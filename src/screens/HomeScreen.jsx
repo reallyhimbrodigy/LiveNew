@@ -4,6 +4,7 @@ import { useAppStore } from "../state/store";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 import { adherencePercent, sevenDayAvgStress } from "../domain/kpis";
+import BrandLogo from "../components/BrandLogo";
 
 export default function HomeScreen({ navigation }) {
   const weekPlan = useAppStore((s) => s.weekPlan);
@@ -44,6 +45,9 @@ export default function HomeScreen({ navigation }) {
 
   return (
     <ScrollView contentContainerStyle={styles.wrap}>
+      <View style={styles.logoRow}>
+        <BrandLogo variant="mark" size={28} />
+      </View>
       <Text style={styles.h1}>Week plan</Text>
       <Text style={styles.p}>Designed around lowering stress load, not maxing output.</Text>
       <View style={styles.kpiRow}>
@@ -67,6 +71,7 @@ export default function HomeScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   wrap: { padding: 18, gap: 14 },
+  logoRow: { alignItems: "flex-start" },
   h1: { fontSize: 22, fontWeight: "800", color: "#111827" },
   p: { fontSize: 15, color: "#374151" },
   kpiRow: { gap: 6 },

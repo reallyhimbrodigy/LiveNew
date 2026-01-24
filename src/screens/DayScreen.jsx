@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { useAppStore } from "../state/store";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
+import BrandLogo from "../components/BrandLogo";
 
 export default function DayScreen({ route, navigation }) {
   const { dateISO } = route.params;
@@ -33,6 +34,9 @@ export default function DayScreen({ route, navigation }) {
 
   return (
     <ScrollView contentContainerStyle={styles.wrap}>
+      <View style={styles.logoRow}>
+        <BrandLogo variant="mark" size={28} />
+      </View>
       <Text style={styles.h1}>{dateISO}</Text>
       <Text style={styles.p}>Focus: {day.focus}</Text>
 
@@ -112,6 +116,7 @@ function labelForStressor(kind) {
 
 const styles = StyleSheet.create({
   wrap: { padding: 18, gap: 14 },
+  logoRow: { alignItems: "flex-start" },
   h1: { fontSize: 22, fontWeight: "800", color: "#111827" },
   p: { fontSize: 15, color: "#374151" },
   sectionTitle: { fontSize: 14, color: "#111827", fontWeight: "700" },

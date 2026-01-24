@@ -2,6 +2,7 @@ import React, { useMemo, useState } from "react";
 import { View, Text, StyleSheet, TextInput, ScrollView } from "react-native";
 import Button from "../ui/Button";
 import { useAppStore } from "../state/store";
+import BrandLogo from "../components/BrandLogo";
 
 export default function BaselineScreen({ navigation }) {
   const setBaseline = useAppStore((s) => s.setBaseline);
@@ -47,6 +48,9 @@ export default function BaselineScreen({ navigation }) {
 
   return (
     <ScrollView contentContainerStyle={styles.wrap}>
+      <View style={styles.logoRow}>
+        <BrandLogo variant="mark" size={32} />
+      </View>
       <Text style={styles.h1}>Baseline</Text>
 
       <Field label="Sleep hours (typical)" value={sleepHours} setValue={setSleepHours} />
@@ -86,6 +90,7 @@ function Field(props) {
 
 const styles = StyleSheet.create({
   wrap: { padding: 18, gap: 14 },
+  logoRow: { alignItems: "flex-start" },
   h1: { fontSize: 22, fontWeight: "800", color: "#111827" },
   label: { fontSize: 14, color: "#374151", fontWeight: "600" },
   input: {

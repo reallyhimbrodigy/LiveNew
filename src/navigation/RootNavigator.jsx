@@ -13,7 +13,7 @@ export default function RootNavigator() {
   return (
     <NavigationContainer>
       <Stack.Navigator>
-        <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ title: "LiveGood" }} />
+        <Stack.Screen name="Onboarding" component={OnboardingScreen} options={{ title: "LiveNew" }} />
         <Stack.Screen name="Baseline" component={BaselineScreen} options={{ title: "Baseline" }} />
         <Stack.Screen name="Home" component={HomeScreen} options={{ title: "This Week" }} />
         <Stack.Screen name="Day" component={DayScreen} options={{ title: "Today" }} />
