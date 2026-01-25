@@ -3,19 +3,26 @@ import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { useAppStore } from "../state/store";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
-import { adherencePercent, sevenDayAvgStress } from "../domain/kpis";
 import BrandLogo from "../components/BrandLogo";
+import { isoToday } from "../domain";
+
+function avgStressLast7(checkIns) {
+  const items = checkIns.slice(0, 7).map((c) => Number(c.stress)).filter((n) => Number.isFinite(n));
+  if (!items.length) return null;
+  const sum = items.reduce((a, b) => a + b, 0);
+  return sum / items.length;
+}
 
 export default function HomeScreen({ navigation }) {
   const weekPlan = useAppStore((s) => s.weekPlan);
-  const buildWeek = useAppStore((s) => s.buildWeek);
   const ensureCurrentWeek = useAppStore((s) => s.ensureCurrentWeek);
   const checkIns = useAppStore((s) => s.checkIns);
-  const completions = useAppStore((s) => s.completions);
+  const lastStressStateByDate = useAppStore((s) => s.lastStressStateByDate);
+  const userProfile = useAppStore((s) => s.userProfile);
 
-  const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), []);
-  const avgStress = useMemo(() => sevenDayAvgStress(checkIns), [checkIns]);
-  const adherence = useMemo(() => (weekPlan ? adherencePercent(weekPlan, completions) : 0), [weekPlan, completions]);
+  const todayISO = useMemo(() => isoToday(), []);
+  const avgStress = useMemo(() => avgStressLast7(checkIns), [checkIns]);
+  const todayProfile = lastStressStateByDate?.[todayISO]?.profile;
   const [didAutoOpen, setDidAutoOpen] = useState(false);
 
   useEffect(() => {
@@ -38,7 +45,11 @@ export default function HomeScreen({ navigation }) {
     return (
       <View style={styles.wrap}>
         <Text style={styles.h1}>No plan yet.</Text>
-        <Button title="Build this week" onPress={() => buildWeek(todayISO)} />
+        {userProfile ? (
+          <Button title="Build this week" onPress={() => ensureCurrentWeek()} />
+        ) : (
+          <Button title="Start baseline" onPress={() => navigation.navigate("Baseline")} />
+        )}
       </View>
     );
   }
@@ -48,18 +59,22 @@ export default function HomeScreen({ navigation }) {
       <View style={styles.logoRow}>
         <BrandLogo variant="mark" size={28} />
       </View>
-      <Text style={styles.h1}>Week plan</Text>
+      <Text style={styles.h1}>This Week</Text>
       <Text style={styles.p}>Designed around lowering stress load, not maxing output.</Text>
       <View style={styles.kpiRow}>
         <Text style={styles.kpiText}>7-day avg stress: {avgStress === null ? "—" : avgStress.toFixed(1)}</Text>
-        <Text style={styles.kpiText}>Adherence: {adherence}%</Text>
+        <Text style={styles.kpiText}>Today profile: {todayProfile || "—"}</Text>
       </View>
 
       {weekPlan.days.map((d) => (
         <View key={d.dateISO} style={{ gap: 8 }}>
-          <Text style={styles.dayTitle}>{d.dateISO} · {d.focus}</Text>
+          <Text style={styles.dayTitle}>
+            {d.dateISO} · {d.profile} · {d.focus}
+          </Text>
           <Card>
-            <Text style={styles.small}>{d.blocks.length} blocks</Text>
+            <Text style={styles.small}>Workout: {d.workout.title} · {d.workout.minutes} min</Text>
+            <Text style={styles.small}>Reset: {d.reset.title} · {d.reset.minutes} min</Text>
+            <Text style={styles.small}>Nutrition: {d.nutrition.title}</Text>
             <View style={{ height: 10 }} />
             <Button title="Open day" onPress={() => navigation.navigate("Day", { dateISO: d.dateISO })} />
           </Card>

@@ -3,46 +3,54 @@ import { View, Text, StyleSheet, TextInput, ScrollView } from "react-native";
 import Button from "../ui/Button";
 import { useAppStore } from "../state/store";
 import BrandLogo from "../components/BrandLogo";
+import { isoToday } from "../domain";
 
 export default function BaselineScreen({ navigation }) {
-  const setBaseline = useAppStore((s) => s.setBaseline);
-  const buildWeek = useAppStore((s) => s.buildWeek);
+  const setUserProfile = useAppStore((s) => s.setUserProfile);
+  const ensureCurrentWeek = useAppStore((s) => s.ensureCurrentWeek);
+  const existingProfile = useAppStore((s) => s.userProfile);
 
-  const todayISO = useMemo(() => new Date().toISOString().slice(0, 10), []);
+  const todayISO = useMemo(() => isoToday(), []);
 
   const [sleepHours, setSleepHours] = useState("7");
   const [caffeineCups, setCaffeineCups] = useState("1");
   const [workoutsPerWeek, setWorkoutsPerWeek] = useState("3");
   const [perceivedStress, setPerceivedStress] = useState("6");
   const [wakeTime, setWakeTime] = useState("07:00");
-  const [bedtime, setBedtime] = useState("23:00");
+  const [bedTime, setBedTime] = useState("23:00");
   const [timePerDayMin, setTimePerDayMin] = useState("20");
-  const [lateScreenMins, setLateScreenMins] = useState("45");
+  const [lateScreenMinutesPerNight, setLateScreenMinutesPerNight] = useState("45");
   const [alcoholNightsPerWeek, setAlcoholNightsPerWeek] = useState("1");
-  const [sunlightMinsPerDay, setSunlightMinsPerDay] = useState("10");
+  const [sunlightMinutesPerDay, setSunlightMinutesPerDay] = useState("10");
   const [mealTimingConsistency, setMealTimingConsistency] = useState("5");
   const [lateCaffeineDaysPerWeek, setLateCaffeineDaysPerWeek] = useState("1");
   const [sleepRegularity, setSleepRegularity] = useState("5");
 
   const commit = async () => {
-    const b = {
+    const id = existingProfile?.id || Math.random().toString(36).slice(2);
+    const createdAtISO = existingProfile?.createdAtISO || todayISO;
+
+    const profile = {
+      id,
+      createdAtISO,
+      wakeTime,
+      bedTime,
+      sleepRegularity: Number(sleepRegularity),
+      caffeineCupsPerDay: Number(caffeineCups),
+      lateCaffeineDaysPerWeek: Number(lateCaffeineDaysPerWeek),
+      sunlightMinutesPerDay: Number(sunlightMinutesPerDay),
+      lateScreenMinutesPerNight: Number(lateScreenMinutesPerNight),
+      alcoholNightsPerWeek: Number(alcoholNightsPerWeek),
+      mealTimingConsistency: Number(mealTimingConsistency),
       sleepHours: Number(sleepHours),
-      caffeineCups: Number(caffeineCups),
       workoutsPerWeek: Number(workoutsPerWeek),
       perceivedStress: Number(perceivedStress),
-      wakeTime,
-      bedtime,
-      lateScreenMins: Number(lateScreenMins),
-      alcoholNightsPerWeek: Number(alcoholNightsPerWeek),
-      sunlightMinsPerDay: Number(sunlightMinsPerDay),
-      mealTimingConsistency: Number(mealTimingConsistency),
-      lateCaffeineDaysPerWeek: Number(lateCaffeineDaysPerWeek),
-      sleepRegularity: Number(sleepRegularity),
       goals: { calmer: true, energy: true, digestion: false, focus: true },
       constraints: { timePerDayMin: Number(timePerDayMin), dietaryStyle: "balanced" },
     };
-    await setBaseline(b);
-    await buildWeek(todayISO);
+
+    await setUserProfile(profile);
+    await ensureCurrentWeek();
     navigation.replace("Home");
   };
 
@@ -58,11 +66,11 @@ export default function BaselineScreen({ navigation }) {
       <Field label="Workouts/week" value={workoutsPerWeek} setValue={setWorkoutsPerWeek} />
       <Field label="Perceived stress (1-10)" value={perceivedStress} setValue={setPerceivedStress} />
       <Field label="Wake time (HH:MM)" value={wakeTime} setValue={setWakeTime} />
-      <Field label="Bedtime (HH:MM)" value={bedtime} setValue={setBedtime} />
+      <Field label="Bedtime (HH:MM)" value={bedTime} setValue={setBedTime} />
       <Field label="Time per day (minutes)" value={timePerDayMin} setValue={setTimePerDayMin} />
-      <Field label="Late screen minutes/night" value={lateScreenMins} setValue={setLateScreenMins} />
+      <Field label="Late screen minutes/night" value={lateScreenMinutesPerNight} setValue={setLateScreenMinutesPerNight} />
       <Field label="Alcohol nights/week" value={alcoholNightsPerWeek} setValue={setAlcoholNightsPerWeek} />
-      <Field label="Sunlight minutes/day" value={sunlightMinsPerDay} setValue={setSunlightMinsPerDay} />
+      <Field label="Sunlight minutes/day" value={sunlightMinutesPerDay} setValue={setSunlightMinutesPerDay} />
       <Field label="Meal timing consistency (1-10)" value={mealTimingConsistency} setValue={setMealTimingConsistency} />
       <Field label="Late caffeine days/week" value={lateCaffeineDaysPerWeek} setValue={setLateCaffeineDaysPerWeek} />
       <Field label="Sleep regularity (1-10)" value={sleepRegularity} setValue={setSleepRegularity} />

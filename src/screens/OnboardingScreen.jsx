@@ -6,7 +6,7 @@ import BrandLogo from "../components/BrandLogo";
 
 export default function OnboardingScreen({ navigation }) {
   const hydrate = useAppStore((s) => s.hydrate);
-  const baseline = useAppStore((s) => s.baseline);
+  const userProfile = useAppStore((s) => s.userProfile);
   const resetData = useAppStore((s) => s.resetData);
 
   useEffect(() => {
@@ -14,8 +14,8 @@ export default function OnboardingScreen({ navigation }) {
   }, []);
 
   useEffect(() => {
-    if (baseline) navigation.replace("Home");
-  }, [baseline]);
+    if (userProfile) navigation.replace("Home");
+  }, [userProfile, navigation]);
 
   return (
     <View style={styles.wrap}>
