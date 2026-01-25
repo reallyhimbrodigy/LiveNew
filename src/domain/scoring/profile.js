@@ -1,6 +1,6 @@
-import { clamp } from "../utils/math";
-import { computeStressLoad } from "./stressLoad";
-import { computeCapacity } from "./capacity";
+import { clamp } from "../utils/math.js";
+import { computeStressLoad } from "./stressLoad.js";
+import { computeCapacity } from "./capacity.js";
 
 export function bandLoad(x) {
   if (x >= 70) return "high";

@@ -1,4 +1,4 @@
-import { DECISION_PIPELINE_VERSION } from "../domain";
+import { DECISION_PIPELINE_VERSION } from "../domain/index.js";
 
 export function initialStatePatch() {
   return {

@@ -1,16 +1,16 @@
-export { defaultLibrary } from "./content/library";
-export { weekStartMonday, addDaysISO, isoToday } from "./utils/date";
+export { defaultLibrary } from "./content/library.js";
+export { weekStartMonday, addDaysISO, isoToday } from "./utils/date.js";
 
-export { computeStressLoad } from "./scoring/stressLoad";
-export { computeCapacity } from "./scoring/capacity";
-export { assignStressProfile } from "./scoring/profile";
+export { computeStressLoad } from "./scoring/stressLoad.js";
+export { computeCapacity } from "./scoring/capacity.js";
+export { assignStressProfile } from "./scoring/profile.js";
 
-export { APP_LOG_SCHEMA_VERSION } from "./constants";
-export { DECISION_PIPELINE_VERSION, STATE_SCHEMA_VERSION, normalizeState, validateState } from "./schema";
+export { APP_LOG_SCHEMA_VERSION } from "./constants.js";
+export { DECISION_PIPELINE_VERSION, STATE_SCHEMA_VERSION, normalizeState, validateState } from "./schema.js";
 
-export { buildDayPlan } from "./planning/decision";
-export { generateWeekPlan } from "./planning/generator";
-export { adaptPlan } from "./planning/adapt";
-export { swapWorkoutForDownshift, shortenDayTo10Min, upgradeDayIfReady } from "./planning/swap";
+export { buildDayPlan } from "./planning/decision.js";
+export { generateWeekPlan } from "./planning/generator.js";
+export { adaptPlan } from "./planning/adapt.js";
+export { swapWorkoutForDownshift, shortenDayTo10Min, upgradeDayIfReady } from "./planning/swap.js";
 
-export { computeProgress } from "./kpis";
+export { computeProgress } from "./kpis.js";

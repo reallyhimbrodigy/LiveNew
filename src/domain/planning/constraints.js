@@ -1,4 +1,4 @@
-import { defaultLibrary } from "../content/library";
+import { defaultLibrary } from "../content/library.js";
 
 function pushRationale(rationale, line) {
   if (!rationale.includes(line)) rationale.push(line);

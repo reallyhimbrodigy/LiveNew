@@ -1,6 +1,6 @@
-import { workoutsSeed } from "./seeds/workouts";
-import { nutritionSeed } from "./seeds/nutrition";
-import { resetsSeed } from "./seeds/resets";
+import { workoutsSeed } from "./seeds/workouts.js";
+import { nutritionSeed } from "./seeds/nutrition.js";
+import { resetsSeed } from "./seeds/resets.js";
 
 export const defaultLibrary = {
   workouts: workoutsSeed,

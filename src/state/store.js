@@ -1,8 +1,8 @@
 import { create } from "zustand";
-import { loadJSON, removeJSON, enqueuePersist, clearPersistQueue } from "./persist";
-import * as domain from "../domain";
-import { reduceEvent, initialStatePatch } from "./engine";
-import { getScenarioById, SCENARIOS } from "../dev/scenarios";
+import { loadJSON, removeJSON, enqueuePersist, clearPersistQueue } from "./persist.js";
+import * as domain from "../domain/index.js";
+import { reduceEvent, initialStatePatch } from "./engine.js";
+import { getScenarioById, SCENARIOS } from "../dev/scenarios.js";
 
 const STORAGE_KEY = "livegood:v1";
 const SCHEMA_VERSION = 4;

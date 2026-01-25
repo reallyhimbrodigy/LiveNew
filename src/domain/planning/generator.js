@@ -1,5 +1,5 @@
-import { weekStartMonday, addDaysISO } from "../utils/date";
-import { buildDayPlan } from "./decision";
+import { weekStartMonday, addDaysISO } from "../utils/date.js";
+import { buildDayPlan } from "./decision.js";
 
 export function generateWeekPlan({ user, weekAnchorISO, checkInsByDate, qualityRules }) {
   const startDateISO = weekStartMonday(weekAnchorISO);

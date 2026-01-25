@@ -1,7 +1,7 @@
-import { assignStressProfile } from "../scoring/profile";
-import { defaultLibrary } from "../content/library";
-import { applyConstraints } from "./constraints";
-import { DECISION_PIPELINE_VERSION } from "../constants";
+import { assignStressProfile } from "../scoring/profile.js";
+import { defaultLibrary } from "../content/library.js";
+import { applyConstraints } from "./constraints.js";
+import { DECISION_PIPELINE_VERSION } from "../constants.js";
 
 export function buildDayPlan({
   user,

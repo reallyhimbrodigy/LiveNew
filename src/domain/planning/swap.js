@@ -1,4 +1,4 @@
-import { defaultLibrary } from "../content/library";
+import { defaultLibrary } from "../content/library.js";
 
 export function swapWorkoutForDownshift(day) {
   const workout =

@@ -1,6 +1,6 @@
-import { reduceEvent, initialStatePatch } from "../state/engine";
-import * as domain from "../domain";
-import { getScenarioById } from "./scenarios";
+import { reduceEvent, initialStatePatch } from "../state/engine.js";
+import * as domain from "../domain/index.js";
+import { getScenarioById } from "./scenarios.js";
 
 const SNAPSHOT_FILES = {
   no_checkins: "no_checkins.json",

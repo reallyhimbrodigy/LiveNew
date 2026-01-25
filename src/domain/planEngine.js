@@ -1,5 +1,5 @@
-import { computeCortisolLoad, loadBand } from "./scoring";
-import { isTimeAfter } from "./time";
+import { computeCortisolLoad, loadBand } from "./scoring.js";
+import { isTimeAfter } from "./time.js";
 
 const uid = () => Math.random().toString(36).slice(2);
 

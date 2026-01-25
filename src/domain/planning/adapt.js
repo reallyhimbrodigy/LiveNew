@@ -1,5 +1,5 @@
-import { addDaysISO } from "../utils/date";
-import { buildDayPlan } from "./decision";
+import { addDaysISO } from "../utils/date.js";
+import { buildDayPlan } from "./decision.js";
 
 export function adaptPlan({
   weekPlan,
