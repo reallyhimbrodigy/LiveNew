@@ -1,14 +1,20 @@
 import { weekStartMonday, addDaysISO } from "../utils/date";
 import { buildDayPlan } from "./decision";
 
-export function generateWeekPlan({ user, weekAnchorISO, checkInsByDate }) {
+export function generateWeekPlan({ user, weekAnchorISO, checkInsByDate, qualityRules }) {
   const startDateISO = weekStartMonday(weekAnchorISO);
   const days = [];
+  const rules = {
+    avoidNoveltyWindowDays: 2,
+    constraintsEnabled: true,
+    noveltyEnabled: true,
+    ...(qualityRules || {}),
+  };
 
   for (let i = 0; i < 7; i++) {
     const dateISO = addDaysISO(startDateISO, i);
     const checkIn = checkInsByDate ? checkInsByDate[dateISO] : undefined;
-    const recentNoveltyGroups = collectRecentNoveltyGroups(days, 2);
+    const recentNoveltyGroups = collectRecentNoveltyGroups(days, rules.avoidNoveltyWindowDays);
 
     const { dayPlan } = buildDayPlan({
       user,
@@ -17,7 +23,7 @@ export function generateWeekPlan({ user, weekAnchorISO, checkInsByDate }) {
       checkInsByDate,
       weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups },
       overrides: null,
-      qualityRules: { avoidNoveltyWindowDays: 2 },
+      qualityRules: rules,
     });
 
     days.push(dayPlan);
@@ -27,6 +33,7 @@ export function generateWeekPlan({ user, weekAnchorISO, checkInsByDate }) {
 }
 
 function collectRecentNoveltyGroups(days, windowDays) {
+  if (!windowDays || windowDays <= 0) return [];
   const recent = days.slice(-windowDays);
   const groups = [];
   recent.forEach((day) => {

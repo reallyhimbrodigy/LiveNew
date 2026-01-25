@@ -22,9 +22,9 @@ export default function OnboardingScreen({ navigation }) {
       <View style={styles.logoWrap}>
         <BrandLogo variant="full" size={96} />
       </View>
-      <Text style={styles.h1}>Cortisol-first wellness.</Text>
+      <Text style={styles.h1}>Work with your biology.</Text>
       <Text style={styles.p}>
-        LiveNew designs your week around downshifting stress hormones through movement, food timing, and nervous-system regulation.
+        LiveNew adapts your day to lower stress load and protect recovery without overhauling your life.
       </Text>
       <Button title="Start baseline" onPress={() => navigation.navigate("Baseline")} />
       {__DEV__ ? <Button title="Reset data" variant="ghost" onPress={resetData} /> : null}

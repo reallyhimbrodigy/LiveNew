@@ -17,10 +17,22 @@ export function adaptPlan({
   let changedDayISO;
 
   const baseContext = weekContextBase || { busyDays: user.busyDays || [] };
-  const baseQualityRules = qualityRules || { avoidNoveltyWindowDays: 2 };
+  const baseQualityRules = {
+    avoidNoveltyWindowDays: 2,
+    constraintsEnabled: true,
+    noveltyEnabled: true,
+    ...(qualityRules || {}),
+  };
 
   if (signal) {
-    const override = buildOverrideFromSignal({ signal, user, todayISO, checkIn, checkInsByDate });
+    const override = buildOverrideFromSignal({
+      signal,
+      user,
+      todayISO,
+      checkIn,
+      checkInsByDate,
+      qualityRules: baseQualityRules,
+    });
     const mergedOverride = { ...(overridesBase || {}), ...(override || {}) };
     const res = rebuildDay({
       user,
@@ -88,7 +100,7 @@ function rebuildDay({ user, dateISO, weekPlan, checkInsByDate, overrides, qualit
   return { weekPlan: { ...weekPlan, days: nextDays }, changed };
 }
 
-function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate }) {
+function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate, qualityRules }) {
   const checkIn = checkInsByDate ? checkInsByDate[todayISO] : undefined;
 
   if (signal === "im_stressed" || signal === "poor_sleep" || signal === "wired" || signal === "anxious") {
@@ -111,7 +123,7 @@ function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate }) {
       checkInsByDate,
       weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups: [] },
       overrides: null,
-      qualityRules: { avoidNoveltyWindowDays: 2 },
+      qualityRules,
     });
     if (stressState.capacity >= 60 && stressState.loadBand !== "high") return { focusBias: "rebuild" };
     return { focusBias: "stabilize" };
@@ -121,6 +133,7 @@ function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate }) {
 }
 
 function collectRecentNoveltyGroups(days, idx, windowDays) {
+  if (!windowDays || windowDays <= 0) return [];
   const start = Math.max(0, idx - windowDays);
   const recent = days.slice(start, idx);
   const groups = [];

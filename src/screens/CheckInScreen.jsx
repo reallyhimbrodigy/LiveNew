@@ -57,7 +57,7 @@ export default function CheckInScreen({ route, navigation }) {
 
   return (
     <View style={styles.wrap}>
-      <Text style={styles.h1}>Check-in</Text>
+      <Text style={styles.h1}>Daily check-in</Text>
       <Text style={styles.p}>{dateISO}</Text>
 
       <Field label="Stress (1-10)" v={stress} setV={setStress} />

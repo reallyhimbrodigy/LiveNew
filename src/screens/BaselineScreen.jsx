@@ -73,7 +73,7 @@ export default function BaselineScreen({ navigation }) {
       <View style={styles.logoRow}>
         <BrandLogo variant="mark" size={32} />
       </View>
-      <Text style={styles.h1}>Baseline</Text>
+      <Text style={styles.h1}>Your baseline</Text>
 
       <Field label="Sleep hours (typical)" value={sleepHours} setValue={setSleepHours} />
       <Field label="Caffeine cups/day" value={caffeineCups} setValue={setCaffeineCups} />
@@ -113,7 +113,7 @@ export default function BaselineScreen({ navigation }) {
         ))}
       </View>
 
-      <Button title="Generate my week" onPress={commit} />
+      <Button title="Build my week" onPress={commit} />
     </ScrollView>
   );
 }

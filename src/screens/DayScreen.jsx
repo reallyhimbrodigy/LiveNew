@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { View, Text, StyleSheet, ScrollView } from "react-native";
 import { useAppStore } from "../state/store";
 import Card from "../ui/Card";
@@ -8,6 +8,7 @@ import BrandLogo from "../components/BrandLogo";
 export default function DayScreen({ route, navigation }) {
   const { dateISO } = route.params;
   const weekPlan = useAppStore((s) => s.weekPlan);
+  const ensureCurrentWeek = useAppStore((s) => s.ensureCurrentWeek);
   const applyQuickSignal = useAppStore((s) => s.applyQuickSignal);
   const addStressor = useAppStore((s) => s.addStressor);
   const lastStressStateByDate = useAppStore((s) => s.lastStressStateByDate);
@@ -15,19 +16,44 @@ export default function DayScreen({ route, navigation }) {
   const undoLastChange = useAppStore((s) => s.undoLastChange);
   const activateBadDayMode = useAppStore((s) => s.activateBadDayMode);
   const submitFeedback = useAppStore((s) => s.submitFeedback);
+  const togglePartCompletion = useAppStore((s) => s.togglePartCompletion);
+  const partCompletionByDate = useAppStore((s) => s.partCompletionByDate);
+  const checkIns = useAppStore((s) => s.checkIns);
+  const dayViewed = useAppStore((s) => s.dayViewed);
 
   const day = weekPlan?.days.find((d) => d.dateISO === dateISO);
   const drivers = lastStressStateByDate?.[dateISO]?.drivers || [];
   const canUndo = history.length && history[0].dateISO === dateISO;
-  const [showReasons, setShowReasons] = React.useState(false);
+  const [showReasons, setShowReasons] = useState(false);
+  const [showDetails, setShowDetails] = useState(false);
+
+  const checkIn = checkIns.find((c) => c.dateISO === dateISO);
+  const timeAvailableMin = checkIn?.timeAvailableMin;
+
+  const loggedRef = useRef(null);
+
+  useEffect(() => {
+    if (!day) return;
+    if (loggedRef.current === dateISO) return;
+    loggedRef.current = dateISO;
+    dayViewed({
+      dateISO,
+      pipelineVersion: day.pipelineVersion,
+      appliedRules: day.meta?.appliedRules || [],
+    });
+  }, [dateISO, day, dayViewed]);
 
   if (!day) {
     return (
       <View style={styles.wrap}>
-        <Text style={styles.h1}>Day not found.</Text>
+        <Text style={styles.h1}>No plan for this day yet.</Text>
+        <Button title="Rebuild this week" onPress={async () => { await ensureCurrentWeek(); navigation.goBack(); }} />
       </View>
     );
   }
+
+  const totalMinutes = (day.workout?.minutes || 0) + (day.reset?.minutes || 0);
+  const parts = partCompletionByDate?.[dateISO] || {};
 
   return (
     <ScrollView contentContainerStyle={styles.wrap}>
@@ -35,22 +61,38 @@ export default function DayScreen({ route, navigation }) {
         <BrandLogo variant="mark" size={28} />
       </View>
       <Text style={styles.h1}>{dateISO}</Text>
-      <Text style={styles.p}>Profile: {day.profile}</Text>
-      <Text style={styles.p}>Focus: {day.focus}</Text>
       <Button title="Today is a bad day" variant="ghost" onPress={() => activateBadDayMode(dateISO)} />
 
       <Card>
-        <Text style={styles.blockTitle}>Why this plan</Text>
+        <Text style={styles.blockTitle}>What you're doing today</Text>
+        <Text style={styles.meta}>Workout: {day.workout.title} - {day.workout.minutes} min</Text>
+        <Text style={styles.meta}>Window: {day.workoutWindow || "PM"}</Text>
+        <Text style={styles.meta}>Reset: {day.reset.title} - {day.reset.minutes} min</Text>
+        <Text style={styles.meta}>Nutrition: {day.nutrition.title}</Text>
+      </Card>
+
+      <Card>
+        <Text style={styles.blockTitle}>Why</Text>
         <Text style={styles.meta}>Profile: {day.profile}</Text>
         <Text style={styles.meta}>Focus: {day.focus}</Text>
-        {drivers.slice(0, 2).map((line, idx) => (
-          <Text key={idx} style={styles.line}>- {line}</Text>
-        ))}
+        {drivers.slice(0, 2).length ? (
+          drivers.slice(0, 2).map((line, idx) => (
+            <Text key={idx} style={styles.line}>- {line}</Text>
+          ))
+        ) : (
+          <Text style={styles.line}>- n/a</Text>
+        )}
         <View style={{ height: 8 }} />
         <Text style={styles.line}>{focusStatement(day.focus)}</Text>
         {day.rationale.slice(0, 2).map((line, idx) => (
           <Text key={`r-${idx}`} style={styles.line}>- {line}</Text>
         ))}
+      </Card>
+
+      <Card>
+        <Text style={styles.blockTitle}>How long</Text>
+        <Text style={styles.meta}>Total: {totalMinutes} min</Text>
+        {timeAvailableMin ? <Text style={styles.meta}>Time available: {timeAvailableMin} min</Text> : null}
       </Card>
 
       <View style={styles.quickWrap}>
@@ -77,45 +119,44 @@ export default function DayScreen({ route, navigation }) {
         </View>
       </View>
 
+      <View style={styles.quickWrap}>
+        <Text style={styles.sectionTitle}>Mark done</Text>
+        <View style={styles.quickRow}>
+          <Button title={parts.workout ? "Workout done" : "Workout done"} variant={parts.workout ? "primary" : "ghost"} onPress={() => togglePartCompletion(dateISO, "workout")} />
+          <Button title={parts.reset ? "Reset done" : "Reset done"} variant={parts.reset ? "primary" : "ghost"} onPress={() => togglePartCompletion(dateISO, "reset")} />
+          <Button title={parts.nutrition ? "Nutrition done" : "Nutrition done"} variant={parts.nutrition ? "primary" : "ghost"} onPress={() => togglePartCompletion(dateISO, "nutrition")} />
+        </View>
+      </View>
+
       {canUndo ? <Button title="Undo last change" variant="ghost" onPress={undoLastChange} /> : null}
 
-      <Button title="Do check-in" onPress={() => navigation.navigate("CheckIn", { dateISO })} />
+      <Button title="Add check-in" onPress={() => navigation.navigate("CheckIn", { dateISO })} />
 
-      <Card>
-        <Text style={styles.blockTitle}>Workout</Text>
-        <Text style={styles.meta}>{day.workout.title} - {day.workout.minutes} min</Text>
-        <Text style={styles.meta}>Window: {day.workoutWindow || "PM"}</Text>
-        <View style={{ height: 10 }} />
-        {day.workout.steps.map((line, idx) => (
-          <Text key={idx} style={styles.line}>- {line}</Text>
-        ))}
-      </Card>
+      <Button
+        title={showDetails ? "Hide details" : "Show details"}
+        variant="ghost"
+        onPress={() => setShowDetails((v) => !v)}
+      />
 
-      <Card>
-        <Text style={styles.blockTitle}>Nutrition</Text>
-        <Text style={styles.meta}>{day.nutrition.title}</Text>
-        <View style={{ height: 10 }} />
-        {day.nutrition.priorities.map((line, idx) => (
-          <Text key={idx} style={styles.line}>- {line}</Text>
-        ))}
-      </Card>
-
-      <Card>
-        <Text style={styles.blockTitle}>Reset</Text>
-        <Text style={styles.meta}>{day.reset.title} - {day.reset.minutes} min</Text>
-        <View style={{ height: 10 }} />
-        {day.reset.steps.map((line, idx) => (
-          <Text key={idx} style={styles.line}>- {line}</Text>
-        ))}
-      </Card>
-
-      <Card>
-        <Text style={styles.blockTitle}>Rationale</Text>
-        <View style={{ height: 10 }} />
-        {day.rationale.slice(0, 3).map((line, idx) => (
-          <Text key={idx} style={styles.line}>- {line}</Text>
-        ))}
-      </Card>
+      {showDetails ? (
+        <Card>
+          <Text style={styles.blockTitle}>Details</Text>
+          <Text style={styles.meta}>Workout steps</Text>
+          {day.workout.steps.map((line, idx) => (
+            <Text key={`w-${idx}`} style={styles.line}>- {line}</Text>
+          ))}
+          <View style={{ height: 8 }} />
+          <Text style={styles.meta}>Nutrition priorities</Text>
+          {day.nutrition.priorities.map((line, idx) => (
+            <Text key={`n-${idx}`} style={styles.line}>- {line}</Text>
+          ))}
+          <View style={{ height: 8 }} />
+          <Text style={styles.meta}>Reset steps</Text>
+          {day.reset.steps.map((line, idx) => (
+            <Text key={`r-${idx}`} style={styles.line}>- {line}</Text>
+          ))}
+        </Card>
+      ) : null}
 
       <Card>
         <Text style={styles.blockTitle}>Did this help?</Text>

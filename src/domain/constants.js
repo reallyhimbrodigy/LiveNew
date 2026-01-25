@@ -1,1 +1,2 @@
-// Reserved for shared domain constants.
+export const DECISION_PIPELINE_VERSION = 1;
+export const APP_LOG_SCHEMA_VERSION = 1;

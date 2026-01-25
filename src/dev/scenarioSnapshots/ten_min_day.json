@@ -1,0 +1,13 @@
+{
+  "scenarioId": "ten_min_day",
+  "pipelineVersion": 1,
+  "dateISO": "TODAY",
+  "dayPlan": {
+    "focus": "stabilize",
+    "profile": "Balanced",
+    "workout": { "id": "w_walk_10", "minutes": 10 },
+    "reset": { "id": "r_breath_3", "minutes": 3 },
+    "nutrition": { "id": "n_stabilize_plate" },
+    "rationaleFirst2": ["Profile: Balanced", "Focus: stabilize"]
+  }
+}

@@ -1,6 +1,7 @@
 import { assignStressProfile } from "../scoring/profile";
 import { defaultLibrary } from "../content/library";
 import { applyConstraints } from "./constraints";
+import { DECISION_PIPELINE_VERSION } from "../constants";
 
 export function buildDayPlan({
   user,
@@ -13,10 +14,16 @@ export function buildDayPlan({
 }) {
   void checkInsByDate;
   const ctx = weekContext || {};
-  const rules = qualityRules || { avoidNoveltyWindowDays: 2 };
+  const rules = {
+    avoidNoveltyWindowDays: 2,
+    constraintsEnabled: true,
+    noveltyEnabled: true,
+    ...(qualityRules || {}),
+  };
   const ov = overrides || {};
 
   const stressState = assignStressProfile({ user, dateISO, checkIn });
+  const appliedRules = [];
 
   let focus = focusFromProfile(stressState.profile, stressState.capacity);
 
@@ -26,27 +33,39 @@ export function buildDayPlan({
     } else {
       focus = ov.focusBias;
     }
+    appliedRules.push("focus_bias");
   }
 
   if (ov.forceBadDayMode) {
     focus = "downshift";
+    appliedRules.push("bad_day_mode");
   }
 
   let timeMin = checkIn ? checkIn.timeAvailableMin : 20;
-  if (ov.timeOverrideMin != null) timeMin = ov.timeOverrideMin;
+  if (ov.timeOverrideMin != null) {
+    timeMin = ov.timeOverrideMin;
+    appliedRules.push("time_override");
+  }
 
   const busyDays = new Set([...(user.busyDays || []), ...((ctx.busyDays || []))]);
   const isBusy = busyDays.has(dateISO);
-  if (isBusy) timeMin = Math.min(timeMin, 15);
+  if (isBusy) {
+    timeMin = Math.min(timeMin, 15);
+    appliedRules.push("busy_day");
+  }
 
   if (ov.forceBadDayMode) timeMin = Math.min(timeMin, 10);
 
   const baseCap = focus === "downshift" ? 4 : 10;
   let intensityCap = baseCap;
-  if (ov.intensityCap != null) intensityCap = Math.min(intensityCap, ov.intensityCap);
+  if (ov.intensityCap != null) {
+    intensityCap = Math.min(intensityCap, ov.intensityCap);
+    appliedRules.push("intensity_cap");
+  }
   if (ov.forceBadDayMode) intensityCap = Math.min(intensityCap, 2);
 
-  const avoidGroups = rules.avoidNoveltyWindowDays > 0 ? ctx.recentNoveltyGroups || [] : [];
+  const avoidGroups =
+    rules.noveltyEnabled && rules.avoidNoveltyWindowDays > 0 ? ctx.recentNoveltyGroups || [] : [];
 
   let workout = pickWorkout({ focus, timeMin, checkIn, intensityCap, avoidGroups });
   let nutrition = pickNutrition({ focus, avoidGroups, forceBadDayMode: ov.forceBadDayMode });
@@ -81,7 +100,16 @@ export function buildDayPlan({
     },
   };
 
-  dayDraft = applyConstraints({ user, checkIn, state: stressState, dayDraft });
+  if (rules.constraintsEnabled) {
+    dayDraft = applyConstraints({ user, checkIn, state: stressState, dayDraft });
+  }
+
+  if (rules.constraintsEnabled) {
+    if (checkIn && checkIn.timeAvailableMin <= 10) appliedRules.push("time_min_constraint");
+    if (stressState.profile === "PoorSleep") appliedRules.push("poor_sleep_constraint");
+    if (stressState.profile === "WiredOverstimulated") appliedRules.push("wired_constraint");
+    if (stressState.profile === "DepletedBurnedOut") appliedRules.push("depleted_constraint");
+  }
 
   let finalIntensityCap = intensityCap;
   if (dayDraft.focus === "downshift") finalIntensityCap = Math.min(finalIntensityCap, 4);
@@ -106,7 +134,21 @@ export function buildDayPlan({
   finalRationale[1] = `Focus: ${dayDraft.focus}`;
   dayDraft.rationale = finalRationale;
 
-  return { dayPlan: dayDraft, stressState };
+  const meta = {
+    pipelineVersion: DECISION_PIPELINE_VERSION,
+    appliedRules,
+    selected: {
+      workoutId: dayDraft.workout.id,
+      resetId: dayDraft.reset.id,
+      nutritionId: dayDraft.nutrition.id,
+      noveltyGroups: { ...dayDraft.selectedNoveltyGroups },
+    },
+  };
+
+  dayDraft.pipelineVersion = meta.pipelineVersion;
+  dayDraft.meta = meta;
+
+  return { dayPlan: dayDraft, stressState, meta };
 }
 
 function focusFromProfile(profile, capacity) {

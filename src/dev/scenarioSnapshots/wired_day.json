@@ -1,0 +1,13 @@
+{
+  "scenarioId": "wired_day",
+  "pipelineVersion": 1,
+  "dateISO": "TODAY",
+  "dayPlan": {
+    "focus": "downshift",
+    "profile": "WiredOverstimulated",
+    "workout": { "id": "w_walk_10", "minutes": 10 },
+    "reset": { "id": "r_phys_sigh_2", "minutes": 2 },
+    "nutrition": { "id": "n_downshift_evening" },
+    "rationaleFirst2": ["Profile: WiredOverstimulated", "Focus: downshift"]
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "scenarioId": "balanced_day",
+  "pipelineVersion": 1,
+  "dateISO": "TODAY",
+  "dayPlan": {
+    "focus": "rebuild",
+    "profile": "Balanced",
+    "workout": { "id": "w_zone2_30", "minutes": 30 },
+    "reset": { "id": "r_breath_3", "minutes": 3 },
+    "nutrition": { "id": "n_rebuild_training" },
+    "rationaleFirst2": ["Profile: Balanced", "Focus: rebuild"]
+  }
+}
