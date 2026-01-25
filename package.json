@@ -6,7 +6,15 @@
     "start": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
-    "web": "expo start --web"
+    "web": "expo start --web",
+    "login": "eas login",
+    "deploy": "eas update --auto",
+    "deploy:prod": "eas update --branch production",
+    "deploy:dev": "eas update --branch development",
+    "build": "eas build --platform all",
+    "build:ios": "eas build --platform ios",
+    "build:android": "eas build --platform android",
+    "push": "git push origin main"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",
@@ -20,6 +28,8 @@
     "react-native-screens": "~4.16.0",
     "zustand": "^5.0.10"
   },
-  "devDependencies": {},
+  "devDependencies": {
+    "eas-cli": "^16.28.0"
+  },
   "private": true
 }
