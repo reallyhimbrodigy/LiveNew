@@ -22,6 +22,10 @@
  *
  * WeekPlan:
  * - startDateISO (Monday)
- * - days: [{dateISO, profile, focus, workout, nutrition, reset, rationale, workoutWindow}]
+ * - days: [{dateISO, profile, focus, workout, nutrition, reset, rationale, workoutWindow, selectedNoveltyGroups}]
+ *
+ * Content items (workout/nutrition/reset) include:
+ * - noveltyGroup (string)
+ * - priority (1..5)
  */
 export {};

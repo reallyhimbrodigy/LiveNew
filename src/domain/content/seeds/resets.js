@@ -7,6 +7,8 @@ export const resetsSeed = [
     steps: ["Inhale 4s", "Exhale 6s", "Repeat for 2 minutes"],
     contraindications: ["avoid_if_dizzy"],
     intensityCost: 0,
+    noveltyGroup: "breath_long_exhale_short",
+    priority: 5,
   },
   {
     id: "r_breath_3",
@@ -16,6 +18,8 @@ export const resetsSeed = [
     steps: ["Inhale 4s", "Exhale 6s", "Repeat for 3 minutes"],
     contraindications: ["avoid_if_dizzy"],
     intensityCost: 0,
+    noveltyGroup: "breath_long_exhale_medium",
+    priority: 5,
   },
   {
     id: "r_phys_sigh_2",
@@ -25,6 +29,8 @@ export const resetsSeed = [
     steps: ["Double inhale through nose", "Long exhale through mouth", "Repeat slowly"],
     contraindications: ["avoid_if_dizzy"],
     intensityCost: 0,
+    noveltyGroup: "breath_phys_sigh",
+    priority: 5,
   },
   {
     id: "r_box_3",
@@ -34,6 +40,8 @@ export const resetsSeed = [
     steps: ["Inhale 4s", "Hold 4s", "Exhale 4s", "Hold 4s"],
     contraindications: ["avoid_if_dizzy"],
     intensityCost: 0,
+    noveltyGroup: "breath_box",
+    priority: 4,
   },
   {
     id: "r_box_5",
@@ -43,6 +51,8 @@ export const resetsSeed = [
     steps: ["Inhale 4s", "Hold 4s", "Exhale 4s", "Hold 4s"],
     contraindications: ["avoid_if_dizzy"],
     intensityCost: 0,
+    noveltyGroup: "breath_box_long",
+    priority: 3,
   },
   {
     id: "r_name_it_3",
@@ -52,6 +62,8 @@ export const resetsSeed = [
     steps: ["Write: what is happening (1 sentence)", "Write: next action (1 sentence)", "Do it"],
     contraindications: [],
     intensityCost: 1,
+    noveltyGroup: "name_and_frame",
+    priority: 4,
   },
   {
     id: "r_body_scan_5",
@@ -61,6 +73,8 @@ export const resetsSeed = [
     steps: ["Slow attention from head to toes", "Relax jaw/shoulders", "Long exhales"],
     contraindications: [],
     intensityCost: 0,
+    noveltyGroup: "body_scan",
+    priority: 4,
   },
   {
     id: "r_eyes_2",
@@ -70,6 +84,8 @@ export const resetsSeed = [
     steps: ["Look left/right slowly", "Gentle neck circles", "Long exhales"],
     contraindications: [],
     intensityCost: 0,
+    noveltyGroup: "eyes_neck_release",
+    priority: 3,
   },
   {
     id: "r_eyes_5",
@@ -79,6 +95,8 @@ export const resetsSeed = [
     steps: ["Eye tracking slow circles", "Neck side stretch", "Finish with slow exhales"],
     contraindications: [],
     intensityCost: 0,
+    noveltyGroup: "eyes_neck_release_long",
+    priority: 3,
   },
   {
     id: "r_ground_2",
@@ -88,6 +106,8 @@ export const resetsSeed = [
     steps: ["Name 5 things you see", "4 things you feel", "3 slow exhales"],
     contraindications: [],
     intensityCost: 0,
+    noveltyGroup: "grounding",
+    priority: 3,
   },
   {
     id: "r_shake_3",
@@ -97,6 +117,8 @@ export const resetsSeed = [
     steps: ["Shake arms/legs gently", "Breathe long exhales"],
     contraindications: [],
     intensityCost: 1,
+    noveltyGroup: "shake_breathe",
+    priority: 3,
   },
   {
     id: "r_walk_5",
@@ -106,6 +128,8 @@ export const resetsSeed = [
     steps: ["Walk slowly", "Notice your feet and breath"],
     contraindications: [],
     intensityCost: 1,
+    noveltyGroup: "reset_walk",
+    priority: 3,
   },
   {
     id: "r_journal_5",
@@ -115,6 +139,8 @@ export const resetsSeed = [
     steps: ["Write everything on your mind", "Circle the next action"],
     contraindications: [],
     intensityCost: 1,
+    noveltyGroup: "brain_dump",
+    priority: 3,
   },
   {
     id: "r_nasal_3",
@@ -124,6 +150,8 @@ export const resetsSeed = [
     steps: ["Close mouth", "Slow inhale/exhale", "Relax shoulders"],
     contraindications: ["avoid_if_congested"],
     intensityCost: 0,
+    noveltyGroup: "breath_nasal",
+    priority: 4,
   },
   {
     id: "r_legs_up_5",
@@ -133,6 +161,8 @@ export const resetsSeed = [
     steps: ["Lie down with legs elevated", "Slow exhales"],
     contraindications: ["avoid_if_back_pain"],
     intensityCost: 0,
+    noveltyGroup: "legs_up_wall",
+    priority: 4,
   },
   {
     id: "r_progressive_5",
@@ -142,6 +172,8 @@ export const resetsSeed = [
     steps: ["Tense then relax each muscle group", "Slow breathing"],
     contraindications: [],
     intensityCost: 1,
+    noveltyGroup: "progressive_relax",
+    priority: 3,
   },
   {
     id: "r_breath_4",
@@ -151,6 +183,8 @@ export const resetsSeed = [
     steps: ["Inhale 4s", "Exhale 7s", "Repeat"],
     contraindications: ["avoid_if_dizzy"],
     intensityCost: 0,
+    noveltyGroup: "breath_long_exhale_long",
+    priority: 3,
   },
   {
     id: "r_stretch_5",
@@ -160,6 +194,8 @@ export const resetsSeed = [
     steps: ["Cross-body stretch", "Doorway chest stretch", "Long exhales"],
     contraindications: [],
     intensityCost: 1,
+    noveltyGroup: "shoulder_release",
+    priority: 3,
   },
   {
     id: "r_warm_face_2",
@@ -169,6 +205,8 @@ export const resetsSeed = [
     steps: ["Warm water on face", "Slow breathing", "Relax jaw"],
     contraindications: [],
     intensityCost: 0,
+    noveltyGroup: "warm_face",
+    priority: 2,
   },
   {
     id: "r_countdown_3",
@@ -178,5 +216,7 @@ export const resetsSeed = [
     steps: ["Inhale 4s", "Exhale 8s", "Count down 10 to 1"],
     contraindications: ["avoid_if_dizzy"],
     intensityCost: 0,
+    noveltyGroup: "breath_countdown",
+    priority: 3,
   },
 ];

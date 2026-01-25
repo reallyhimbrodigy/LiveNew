@@ -12,6 +12,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_plate",
+    priority: 5,
   },
   {
     id: "n_downshift_evening",
@@ -25,6 +27,8 @@ export const nutritionSeed = [
     contraindications: ["avoid_late_meal"],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_evening_downshift",
+    priority: 4,
   },
   {
     id: "n_rebuild_training",
@@ -38,6 +42,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 2,
     minutes: 0,
+    noveltyGroup: "nutrition_rebuild_training",
+    priority: 4,
   },
   {
     id: "n_caffeine_gate",
@@ -51,6 +57,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 0,
     minutes: 0,
+    noveltyGroup: "nutrition_caffeine_delay",
+    priority: 4,
   },
   {
     id: "n_caffeine_cutoff",
@@ -64,6 +72,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 0,
     minutes: 0,
+    noveltyGroup: "nutrition_caffeine_cutoff",
+    priority: 4,
   },
   {
     id: "n_half_caf_taper",
@@ -77,6 +87,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 0,
     minutes: 0,
+    noveltyGroup: "nutrition_caffeine_taper",
+    priority: 3,
   },
   {
     id: "n_low_appetite",
@@ -90,6 +102,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_low_appetite",
+    priority: 4,
   },
   {
     id: "n_high_stress_simple",
@@ -103,6 +117,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_high_stress",
+    priority: 4,
   },
   {
     id: "n_digestion_warm",
@@ -116,6 +132,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_digestion_warm",
+    priority: 3,
   },
   {
     id: "n_digestion_low_fodmap",
@@ -129,6 +147,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_digestion_gentle",
+    priority: 3,
   },
   {
     id: "n_evening_light",
@@ -142,6 +162,8 @@ export const nutritionSeed = [
     contraindications: ["avoid_late_meal"],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_evening_plate",
+    priority: 3,
   },
   {
     id: "n_sleep_fiber",
@@ -155,6 +177,8 @@ export const nutritionSeed = [
     contraindications: ["avoid_late_meal"],
     intensityCost: 0,
     minutes: 0,
+    noveltyGroup: "nutrition_sleep_snack",
+    priority: 3,
   },
   {
     id: "n_rebuild_hydration",
@@ -168,6 +192,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_hydration",
+    priority: 3,
   },
   {
     id: "n_protein_spread",
@@ -181,6 +207,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_protein_spread",
+    priority: 4,
   },
   {
     id: "n_carbs_post_workout",
@@ -194,6 +222,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 2,
     minutes: 0,
+    noveltyGroup: "nutrition_post_workout",
+    priority: 3,
   },
   {
     id: "n_breakfast_anchor",
@@ -207,6 +237,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_breakfast_anchor",
+    priority: 4,
   },
   {
     id: "n_midday_balance",
@@ -220,6 +252,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_midday_balance",
+    priority: 3,
   },
   {
     id: "n_stress_cravings",
@@ -233,6 +267,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_stress_cravings",
+    priority: 3,
   },
   {
     id: "n_low_energy_simple",
@@ -246,6 +282,8 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 0,
     minutes: 0,
+    noveltyGroup: "nutrition_low_energy",
+    priority: 3,
   },
   {
     id: "n_sleep_calm_routine",
@@ -259,6 +297,8 @@ export const nutritionSeed = [
     contraindications: ["avoid_late_meal"],
     intensityCost: 0,
     minutes: 0,
+    noveltyGroup: "nutrition_sleep_calm",
+    priority: 3,
   },
   {
     id: "n_rebuild_consistency",
@@ -272,5 +312,7 @@ export const nutritionSeed = [
     contraindications: [],
     intensityCost: 1,
     minutes: 0,
+    noveltyGroup: "nutrition_rebuild_rhythm",
+    priority: 4,
   },
 ];

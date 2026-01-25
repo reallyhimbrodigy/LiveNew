@@ -4,14 +4,7 @@ import { useAppStore } from "../state/store";
 import Card from "../ui/Card";
 import Button from "../ui/Button";
 import BrandLogo from "../components/BrandLogo";
-import { isoToday } from "../domain";
-
-function avgStressLast7(checkIns) {
-  const items = checkIns.slice(0, 7).map((c) => Number(c.stress)).filter((n) => Number.isFinite(n));
-  if (!items.length) return null;
-  const sum = items.reduce((a, b) => a + b, 0);
-  return sum / items.length;
-}
+import { isoToday, computeProgress } from "../domain";
 
 export default function HomeScreen({ navigation }) {
   const weekPlan = useAppStore((s) => s.weekPlan);
@@ -19,9 +12,10 @@ export default function HomeScreen({ navigation }) {
   const checkIns = useAppStore((s) => s.checkIns);
   const lastStressStateByDate = useAppStore((s) => s.lastStressStateByDate);
   const userProfile = useAppStore((s) => s.userProfile);
+  const completions = useAppStore((s) => s.completions);
 
   const todayISO = useMemo(() => isoToday(), []);
-  const avgStress = useMemo(() => avgStressLast7(checkIns), [checkIns]);
+  const progress = useMemo(() => computeProgress({ checkIns, weekPlan, completions }), [checkIns, weekPlan, completions]);
   const todayProfile = lastStressStateByDate?.[todayISO]?.profile;
   const [didAutoOpen, setDidAutoOpen] = useState(false);
 
@@ -62,9 +56,16 @@ export default function HomeScreen({ navigation }) {
       <Text style={styles.h1}>This Week</Text>
       <Text style={styles.p}>Designed around lowering stress load, not maxing output.</Text>
       <View style={styles.kpiRow}>
-        <Text style={styles.kpiText}>7-day avg stress: {avgStress === null ? "n/a" : avgStress.toFixed(1)}</Text>
+        <Text style={styles.kpiText}>7-day avg stress: {progress.stressAvg7 == null ? "n/a" : progress.stressAvg7.toFixed(1)}</Text>
         <Text style={styles.kpiText}>Today profile: {todayProfile || "n/a"}</Text>
       </View>
+
+      <Card>
+        <Text style={styles.sectionTitle}>Progress</Text>
+        <Text style={styles.small}>Avg sleep (7d): {progress.sleepAvg7 == null ? "n/a" : progress.sleepAvg7.toFixed(1)}</Text>
+        <Text style={styles.small}>Adherence: {progress.adherencePct == null ? "n/a" : `${progress.adherencePct}%`}</Text>
+        <Text style={styles.small}>Downshift minutes (7d): {progress.downshiftMinutes7 == null ? "n/a" : progress.downshiftMinutes7}</Text>
+      </Card>
 
       {weekPlan.days.map((d) => (
         <View key={d.dateISO} style={{ gap: 8 }}>
@@ -90,6 +91,7 @@ const styles = StyleSheet.create({
   logoRow: { alignItems: "flex-start" },
   h1: { fontSize: 22, fontWeight: "800", color: "#111827" },
   p: { fontSize: 15, color: "#374151" },
+  sectionTitle: { fontSize: 14, color: "#111827", fontWeight: "700" },
   kpiRow: { gap: 6 },
   kpiText: { fontSize: 14, color: "#374151", fontWeight: "600" },
   dayTitle: { fontSize: 16, fontWeight: "700", color: "#111827" },

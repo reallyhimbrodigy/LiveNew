@@ -13,10 +13,13 @@ export default function DayScreen({ route, navigation }) {
   const lastStressStateByDate = useAppStore((s) => s.lastStressStateByDate);
   const history = useAppStore((s) => s.history);
   const undoLastChange = useAppStore((s) => s.undoLastChange);
+  const activateBadDayMode = useAppStore((s) => s.activateBadDayMode);
+  const submitFeedback = useAppStore((s) => s.submitFeedback);
 
   const day = weekPlan?.days.find((d) => d.dateISO === dateISO);
   const drivers = lastStressStateByDate?.[dateISO]?.drivers || [];
   const canUndo = history.length && history[0].dateISO === dateISO;
+  const [showReasons, setShowReasons] = React.useState(false);
 
   if (!day) {
     return (
@@ -34,6 +37,7 @@ export default function DayScreen({ route, navigation }) {
       <Text style={styles.h1}>{dateISO}</Text>
       <Text style={styles.p}>Profile: {day.profile}</Text>
       <Text style={styles.p}>Focus: {day.focus}</Text>
+      <Button title="Today is a bad day" variant="ghost" onPress={() => activateBadDayMode(dateISO)} />
 
       <Card>
         <Text style={styles.blockTitle}>Why this plan</Text>
@@ -111,6 +115,23 @@ export default function DayScreen({ route, navigation }) {
         {day.rationale.slice(0, 3).map((line, idx) => (
           <Text key={idx} style={styles.line}>- {line}</Text>
         ))}
+      </Card>
+
+      <Card>
+        <Text style={styles.blockTitle}>Did this help?</Text>
+        <View style={{ height: 8 }} />
+        <View style={styles.quickRow}>
+          <Button title="Yes" variant="ghost" onPress={() => { setShowReasons(false); submitFeedback({ dateISO, helped: true }); }} />
+          <Button title="No" variant="ghost" onPress={() => setShowReasons((v) => !v)} />
+        </View>
+        {showReasons ? (
+          <View style={styles.quickRow}>
+            <Button title="Too hard" variant="ghost" onPress={() => submitFeedback({ dateISO, helped: false, reason: "too_hard" })} />
+            <Button title="Too easy" variant="ghost" onPress={() => submitFeedback({ dateISO, helped: false, reason: "too_easy" })} />
+            <Button title="Wrong time" variant="ghost" onPress={() => submitFeedback({ dateISO, helped: false, reason: "wrong_time" })} />
+            <Button title="Not relevant" variant="ghost" onPress={() => submitFeedback({ dateISO, helped: false, reason: "not_relevant" })} />
+          </View>
+        ) : null}
       </Card>
     </ScrollView>
   );

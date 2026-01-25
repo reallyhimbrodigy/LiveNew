@@ -7,10 +7,11 @@ import {
   assignStressProfile,
   generateWeekPlan,
   adaptPlan,
+  buildDayPlan,
 } from "../domain";
 
 const STORAGE_KEY = "livegood:v1";
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 function buildCheckInsByDate(checkIns) {
   const map = {};
@@ -88,6 +89,92 @@ function buildStressStateMap(user, plan, checkInsByDate) {
   return map;
 }
 
+function isActiveUntil(dateISO, untilISO) {
+  if (!untilISO) return true;
+  return dateISO <= untilISO;
+}
+
+function cleanupModifiers(modifiers, todayISO) {
+  const next = { ...(modifiers || {}) };
+  if (next.intensityCapUntilISO && todayISO > next.intensityCapUntilISO) {
+    delete next.intensityCapUntilISO;
+    delete next.intensityCapValue;
+  }
+  if (next.preferredWindowBiasUntilISO && todayISO > next.preferredWindowBiasUntilISO) {
+    delete next.preferredWindowBiasUntilISO;
+    delete next.preferredWindowBias;
+  }
+  if (next.noveltyRotationBoostUntilISO && todayISO > next.noveltyRotationBoostUntilISO) {
+    delete next.noveltyRotationBoostUntilISO;
+    next.noveltyRotationBoost = false;
+  }
+  return next;
+}
+
+function effectiveUserForDate(user, modifiers, dateISO) {
+  const mod = modifiers || {};
+  const biasActive = mod.preferredWindowBias && isActiveUntil(dateISO, mod.preferredWindowBiasUntilISO);
+  if (!biasActive) return user;
+  const windows = Array.isArray(user.preferredWorkoutWindows) ? user.preferredWorkoutWindows : [];
+  const nextWindows = [mod.preferredWindowBias, ...windows.filter((w) => w !== mod.preferredWindowBias)];
+  return { ...user, preferredWorkoutWindows: nextWindows };
+}
+
+function modifiersForDate(modifiers, dateISO) {
+  const mod = modifiers || {};
+  const intensityActive = mod.intensityCapValue != null && isActiveUntil(dateISO, mod.intensityCapUntilISO);
+  const noveltyActive = mod.noveltyRotationBoost && isActiveUntil(dateISO, mod.noveltyRotationBoostUntilISO);
+  return {
+    intensityCap: intensityActive ? mod.intensityCapValue : null,
+    qualityRules: { avoidNoveltyWindowDays: noveltyActive ? 3 : 2 },
+  };
+}
+
+function rebuildDayInPlan({ user, weekPlan, dateISO, checkInsByDate, overrides, qualityRules }) {
+  const idx = weekPlan.days.findIndex((d) => d.dateISO === dateISO);
+  if (idx === -1) return { weekPlan, dayPlan: null };
+
+  const recentNoveltyGroups = collectRecentNoveltyGroups(weekPlan.days, idx, 2);
+  const { dayPlan } = buildDayPlan({
+    user,
+    dateISO,
+    checkIn: checkInsByDate ? checkInsByDate[dateISO] : undefined,
+    checkInsByDate,
+    weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups },
+    overrides,
+    qualityRules,
+  });
+
+  const nextDays = weekPlan.days.slice();
+  nextDays[idx] = dayPlan;
+  return { weekPlan: { ...weekPlan, days: nextDays }, dayPlan };
+}
+
+function nextWindowFrom(current) {
+  const cycle = ["AM", "MIDDAY", "PM"];
+  const idx = cycle.indexOf(current);
+  if (idx === -1) return "AM";
+  return cycle[(idx + 1) % cycle.length];
+}
+
+function collectRecentNoveltyGroups(days, idx, windowDays) {
+  const start = Math.max(0, idx - windowDays);
+  const recent = days.slice(start, idx);
+  const groups = [];
+  recent.forEach((day) => {
+    if (day.selectedNoveltyGroups) {
+      Object.values(day.selectedNoveltyGroups).forEach((g) => {
+        if (g) groups.push(g);
+      });
+    } else {
+      if (day.workout?.noveltyGroup) groups.push(day.workout.noveltyGroup);
+      if (day.nutrition?.noveltyGroup) groups.push(day.nutrition.noveltyGroup);
+      if (day.reset?.noveltyGroup) groups.push(day.reset.noveltyGroup);
+    }
+  });
+  return groups;
+}
+
 export const useAppStore = create((set, get) => ({
   schemaVersion: SCHEMA_VERSION,
   userProfile: null,
@@ -97,6 +184,8 @@ export const useAppStore = create((set, get) => ({
   completions: {},
   stressors: [],
   history: [],
+  feedback: [],
+  modifiers: {},
 
   getTodayISO: () => isoToday(),
 
@@ -104,9 +193,10 @@ export const useAppStore = create((set, get) => ({
     const saved = await loadJSON(STORAGE_KEY);
     if (!saved) return;
     const savedVersion = saved.schemaVersion ?? 1;
-    if (savedVersion !== SCHEMA_VERSION) {
-      const reset = {
-        schemaVersion: SCHEMA_VERSION,
+
+    if (savedVersion > SCHEMA_VERSION) {
+      await removeJSON(STORAGE_KEY);
+      set({
         userProfile: null,
         weekPlan: null,
         checkIns: [],
@@ -114,17 +204,9 @@ export const useAppStore = create((set, get) => ({
         stressors: [],
         lastStressStateByDate: {},
         history: [],
-      };
-      set({
-        userProfile: reset.userProfile,
-        weekPlan: reset.weekPlan,
-        checkIns: reset.checkIns,
-        completions: reset.completions,
-        stressors: reset.stressors,
-        lastStressStateByDate: reset.lastStressStateByDate,
-        history: reset.history,
+        feedback: [],
+        modifiers: {},
       });
-      await saveJSON(STORAGE_KEY, reset);
       return;
     }
 
@@ -137,7 +219,8 @@ export const useAppStore = create((set, get) => ({
       saved.weekPlan.days[0].workout
         ? saved.weekPlan
         : null;
-    const needsPersist = Boolean(!saved.userProfile && saved.baseline);
+
+    const nextModifiers = cleanupModifiers(saved.modifiers ?? {}, isoToday());
 
     set({
       userProfile: userProfile ?? null,
@@ -147,9 +230,11 @@ export const useAppStore = create((set, get) => ({
       stressors: saved.stressors ?? [],
       lastStressStateByDate: saved.lastStressStateByDate ?? {},
       history: saved.history ?? [],
+      feedback: saved.feedback ?? [],
+      modifiers: nextModifiers,
     });
 
-    if (needsPersist) await persist();
+    if (savedVersion !== SCHEMA_VERSION) await persist();
   },
 
   resetData: async () => {
@@ -162,6 +247,8 @@ export const useAppStore = create((set, get) => ({
       stressors: [],
       lastStressStateByDate: {},
       history: [],
+      feedback: [],
+      modifiers: {},
     });
   },
 
@@ -173,20 +260,65 @@ export const useAppStore = create((set, get) => ({
   buildWeek: async (weekAnchorISO) => {
     const user = get().userProfile;
     if (!user) return;
+
     const checkInsByDate = buildCheckInsByDate(get().checkIns);
-    const plan = generateWeekPlan({ user, weekAnchorISO, checkInsByDate });
-    const lastStressStateByDate = buildStressStateMap(user, plan, checkInsByDate);
-    set({ weekPlan: plan, lastStressStateByDate });
+    const modifiers = cleanupModifiers(get().modifiers, weekAnchorISO);
+    const effectiveUser = effectiveUserForDate(user, modifiers, weekAnchorISO);
+
+    let plan = generateWeekPlan({ user: effectiveUser, weekAnchorISO, checkInsByDate });
+
+    if (modifiers.stabilizeTomorrow) {
+      const tomorrowISO = addDaysISO(isoToday(), 1);
+      if (plan.days.some((d) => d.dateISO === tomorrowISO)) {
+        const res = rebuildDayInPlan({
+          user: effectiveUser,
+          weekPlan: plan,
+          dateISO: tomorrowISO,
+          checkInsByDate,
+          overrides: { focusBias: "stabilize" },
+          qualityRules: { avoidNoveltyWindowDays: 2 },
+        });
+        plan = res.weekPlan;
+      }
+      modifiers.stabilizeTomorrow = false;
+    }
+
+    const lastStressStateByDate = buildStressStateMap(effectiveUser, plan, checkInsByDate);
+    set({ weekPlan: plan, lastStressStateByDate, modifiers });
     await persist();
   },
 
   ensureCurrentWeek: async () => {
     const user = get().userProfile;
     if (!user) return;
+
     const currentWeekStart = weekStartMonday(isoToday());
     const plan = get().weekPlan;
     if (!plan || plan.startDateISO !== currentWeekStart) {
       await get().buildWeek(currentWeekStart);
+      return;
+    }
+
+    const modifiers = cleanupModifiers(get().modifiers, isoToday());
+    if (modifiers.stabilizeTomorrow) {
+      const checkInsByDate = buildCheckInsByDate(get().checkIns);
+      const effectiveUser = effectiveUserForDate(user, modifiers, isoToday());
+      const tomorrowISO = addDaysISO(isoToday(), 1);
+      if (plan.days.some((d) => d.dateISO === tomorrowISO)) {
+        const res = rebuildDayInPlan({
+          user: effectiveUser,
+          weekPlan: plan,
+          dateISO: tomorrowISO,
+          checkInsByDate,
+          overrides: { focusBias: "stabilize" },
+          qualityRules: { avoidNoveltyWindowDays: 2 },
+        });
+        const nextPlan = res.weekPlan;
+        const lastStressStateByDate = buildStressStateMap(effectiveUser, nextPlan, checkInsByDate);
+        modifiers.stabilizeTomorrow = false;
+        set({ weekPlan: nextPlan, lastStressStateByDate, modifiers });
+        await persist();
+      }
     }
   },
 
@@ -196,20 +328,18 @@ export const useAppStore = create((set, get) => ({
     const filtered = state.checkIns.filter((item) => item.dateISO !== normalized.dateISO);
     const nextCheckIns = [normalized, ...filtered].slice(0, 60);
     const checkInsByDate = buildCheckInsByDate(nextCheckIns);
-    let lastStressStateByDate = { ...(state.lastStressStateByDate || {}) };
+
+    let modifiers = cleanupModifiers(state.modifiers, normalized.dateISO);
+    const effectiveUser = state.userProfile
+      ? effectiveUserForDate(state.userProfile, modifiers, normalized.dateISO)
+      : null;
+    const { intensityCap, qualityRules } = modifiersForDate(modifiers, normalized.dateISO);
 
     let nextPlan = state.weekPlan;
     if (state.userProfile) {
-      const stressState = assignStressProfile({
-        user: state.userProfile,
-        dateISO: normalized.dateISO,
-        checkIn: normalized,
-      });
-      lastStressStateByDate[normalized.dateISO] = stressState;
-
       if (!nextPlan || nextPlan.startDateISO !== weekStartMonday(normalized.dateISO)) {
         nextPlan = generateWeekPlan({
-          user: state.userProfile,
+          user: effectiveUser,
           weekAnchorISO: normalized.dateISO,
           checkInsByDate,
         });
@@ -218,18 +348,21 @@ export const useAppStore = create((set, get) => ({
       if (nextPlan) {
         const adapted = adaptPlan({
           weekPlan: nextPlan,
-          user: state.userProfile,
+          user: effectiveUser,
           todayISO: normalized.dateISO,
           checkIn: normalized,
           checkInsByDate,
+          overridesBase: intensityCap != null ? { intensityCap } : null,
+          qualityRules,
+          weekContextBase: { busyDays: effectiveUser.busyDays || [] },
         });
         nextPlan = adapted.weekPlan;
-        lastStressStateByDate = {
-          ...lastStressStateByDate,
-          ...buildStressStateMap(state.userProfile, nextPlan, checkInsByDate),
-        };
       }
     }
+
+    const lastStressStateByDate = nextPlan && effectiveUser
+      ? buildStressStateMap(effectiveUser, nextPlan, checkInsByDate)
+      : state.lastStressStateByDate;
 
     let history = state.history;
     if (state.weekPlan && nextPlan) {
@@ -251,20 +384,28 @@ export const useAppStore = create((set, get) => ({
       }
     }
 
-    set({ checkIns: nextCheckIns, weekPlan: nextPlan, lastStressStateByDate, history });
+    set({ checkIns: nextCheckIns, weekPlan: nextPlan, lastStressStateByDate, history, modifiers });
     await persist();
   },
 
   applyQuickSignal: async (signal, todayISO) => {
     const state = get();
     if (!state.weekPlan || !state.userProfile) return;
+
     const checkInsByDate = buildCheckInsByDate(state.checkIns);
+    const modifiers = cleanupModifiers(state.modifiers, todayISO);
+    const effectiveUser = effectiveUserForDate(state.userProfile, modifiers, todayISO);
+    const { intensityCap, qualityRules } = modifiersForDate(modifiers, todayISO);
+
     const adapted = adaptPlan({
       weekPlan: state.weekPlan,
-      user: state.userProfile,
+      user: effectiveUser,
       todayISO,
       signal,
       checkInsByDate,
+      overridesBase: intensityCap != null ? { intensityCap } : null,
+      qualityRules,
+      weekContextBase: { busyDays: effectiveUser.busyDays || [] },
     });
 
     let history = state.history;
@@ -275,7 +416,110 @@ export const useAppStore = create((set, get) => ({
       afterDay: findDay(adapted.weekPlan, todayISO),
     });
 
-    set({ weekPlan: adapted.weekPlan, history });
+    const lastStressStateByDate = buildStressStateMap(effectiveUser, adapted.weekPlan, checkInsByDate);
+
+    set({ weekPlan: adapted.weekPlan, history, lastStressStateByDate, modifiers });
+    await persist();
+  },
+
+  activateBadDayMode: async (todayISO) => {
+    const state = get();
+    if (!state.weekPlan || !state.userProfile) return;
+
+    const checkInsByDate = buildCheckInsByDate(state.checkIns);
+    let modifiers = cleanupModifiers(state.modifiers, todayISO);
+    const effectiveUser = effectiveUserForDate(state.userProfile, modifiers, todayISO);
+    const { intensityCap, qualityRules } = modifiersForDate(modifiers, todayISO);
+
+    const beforeDay = findDay(state.weekPlan, todayISO);
+    const res = rebuildDayInPlan({
+      user: effectiveUser,
+      weekPlan: state.weekPlan,
+      dateISO: todayISO,
+      checkInsByDate,
+      overrides: {
+        forceBadDayMode: true,
+        intensityCap: intensityCap != null ? intensityCap : 2,
+      },
+      qualityRules,
+    });
+
+    modifiers.stabilizeTomorrow = true;
+
+    const history = addHistoryEntry(state.history, {
+      reason: "Bad day mode",
+      dateISO: todayISO,
+      beforeDay,
+      afterDay: findDay(res.weekPlan, todayISO),
+    });
+
+    const lastStressStateByDate = buildStressStateMap(effectiveUser, res.weekPlan, checkInsByDate);
+
+    set({ weekPlan: res.weekPlan, history, modifiers, lastStressStateByDate });
+    await persist();
+  },
+
+  submitFeedback: async ({ dateISO, helped, reason }) => {
+    const state = get();
+    if (!state.userProfile || !state.weekPlan) return;
+
+    const feedbackEntry = {
+      id: Math.random().toString(36).slice(2),
+      dateISO,
+      helped,
+      reason: reason || undefined,
+      atISO: new Date().toISOString(),
+    };
+
+    let feedback = [feedbackEntry, ...state.feedback].slice(0, 120);
+    let modifiers = cleanupModifiers(state.modifiers, dateISO);
+
+    if (reason === "too_hard") {
+      modifiers.intensityCapValue = 3;
+      modifiers.intensityCapUntilISO = addDaysISO(dateISO, 3);
+    } else if (reason === "too_easy") {
+      delete modifiers.intensityCapValue;
+      delete modifiers.intensityCapUntilISO;
+    } else if (reason === "wrong_time") {
+      const day = findDay(state.weekPlan, dateISO);
+      const currentWindow = day?.workoutWindow || "AM";
+      modifiers.preferredWindowBias = nextWindowFrom(currentWindow);
+      modifiers.preferredWindowBiasUntilISO = addDaysISO(dateISO, 7);
+    } else if (reason === "not_relevant") {
+      modifiers.noveltyRotationBoost = true;
+      modifiers.noveltyRotationBoostUntilISO = addDaysISO(dateISO, 7);
+    }
+
+    const checkInsByDate = buildCheckInsByDate(state.checkIns);
+    const effectiveUser = effectiveUserForDate(state.userProfile, modifiers, dateISO);
+
+    let nextPlan = state.weekPlan;
+    let history = state.history;
+
+    const tomorrowISO = addDaysISO(dateISO, 1);
+    const { intensityCap, qualityRules } = modifiersForDate(modifiers, tomorrowISO);
+    if (nextPlan.days.some((d) => d.dateISO === tomorrowISO)) {
+      const beforeDay = findDay(nextPlan, tomorrowISO);
+      const res = rebuildDayInPlan({
+        user: effectiveUser,
+        weekPlan: nextPlan,
+        dateISO: tomorrowISO,
+        checkInsByDate,
+        overrides: intensityCap != null ? { intensityCap } : null,
+        qualityRules,
+      });
+      nextPlan = res.weekPlan;
+      history = addHistoryEntry(history, {
+        reason: "Feedback adjustment",
+        dateISO: tomorrowISO,
+        beforeDay,
+        afterDay: findDay(nextPlan, tomorrowISO),
+      });
+    }
+
+    const lastStressStateByDate = buildStressStateMap(effectiveUser, nextPlan, checkInsByDate);
+
+    set({ feedback, modifiers, weekPlan: nextPlan, history, lastStressStateByDate });
     await persist();
   },
 
@@ -287,7 +531,14 @@ export const useAppStore = create((set, get) => ({
     if (idx === -1) return;
     const nextDays = state.weekPlan.days.slice();
     nextDays[idx] = latest.beforeDay;
-    set({ weekPlan: { ...state.weekPlan, days: nextDays }, history: rest });
+
+    const checkInsByDate = buildCheckInsByDate(state.checkIns);
+    const effectiveUser = state.userProfile;
+    const lastStressStateByDate = effectiveUser
+      ? buildStressStateMap(effectiveUser, { ...state.weekPlan, days: nextDays }, checkInsByDate)
+      : state.lastStressStateByDate;
+
+    set({ weekPlan: { ...state.weekPlan, days: nextDays }, history: rest, lastStressStateByDate });
     await persist();
   },
 
@@ -308,13 +559,21 @@ export const useAppStore = create((set, get) => ({
     let history = state.history;
     if (nextPlan && state.userProfile) {
       const checkInsByDate = buildCheckInsByDate(state.checkIns);
+      const modifiers = cleanupModifiers(state.modifiers, dateISO);
+      const effectiveUser = effectiveUserForDate(state.userProfile, modifiers, dateISO);
+      const { intensityCap, qualityRules } = modifiersForDate(modifiers, dateISO);
+
       const adapted = adaptPlan({
         weekPlan: nextPlan,
-        user: state.userProfile,
+        user: effectiveUser,
         todayISO: dateISO,
         signal: "im_stressed",
         checkInsByDate,
+        overridesBase: intensityCap != null ? { intensityCap } : null,
+        qualityRules,
+        weekContextBase: { busyDays: effectiveUser.busyDays || [] },
       });
+
       nextPlan = adapted.weekPlan;
       history = addHistoryEntry(history, {
         reason: `Stressor: ${kind}`,
@@ -322,9 +581,14 @@ export const useAppStore = create((set, get) => ({
         beforeDay: findDay(state.weekPlan, dateISO),
         afterDay: findDay(nextPlan, dateISO),
       });
+
+      const lastStressStateByDate = buildStressStateMap(effectiveUser, nextPlan, checkInsByDate);
+      set({ stressors: nextStressors, weekPlan: nextPlan, history, lastStressStateByDate, modifiers });
+      await persist();
+      return;
     }
 
-    set({ stressors: nextStressors, weekPlan: nextPlan, history });
+    set({ stressors: nextStressors });
     await persist();
   },
 }));
@@ -340,5 +604,7 @@ async function persist() {
     stressors: s.stressors,
     lastStressStateByDate: s.lastStressStateByDate,
     history: s.history,
+    feedback: s.feedback,
+    modifiers: s.modifiers,
   });
 }

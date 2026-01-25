@@ -1,16 +1,36 @@
 import { addDaysISO } from "../utils/date";
-import { assignStressProfile } from "../scoring/profile";
-import { applyConstraints } from "./constraints";
-import { focusFromProfile, pickWorkout, pickNutrition, pickReset, pickWorkoutWindow } from "./generator";
+import { buildDayPlan } from "./decision";
 
-export function adaptPlan({ weekPlan, user, todayISO, checkIn, signal, checkInsByDate }) {
+export function adaptPlan({
+  weekPlan,
+  user,
+  todayISO,
+  checkIn,
+  signal,
+  checkInsByDate,
+  overridesBase,
+  qualityRules,
+  weekContextBase,
+}) {
   const notes = [];
   let nextPlan = weekPlan;
   let changedDayISO;
 
+  const baseContext = weekContextBase || { busyDays: user.busyDays || [] };
+  const baseQualityRules = qualityRules || { avoidNoveltyWindowDays: 2 };
+
   if (signal) {
-    const override = buildOverrideFromSignal({ signal, checkIn, user, todayISO, checkInsByDate });
-    const res = applyRebuild(nextPlan, user, todayISO, checkInsByDate, override);
+    const override = buildOverrideFromSignal({ signal, user, todayISO, checkIn, checkInsByDate });
+    const mergedOverride = { ...(overridesBase || {}), ...(override || {}) };
+    const res = rebuildDay({
+      user,
+      dateISO: todayISO,
+      weekPlan: nextPlan,
+      checkInsByDate,
+      overrides: mergedOverride,
+      qualityRules: baseQualityRules,
+      weekContextBase: baseContext,
+    });
     if (res.changed) {
       nextPlan = res.weekPlan;
       changedDayISO = todayISO;
@@ -20,7 +40,16 @@ export function adaptPlan({ weekPlan, user, todayISO, checkIn, signal, checkInsB
 
   if (checkIn && checkIn.stress >= 7 && checkIn.sleepQuality <= 5) {
     const tomorrowISO = addDaysISO(todayISO, 1);
-    const res = applyRebuild(nextPlan, user, tomorrowISO, checkInsByDate, { focusBias: "downshift" });
+    const mergedOverride = { ...(overridesBase || {}), focusBias: "downshift" };
+    const res = rebuildDay({
+      user,
+      dateISO: tomorrowISO,
+      weekPlan: nextPlan,
+      checkInsByDate,
+      overrides: mergedOverride,
+      qualityRules: baseQualityRules,
+      weekContextBase: baseContext,
+    });
     if (res.changed) {
       nextPlan = res.weekPlan;
       changedDayISO = tomorrowISO;
@@ -31,22 +60,36 @@ export function adaptPlan({ weekPlan, user, todayISO, checkIn, signal, checkInsB
   return { weekPlan: nextPlan, changedDayISO, notes };
 }
 
-function applyRebuild(weekPlan, user, dateISO, checkInsByDate, override) {
+function rebuildDay({ user, dateISO, weekPlan, checkInsByDate, overrides, qualityRules, weekContextBase }) {
   const idx = weekPlan.days.findIndex((d) => d.dateISO === dateISO);
   if (idx === -1) return { weekPlan, changed: false };
 
+  const recentNoveltyGroups = collectRecentNoveltyGroups(weekPlan.days, idx, 2);
+  const weekContext = {
+    busyDays: (weekContextBase && weekContextBase.busyDays) || user.busyDays || [],
+    recentNoveltyGroups,
+  };
+
+  const { dayPlan } = buildDayPlan({
+    user,
+    dateISO,
+    checkIn: checkInsByDate ? checkInsByDate[dateISO] : undefined,
+    checkInsByDate,
+    weekContext,
+    overrides,
+    qualityRules,
+  });
+
   const nextDays = weekPlan.days.slice();
-  const rebuilt = rebuildDay({ user, dateISO, weekPlan, checkInsByDate, override });
   const prev = nextDays[idx];
-  const changed = JSON.stringify(prev) !== JSON.stringify(rebuilt);
-  nextDays[idx] = rebuilt;
+  const changed = JSON.stringify(prev) !== JSON.stringify(dayPlan);
+  nextDays[idx] = dayPlan;
 
   return { weekPlan: { ...weekPlan, days: nextDays }, changed };
 }
 
 function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate }) {
   const checkIn = checkInsByDate ? checkInsByDate[todayISO] : undefined;
-  const state = assignStressProfile({ user, dateISO: todayISO, checkIn });
 
   if (signal === "im_stressed" || signal === "poor_sleep" || signal === "wired" || signal === "anxious") {
     return { focusBias: "downshift" };
@@ -61,59 +104,36 @@ function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate }) {
   }
 
   if (signal === "i_have_more_energy") {
-    if (state.capacity >= 60 && state.loadBand !== "high") return { focusBias: "rebuild" };
+    const { stressState } = buildDayPlan({
+      user,
+      dateISO: todayISO,
+      checkIn,
+      checkInsByDate,
+      weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups: [] },
+      overrides: null,
+      qualityRules: { avoidNoveltyWindowDays: 2 },
+    });
+    if (stressState.capacity >= 60 && stressState.loadBand !== "high") return { focusBias: "rebuild" };
     return { focusBias: "stabilize" };
   }
 
   return null;
 }
 
-function rebuildDay({ user, dateISO, weekPlan, checkInsByDate, override }) {
-  const checkIn = checkInsByDate ? checkInsByDate[dateISO] : undefined;
-  const state = assignStressProfile({ user, dateISO, checkIn });
-  let focus = focusFromProfile(state.profile, state.capacity);
-
-  if (override && override.focusBias) {
-    if (override.focusBias === "rebuild") {
-      if (state.capacity >= 60 && state.loadBand !== "high") focus = "rebuild";
+function collectRecentNoveltyGroups(days, idx, windowDays) {
+  const start = Math.max(0, idx - windowDays);
+  const recent = days.slice(start, idx);
+  const groups = [];
+  recent.forEach((day) => {
+    if (day.selectedNoveltyGroups) {
+      Object.values(day.selectedNoveltyGroups).forEach((g) => {
+        if (g) groups.push(g);
+      });
     } else {
-      focus = override.focusBias;
+      if (day.workout?.noveltyGroup) groups.push(day.workout.noveltyGroup);
+      if (day.nutrition?.noveltyGroup) groups.push(day.nutrition.noveltyGroup);
+      if (day.reset?.noveltyGroup) groups.push(day.reset.noveltyGroup);
     }
-  }
-
-  const baseTimeMin = override && override.timeOverrideMin != null
-    ? override.timeOverrideMin
-    : checkIn
-      ? checkIn.timeAvailableMin
-      : 20;
-
-  const isBusy = Array.isArray(user.busyDays) && user.busyDays.includes(dateISO);
-  const timeMin = isBusy ? Math.min(baseTimeMin, 15) : baseTimeMin;
-
-  const workout = pickWorkout({ focus, timeMin, checkIn });
-  const nutrition = pickNutrition({ focus });
-  const reset = pickReset({ focus, timeMin });
-  const workoutWindow = pickWorkoutWindow(user);
-
-  const rationale = [
-    `Profile: ${state.profile}`,
-    `Stress load: ${Math.round(state.stressLoad)}/100`,
-    `Capacity: ${Math.round(state.capacity)}/100`,
-    ...state.drivers.slice(0, 3),
-  ];
-
-  if (isBusy) rationale.push("Busy day -> shorter plan");
-
-  const dayDraft = {
-    dateISO,
-    profile: state.profile,
-    focus,
-    workout,
-    nutrition,
-    reset,
-    rationale,
-    workoutWindow,
-  };
-
-  return applyConstraints({ user, checkIn, state, dayDraft });
+  });
+  return groups;
 }

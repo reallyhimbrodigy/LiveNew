@@ -10,6 +10,8 @@ export const workoutsSeed = [
     steps: ["Walk easy and slow.", "Nasal breathing if possible."],
     contraindications: [],
     intensityCost: 1,
+    noveltyGroup: "walk_easy_short",
+    priority: 5,
   },
   {
     id: "w_walk_10",
@@ -21,6 +23,8 @@ export const workoutsSeed = [
     steps: ["Walk easy. Nasal breathing if possible.", "End with 60s slow exhale breathing."],
     contraindications: [],
     intensityCost: 2,
+    noveltyGroup: "walk_easy_medium",
+    priority: 4,
   },
   {
     id: "w_breathwalk_12",
@@ -32,6 +36,8 @@ export const workoutsSeed = [
     steps: ["Inhale 3 steps, exhale 5 steps.", "Keep pace easy and smooth."],
     contraindications: ["avoid_if_dizzy"],
     intensityCost: 2,
+    noveltyGroup: "walk_breath",
+    priority: 4,
   },
   {
     id: "w_mob_8",
@@ -43,6 +49,8 @@ export const workoutsSeed = [
     steps: ["2 min neck/shoulders", "3 min hips", "3 min spine + deep breathing"],
     contraindications: [],
     intensityCost: 1,
+    noveltyGroup: "mobility_reset",
+    priority: 5,
   },
   {
     id: "w_stretch_10",
@@ -54,6 +62,8 @@ export const workoutsSeed = [
     steps: ["Slow hamstring + hip stretch", "Finish with long exhales"],
     contraindications: [],
     intensityCost: 1,
+    noveltyGroup: "mobility_floor",
+    priority: 3,
   },
   {
     id: "w_yoga_15",
@@ -65,6 +75,8 @@ export const workoutsSeed = [
     steps: ["Slow flow + long exhales", "Finish: legs-up-the-wall 2 minutes"],
     contraindications: [],
     intensityCost: 2,
+    noveltyGroup: "yoga_nervous",
+    priority: 4,
   },
 
   // Stabilize (8)
@@ -79,6 +91,8 @@ export const workoutsSeed = [
     contraindications: ["avoid_if_poor_sleep"],
     intensityCost: 4,
     minSleepQuality: 5,
+    noveltyGroup: "strength_gentle_short",
+    priority: 4,
   },
   {
     id: "w_strength_20",
@@ -91,6 +105,8 @@ export const workoutsSeed = [
     contraindications: ["avoid_if_poor_sleep"],
     intensityCost: 5,
     minSleepQuality: 5,
+    noveltyGroup: "strength_gentle",
+    priority: 5,
   },
   {
     id: "w_zone2_20",
@@ -103,6 +119,8 @@ export const workoutsSeed = [
     contraindications: [],
     intensityCost: 4,
     minSleepQuality: 4,
+    noveltyGroup: "zone2_steady_short",
+    priority: 4,
   },
   {
     id: "w_zone2_25",
@@ -115,6 +133,8 @@ export const workoutsSeed = [
     contraindications: [],
     intensityCost: 5,
     minSleepQuality: 5,
+    noveltyGroup: "zone2_steady",
+    priority: 4,
   },
   {
     id: "w_mob_core_18",
@@ -127,6 +147,8 @@ export const workoutsSeed = [
     contraindications: ["avoid_if_low_back_pain"],
     intensityCost: 4,
     minSleepQuality: 4,
+    noveltyGroup: "mobility_core",
+    priority: 3,
   },
   {
     id: "w_brisk_15",
@@ -139,6 +161,8 @@ export const workoutsSeed = [
     contraindications: [],
     intensityCost: 3,
     minSleepQuality: 4,
+    noveltyGroup: "walk_brisk",
+    priority: 3,
   },
   {
     id: "w_stability_22",
@@ -151,6 +175,8 @@ export const workoutsSeed = [
     contraindications: ["avoid_if_poor_sleep"],
     intensityCost: 5,
     minSleepQuality: 5,
+    noveltyGroup: "strength_stability",
+    priority: 4,
   },
   {
     id: "w_cycle_25",
@@ -163,6 +189,8 @@ export const workoutsSeed = [
     contraindications: [],
     intensityCost: 4,
     minSleepQuality: 4,
+    noveltyGroup: "zone2_cycle",
+    priority: 3,
   },
 
   // Rebuild (6)
@@ -177,6 +205,8 @@ export const workoutsSeed = [
     contraindications: ["avoid_if_poor_sleep"],
     intensityCost: 6,
     minSleepQuality: 6,
+    noveltyGroup: "zone2_rebuild_30",
+    priority: 5,
   },
   {
     id: "w_zone2_40",
@@ -189,6 +219,8 @@ export const workoutsSeed = [
     contraindications: ["avoid_if_poor_sleep"],
     intensityCost: 7,
     minSleepQuality: 6,
+    noveltyGroup: "zone2_rebuild_40",
+    priority: 4,
   },
   {
     id: "w_strength_30",
@@ -201,6 +233,8 @@ export const workoutsSeed = [
     contraindications: ["avoid_if_poor_sleep"],
     intensityCost: 7,
     minSleepQuality: 6,
+    noveltyGroup: "strength_rebuild_30",
+    priority: 4,
   },
   {
     id: "w_strength_35",
@@ -213,6 +247,8 @@ export const workoutsSeed = [
     contraindications: ["avoid_if_poor_sleep"],
     intensityCost: 8,
     minSleepQuality: 7,
+    noveltyGroup: "strength_rebuild_35",
+    priority: 3,
   },
   {
     id: "w_hike_45",
@@ -225,6 +261,8 @@ export const workoutsSeed = [
     contraindications: ["avoid_if_poor_sleep"],
     intensityCost: 8,
     minSleepQuality: 6,
+    noveltyGroup: "walk_hike",
+    priority: 3,
   },
   {
     id: "w_mix_30",
@@ -237,5 +275,7 @@ export const workoutsSeed = [
     contraindications: ["avoid_if_poor_sleep"],
     intensityCost: 6,
     minSleepQuality: 6,
+    noveltyGroup: "zone2_mix",
+    priority: 4,
   },
 ];
