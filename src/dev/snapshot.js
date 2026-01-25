@@ -2,20 +2,52 @@ import { reduceEvent, initialStatePatch } from "../state/engine";
 import * as domain from "../domain";
 import { getScenarioById } from "./scenarios";
 
-const snapshots = {
-  no_checkins: require("./scenarioSnapshots/no_checkins.json"),
-  poor_sleep_day: require("./scenarioSnapshots/poor_sleep_day.json"),
-  wired_day: require("./scenarioSnapshots/wired_day.json"),
-  ten_min_day: require("./scenarioSnapshots/ten_min_day.json"),
-  busy_day: require("./scenarioSnapshots/busy_day.json"),
-  bad_day_mode: require("./scenarioSnapshots/bad_day_mode.json"),
-  feedback_too_hard: require("./scenarioSnapshots/feedback_too_hard.json"),
-  feedback_not_relevant: require("./scenarioSnapshots/feedback_not_relevant.json"),
-  balanced_day: require("./scenarioSnapshots/balanced_day.json"),
-  depleted_day: require("./scenarioSnapshots/depleted_day.json"),
+const SNAPSHOT_FILES = {
+  no_checkins: "no_checkins.json",
+  poor_sleep_day: "poor_sleep_day.json",
+  wired_day: "wired_day.json",
+  ten_min_day: "ten_min_day.json",
+  busy_day: "busy_day.json",
+  bad_day_mode: "bad_day_mode.json",
+  feedback_too_hard: "feedback_too_hard.json",
+  feedback_not_relevant: "feedback_not_relevant.json",
+  balanced_day: "balanced_day.json",
+  depleted_day: "depleted_day.json",
 };
 
-export const SNAPSHOT_IDS = Object.keys(snapshots);
+export const SNAPSHOT_IDS = Object.keys(SNAPSHOT_FILES);
+
+let snapshotCache = null;
+
+function loadSnapshotsSync() {
+  if (snapshotCache) return snapshotCache;
+  if (typeof require !== "undefined") {
+    snapshotCache = {};
+    Object.entries(SNAPSHOT_FILES).forEach(([id, file]) => {
+      snapshotCache[id] = require(`./scenarioSnapshots/${file}`);
+    });
+    return snapshotCache;
+  }
+  return null;
+}
+
+async function loadSnapshots() {
+  if (snapshotCache) return snapshotCache;
+  const sync = loadSnapshotsSync();
+  if (sync) return sync;
+
+  const fs = await import("fs/promises");
+  const path = await import("path");
+  const baseDir = path.join(process.cwd(), "src", "dev", "scenarioSnapshots");
+  const entries = await Promise.all(
+    Object.entries(SNAPSHOT_FILES).map(async ([id, file]) => {
+      const raw = await fs.readFile(path.join(baseDir, file), "utf8");
+      return [id, JSON.parse(raw)];
+    })
+  );
+  snapshotCache = Object.fromEntries(entries);
+  return snapshotCache;
+}
 
 export function normalizeDayPlan(dayPlan) {
   return {
@@ -59,7 +91,8 @@ export function diffSnapshot(expected, actual) {
   }
 }
 
-export function runSnapshotCheck(scenarioId, state, ctx) {
+export async function runSnapshotCheck(scenarioId, state, ctx) {
+  const snapshots = await loadSnapshots();
   const snap = snapshots[scenarioId];
   if (!snap) return { ok: false, diffs: [`Missing snapshot for ${scenarioId}`] };
 

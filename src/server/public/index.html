@@ -1,0 +1,245 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>LiveNew Dogfood</title>
+    <style>
+      body { font-family: ui-sans-serif, system-ui, -apple-system, Arial; margin: 24px; color: #111827; }
+      h1 { margin-bottom: 8px; }
+      section { border: 1px solid #e5e7eb; border-radius: 12px; padding: 16px; margin-bottom: 16px; }
+      label { display: block; font-size: 12px; margin-top: 8px; color: #6b7280; }
+      input, select, button, textarea { padding: 8px; margin-top: 4px; }
+      button { margin-right: 8px; margin-top: 8px; }
+      pre { background: #f9fafb; padding: 12px; border-radius: 12px; overflow: auto; }
+      .row { display: flex; flex-wrap: wrap; gap: 12px; }
+      .muted { color: #6b7280; font-size: 12px; }
+    </style>
+  </head>
+  <body>
+    <h1>LiveNew Dogfood</h1>
+    <p class="muted">Local state only. No auth. Environment: <span id="env"></span></p>
+
+    <section>
+      <h3>Profile</h3>
+      <div class="row">
+        <div>
+          <label>Wake time</label>
+          <input id="wakeTime" value="07:00" />
+        </div>
+        <div>
+          <label>Bed time</label>
+          <input id="bedTime" value="23:00" />
+        </div>
+        <div>
+          <label>Sleep regularity (1-10)</label>
+          <input id="sleepRegularity" value="5" />
+        </div>
+      </div>
+      <button onclick="saveProfile()">Save profile</button>
+    </section>
+
+    <section>
+      <h3>Plan</h3>
+      <div class="row">
+        <div>
+          <label>Week anchor (YYYY-MM-DD)</label>
+          <input id="weekDate" />
+        </div>
+        <div>
+          <label>Day (YYYY-MM-DD)</label>
+          <input id="dayDate" />
+        </div>
+      </div>
+      <button onclick="getWeek()">Get week</button>
+      <button onclick="getDay()">Get day</button>
+    </section>
+
+    <section>
+      <h3>Check-in</h3>
+      <div class="row">
+        <div>
+          <label>Date (YYYY-MM-DD)</label>
+          <input id="checkInDate" />
+        </div>
+        <div>
+          <label>Stress (1-10)</label>
+          <input id="checkInStress" value="6" />
+        </div>
+        <div>
+          <label>Sleep quality (1-10)</label>
+          <input id="checkInSleep" value="6" />
+        </div>
+        <div>
+          <label>Energy (1-10)</label>
+          <input id="checkInEnergy" value="6" />
+        </div>
+        <div>
+          <label>Time available (min)</label>
+          <input id="checkInTime" value="20" />
+        </div>
+      </div>
+      <button onclick="submitCheckIn()">Save check-in</button>
+    </section>
+
+    <section>
+      <h3>Signal</h3>
+      <label>Date (YYYY-MM-DD)</label>
+      <input id="signalDate" />
+      <div class="row">
+        <button onclick="sendSignal('im_stressed')">I'm stressed</button>
+        <button onclick="sendSignal('im_exhausted')">I'm exhausted</button>
+        <button onclick="sendSignal('i_have_10_min')">I have 10 min</button>
+        <button onclick="sendSignal('i_have_more_energy')">I have more energy</button>
+      </div>
+    </section>
+
+    <section>
+      <h3>Bad day mode</h3>
+      <label>Date (YYYY-MM-DD)</label>
+      <input id="badDayDate" />
+      <button onclick="sendBadDay()">Activate</button>
+    </section>
+
+    <section>
+      <h3>Feedback</h3>
+      <label>Date (YYYY-MM-DD)</label>
+      <input id="feedbackDate" />
+      <div class="row">
+        <button onclick="sendFeedback(true)">Helped</button>
+        <button onclick="sendFeedback(false, 'too_hard')">Too hard</button>
+        <button onclick="sendFeedback(false, 'too_easy')">Too easy</button>
+        <button onclick="sendFeedback(false, 'wrong_time')">Wrong time</button>
+        <button onclick="sendFeedback(false, 'not_relevant')">Not relevant</button>
+      </div>
+    </section>
+
+    <section>
+      <h3>Completion</h3>
+      <label>Date (YYYY-MM-DD)</label>
+      <input id="completeDate" />
+      <div class="row">
+        <button onclick="toggleComplete('workout')">Workout done</button>
+        <button onclick="toggleComplete('reset')">Reset done</button>
+        <button onclick="toggleComplete('nutrition')">Nutrition done</button>
+      </div>
+    </section>
+
+    <section id="devPanel">
+      <h3>Dev tools</h3>
+      <div class="row">
+        <button onclick="getBundle()">Get debug bundle</button>
+        <button onclick="runSnapshots()">Run snapshots</button>
+      </div>
+      <div class="row">
+        <label>Scenario</label>
+        <select id="scenarioSelect">
+          <option value="no_checkins">no_checkins</option>
+          <option value="poor_sleep_day">poor_sleep_day</option>
+          <option value="wired_day">wired_day</option>
+          <option value="ten_min_day">ten_min_day</option>
+          <option value="busy_day">busy_day</option>
+          <option value="bad_day_mode">bad_day_mode</option>
+          <option value="feedback_too_hard">feedback_too_hard</option>
+          <option value="feedback_not_relevant">feedback_not_relevant</option>
+        </select>
+        <button onclick="applyScenario()">Apply scenario</button>
+      </div>
+    </section>
+
+    <section>
+      <h3>Response</h3>
+      <pre id="output">Ready.</pre>
+    </section>
+
+    <script>
+      const IS_DEV = __IS_DEV__;
+      document.getElementById('env').textContent = IS_DEV ? 'development' : 'production';
+      if (!IS_DEV) document.getElementById('devPanel').style.display = 'none';
+
+      function todayISO() {
+        return new Date().toISOString().slice(0, 10);
+      }
+      document.getElementById('dayDate').value = todayISO();
+      document.getElementById('weekDate').value = todayISO();
+      document.getElementById('checkInDate').value = todayISO();
+      document.getElementById('signalDate').value = todayISO();
+      document.getElementById('badDayDate').value = todayISO();
+      document.getElementById('feedbackDate').value = todayISO();
+      document.getElementById('completeDate').value = todayISO();
+
+      async function request(path, method, body) {
+        const res = await fetch(path, {
+          method,
+          headers: { 'Content-Type': 'application/json' },
+          body: body ? JSON.stringify(body) : undefined,
+        });
+        const data = await res.json();
+        document.getElementById('output').textContent = JSON.stringify(data, null, 2);
+        return data;
+      }
+
+      async function saveProfile() {
+        const userProfile = {
+          wakeTime: document.getElementById('wakeTime').value,
+          bedTime: document.getElementById('bedTime').value,
+          sleepRegularity: Number(document.getElementById('sleepRegularity').value || 5),
+        };
+        await request('/v1/profile', 'POST', { userProfile });
+      }
+
+      async function getWeek() {
+        const date = document.getElementById('weekDate').value || todayISO();
+        await request(`/v1/plan/week?date=${date}`, 'GET');
+      }
+
+      async function getDay() {
+        const date = document.getElementById('dayDate').value || todayISO();
+        await request(`/v1/plan/day?date=${date}`, 'GET');
+      }
+
+      async function submitCheckIn() {
+        const checkIn = {
+          dateISO: document.getElementById('checkInDate').value || todayISO(),
+          stress: Number(document.getElementById('checkInStress').value || 6),
+          sleepQuality: Number(document.getElementById('checkInSleep').value || 6),
+          energy: Number(document.getElementById('checkInEnergy').value || 6),
+          timeAvailableMin: Number(document.getElementById('checkInTime').value || 20),
+        };
+        await request('/v1/checkin', 'POST', { checkIn });
+      }
+
+      async function sendSignal(signal) {
+        const dateISO = document.getElementById('signalDate').value || todayISO();
+        await request('/v1/signal', 'POST', { dateISO, signal });
+      }
+
+      async function sendBadDay() {
+        const dateISO = document.getElementById('badDayDate').value || todayISO();
+        await request('/v1/bad-day', 'POST', { dateISO });
+      }
+
+      async function sendFeedback(helped, reason) {
+        const dateISO = document.getElementById('feedbackDate').value || todayISO();
+        await request('/v1/feedback', 'POST', { dateISO, helped, reason });
+      }
+
+      async function toggleComplete(part) {
+        const dateISO = document.getElementById('completeDate').value || todayISO();
+        await request('/v1/complete', 'POST', { dateISO, part });
+      }
+
+      async function getBundle() {
+        await request('/v1/dev/bundle', 'GET');
+      }
+
+      async function applyScenario() {
+        const scenarioId = document.getElementById('scenarioSelect').value;
+        await request('/v1/dev/scenario', 'POST', { scenarioId });
+      }
+
+      async function runSnapshots() {
+        await request('/v1/dev/snapshot/run', 'POST', {});
+      }
+    </script>
+  </body>
+</html>

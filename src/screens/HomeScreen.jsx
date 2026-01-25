@@ -156,18 +156,18 @@ export default function HomeScreen({ navigation }) {
               <Button
                 title="Run all"
                 variant="ghost"
-                onPress={() => {
+                onPress={async () => {
                   let pass = 0;
                   let fail = 0;
-                  SNAPSHOT_IDS.forEach((id) => {
-                    const res = runSnapshotCheck(id, useAppStore.getState(), {
+                  for (const id of SNAPSHOT_IDS) {
+                    const res = await runSnapshotCheck(id, useAppStore.getState(), {
                       now: { todayISO: isoToday(), atISO: new Date().toISOString() },
                       ruleToggles,
                     });
                     if (res.ok) pass += 1;
                     else fail += 1;
                     if (!res.ok) console.log(`[snapshot] ${id}\n${res.diffs.join("\n")}`);
-                  });
+                  }
                   setSnapshotSummary(`Run all: ${pass}/${SNAPSHOT_IDS.length} passed (${fail} failed)`);
                 }}
               />
@@ -176,8 +176,8 @@ export default function HomeScreen({ navigation }) {
                   key={id}
                   title={id}
                   variant="ghost"
-                  onPress={() => {
-                    const res = runSnapshotCheck(id, useAppStore.getState(), {
+                  onPress={async () => {
+                    const res = await runSnapshotCheck(id, useAppStore.getState(), {
                       now: { todayISO: isoToday(), atISO: new Date().toISOString() },
                       ruleToggles,
                     });

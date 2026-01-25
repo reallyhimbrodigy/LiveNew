@@ -24,6 +24,7 @@ export function reduceEvent(state, event, ctx) {
   let nextState = { ...state };
   let effects = { persist: false };
   let logEvent = null;
+  let result = {};
 
   const ensureUser = () => {
     if (!nextState.userProfile) return null;
@@ -35,7 +36,7 @@ export function reduceEvent(state, event, ctx) {
   switch (event.type) {
     case "BASELINE_SAVED": {
       const userProfile = event.payload?.userProfile;
-      if (!userProfile) return { nextState, effects, logEvent };
+      if (!userProfile) return { nextState, effects, logEvent, result };
       nextState.userProfile = userProfile;
       effects.persist = true;
       logEvent = {
@@ -47,12 +48,12 @@ export function reduceEvent(state, event, ctx) {
         },
         atISO: event.atISO,
       };
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "ENSURE_WEEK": {
       const user = ensureUser();
-      if (!user) return { nextState, effects, logEvent };
+      if (!user) return { nextState, effects, logEvent, result };
 
       const currentWeekStart = domain.weekStartMonday(todayISO);
       const checkInsByDate = buildCheckInsByDate(checkIns);
@@ -93,12 +94,12 @@ export function reduceEvent(state, event, ctx) {
 
       nextState.modifiers = modifiers;
       effects.persist = effects.persist || false;
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "WEEK_REBUILD": {
       const user = ensureUser();
-      if (!user) return { nextState, effects, logEvent };
+      if (!user) return { nextState, effects, logEvent, result };
       const weekAnchorISO = event.payload?.weekAnchorISO || todayISO;
       const checkInsByDate = buildCheckInsByDate(checkIns);
       const modifiers = cleanupModifiers(nextState.modifiers || {}, weekAnchorISO);
@@ -119,7 +120,7 @@ export function reduceEvent(state, event, ctx) {
         payload: { startDateISO: nextState.weekPlan.startDateISO, pipelineVersion: DECISION_PIPELINE_VERSION },
         atISO: event.atISO,
       };
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "DAY_VIEWED": {
@@ -133,13 +134,13 @@ export function reduceEvent(state, event, ctx) {
         atISO: event.atISO,
       };
       effects.persist = true;
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "CHECKIN_SAVED": {
       const user = ensureUser();
       const rawCheckIn = event.payload?.checkIn;
-      if (!rawCheckIn) return { nextState, effects, logEvent };
+      if (!rawCheckIn) return { nextState, effects, logEvent, result };
 
       const checkIn = normalizeCheckIn(rawCheckIn);
       const filtered = checkIns.filter((item) => item.dateISO !== checkIn.dateISO);
@@ -172,6 +173,7 @@ export function reduceEvent(state, event, ctx) {
             weekContextBase: { busyDays: effectiveUser.busyDays || [] },
           });
           nextState.weekPlan = adapted.weekPlan;
+          result = { changedDayISO: adapted.changedDayISO, notes: adapted.notes || [] };
         }
 
         if (nextState.weekPlan) {
@@ -210,15 +212,15 @@ export function reduceEvent(state, event, ctx) {
         },
         atISO: event.atISO,
       };
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "QUICK_SIGNAL": {
       const user = ensureUser();
-      if (!user || !nextState.weekPlan) return { nextState, effects, logEvent };
+      if (!user || !nextState.weekPlan) return { nextState, effects, logEvent, result };
       const dateISO = event.payload?.dateISO;
       const signal = event.payload?.signal;
-      if (!dateISO || !signal) return { nextState, effects, logEvent };
+      if (!dateISO || !signal) return { nextState, effects, logEvent, result };
 
       const checkInsByDate = buildCheckInsByDate(checkIns);
       const modifiers = cleanupModifiers(nextState.modifiers || {}, dateISO);
@@ -236,6 +238,7 @@ export function reduceEvent(state, event, ctx) {
         weekContextBase: { busyDays: effectiveUser.busyDays || [] },
       });
       nextState.weekPlan = adapted.weekPlan;
+      result = { changedDayISO: adapted.changedDayISO, notes: adapted.notes || [] };
       nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain);
       nextState.modifiers = modifiers;
 
@@ -250,14 +253,14 @@ export function reduceEvent(state, event, ctx) {
 
       effects.persist = true;
       logEvent = { type: "quick_signal", payload: { dateISO, signal }, atISO: event.atISO };
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "STRESSOR_ADDED": {
       const user = ensureUser();
       const dateISO = event.payload?.dateISO;
       const kind = event.payload?.kind;
-      if (!dateISO || !kind) return { nextState, effects, logEvent };
+      if (!dateISO || !kind) return { nextState, effects, logEvent, result };
 
       const existing = (nextState.stressors || []).some((s) => s.dateISO === dateISO && s.kind === kind);
       if (!existing) {
@@ -300,19 +303,19 @@ export function reduceEvent(state, event, ctx) {
 
       effects.persist = true;
       logEvent = { type: "quick_signal", payload: { dateISO, signal: "im_stressed", kind }, atISO: event.atISO };
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "BAD_DAY_MODE": {
       const user = ensureUser();
-      if (!user || !nextState.weekPlan) return { nextState, effects, logEvent };
+      if (!user || !nextState.weekPlan) return { nextState, effects, logEvent, result };
       const dateISO = event.payload?.dateISO;
-      if (!dateISO) return { nextState, effects, logEvent };
+      if (!dateISO) return { nextState, effects, logEvent, result };
 
       if (!ruleToggles.badDayEnabled) {
         effects.persist = true;
         logEvent = { type: "bad_day_mode", payload: { dateISO, disabled: true }, atISO: event.atISO };
-        return { nextState, effects, logEvent };
+        return { nextState, effects, logEvent, result };
       }
 
       const checkInsByDate = buildCheckInsByDate(checkIns);
@@ -346,6 +349,7 @@ export function reduceEvent(state, event, ctx) {
       }
 
       modifiers.stabilizeTomorrow = true;
+      result = { changedDayISO: dateISO, notes: ["Bad day mode applied"] };
 
       let autoEvent = null;
       if (hasBadDayYesterday(state.eventLog || [], dateISO, domain)) {
@@ -361,7 +365,7 @@ export function reduceEvent(state, event, ctx) {
         { type: "bad_day_mode", payload: { dateISO }, atISO: event.atISO },
         autoEvent,
       ].filter(Boolean);
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "FEEDBACK_SUBMITTED": {
@@ -369,7 +373,7 @@ export function reduceEvent(state, event, ctx) {
       const dateISO = event.payload?.dateISO;
       const helped = event.payload?.helped;
       const reason = event.payload?.reason;
-      if (!user || !nextState.weekPlan || !dateISO) return { nextState, effects, logEvent };
+      if (!user || !nextState.weekPlan || !dateISO) return { nextState, effects, logEvent, result };
 
       const feedbackEntry = {
         id: Math.random().toString(36).slice(2),
@@ -425,6 +429,7 @@ export function reduceEvent(state, event, ctx) {
             afterDay: findDay(nextPlan, tomorrowISO),
           });
         }
+        result = { changedDayISO: tomorrowISO, notes: ["Feedback adjustment"] };
       }
 
       nextState.weekPlan = nextPlan;
@@ -432,13 +437,13 @@ export function reduceEvent(state, event, ctx) {
       nextState.modifiers = modifiers;
       effects.persist = true;
       logEvent = { type: "feedback", payload: { dateISO, helped, reason }, atISO: event.atISO };
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "TOGGLE_PART_COMPLETION": {
       const dateISO = event.payload?.dateISO;
       const part = event.payload?.part;
-      if (!dateISO || !part) return { nextState, effects, logEvent };
+      if (!dateISO || !part) return { nextState, effects, logEvent, result };
 
       const current = nextState.partCompletionByDate?.[dateISO] || {};
       const nextValue = !current[part];
@@ -449,16 +454,16 @@ export function reduceEvent(state, event, ctx) {
 
       effects.persist = true;
       logEvent = { type: "completion", payload: { dateISO, part, completed: nextValue }, atISO: event.atISO };
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "UNDO_LAST_CHANGE": {
       if (!nextState.history || !nextState.history.length || !nextState.weekPlan) {
-        return { nextState, effects, logEvent };
+        return { nextState, effects, logEvent, result };
       }
       const [latest, ...rest] = nextState.history;
       const idx = nextState.weekPlan.days.findIndex((d) => d.dateISO === latest.dateISO);
-      if (idx === -1) return { nextState, effects, logEvent };
+      if (idx === -1) return { nextState, effects, logEvent, result };
 
       const nextDays = nextState.weekPlan.days.slice();
       nextDays[idx] = latest.beforeDay;
@@ -477,20 +482,20 @@ export function reduceEvent(state, event, ctx) {
 
       effects.persist = true;
       logEvent = { type: "undo_last_change", payload: { dateISO: latest.dateISO }, atISO: event.atISO };
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "CLEAR_EVENT_LOG": {
       nextState.eventLog = [];
       effects.persist = true;
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     case "APPLY_SCENARIO": {
       const scenarioId = event.payload?.scenarioId;
-      if (!scenarioId || !ctx.scenarios) return { nextState, effects, logEvent };
+      if (!scenarioId || !ctx.scenarios) return { nextState, effects, logEvent, result };
       const scenario = ctx.scenarios.getScenarioById ? ctx.scenarios.getScenarioById(scenarioId) : null;
-      if (!scenario) return { nextState, effects, logEvent };
+      if (!scenario) return { nextState, effects, logEvent, result };
 
       const patch = scenario.seed(state, ctx) || {};
       nextState = { ...nextState, ...patch };
@@ -512,11 +517,11 @@ export function reduceEvent(state, event, ctx) {
 
       effects.persist = true;
       logEvent = { type: "scenario_applied", payload: { scenarioId }, atISO: event.atISO };
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
     }
 
     default:
-      return { nextState, effects, logEvent };
+      return { nextState, effects, logEvent, result };
   }
 }
 
