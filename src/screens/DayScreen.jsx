@@ -10,8 +10,13 @@ export default function DayScreen({ route, navigation }) {
   const weekPlan = useAppStore((s) => s.weekPlan);
   const applyQuickSignal = useAppStore((s) => s.applyQuickSignal);
   const addStressor = useAppStore((s) => s.addStressor);
+  const lastStressStateByDate = useAppStore((s) => s.lastStressStateByDate);
+  const history = useAppStore((s) => s.history);
+  const undoLastChange = useAppStore((s) => s.undoLastChange);
 
   const day = weekPlan?.days.find((d) => d.dateISO === dateISO);
+  const drivers = lastStressStateByDate?.[dateISO]?.drivers || [];
+  const canUndo = history.length && history[0].dateISO === dateISO;
 
   if (!day) {
     return (
@@ -29,6 +34,20 @@ export default function DayScreen({ route, navigation }) {
       <Text style={styles.h1}>{dateISO}</Text>
       <Text style={styles.p}>Profile: {day.profile}</Text>
       <Text style={styles.p}>Focus: {day.focus}</Text>
+
+      <Card>
+        <Text style={styles.blockTitle}>Why this plan</Text>
+        <Text style={styles.meta}>Profile: {day.profile}</Text>
+        <Text style={styles.meta}>Focus: {day.focus}</Text>
+        {drivers.slice(0, 2).map((line, idx) => (
+          <Text key={idx} style={styles.line}>- {line}</Text>
+        ))}
+        <View style={{ height: 8 }} />
+        <Text style={styles.line}>{focusStatement(day.focus)}</Text>
+        {day.rationale.slice(0, 2).map((line, idx) => (
+          <Text key={`r-${idx}`} style={styles.line}>- {line}</Text>
+        ))}
+      </Card>
 
       <View style={styles.quickWrap}>
         <Text style={styles.sectionTitle}>Quick signals</Text>
@@ -54,14 +73,17 @@ export default function DayScreen({ route, navigation }) {
         </View>
       </View>
 
+      {canUndo ? <Button title="Undo last change" variant="ghost" onPress={undoLastChange} /> : null}
+
       <Button title="Do check-in" onPress={() => navigation.navigate("CheckIn", { dateISO })} />
 
       <Card>
         <Text style={styles.blockTitle}>Workout</Text>
-        <Text style={styles.meta}>{day.workout.title} · {day.workout.minutes} min</Text>
+        <Text style={styles.meta}>{day.workout.title} - {day.workout.minutes} min</Text>
+        <Text style={styles.meta}>Window: {day.workoutWindow || "PM"}</Text>
         <View style={{ height: 10 }} />
         {day.workout.steps.map((line, idx) => (
-          <Text key={idx} style={styles.line}>• {line}</Text>
+          <Text key={idx} style={styles.line}>- {line}</Text>
         ))}
       </Card>
 
@@ -70,16 +92,16 @@ export default function DayScreen({ route, navigation }) {
         <Text style={styles.meta}>{day.nutrition.title}</Text>
         <View style={{ height: 10 }} />
         {day.nutrition.priorities.map((line, idx) => (
-          <Text key={idx} style={styles.line}>• {line}</Text>
+          <Text key={idx} style={styles.line}>- {line}</Text>
         ))}
       </Card>
 
       <Card>
         <Text style={styles.blockTitle}>Reset</Text>
-        <Text style={styles.meta}>{day.reset.title} · {day.reset.minutes} min</Text>
+        <Text style={styles.meta}>{day.reset.title} - {day.reset.minutes} min</Text>
         <View style={{ height: 10 }} />
         {day.reset.steps.map((line, idx) => (
-          <Text key={idx} style={styles.line}>• {line}</Text>
+          <Text key={idx} style={styles.line}>- {line}</Text>
         ))}
       </Card>
 
@@ -87,7 +109,7 @@ export default function DayScreen({ route, navigation }) {
         <Text style={styles.blockTitle}>Rationale</Text>
         <View style={{ height: 10 }} />
         {day.rationale.slice(0, 3).map((line, idx) => (
-          <Text key={idx} style={styles.line}>• {line}</Text>
+          <Text key={idx} style={styles.line}>- {line}</Text>
         ))}
       </Card>
     </ScrollView>
@@ -126,4 +148,10 @@ function labelForStressor(kind) {
     default:
       return kind;
   }
+}
+
+function focusStatement(focus) {
+  if (focus === "downshift") return "Today is about lowering activation and protecting sleep pressure.";
+  if (focus === "rebuild") return "Today is about rebuilding capacity while staying cortisol-safe.";
+  return "Today is about steady support without adding extra strain.";
 }

@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TextInput, ScrollView } from "react-native";
 import Button from "../ui/Button";
 import { useAppStore } from "../state/store";
 import BrandLogo from "../components/BrandLogo";
-import { isoToday } from "../domain";
+import { isoToday, weekStartMonday, addDaysISO } from "../domain";
 
 export default function BaselineScreen({ navigation }) {
   const setUserProfile = useAppStore((s) => s.setUserProfile);
@@ -11,6 +11,8 @@ export default function BaselineScreen({ navigation }) {
   const existingProfile = useAppStore((s) => s.userProfile);
 
   const todayISO = useMemo(() => isoToday(), []);
+  const weekStart = useMemo(() => weekStartMonday(todayISO), [todayISO]);
+  const weekDays = useMemo(() => Array.from({ length: 7 }, (_, i) => addDaysISO(weekStart, i)), [weekStart]);
 
   const [sleepHours, setSleepHours] = useState("7");
   const [caffeineCups, setCaffeineCups] = useState("1");
@@ -25,6 +27,16 @@ export default function BaselineScreen({ navigation }) {
   const [mealTimingConsistency, setMealTimingConsistency] = useState("5");
   const [lateCaffeineDaysPerWeek, setLateCaffeineDaysPerWeek] = useState("1");
   const [sleepRegularity, setSleepRegularity] = useState("5");
+  const [preferredWorkoutWindows, setPreferredWorkoutWindows] = useState(["PM"]);
+  const [busyDays, setBusyDays] = useState([]);
+
+  const toggleWindow = (win) => {
+    setPreferredWorkoutWindows((prev) => (prev.includes(win) ? prev.filter((w) => w !== win) : [...prev, win]));
+  };
+
+  const toggleBusyDay = (dateISO) => {
+    setBusyDays((prev) => (prev.includes(dateISO) ? prev.filter((d) => d !== dateISO) : [...prev, dateISO]));
+  };
 
   const commit = async () => {
     const id = existingProfile?.id || Math.random().toString(36).slice(2);
@@ -42,6 +54,8 @@ export default function BaselineScreen({ navigation }) {
       lateScreenMinutesPerNight: Number(lateScreenMinutesPerNight),
       alcoholNightsPerWeek: Number(alcoholNightsPerWeek),
       mealTimingConsistency: Number(mealTimingConsistency),
+      preferredWorkoutWindows: preferredWorkoutWindows.length ? preferredWorkoutWindows : ["PM"],
+      busyDays,
       sleepHours: Number(sleepHours),
       workoutsPerWeek: Number(workoutsPerWeek),
       perceivedStress: Number(perceivedStress),
@@ -75,6 +89,30 @@ export default function BaselineScreen({ navigation }) {
       <Field label="Late caffeine days/week" value={lateCaffeineDaysPerWeek} setValue={setLateCaffeineDaysPerWeek} />
       <Field label="Sleep regularity (1-10)" value={sleepRegularity} setValue={setSleepRegularity} />
 
+      <Text style={styles.sectionTitle}>Preferred workout window</Text>
+      <View style={styles.toggleRow}>
+        {["AM", "MIDDAY", "PM"].map((win) => (
+          <Button
+            key={win}
+            title={win}
+            variant={preferredWorkoutWindows.includes(win) ? "primary" : "ghost"}
+            onPress={() => toggleWindow(win)}
+          />
+        ))}
+      </View>
+
+      <Text style={styles.sectionTitle}>Busy days (this week)</Text>
+      <View style={styles.toggleRow}>
+        {weekDays.map((d) => (
+          <Button
+            key={d}
+            title={d}
+            variant={busyDays.includes(d) ? "primary" : "ghost"}
+            onPress={() => toggleBusyDay(d)}
+          />
+        ))}
+      </View>
+
       <Button title="Generate my week" onPress={commit} />
     </ScrollView>
   );
@@ -100,6 +138,8 @@ const styles = StyleSheet.create({
   wrap: { padding: 18, gap: 14 },
   logoRow: { alignItems: "flex-start" },
   h1: { fontSize: 22, fontWeight: "800", color: "#111827" },
+  sectionTitle: { fontSize: 14, color: "#111827", fontWeight: "700" },
+  toggleRow: { flexDirection: "row", flexWrap: "wrap", gap: 8 },
   label: { fontSize: 14, color: "#374151", fontWeight: "600" },
   input: {
     borderWidth: 1,

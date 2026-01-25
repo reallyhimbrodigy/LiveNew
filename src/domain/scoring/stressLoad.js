@@ -1,6 +1,6 @@
 import { clamp } from "../utils/math";
 
-export function computeStressLoad(user, checkIn, wearable) {
+export function computeStressLoad(user, checkIn) {
   const drivers = [];
 
   const screenPenalty = clamp((user.lateScreenMinutesPerNight / 15) * 2, 0, 16);
@@ -27,16 +27,6 @@ export function computeStressLoad(user, checkIn, wearable) {
   const sleepQualPenalty = checkIn ? clamp((10 - checkIn.sleepQuality) * 3, 0, 27) : 0;
   if (checkIn && checkIn.sleepQuality <= 5) drivers.push("Low sleep quality");
 
-  let wearablePenalty = 0;
-  if (wearable && wearable.rhrBpm != null) {
-    wearablePenalty += clamp((wearable.rhrBpm - 60) * 0.6, 0, 15);
-    if (wearablePenalty >= 8) drivers.push("Elevated resting heart rate signal");
-  }
-  if (wearable && wearable.hrvMs != null) {
-    wearablePenalty += clamp((50 - wearable.hrvMs) * 0.4, 0, 15);
-    if (wearablePenalty >= 8) drivers.push("Lower HRV signal");
-  }
-
   const raw =
     screenPenalty +
     alcoholPenalty +
@@ -44,8 +34,7 @@ export function computeStressLoad(user, checkIn, wearable) {
     irregularSleepPenalty +
     mealTimingPenalty +
     stressPenalty +
-    sleepQualPenalty +
-    wearablePenalty -
+    sleepQualPenalty -
     sunlightBonus;
 
   const score = clamp(raw, 0, 100);

@@ -14,9 +14,9 @@ export function bandCapacity(x) {
   return "low";
 }
 
-export function assignStressProfile({ user, dateISO, checkIn, wearable }) {
-  const load = computeStressLoad(user, checkIn, wearable);
-  const cap = computeCapacity(user, checkIn, wearable);
+export function assignStressProfile({ user, dateISO, checkIn }) {
+  const load = computeStressLoad(user, checkIn);
+  const cap = computeCapacity(user, checkIn);
 
   const stressLoad = clamp(load.score, 0, 100);
   const capacity = clamp(cap.score, 0, 100);

@@ -62,18 +62,19 @@ export default function HomeScreen({ navigation }) {
       <Text style={styles.h1}>This Week</Text>
       <Text style={styles.p}>Designed around lowering stress load, not maxing output.</Text>
       <View style={styles.kpiRow}>
-        <Text style={styles.kpiText}>7-day avg stress: {avgStress === null ? "—" : avgStress.toFixed(1)}</Text>
-        <Text style={styles.kpiText}>Today profile: {todayProfile || "—"}</Text>
+        <Text style={styles.kpiText}>7-day avg stress: {avgStress === null ? "n/a" : avgStress.toFixed(1)}</Text>
+        <Text style={styles.kpiText}>Today profile: {todayProfile || "n/a"}</Text>
       </View>
 
       {weekPlan.days.map((d) => (
         <View key={d.dateISO} style={{ gap: 8 }}>
           <Text style={styles.dayTitle}>
-            {d.dateISO} · {d.profile} · {d.focus}
+            {d.dateISO} - {d.profile} - {d.focus}
           </Text>
           <Card>
-            <Text style={styles.small}>Workout: {d.workout.title} · {d.workout.minutes} min</Text>
-            <Text style={styles.small}>Reset: {d.reset.title} · {d.reset.minutes} min</Text>
+            <Text style={styles.small}>Workout: {d.workout.title} - {d.workout.minutes} min</Text>
+            <Text style={styles.small}>Window: {d.workoutWindow || "PM"}</Text>
+            <Text style={styles.small}>Reset: {d.reset.title} - {d.reset.minutes} min</Text>
             <Text style={styles.small}>Nutrition: {d.nutrition.title}</Text>
             <View style={{ height: 10 }} />
             <Button title="Open day" onPress={() => navigation.navigate("Day", { dateISO: d.dateISO })} />

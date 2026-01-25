@@ -10,6 +10,8 @@
  * - lateScreenMinutesPerNight (0..120)
  * - alcoholNightsPerWeek (0-7)
  * - mealTimingConsistency (1-10)
+ * - preferredWorkoutWindows (array of "AM"|"MIDDAY"|"PM")
+ * - busyDays (array of ISO dates within current week)
  *
  * DailyCheckIn:
  * - dateISO "YYYY-MM-DD"
@@ -20,6 +22,6 @@
  *
  * WeekPlan:
  * - startDateISO (Monday)
- * - days: [{dateISO, profile, focus, workout, nutrition, reset, rationale}]
+ * - days: [{dateISO, profile, focus, workout, nutrition, reset, rationale, workoutWindow}]
  */
 export {};
