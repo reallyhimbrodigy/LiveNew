@@ -143,6 +143,34 @@ function renderCompletionButtons(completion) {
   });
 }
 
+function renderTrends(days) {
+  const panel = document.getElementById("trends-panel");
+  if (!panel) return;
+  if (!Array.isArray(days) || !days.length) {
+    panel.textContent = "No trend data yet.";
+    return;
+  }
+  const rows = days
+    .map(
+      (day) => `\n      <tr>\n        <td>${day.dateISO}</td>\n        <td>${day.stressAvg != null ? day.stressAvg.toFixed(1) : "-"}</td>\n        <td>${day.sleepAvg != null ? day.sleepAvg.toFixed(1) : "-"}</td>\n        <td>${day.anyPartCompletion == null ? "-" : day.anyPartCompletion ? "yes" : "no"}</td>\n        <td>${day.downshiftMinutes != null ? day.downshiftMinutes : "-"}</td>\n      </tr>`
+    )
+    .join(" ");
+  panel.innerHTML = `
+    <table style="width:100%; border-collapse: collapse;">
+      <thead>
+        <tr>
+          <th style="text-align:left; padding: 4px 0;">Date</th>
+          <th style="text-align:left; padding: 4px 0;">Stress</th>
+          <th style="text-align:left; padding: 4px 0;">Sleep</th>
+          <th style="text-align:left; padding: 4px 0;">Any part</th>
+          <th style="text-align:left; padding: 4px 0;">Downshift min</th>
+        </tr>
+      </thead>
+      <tbody>${rows}</tbody>
+    </table>
+  `;
+}
+
 async function loadDay(dateISO) {
   setStatus("day", "Loading day...");
   try {
@@ -160,6 +188,17 @@ async function refreshProgress() {
     renderProgress(res.progress);
   } catch (err) {
     renderProgress(null);
+  }
+}
+
+async function refreshTrends() {
+  const select = document.getElementById("trends-days");
+  const days = select ? Number(select.value) : 7;
+  try {
+    const res = await api(`/v1/trends?days=${days}`);
+    renderTrends(res.days);
+  } catch (err) {
+    renderTrends([]);
   }
 }
 
@@ -342,6 +381,14 @@ function bindEvents() {
     await refreshProgress();
   });
 
+  document.getElementById("refresh-trends")?.addEventListener("click", async () => {
+    await refreshTrends();
+  });
+
+  document.getElementById("trends-days")?.addEventListener("change", async () => {
+    await refreshTrends();
+  });
+
   document.getElementById("save-rules")?.addEventListener("click", async () => {
     setStatus("snapshot", "Saving rule toggles...");
     try {
@@ -409,6 +456,7 @@ function bootstrap() {
   bindEvents();
   loadDay(dayDateInput.value);
   refreshProgress();
+  refreshTrends();
   initDevPanel();
 }
 

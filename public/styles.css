@@ -219,6 +219,13 @@ pre {
   font-size: 0.8rem;
 }
 
+table th,
+table td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 4px;
+  font-size: 0.85rem;
+}
+
 footer {
   margin-top: 28px;
   color: var(--muted);
