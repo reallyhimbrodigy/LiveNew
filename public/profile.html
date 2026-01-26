@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LiveNew — Profile</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body data-page="profile">
+  <header class="topbar">
+    <div class="brand">LiveNew</div>
+    <nav class="nav">
+      <a href="/day">Day</a>
+      <a href="/week">Week</a>
+      <a href="/trends">Trends</a>
+      <a href="/profile" class="active">Profile</a>
+      <a class="admin-link" href="/admin">Admin</a>
+    </nav>
+    <div class="auth" id="auth-panel">
+      <div class="auth-status" id="auth-status">Not signed in</div>
+      <div class="auth-row">
+        <input id="auth-email" type="email" placeholder="email" />
+        <button id="auth-request">Send code</button>
+      </div>
+      <div class="auth-row">
+        <input id="auth-code" type="text" placeholder="code" />
+        <button id="auth-verify">Verify</button>
+        <button id="auth-logout" class="ghost">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h1>Profile</h1>
+      <div class="grid-2">
+        <label>Wake time <input id="profile-wake" type="time" /></label>
+        <label>Bed time <input id="profile-bed" type="time" /></label>
+        <label>Sleep regularity (1-10) <input id="profile-sleep-regular" type="number" min="1" max="10" /></label>
+        <label>Caffeine cups/day <input id="profile-caffeine" type="number" min="0" max="5" /></label>
+        <label>Late caffeine days/week <input id="profile-late-caffeine" type="number" min="0" max="7" /></label>
+        <label>Sunlight minutes/day <input id="profile-sunlight" type="number" min="0" max="120" /></label>
+        <label>Late screen minutes/night <input id="profile-screen" type="number" min="0" max="240" /></label>
+        <label>Alcohol nights/week <input id="profile-alcohol" type="number" min="0" max="7" /></label>
+        <label>Meal timing consistency (1-10) <input id="profile-meal" type="number" min="1" max="10" /></label>
+        <label>Content pack
+          <select id="profile-pack">
+            <option value="balanced_routine">Balanced routine</option>
+            <option value="calm_reset">Calm reset</option>
+            <option value="rebuild_strength">Rebuild strength</option>
+          </select>
+        </label>
+      </div>
+      <button id="profile-save">Save profile</button>
+    </section>
+
+    <section class="card">
+      <h2>Sessions</h2>
+      <div class="row">
+        <input id="device-name" type="text" placeholder="Device name" />
+        <button id="device-name-save">Save device name</button>
+      </div>
+      <div id="sessions-list" class="list"></div>
+    </section>
+  </main>
+
+  <script type="module" src="/assets/app.core.js"></script>
+</body>
+</html>

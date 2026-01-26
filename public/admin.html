@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LiveNew — Admin</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body data-page="admin">
+  <header class="topbar">
+    <div class="brand">LiveNew</div>
+    <nav class="nav">
+      <a href="/day">Day</a>
+      <a href="/week">Week</a>
+      <a href="/trends">Trends</a>
+      <a href="/profile">Profile</a>
+      <a class="admin-link active" href="/admin">Admin</a>
+    </nav>
+    <div class="auth" id="auth-panel">
+      <div class="auth-status" id="auth-status">Not signed in</div>
+      <div class="auth-row">
+        <input id="auth-email" type="email" placeholder="email" />
+        <button id="auth-request">Send code</button>
+      </div>
+      <div class="auth-row">
+        <input id="auth-code" type="text" placeholder="code" />
+        <button id="auth-verify">Verify</button>
+        <button id="auth-logout" class="ghost">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card" id="admin-guard">
+      <h1>Admin</h1>
+      <p class="muted" id="admin-guard-text">Checking admin access…</p>
+    </section>
+
+    <section class="card hidden" id="admin-panel">
+      <div class="tabs">
+        <button class="tab active" data-tab="content">Content</button>
+        <button class="tab" data-tab="worst">Worst items</button>
+        <button class="tab" data-tab="heatmap">Heatmap</button>
+        <button class="tab" data-tab="params">Parameters</button>
+      </div>
+
+      <div class="tab-panel" data-panel="content">
+        <div class="row">
+          <label>Kind
+            <select id="admin-kind">
+              <option value="workout">Workouts</option>
+              <option value="nutrition">Nutrition</option>
+              <option value="reset">Resets</option>
+            </select>
+          </label>
+          <button id="admin-content-load">Load</button>
+        </div>
+        <div class="split">
+          <div class="list" id="admin-content-list"></div>
+          <div class="editor" id="admin-content-editor">
+            <h3>Edit item</h3>
+            <div class="grid-2">
+              <label>Title <input id="content-title" type="text" /></label>
+              <label>Enabled <select id="content-enabled"><option value="true">Yes</option><option value="false">No</option></select></label>
+              <label>Priority <input id="content-priority" type="number" /></label>
+              <label>Novelty group <input id="content-novelty" type="text" /></label>
+              <label>Minutes <input id="content-minutes" type="number" /></label>
+              <label>Tags (comma) <input id="content-tags" type="text" /></label>
+            </div>
+            <label>Steps / Priorities
+              <textarea id="content-steps" rows="4"></textarea>
+            </label>
+            <div class="row">
+              <button id="content-save">Save</button>
+              <button id="content-disable" class="danger">Disable</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" data-panel="worst">
+        <div class="row">
+          <label>Kind
+            <select id="worst-kind">
+              <option value="workout">Workouts</option>
+              <option value="nutrition">Nutrition</option>
+              <option value="reset">Resets</option>
+            </select>
+          </label>
+          <button id="worst-load">Load</button>
+        </div>
+        <div id="worst-list" class="list"></div>
+      </div>
+
+      <div class="tab-panel hidden" data-panel="heatmap">
+        <div class="row">
+          <label>Kind
+            <select id="heatmap-kind">
+              <option value="workout">Workouts</option>
+              <option value="nutrition">Nutrition</option>
+              <option value="reset">Resets</option>
+            </select>
+          </label>
+          <button id="heatmap-load">Load</button>
+        </div>
+        <table class="table" id="heatmap-table">
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Picked</th>
+              <th>Completed</th>
+              <th>Not relevant</th>
+              <th>Completion rate</th>
+              <th>Not relevant rate</th>
+            </tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="tab-panel hidden" data-panel="params">
+        <div id="params-list" class="list"></div>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/assets/app.core.js"></script>
+</body>
+</html>

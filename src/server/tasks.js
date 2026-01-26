@@ -1,0 +1,37 @@
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export function createTaskScheduler({ config, createBackup, cleanupOldEvents, retentionDays }) {
+  const running = new Set();
+  const timers = [];
+
+  async function runTask(name) {
+    if (running.has(name)) return { ok: false, running: true };
+    running.add(name);
+    try {
+      if (name === "backup") {
+        const backup = await createBackup();
+        return { ok: true, result: backup };
+      }
+      if (name === "cleanup") {
+        await cleanupOldEvents(retentionDays);
+        return { ok: true };
+      }
+      return { ok: false, error: "unknown_task" };
+    } finally {
+      running.delete(name);
+    }
+  }
+
+  function schedule() {
+    if (!(config.isAlphaLike || config.isProdLike)) return;
+    timers.push(setInterval(() => runTask("backup").catch(() => {}), DAY_MS));
+    timers.push(setInterval(() => runTask("cleanup").catch(() => {}), DAY_MS));
+  }
+
+  function stop() {
+    timers.forEach((timer) => clearInterval(timer));
+    timers.length = 0;
+  }
+
+  return { runTask, schedule, stop };
+}

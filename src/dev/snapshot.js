@@ -98,6 +98,7 @@ export async function runSnapshotCheck(scenarioId, state, ctx) {
 
   const now = ctx?.now || { todayISO: domain.isoToday(), atISO: new Date().toISOString() };
   const ruleToggles = ctx?.ruleToggles || initialStatePatch().ruleToggles;
+  const params = ctx?.params || {};
   const baseState = {
     ...(initialStatePatch()),
     schemaVersion: state?.schemaVersion ?? 0,
@@ -120,6 +121,7 @@ export async function runSnapshotCheck(scenarioId, state, ctx) {
     now,
     ruleToggles,
     scenarios: { getScenarioById },
+    params,
   };
 
   let result = reduceEvent(baseState, { type: "APPLY_SCENARIO", payload: { scenarioId }, atISO: now.atISO }, ctxForEngine);
@@ -141,6 +143,7 @@ export async function runSnapshotCheck(scenarioId, state, ctx) {
     return { ok: false, diffs: [`No day plan for ${dateISO}`] };
   }
 
+  const paramsVersion = ctx?.paramsVersion || {};
   const expected = {
     ...snap,
     dateISO,
@@ -150,7 +153,12 @@ export async function runSnapshotCheck(scenarioId, state, ctx) {
     pipelineVersion: dayPlan.pipelineVersion ?? null,
     dateISO,
     dayPlan: normalizeDayPlan(dayPlan),
+    paramsVersion,
   };
+
+  if (ctx?.allowParamDrift) {
+    expected.paramsVersion = paramsVersion;
+  }
 
   const diffs = diffSnapshot(expected, actual);
   return { ok: diffs.length === 0, diffs };

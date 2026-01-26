@@ -73,6 +73,13 @@ export async function checkReady() {
   }
 }
 
+export async function listAppliedMigrations() {
+  const rows = getDb()
+    .prepare("SELECT id, applied_at FROM schema_migrations ORDER BY id")
+    .all();
+  return rows.map((row) => ({ id: row.id, appliedAt: row.applied_at }));
+}
+
 export async function getUserByEmail(email) {
   const normalized = normalizeEmail(email);
   const emailHash = hashString(normalized);
@@ -174,20 +181,56 @@ export async function verifyAuthCode(email, code) {
   return { userId: row.user_id };
 }
 
-export async function createSession(userId, ttlMinutes = 60 * 24 * 7) {
+export async function createSession(userId, ttlMinutes = 60 * 24 * 7, deviceName = null) {
   const token = crypto.randomUUID().replace(/-/g, "");
   const tokenHash = hashString(token);
   const encrypted = encryptString(token);
   const now = new Date();
   const expires = new Date(now.getTime() + ttlMinutes * 60 * 1000);
-  if (hasColumn("sessions", "token_hash")) {
-    getDb()
-      .prepare("INSERT INTO sessions (token, token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
-      .run(encrypted, tokenHash, userId, expires.toISOString(), now.toISOString());
+  const createdAt = now.toISOString();
+  const expiresAt = expires.toISOString();
+  const hasTokenHash = hasColumn("sessions", "token_hash");
+  const hasDevice = hasColumn("sessions", "device_name");
+  const hasLastSeen = hasColumn("sessions", "last_seen_at");
+
+  if (hasTokenHash) {
+    if (hasDevice || hasLastSeen) {
+      const columns = ["token", "token_hash", "user_id", "expires_at", "created_at"];
+      const values = [encrypted, tokenHash, userId, expiresAt, createdAt];
+      if (hasDevice) {
+        columns.push("device_name");
+        values.push(deviceName);
+      }
+      if (hasLastSeen) {
+        columns.push("last_seen_at");
+        values.push(createdAt);
+      }
+      const placeholders = columns.map(() => "?").join(", ");
+      getDb().prepare(`INSERT INTO sessions (${columns.join(", ")}) VALUES (${placeholders})`).run(...values);
+    } else {
+      getDb()
+        .prepare("INSERT INTO sessions (token, token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
+        .run(encrypted, tokenHash, userId, expiresAt, createdAt);
+    }
   } else {
-    getDb()
-      .prepare("INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
-      .run(encrypted, userId, expires.toISOString(), now.toISOString());
+    if (hasDevice || hasLastSeen) {
+      const columns = ["token", "user_id", "expires_at", "created_at"];
+      const values = [encrypted, userId, expiresAt, createdAt];
+      if (hasDevice) {
+        columns.push("device_name");
+        values.push(deviceName);
+      }
+      if (hasLastSeen) {
+        columns.push("last_seen_at");
+        values.push(createdAt);
+      }
+      const placeholders = columns.map(() => "?").join(", ");
+      getDb().prepare(`INSERT INTO sessions (${columns.join(", ")}) VALUES (${placeholders})`).run(...values);
+    } else {
+      getDb()
+        .prepare("INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+        .run(encrypted, userId, expiresAt, createdAt);
+    }
   }
   return token;
 }
@@ -201,21 +244,88 @@ export async function deleteSession(token) {
   }
 }
 
+export async function deleteSessionByTokenOrHash(value) {
+  if (!value) return;
+  const tokenHash = value.length >= 64 ? value : hashString(value);
+  if (hasColumn("sessions", "token_hash") && tokenHash) {
+    getDb().prepare("DELETE FROM sessions WHERE token_hash = ? OR token = ?").run(tokenHash, value);
+  } else {
+    getDb().prepare("DELETE FROM sessions WHERE token = ?").run(value);
+  }
+}
+
+export async function touchSession(token, deviceName) {
+  const tokenHash = hashString(token);
+  const now = new Date().toISOString();
+  const hasDevice = hasColumn("sessions", "device_name");
+  const hasLastSeen = hasColumn("sessions", "last_seen_at");
+  if (!hasDevice && !hasLastSeen) return;
+  if (hasColumn("sessions", "token_hash") && tokenHash) {
+    if (hasDevice && deviceName) {
+      getDb()
+        .prepare(
+          "UPDATE sessions SET last_seen_at = ?, device_name = COALESCE(device_name, ?) WHERE token_hash = ? OR token = ?"
+        )
+        .run(now, deviceName, tokenHash, token);
+    } else {
+      getDb()
+        .prepare("UPDATE sessions SET last_seen_at = ? WHERE token_hash = ? OR token = ?")
+        .run(now, tokenHash, token);
+    }
+    return;
+  }
+  if (hasDevice && deviceName) {
+    getDb()
+      .prepare("UPDATE sessions SET last_seen_at = ?, device_name = COALESCE(device_name, ?) WHERE token = ?")
+      .run(now, deviceName, token);
+  } else {
+    getDb().prepare("UPDATE sessions SET last_seen_at = ? WHERE token = ?").run(now, token);
+  }
+}
+
+export async function listSessionsByUser(userId) {
+  const hasTokenHash = hasColumn("sessions", "token_hash");
+  const hasDevice = hasColumn("sessions", "device_name");
+  const hasLastSeen = hasColumn("sessions", "last_seen_at");
+  const columns = ["token", "user_id", "expires_at", "created_at"];
+  if (hasTokenHash) columns.push("token_hash");
+  if (hasDevice) columns.push("device_name");
+  if (hasLastSeen) columns.push("last_seen_at");
+  const rows = getDb()
+    .prepare(`SELECT ${columns.join(", ")} FROM sessions WHERE user_id = ? ORDER BY created_at DESC`)
+    .all(userId);
+  return rows.map((row) => {
+    const tokenValue = decryptString(row.token);
+    const tokenHash = row.token_hash || hashString(tokenValue);
+    return {
+      tokenHash,
+      deviceName: row.device_name || null,
+      createdAt: row.created_at,
+      lastSeenAt: row.last_seen_at || row.created_at,
+      expiresAt: row.expires_at,
+    };
+  });
+}
+
 export async function getSession(token) {
   const tokenHash = hashString(token);
+  const hasTokenHash = hasColumn("sessions", "token_hash");
+  const hasDevice = hasColumn("sessions", "device_name");
+  const hasLastSeen = hasColumn("sessions", "last_seen_at");
+  const columns = ["sessions.token", "sessions.user_id", "sessions.expires_at", "users.email"];
+  if (hasTokenHash) columns.push("sessions.token_hash");
+  if (hasDevice) columns.push("sessions.device_name");
+  if (hasLastSeen) columns.push("sessions.last_seen_at");
+  const selectSql = `SELECT ${columns.join(", ")} FROM sessions JOIN users ON users.id = sessions.user_id WHERE `;
   let row = null;
-  if (hasColumn("sessions", "token_hash") && tokenHash) {
+  if (hasTokenHash && tokenHash) {
     row = getDb()
-      .prepare(
-        "SELECT sessions.token, sessions.token_hash, sessions.user_id, sessions.expires_at, users.email FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ?"
-      )
+      .prepare(`${selectSql} sessions.token_hash = ?`)
       .get(tokenHash);
   }
   if (!row) {
     row = getDb()
-      .prepare(
-        "SELECT sessions.token, sessions.token_hash, sessions.user_id, sessions.expires_at, users.email FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token = ?"
-      )
+      .prepare(`${selectSql} sessions.token = ?`)
       .get(token);
   }
   if (!row) return null;
@@ -236,6 +346,8 @@ export async function getSession(token) {
     token: row.token,
     user_id: row.user_id,
     expires_at: row.expires_at,
+    device_name: row.device_name || null,
+    last_seen_at: row.last_seen_at || null,
     email: decryptString(row.email),
   };
 }
@@ -689,6 +801,46 @@ export async function listAnalyticsDaily(fromISO, toISO) {
     activeUsersCount: row.active_users_count,
     updatedAt: row.updated_at,
   }));
+}
+
+export async function listParameters() {
+  const rows = getDb().prepare("SELECT key, value_json, version, updated_at FROM parameters ORDER BY key").all();
+  return rows.map((row) => ({
+    key: row.key,
+    value: JSON.parse(row.value_json),
+    version: row.version,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function seedParameters(defaults) {
+  if (!defaults || typeof defaults !== "object") return;
+  const now = new Date().toISOString();
+  const stmt = getDb().prepare(
+    "INSERT INTO parameters (key, value_json, version, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO NOTHING"
+  );
+  getDb().exec("BEGIN;");
+  try {
+    Object.entries(defaults).forEach(([key, value]) => {
+      stmt.run(key, JSON.stringify(value ?? null), 1, now);
+    });
+    getDb().exec("COMMIT;");
+  } catch (err) {
+    getDb().exec("ROLLBACK;");
+    throw err;
+  }
+}
+
+export async function upsertParameter(key, value) {
+  const now = new Date().toISOString();
+  const row = getDb().prepare("SELECT version FROM parameters WHERE key = ?").get(key);
+  const nextVersion = row ? row.version + 1 : 1;
+  getDb()
+    .prepare(
+      "INSERT INTO parameters (key, value_json, version, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value_json=excluded.value_json, version=excluded.version, updated_at=excluded.updated_at"
+    )
+    .run(key, JSON.stringify(value ?? null), nextVersion, now);
+  return { key, version: nextVersion, updatedAt: now };
 }
 
 export async function seedFeatureFlags(defaults) {

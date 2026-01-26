@@ -23,6 +23,7 @@ export function reduceEvent(state, event, ctx) {
   const todayISO = ctx.now?.todayISO || domain.isoToday();
   const ruleToggles = ctx.ruleToggles || initialStatePatch().ruleToggles;
   const qualityRules = buildQualityRules(ruleToggles);
+  const params = ctx.params || {};
 
   let nextState = { ...state };
   let effects = { persist: false };
@@ -70,6 +71,7 @@ export function reduceEvent(state, event, ctx) {
           weekAnchorISO: currentWeekStart,
           checkInsByDate,
           qualityRules,
+          params,
         });
         nextState.selectionStats = incrementPickedForWeek(nextState.selectionStats, nextState.weekPlan);
         effects.persist = true;
@@ -88,6 +90,7 @@ export function reduceEvent(state, event, ctx) {
           modifiers,
           domain,
           qualityRules,
+          params,
         });
         nextState.weekPlan = normalized.weekPlan;
         if (normalized.changed) {
@@ -97,7 +100,7 @@ export function reduceEvent(state, event, ctx) {
       }
 
       if (nextState.weekPlan) {
-        nextState.lastStressStateByDate = buildStressStateMap(user, nextState.weekPlan, checkInsByDate, domain);
+        nextState.lastStressStateByDate = buildStressStateMap(user, nextState.weekPlan, checkInsByDate, domain, params);
       }
 
       nextState.modifiers = modifiers;
@@ -118,10 +121,11 @@ export function reduceEvent(state, event, ctx) {
         weekAnchorISO,
         checkInsByDate,
         qualityRules,
+        params,
       });
       nextState.selectionStats = incrementPickedForWeek(nextState.selectionStats, nextState.weekPlan);
 
-      nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain);
+      nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain, params);
       nextState.modifiers = modifiers;
       effects.persist = true;
       logEvent = {
@@ -168,6 +172,7 @@ export function reduceEvent(state, event, ctx) {
             weekAnchorISO: checkIn.dateISO,
             checkInsByDate,
             qualityRules: qualityRulesForDay,
+            params,
           });
           generatedWeek = true;
         }
@@ -182,6 +187,7 @@ export function reduceEvent(state, event, ctx) {
             overridesBase: intensityCap != null ? { intensityCap } : null,
             qualityRules: qualityRulesForDay,
             weekContextBase: { busyDays: effectiveUser.busyDays || [] },
+            params,
           });
           nextState.weekPlan = adapted.weekPlan;
           result = { changedDayISO: adapted.changedDayISO, notes: adapted.notes || [] };
@@ -196,7 +202,7 @@ export function reduceEvent(state, event, ctx) {
         }
 
         if (nextState.weekPlan) {
-          nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain);
+          nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain, params);
         }
       }
 
@@ -255,6 +261,7 @@ export function reduceEvent(state, event, ctx) {
         overridesBase: intensityCap != null ? { intensityCap } : null,
         qualityRules: qualityRulesForDay,
         weekContextBase: { busyDays: effectiveUser.busyDays || [] },
+        params,
       });
       nextState.weekPlan = adapted.weekPlan;
       result = { changedDayISO: adapted.changedDayISO, notes: adapted.notes || [] };
@@ -262,7 +269,7 @@ export function reduceEvent(state, event, ctx) {
         const changedDay = findDay(nextState.weekPlan, adapted.changedDayISO);
         nextState.selectionStats = incrementPickedForDay(nextState.selectionStats, changedDay);
       }
-      nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain);
+      nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain, params);
       nextState.modifiers = modifiers;
 
       if (nextState.weekPlan && nextState.history) {
@@ -308,10 +315,11 @@ export function reduceEvent(state, event, ctx) {
           overridesBase: intensityCap != null ? { intensityCap } : null,
           qualityRules: qualityRulesForDay,
           weekContextBase: { busyDays: effectiveUser.busyDays || [] },
+          params,
         });
 
         nextState.weekPlan = adapted.weekPlan;
-        nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain);
+        nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain, params);
         nextState.modifiers = modifiers;
 
         if (nextState.history) {
@@ -358,10 +366,11 @@ export function reduceEvent(state, event, ctx) {
           intensityCap: intensityCap != null ? intensityCap : 2,
         },
         qualityRules: qualityRulesForDay,
+        params,
       });
       nextState.weekPlan = res.weekPlan;
       nextState.selectionStats = incrementPickedForDay(nextState.selectionStats, res.dayPlan);
-      nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain);
+      nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain, params);
 
       if (nextState.history) {
         nextState.history = addHistoryEntry(nextState.history, {
@@ -443,6 +452,7 @@ export function reduceEvent(state, event, ctx) {
           checkInsByDate,
           overrides: intensityCap != null ? { intensityCap, source: "feedback" } : { source: "feedback" },
           qualityRules: qualityRulesForDay,
+          params,
         });
         nextPlan = res.weekPlan;
         nextState.selectionStats = incrementPickedForDay(nextState.selectionStats, res.dayPlan);
@@ -458,7 +468,7 @@ export function reduceEvent(state, event, ctx) {
       }
 
       nextState.weekPlan = nextPlan;
-      nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextPlan, checkInsByDate, domain);
+      nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextPlan, checkInsByDate, domain, params);
       nextState.modifiers = modifiers;
       if (reason === "not_relevant") {
         const todayPlan = findDay(nextPlan, dateISO);
@@ -509,7 +519,8 @@ export function reduceEvent(state, event, ctx) {
           nextState.userProfile,
           nextState.weekPlan,
           checkInsByDate,
-          domain
+          domain,
+          params
         );
       }
 
@@ -540,8 +551,9 @@ export function reduceEvent(state, event, ctx) {
           weekAnchorISO,
           checkInsByDate,
           qualityRules: buildQualityRules(nextToggles),
+          params,
         });
-        nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain);
+        nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain, params);
       }
 
       effects.persist = true;
@@ -567,12 +579,13 @@ export function reduceEvent(state, event, ctx) {
           weekAnchorISO: todayISO,
           checkInsByDate,
           qualityRules,
+          params,
         });
         nextState.selectionStats = incrementPickedForWeek(nextState.selectionStats, nextState.weekPlan);
       }
 
       if (user && nextState.weekPlan) {
-        nextState.lastStressStateByDate = buildStressStateMap(user, nextState.weekPlan, checkInsByDate, domain);
+        nextState.lastStressStateByDate = buildStressStateMap(user, nextState.weekPlan, checkInsByDate, domain, params);
       }
 
       effects.persist = true;
@@ -655,7 +668,7 @@ function modifiersForDate(modifiers, dateISO, ruleToggles) {
   };
 }
 
-function normalizePlanPipeline({ user, weekPlan, checkInsByDate, modifiers, domain, qualityRules }) {
+function normalizePlanPipeline({ user, weekPlan, checkInsByDate, modifiers, domain, qualityRules, params }) {
   const nextDays = [];
   let changed = false;
 
@@ -674,6 +687,7 @@ function normalizePlanPipeline({ user, weekPlan, checkInsByDate, modifiers, doma
         weekContext: { busyDays: effectiveUser.busyDays || [], recentNoveltyGroups },
         overrides: intensityCap != null ? { intensityCap } : null,
         qualityRules: rulesForDay,
+        params,
       });
       nextDays.push(dayPlan);
       changed = true;
@@ -686,7 +700,7 @@ function normalizePlanPipeline({ user, weekPlan, checkInsByDate, modifiers, doma
   return { weekPlan: { ...weekPlan, days: nextDays }, changed: true };
 }
 
-function rebuildDayInPlan({ domain, user, weekPlan, dateISO, checkInsByDate, overrides, qualityRules }) {
+function rebuildDayInPlan({ domain, user, weekPlan, dateISO, checkInsByDate, overrides, qualityRules, params }) {
   const idx = weekPlan.days.findIndex((d) => d.dateISO === dateISO);
   if (idx === -1) return { weekPlan, dayPlan: null };
 
@@ -699,6 +713,7 @@ function rebuildDayInPlan({ domain, user, weekPlan, dateISO, checkInsByDate, ove
     weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups },
     overrides,
     qualityRules,
+    params,
   });
 
   const nextDays = weekPlan.days.slice();
@@ -728,13 +743,13 @@ function findDay(plan, dateISO) {
   return plan?.days?.find((d) => d.dateISO === dateISO) || null;
 }
 
-function buildStressStateMap(user, plan, checkInsByDate, domain) {
+function buildStressStateMap(user, plan, checkInsByDate, domain, params) {
   const map = {};
   plan.days.forEach((day) => {
     const checkIn = checkInsByDate ? checkInsByDate[day.dateISO] : undefined;
-    const stressState = domain.assignStressProfile({ user, dateISO: day.dateISO, checkIn });
+    const stressState = domain.assignStressProfile({ user, dateISO: day.dateISO, checkIn, params });
     if (typeof domain.computeRecoveryDebt === "function") {
-      stressState.recoveryDebt = domain.computeRecoveryDebt(checkInsByDate, day.dateISO);
+      stressState.recoveryDebt = domain.computeRecoveryDebt(checkInsByDate, day.dateISO, params);
     }
     map[day.dateISO] = stressState;
   });

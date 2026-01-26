@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>LiveNew</title>
+  <title>LiveNew — Week</title>
   <link rel="stylesheet" href="/assets/styles.css" />
 </head>
-<body data-page="home">
+<body data-page="week">
   <header class="topbar">
     <div class="brand">LiveNew</div>
     <nav class="nav">
       <a href="/day">Day</a>
-      <a href="/week">Week</a>
+      <a href="/week" class="active">Week</a>
       <a href="/trends">Trends</a>
       <a href="/profile">Profile</a>
       <a class="admin-link" href="/admin">Admin</a>
@@ -32,11 +32,12 @@
 
   <main class="container">
     <section class="card">
-      <h1>LiveNew</h1>
-      <p class="muted">Your daily recovery plan, distilled.</p>
-      <div class="actions">
-        <a class="button" href="/day">Go to Day</a>
+      <h1>Week plan</h1>
+      <div class="row">
+        <label>Week anchor <input id="week-date" type="date" /></label>
+        <button id="week-load">Load week</button>
       </div>
+      <div id="week-list" class="list"></div>
     </section>
   </main>
 

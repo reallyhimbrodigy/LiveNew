@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>LiveNew — Day</title>
+  <link rel="stylesheet" href="/assets/styles.css" />
+</head>
+<body data-page="day">
+  <header class="topbar">
+    <div class="brand">LiveNew</div>
+    <nav class="nav">
+      <a href="/day" class="active">Day</a>
+      <a href="/week">Week</a>
+      <a href="/trends">Trends</a>
+      <a href="/profile">Profile</a>
+      <a class="admin-link" href="/admin">Admin</a>
+    </nav>
+    <div class="auth" id="auth-panel">
+      <div class="auth-status" id="auth-status">Not signed in</div>
+      <div class="auth-row">
+        <input id="auth-email" type="email" placeholder="email" />
+        <button id="auth-request">Send code</button>
+      </div>
+      <div class="auth-row">
+        <input id="auth-code" type="text" placeholder="code" />
+        <button id="auth-verify">Verify</button>
+        <button id="auth-logout" class="ghost">Logout</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <section class="card">
+      <h1>Today</h1>
+      <div class="row">
+        <label>Date <input id="day-date" type="date" /></label>
+        <button id="day-load">Load Day</button>
+      </div>
+      <div id="day-summary" class="grid-3">
+        <div class="tile">
+          <h3>What</h3>
+          <div id="day-what"></div>
+        </div>
+        <div class="tile">
+          <h3>Why</h3>
+          <div id="day-why"></div>
+        </div>
+        <div class="tile">
+          <h3>How long</h3>
+          <div id="day-howlong"></div>
+        </div>
+      </div>
+      <button id="day-details-toggle" class="ghost">Show details</button>
+      <div id="day-details" class="details hidden"></div>
+    </section>
+
+    <section class="card">
+      <h2>Quick signals</h2>
+      <div id="signal-buttons" class="row wrap"></div>
+      <button id="bad-day-btn" class="danger">Bad day mode</button>
+    </section>
+
+    <section class="card">
+      <h2>Check-in</h2>
+      <div class="grid-2">
+        <label>Stress (1-10) <input id="checkin-stress" type="number" min="1" max="10" /></label>
+        <label>Sleep quality (1-10) <input id="checkin-sleep" type="number" min="1" max="10" /></label>
+        <label>Energy (1-10) <input id="checkin-energy" type="number" min="1" max="10" /></label>
+        <label>Time available
+          <select id="checkin-time">
+            <option value="5">5</option>
+            <option value="10">10</option>
+            <option value="15">15</option>
+            <option value="20" selected>20</option>
+            <option value="30">30</option>
+            <option value="45">45</option>
+            <option value="60">60</option>
+          </select>
+        </label>
+        <label class="span-2">Notes <input id="checkin-notes" type="text" placeholder="Optional" /></label>
+      </div>
+      <button id="checkin-submit">Save check-in</button>
+    </section>
+
+    <section class="card">
+      <h2>Completion</h2>
+      <div class="row wrap" id="completion-list">
+        <label><input type="checkbox" data-part="workout" /> Workout done</label>
+        <label><input type="checkbox" data-part="reset" /> Reset done</label>
+        <label><input type="checkbox" data-part="nutrition" /> Nutrition done</label>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Feedback</h2>
+      <div class="row">
+        <select id="feedback-helped">
+          <option value="yes">Helped</option>
+          <option value="no">Did not help</option>
+        </select>
+        <select id="feedback-reason">
+          <option value="too_hard">Too hard</option>
+          <option value="too_easy">Too easy</option>
+          <option value="wrong_time">Wrong time</option>
+          <option value="not_relevant">Not relevant</option>
+        </select>
+        <button id="feedback-submit">Send feedback</button>
+      </div>
+    </section>
+  </main>
+
+  <script type="module" src="/assets/app.core.js"></script>
+</body>
+</html>

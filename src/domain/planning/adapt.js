@@ -11,6 +11,7 @@ export function adaptPlan({
   overridesBase,
   qualityRules,
   weekContextBase,
+  params,
 }) {
   const notes = [];
   let nextPlan = weekPlan;
@@ -32,6 +33,7 @@ export function adaptPlan({
       checkIn,
       checkInsByDate,
       qualityRules: baseQualityRules,
+      params,
     });
     const mergedOverride = { ...(overridesBase || {}), ...(override || {}) };
     const res = rebuildDay({
@@ -42,6 +44,7 @@ export function adaptPlan({
       overrides: mergedOverride,
       qualityRules: baseQualityRules,
       weekContextBase: baseContext,
+      params,
     });
     if (res.changed) {
       nextPlan = res.weekPlan;
@@ -61,6 +64,7 @@ export function adaptPlan({
       overrides: mergedOverride,
       qualityRules: baseQualityRules,
       weekContextBase: baseContext,
+      params,
     });
     if (res.changed) {
       nextPlan = res.weekPlan;
@@ -72,7 +76,7 @@ export function adaptPlan({
   return { weekPlan: nextPlan, changedDayISO, notes };
 }
 
-function rebuildDay({ user, dateISO, weekPlan, checkInsByDate, overrides, qualityRules, weekContextBase }) {
+function rebuildDay({ user, dateISO, weekPlan, checkInsByDate, overrides, qualityRules, weekContextBase, params }) {
   const idx = weekPlan.days.findIndex((d) => d.dateISO === dateISO);
   if (idx === -1) return { weekPlan, changed: false };
 
@@ -90,6 +94,7 @@ function rebuildDay({ user, dateISO, weekPlan, checkInsByDate, overrides, qualit
     weekContext,
     overrides,
     qualityRules,
+    params,
   });
 
   const nextDays = weekPlan.days.slice();
@@ -100,7 +105,7 @@ function rebuildDay({ user, dateISO, weekPlan, checkInsByDate, overrides, qualit
   return { weekPlan: { ...weekPlan, days: nextDays }, changed };
 }
 
-function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate, qualityRules }) {
+function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate, qualityRules, params }) {
   const checkIn = checkInsByDate ? checkInsByDate[todayISO] : undefined;
 
   if (signal === "im_stressed" || signal === "poor_sleep" || signal === "wired" || signal === "anxious") {
@@ -124,6 +129,7 @@ function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate, quali
       weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups: [] },
       overrides: null,
       qualityRules,
+      params,
     });
     if (stressState.capacity >= 60 && stressState.loadBand !== "high") return { focusBias: "rebuild", source: "signal" };
     return { focusBias: "stabilize", source: "signal" };

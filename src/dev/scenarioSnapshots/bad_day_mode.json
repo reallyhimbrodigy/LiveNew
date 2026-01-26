@@ -5,9 +5,27 @@
   "dayPlan": {
     "focus": "downshift",
     "profile": "Balanced",
-    "workout": { "id": "w_walk_5", "minutes": 5 },
-    "reset": { "id": "r_phys_sigh_2", "minutes": 2 },
-    "nutrition": { "id": "n_downshift_evening" },
-    "rationaleFirst2": ["Profile: Balanced", "Focus: downshift"]
+    "workout": {
+      "id": "w_walk_5",
+      "minutes": 5
+    },
+    "reset": {
+      "id": "r_phys_sigh_2",
+      "minutes": 2
+    },
+    "nutrition": {
+      "id": "n_downshift_evening"
+    },
+    "rationaleFirst2": [
+      "Profile: Balanced",
+      "Focus: downshift"
+    ]
+  },
+  "paramsVersion": {
+    "profileThresholds": 1,
+    "recoveryDebtWeights": 1,
+    "timeBuckets": 1,
+    "focusBiasRules": 1,
+    "contentPackWeights": 1
   }
 }

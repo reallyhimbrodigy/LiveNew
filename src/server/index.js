@@ -45,6 +45,10 @@ import {
   bumpContentStats,
   getContentStats,
   getAdminStats,
+  listSessionsByUser,
+  touchSession,
+  deleteSessionByTokenOrHash,
+  seedParameters,
   cleanupOldEvents,
   upsertDecisionTrace,
   getDecisionTrace,
@@ -58,6 +62,8 @@ import {
   seedFeatureFlags,
   listFeatureFlags,
   setFeatureFlag,
+  upsertParameter,
+  listAppliedMigrations,
   deleteUserData,
 } from "../state/db.js";
 import { createBackup, restoreBackup, listBackups } from "../db/backup.js";
@@ -65,6 +71,8 @@ import { getConfig } from "./config.js";
 import { ensureSecretKey } from "./env.js";
 import { computeBootSummary } from "./bootSummary.js";
 import { handleSetupRoutes } from "./setupRoutes.js";
+import { getParameters, getDefaultParameters, resetParametersCache } from "./parameters.js";
+import { createTaskScheduler } from "./tasks.js";
 
 const NODE_ENV = process.env.NODE_ENV || "development";
 const config = getConfig();
@@ -106,16 +114,20 @@ await ensureDataDirWritable(config);
 await initDb();
 await seedContentItems(domain.defaultLibrary);
 await seedFeatureFlags(DEFAULT_FLAGS);
+await seedParameters(getDefaultParameters());
+resetParametersCache();
 await applyLibraryFromDb();
 await cleanupOldEvents(EVENT_RETENTION_DAYS);
 const bootSummary = await computeBootSummary(config);
 enforceGuardrails(config, bootSummary);
 console.log(JSON.stringify({ boot: bootSummary }));
-setInterval(() => {
-  cleanupOldEvents(EVENT_RETENTION_DAYS).catch((err) => {
-    console.error("Event retention cleanup failed", err);
-  });
-}, 24 * 60 * 60 * 1000);
+const taskScheduler = createTaskScheduler({
+  config,
+  createBackup,
+  cleanupOldEvents,
+  retentionDays: EVENT_RETENTION_DAYS,
+});
+taskScheduler.schedule();
 
 function enforceGuardrails(runtimeConfig, summary) {
   if (!(runtimeConfig.isAlphaLike || runtimeConfig.isProdLike)) return;
@@ -207,6 +219,7 @@ async function repairUserState(userId, reason) {
   const events = await getUserEvents(userId, 1, 5000);
   if (events.length) {
     const flags = await getFeatureFlags();
+    const paramsState = await getParameters();
     let rebuilt = normalizeState({});
     for (const evt of events) {
       const ctx = {
@@ -215,6 +228,7 @@ async function repairUserState(userId, reason) {
         ruleToggles: resolveRuleToggles(rebuilt, flags),
         scenarios: { getScenarioById },
         isDev: isDevRoutesEnabled,
+        params: paramsState.map,
       };
       const result = reduceEvent(rebuilt, { type: evt.type, payload: evt.payload, atISO: evt.atISO || baseNow }, ctx);
       rebuilt = appendLogEvent(result.nextState, result.logEvent);
@@ -324,6 +338,7 @@ function normalizeUserProfile(profile) {
     mealTimingConsistency: toNumber(profile.mealTimingConsistency, 5),
     preferredWorkoutWindows: Array.isArray(profile.preferredWorkoutWindows) ? profile.preferredWorkoutWindows : ["PM"],
     busyDays: Array.isArray(profile.busyDays) ? profile.busyDays : [],
+    contentPack: profile.contentPack || "balanced_routine",
   };
 }
 
@@ -336,10 +351,15 @@ async function seedInitialProfile(email, profile) {
   let currentVersion = cached.version;
   const flags = await getFeatureFlags();
   const effectiveToggles = resolveRuleToggles(currentState, flags);
+  const paramsState = await getParameters();
 
-  const baseline = dispatch(currentState, { type: "BASELINE_SAVED", payload: { userProfile: normalized } }, { ruleToggles: effectiveToggles });
+  const baseline = dispatch(
+    currentState,
+    { type: "BASELINE_SAVED", payload: { userProfile: normalized } },
+    { ruleToggles: effectiveToggles, params: paramsState.map }
+  );
   currentState = baseline.state;
-  const ensured = dispatch(currentState, { type: "ENSURE_WEEK", payload: {} }, { ruleToggles: effectiveToggles });
+  const ensured = dispatch(currentState, { type: "ENSURE_WEEK", payload: {} }, { ruleToggles: effectiveToggles, params: paramsState.map });
   currentState = ensured.state;
 
   let saveRes = await saveUserState(user.id, currentVersion, currentState);
@@ -347,9 +367,13 @@ async function seedInitialProfile(email, profile) {
     cached = await loadUserState(user.id);
     currentState = cached.state;
     currentVersion = cached.version;
-    const retryBaseline = dispatch(currentState, { type: "BASELINE_SAVED", payload: { userProfile: normalized } }, { ruleToggles: effectiveToggles });
+    const retryBaseline = dispatch(
+      currentState,
+      { type: "BASELINE_SAVED", payload: { userProfile: normalized } },
+      { ruleToggles: effectiveToggles, params: paramsState.map }
+    );
     currentState = retryBaseline.state;
-    const retryEnsured = dispatch(currentState, { type: "ENSURE_WEEK", payload: {} }, { ruleToggles: effectiveToggles });
+    const retryEnsured = dispatch(currentState, { type: "ENSURE_WEEK", payload: {} }, { ruleToggles: effectiveToggles, params: paramsState.map });
     currentState = retryEnsured.state;
     saveRes = await saveUserState(user.id, currentVersion, currentState);
   }
@@ -384,6 +408,7 @@ function dispatch(state, event, ctxOverrides = {}) {
     now: { todayISO: domain.isoToday(), atISO: new Date().toISOString() },
     scenarios: { getScenarioById },
     isDev: isDevRoutesEnabled,
+    params: ctxOverrides.params,
     ...ctxOverrides,
   };
 
@@ -468,6 +493,20 @@ function getRequestId(req) {
 
 function getClientIp(req) {
   return req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
+}
+
+function getDeviceName(req) {
+  const header = req.headers["x-device-name"];
+  const value = Array.isArray(header) ? header[0] : header;
+  if (!value) return null;
+  const trimmed = String(value).trim();
+  if (!trimmed) return null;
+  return trimmed.slice(0, 64);
+}
+
+function hashToken(token) {
+  if (!token) return null;
+  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 function isAuthRequired() {
@@ -743,11 +782,15 @@ function buildTrends(state, days) {
   return result;
 }
 
-function assessReadiness(runtimeConfig, summary) {
+function assessReadiness(runtimeConfig, summary, checks = {}) {
   const failures = [];
   if (runtimeConfig.dbStatusRequired && !summary.storage.ok) failures.push("db");
   if (!summary.dataDir.writable) failures.push("dataDir");
   if (runtimeConfig.secretKeyPolicy.requireReal && summary.secretKey.ephemeral) failures.push("secretKey");
+  if (checks.migrationsOk === false) failures.push("migrations");
+  if (checks.flagsOk === false) failures.push("featureFlags");
+  if (checks.paramsOk === false) failures.push("parameters");
+  if (checks.dbReadyOk === false) failures.push("dbReady");
   if (runtimeConfig.isAlphaLike || runtimeConfig.isProdLike) {
     if (!summary.admin.configured) failures.push("adminEmails");
     if (summary.devRoutes.enabled) failures.push("devRoutes");
@@ -805,19 +848,39 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
-  if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
+  const pageRoutes = new Map([
+    ["/", "day.html"],
+    ["/index.html", "index.html"],
+    ["/day", "day.html"],
+    ["/day.html", "day.html"],
+    ["/week", "week.html"],
+    ["/week.html", "week.html"],
+    ["/trends", "trends.html"],
+    ["/trends.html", "trends.html"],
+    ["/profile", "profile.html"],
+    ["/profile.html", "profile.html"],
+    ["/admin", "admin.html"],
+    ["/admin.html", "admin.html"],
+  ]);
+
+  if (req.method === "GET" && pageRoutes.has(pathname)) {
     issueCsrfToken(res);
-    await serveFile(res, path.join(PUBLIC_DIR, "index.html"), { replaceDevFlag: true });
+    await serveFile(res, path.join(PUBLIC_DIR, pageRoutes.get(pathname)));
+    return;
+  }
+
+  if (req.method === "GET" && pathname.startsWith("/assets/")) {
+    await serveFile(res, path.join(PUBLIC_DIR, pathname.slice(1)));
     return;
   }
 
   if (req.method === "GET" && pathname === "/app.js") {
-    await serveFile(res, path.join(PUBLIC_DIR, "app.js"));
+    await serveFile(res, path.join(PUBLIC_DIR, "assets", "app.core.js"));
     return;
   }
 
   if (req.method === "GET" && pathname === "/styles.css") {
-    await serveFile(res, path.join(PUBLIC_DIR, "styles.css"));
+    await serveFile(res, path.join(PUBLIC_DIR, "assets", "styles.css"));
     return;
   }
 
@@ -857,11 +920,49 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/readyz" && req.method === "GET") {
-      await checkReady();
-      await getFeatureFlags();
+      let flagsOk = true;
+      let paramsOk = true;
+      let migrationsOk = true;
+      let dbReadyOk = true;
+      let migrationsCount = 0;
+      try {
+        await checkReady();
+      } catch {
+        dbReadyOk = false;
+      }
+      try {
+        await getFeatureFlags();
+      } catch {
+        flagsOk = false;
+      }
+      let paramsState = null;
+      try {
+        paramsState = await getParameters();
+        paramsOk = paramsState.ok;
+      } catch {
+        paramsOk = false;
+      }
+      try {
+        const migrations = await listAppliedMigrations();
+        migrationsCount = migrations.length;
+        migrationsOk = migrations.length > 0;
+      } catch {
+        migrationsOk = false;
+      }
       const summary = await computeBootSummary(config);
-      const readiness = assessReadiness(config, summary);
-      sendJson(res, 200, { ok: readiness.ok, summary, failures: readiness.failures });
+      const readiness = assessReadiness(config, summary, { flagsOk, paramsOk, migrationsOk, dbReadyOk });
+      sendJson(res, 200, {
+        ok: readiness.ok,
+        summary,
+        failures: readiness.failures,
+        checks: {
+          flagsOk,
+          paramsOk,
+          migrationsOk,
+          dbReadyOk,
+          migrationsCount,
+        },
+      });
       return;
     }
 
@@ -929,7 +1030,8 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 401, "code_invalid", "code is invalid or expired", "code");
         return;
       }
-      const token = await createSession(verified.userId, SESSION_TTL_MINUTES || undefined);
+      const deviceName = getDeviceName(req);
+      const token = await createSession(verified.userId, SESSION_TTL_MINUTES || undefined, deviceName);
       res.livenewUserId = verified.userId;
       sendJson(res, 200, { ok: true, token }, verified.userId);
       return;
@@ -943,6 +1045,8 @@ const server = http.createServer(async (req, res) => {
       if (session) {
         userId = session.user_id;
         userEmail = session.email;
+        const deviceName = getDeviceName(req);
+        await touchSession(token, deviceName);
       }
     }
 
@@ -953,7 +1057,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       await deleteSession(token);
-      const newToken = await createSession(userId, SESSION_TTL_MINUTES || undefined);
+      const deviceName = getDeviceName(req);
+      const newToken = await createSession(userId, SESSION_TTL_MINUTES || undefined, deviceName);
       res.livenewUserId = userId;
       sendJson(res, 200, { ok: true, token: newToken }, userId);
       return;
@@ -996,7 +1101,11 @@ const server = http.createServer(async (req, res) => {
         const prevState = currentState;
         const flags = await getFeatureFlags();
         const effectiveToggles = resolveRuleToggles(currentState, flags);
-        const resEvent = dispatch(currentState, eventWithAt, { ruleToggles: effectiveToggles });
+        const paramsState = await getParameters();
+        const resEvent = dispatch(currentState, eventWithAt, {
+          ruleToggles: effectiveToggles,
+          params: paramsState.map,
+        });
         const nextState = resEvent.state;
 
         if (!resEvent.effects.persist && !resEvent.logEvent) {
@@ -1133,7 +1242,8 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === "/v1/checkin" && req.method === "POST") {
       const body = await parseJson(req);
-      const validation = validateCheckIn(body);
+      const paramsState = await getParameters();
+      const validation = validateCheckIn(body, { allowedTimes: paramsState.map?.timeBuckets?.allowed });
       if (!validation.ok) {
         sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
         return;
@@ -1296,6 +1406,62 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/account/sessions" && req.method === "GET") {
+      if (!token) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      const sessions = await listSessionsByUser(userId);
+      const currentHash = hashToken(token);
+      const list = sessions.map((session) => ({
+        token: session.tokenHash,
+        deviceName: session.deviceName,
+        createdAt: session.createdAt,
+        lastSeenAt: session.lastSeenAt,
+        expiresAt: session.expiresAt,
+        isCurrent: currentHash && session.tokenHash === currentHash,
+      }));
+      send(200, { ok: true, sessions: list });
+      return;
+    }
+
+    if (pathname === "/v1/account/sessions/revoke" && req.method === "POST") {
+      if (!token) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      const body = await parseJson(req);
+      const revokeToken = body?.token;
+      if (!revokeToken || typeof revokeToken !== "string") {
+        sendError(res, 400, "token_required", "token is required", "token");
+        return;
+      }
+      const currentHash = hashToken(token);
+      if (revokeToken === token || revokeToken === currentHash) {
+        sendError(res, 400, "cannot_revoke_current", "Use auth/refresh or logout to revoke current session");
+        return;
+      }
+      await deleteSessionByTokenOrHash(revokeToken);
+      send(200, { ok: true });
+      return;
+    }
+
+    if (pathname === "/v1/account/sessions/name" && req.method === "POST") {
+      if (!token) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      const body = await parseJson(req);
+      const deviceName = typeof body?.deviceName === "string" ? body.deviceName.trim() : "";
+      if (!deviceName) {
+        sendError(res, 400, "device_name_required", "deviceName is required", "deviceName");
+        return;
+      }
+      await touchSession(token, deviceName.slice(0, 64));
+      send(200, { ok: true, deviceName: deviceName.slice(0, 64) });
+      return;
+    }
+
     if (pathname === "/v1/account" && req.method === "DELETE") {
       const confirmHeader = req.headers["x-confirm-delete"];
       if (confirmHeader !== "DELETE") {
@@ -1363,6 +1529,64 @@ const server = http.createServer(async (req, res) => {
       const updated = await setFeatureFlag(key, value);
       featureFlagsCache.data = null;
       send(200, { ok: true, flag: updated });
+      return;
+    }
+
+    if (pathname === "/v1/admin/parameters" && req.method === "GET") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const paramsState = await getParameters();
+      send(200, {
+        ok: true,
+        parameters: paramsState.map,
+        versions: paramsState.versions,
+        errors: paramsState.errors,
+      });
+      return;
+    }
+
+    if (pathname === "/v1/admin/parameters" && req.method === "PATCH") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const body = await parseJson(req);
+      const key = body?.key;
+      if (!key || typeof key !== "string") {
+        sendError(res, 400, "key_required", "key is required", "key");
+        return;
+      }
+      const defaults = getDefaultParameters();
+      if (!(key in defaults)) {
+        sendError(res, 400, "key_invalid", "Unknown parameter key", "key");
+        return;
+      }
+      let value = body?.value;
+      if (value == null && typeof body?.value_json === "string") {
+        try {
+          value = JSON.parse(body.value_json);
+        } catch {
+          sendError(res, 400, "value_invalid", "value_json must be valid JSON", "value_json");
+          return;
+        }
+      }
+      if (value == null) {
+        sendError(res, 400, "value_required", "value is required", "value");
+        return;
+      }
+      const updated = await upsertParameter(key, value);
+      resetParametersCache();
+      send(200, { ok: true, key, version: updated.version, updatedAt: updated.updatedAt });
       return;
     }
 
@@ -1449,6 +1673,28 @@ const server = http.createServer(async (req, res) => {
       const pageSize = Number(url.searchParams.get("pageSize") || 50);
       const events = await listUserEventsPaged(userIdParam, page, pageSize);
       send(200, { ok: true, events, page, pageSize });
+      return;
+    }
+
+    const contentDisableMatch = pathname.match(/^\/v1\/admin\/content\/(workout|nutrition|reset)\/([^/]+)\/disable$/);
+    if (contentDisableMatch && req.method === "POST") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const kind = contentDisableMatch[1];
+      const id = contentDisableMatch[2];
+      const updated = await patchContentItem(kind, id, { enabled: false });
+      if (!updated) {
+        sendError(res, 404, "not_found", "Content item not found");
+        return;
+      }
+      await applyLibraryFromDb();
+      send(200, { ok: true, item: updated });
       return;
     }
 
@@ -1579,6 +1825,62 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/admin/stats/content" && req.method === "GET") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const kind = url.searchParams.get("kind");
+      if (!["workout", "nutrition", "reset"].includes(kind)) {
+        sendError(res, 400, "kind_invalid", "kind must be workout, nutrition, or reset", "kind");
+        return;
+      }
+      const fromISO = url.searchParams.get("from");
+      const toISO = url.searchParams.get("to");
+      if (fromISO) {
+        const validation = validateDateParam(fromISO, "from");
+        if (!validation.ok) {
+          sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+          return;
+        }
+      }
+      if (toISO) {
+        const validation = validateDateParam(toISO, "to");
+        if (!validation.ok) {
+          sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+          return;
+        }
+      }
+      const statsRows = await getAdminStats();
+      const statsMap = new Map();
+      statsRows.forEach((row) => {
+        statsMap.set(row.itemId, row);
+      });
+      const items = await listContentItems(kind, true);
+      const enriched = items.map((item) => {
+        const stat = statsMap.get(item.id) || { picked: 0, completed: 0, notRelevant: 0 };
+        const picked = stat.picked || 0;
+        const completionRate = picked ? stat.completed / picked : 0;
+        const notRelevantRate = picked ? stat.notRelevant / picked : 0;
+        return {
+          item,
+          stats: {
+            picked,
+            completed: stat.completed || 0,
+            notRelevant: stat.notRelevant || 0,
+            completionRate,
+            notRelevantRate,
+          },
+        };
+      });
+      send(200, { ok: true, kind, fromISO, toISO, items: enriched });
+      return;
+    }
+
     if (pathname === "/v1/admin/stats" && req.method === "GET") {
       if (!userEmail) {
         sendError(res, 401, "auth_required", "Authorization required");
@@ -1695,6 +1997,26 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/admin/tasks/run" && req.method === "POST") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const body = await parseJson(req);
+      const task = body?.task;
+      if (!["backup", "cleanup"].includes(task)) {
+        sendError(res, 400, "task_invalid", "task must be backup or cleanup", "task");
+        return;
+      }
+      const result = await taskScheduler.runTask(task);
+      send(200, { ok: true, task, result });
+      return;
+    }
+
     if (pathname === "/v1/admin/repair" && req.method === "POST") {
       if (!userEmail) {
         sendError(res, 401, "auth_required", "Authorization required");
@@ -1737,6 +2059,7 @@ const server = http.createServer(async (req, res) => {
         let replayState = normalizeState(validation.value.initialState || {});
         const now = { todayISO: domain.isoToday(), atISO: new Date().toISOString() };
         const flags = await getFeatureFlags();
+        const paramsState = await getParameters();
 
         for (const evt of validation.value.events) {
           const atISO = evt.atISO || now.atISO;
@@ -1746,6 +2069,7 @@ const server = http.createServer(async (req, res) => {
             ruleToggles: resolveRuleToggles(replayState, flags),
             scenarios: { getScenarioById },
             isDev: true,
+            params: paramsState.map,
           };
           const result = reduceEvent(replayState, { type: evt.type, payload: evt.payload, atISO }, ctx);
           replayState = appendLogEvent(result.nextState, result.logEvent);
@@ -1813,6 +2137,7 @@ const server = http.createServer(async (req, res) => {
         const events = seq === 0 ? [] : await getUserEvents(targetUserId, 1, seq);
         let rebuilt = normalizeState({});
         const flags = await getFeatureFlags();
+        const paramsState = await getParameters();
         for (const evt of events) {
           const ctx = {
             domain,
@@ -1820,6 +2145,7 @@ const server = http.createServer(async (req, res) => {
             ruleToggles: resolveRuleToggles(rebuilt, flags),
             scenarios: { getScenarioById },
             isDev: true,
+            params: paramsState.map,
           };
           const result = reduceEvent(rebuilt, { type: evt.type, payload: evt.payload, atISO: evt.atISO }, ctx);
           rebuilt = appendLogEvent(result.nextState, result.logEvent);
@@ -1933,13 +2259,18 @@ const server = http.createServer(async (req, res) => {
       if (pathname === "/v1/dev/snapshot/run" && req.method === "POST") {
         const body = await parseJson(req);
         const scenarioId = body.scenarioId;
+        const allowParamDrift = body?.allowParamDrift === true;
         const ids = scenarioId ? [scenarioId] : SNAPSHOT_IDS;
         const results = [];
         const flags = await getFeatureFlags();
+        const paramsState = await getParameters();
         for (const id of ids) {
           const resCheck = await runSnapshotCheck(id, state, {
             now: { todayISO: domain.isoToday(), atISO: new Date().toISOString() },
             ruleToggles: resolveRuleToggles(state, flags),
+            paramsVersion: paramsState.versions,
+            params: paramsState.map,
+            allowParamDrift,
           });
           results.push({ scenarioId: id, ok: resCheck.ok, diffsCount: resCheck.diffs.length });
         }
@@ -1988,6 +2319,7 @@ async function handleShutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`LiveNew shutting down (${signal})...`);
+  taskScheduler.stop();
   server.close(() => {
     process.exit(0);
   });

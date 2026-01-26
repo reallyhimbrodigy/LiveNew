@@ -25,6 +25,13 @@ export function normalizeState(state = {}) {
     ...(next.ruleToggles || {}),
   };
 
+  if (next.userProfile) {
+    next.userProfile = {
+      ...next.userProfile,
+      contentPack: next.userProfile.contentPack || "balanced_routine",
+    };
+  }
+
   return next;
 }
 

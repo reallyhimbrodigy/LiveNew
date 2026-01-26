@@ -5,14 +5,18 @@
     "version": "1.0"
   },
   "servers": [
-    { "url": "/" }
+    {
+      "url": "/"
+    }
   ],
   "paths": {
     "/v1/csrf": {
       "get": {
         "summary": "Issue CSRF token",
         "responses": {
-          "200": { "description": "OK" }
+          "200": {
+            "description": "OK"
+          }
         }
       }
     },
@@ -25,15 +29,25 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": { "email": { "type": "string" } },
-                "required": ["email"]
+                "properties": {
+                  "email": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "email"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "OK" },
-          "400": { "description": "Invalid request" }
+          "200": {
+            "description": "OK"
+          },
+          "400": {
+            "description": "Invalid request"
+          }
         }
       }
     },
@@ -47,17 +61,28 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "email": { "type": "string" },
-                  "code": { "type": "string" }
+                  "email": {
+                    "type": "string"
+                  },
+                  "code": {
+                    "type": "string"
+                  }
                 },
-                "required": ["email", "code"]
+                "required": [
+                  "email",
+                  "code"
+                ]
               }
             }
           }
         },
         "responses": {
-          "200": { "description": "OK" },
-          "401": { "description": "Invalid code" }
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Invalid code"
+          }
         }
       }
     },
@@ -65,8 +90,12 @@
       "post": {
         "summary": "Refresh session token",
         "responses": {
-          "200": { "description": "OK" },
-          "401": { "description": "Unauthorized" }
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
         }
       }
     },
@@ -79,31 +108,63 @@
             "application/json": {
               "schema": {
                 "type": "object",
-                "properties": { "userProfile": { "type": "object" } },
-                "required": ["userProfile"]
+                "properties": {
+                  "userProfile": {
+                    "type": "object"
+                  }
+                },
+                "required": [
+                  "userProfile"
+                ]
               }
             }
           }
         },
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/plan/week": {
       "get": {
         "summary": "Get week plan",
         "parameters": [
-          { "name": "date", "in": "query", "schema": { "type": "string" }, "required": false }
+          {
+            "name": "date",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/plan/day": {
       "get": {
         "summary": "Get day plan",
         "parameters": [
-          { "name": "date", "in": "query", "schema": { "type": "string" }, "required": true }
+          {
+            "name": "date",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": true
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/checkin": {
@@ -111,9 +172,19 @@
         "summary": "Submit check-in",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/signal": {
@@ -121,9 +192,19 @@
         "summary": "Submit quick signal",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/bad-day": {
@@ -131,9 +212,19 @@
         "summary": "Enable bad day mode",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/feedback": {
@@ -141,9 +232,19 @@
         "summary": "Submit feedback",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/complete": {
@@ -151,64 +252,146 @@
         "summary": "Toggle completion",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/progress": {
       "get": {
         "summary": "Get progress",
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/trends": {
       "get": {
         "summary": "Get trends",
         "parameters": [
-          { "name": "days", "in": "query", "schema": { "type": "integer" }, "required": false }
+          {
+            "name": "days",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "required": false
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/account/export": {
       "get": {
         "summary": "Export account data",
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/account": {
       "delete": {
         "summary": "Delete account data",
         "parameters": [
-          { "name": "x-confirm-delete", "in": "header", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "x-confirm-delete",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/me": {
       "get": {
         "summary": "Get admin status",
-        "responses": { "200": { "description": "OK" }, "401": { "description": "Unauthorized" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          },
+          "401": {
+            "description": "Unauthorized"
+          }
+        }
       }
     },
     "/v1/admin/content": {
       "get": {
         "summary": "List content items",
         "parameters": [
-          { "name": "kind", "in": "query", "schema": { "type": "string" }, "required": false },
-          { "name": "page", "in": "query", "schema": { "type": "integer" }, "required": false },
-          { "name": "pageSize", "in": "query", "schema": { "type": "integer" }, "required": false }
+          {
+            "name": "kind",
+            "in": "query",
+            "schema": {
+              "type": "string"
+            },
+            "required": false
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "required": false
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "schema": {
+              "type": "integer"
+            },
+            "required": false
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       },
       "post": {
         "summary": "Upsert content item",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/content/bulk": {
@@ -216,112 +399,297 @@
         "summary": "Bulk upsert content items",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/content/{kind}/{id}": {
       "patch": {
         "summary": "Patch content item",
         "parameters": [
-          { "name": "kind", "in": "path", "required": true, "schema": { "type": "string" } },
-          { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/reports/worst-items": {
       "get": {
         "summary": "Worst items report",
         "parameters": [
-          { "name": "kind", "in": "query", "required": true, "schema": { "type": "string" } },
-          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer" } }
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/flags": {
       "get": {
         "summary": "List feature flags",
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       },
       "patch": {
         "summary": "Update feature flag",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/analytics/daily": {
       "get": {
         "summary": "Daily analytics",
         "parameters": [
-          { "name": "from", "in": "query", "required": false, "schema": { "type": "string" } },
-          { "name": "to", "in": "query", "required": false, "schema": { "type": "string" } }
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/metrics/latency": {
       "get": {
         "summary": "Latency metrics",
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/stats": {
       "get": {
         "summary": "Content stats",
         "parameters": [
-          { "name": "userId", "in": "query", "required": false, "schema": { "type": "string" } }
+          {
+            "name": "userId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/trace": {
       "get": {
         "summary": "Decision trace",
         "parameters": [
-          { "name": "userId", "in": "query", "required": true, "schema": { "type": "string" } },
-          { "name": "date", "in": "query", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "date",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/traces": {
       "get": {
         "summary": "Decision traces",
         "parameters": [
-          { "name": "userId", "in": "query", "required": true, "schema": { "type": "string" } },
-          { "name": "from", "in": "query", "required": true, "schema": { "type": "string" } },
-          { "name": "to", "in": "query", "required": true, "schema": { "type": "string" } },
-          { "name": "page", "in": "query", "required": false, "schema": { "type": "integer" } },
-          { "name": "pageSize", "in": "query", "required": false, "schema": { "type": "integer" } }
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/events": {
       "get": {
         "summary": "User events",
         "parameters": [
-          { "name": "userId", "in": "query", "required": true, "schema": { "type": "string" } },
-          { "name": "page", "in": "query", "required": false, "schema": { "type": "integer" } },
-          { "name": "pageSize", "in": "query", "required": false, "schema": { "type": "integer" } }
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/db/backup": {
       "post": {
         "summary": "Create DB backup",
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/db/restore": {
@@ -329,18 +697,201 @@
         "summary": "Restore DB backup",
         "requestBody": {
           "required": true,
-          "content": { "application/json": { "schema": { "type": "object" } } }
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
         },
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     },
     "/v1/admin/repair": {
       "post": {
         "summary": "Repair user state",
         "parameters": [
-          { "name": "userId", "in": "query", "required": true, "schema": { "type": "string" } }
+          {
+            "name": "userId",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
         ],
-        "responses": { "200": { "description": "OK" } }
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/account/sessions": {
+      "get": {
+        "summary": "List sessions",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/account/sessions/revoke": {
+      "post": {
+        "summary": "Revoke session",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/account/sessions/name": {
+      "post": {
+        "summary": "Name current session",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/admin/parameters": {
+      "get": {
+        "summary": "List parameters",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      },
+      "patch": {
+        "summary": "Update parameter",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/admin/stats/content": {
+      "get": {
+        "summary": "Content heatmap stats",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "from",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/admin/content/{kind}/{id}/disable": {
+      "post": {
+        "summary": "Disable content item",
+        "parameters": [
+          {
+            "name": "kind",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/admin/tasks/run": {
+      "post": {
+        "summary": "Run admin task",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
       }
     }
   }

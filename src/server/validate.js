@@ -12,6 +12,7 @@ const SIGNALS = new Set([
 const FEEDBACK_REASONS = new Set(["too_hard", "too_easy", "wrong_time", "not_relevant"]);
 const PARTS = new Set(["workout", "reset", "nutrition"]);
 const TIME_OPTIONS = new Set([5, 10, 15, 20, 30, 45, 60]);
+const CONTENT_PACKS = new Set(["calm_reset", "balanced_routine", "rebuild_strength"]);
 const REPLAY_EVENT_TYPES = new Set([
   "BASELINE_SAVED",
   "ENSURE_WEEK",
@@ -90,11 +91,14 @@ export function validateProfile(body) {
   if (userProfile.mealTimingConsistency != null && !isIntegerInRange(userProfile.mealTimingConsistency, 1, 10)) {
     return fail("profile_invalid", "mealTimingConsistency must be 1..10", "mealTimingConsistency");
   }
+  if (userProfile.contentPack != null && !CONTENT_PACKS.has(userProfile.contentPack)) {
+    return fail("profile_invalid", "contentPack is not allowed", "contentPack");
+  }
 
   return ok({ userProfile });
 }
 
-export function validateCheckIn(body) {
+export function validateCheckIn(body, options = {}) {
   const checkIn = body?.checkIn;
   if (!checkIn || typeof checkIn !== "object") {
     return fail("checkin_missing", "checkIn is required", "checkIn");
@@ -112,8 +116,10 @@ export function validateCheckIn(body) {
     return fail("checkin_invalid", "energy must be 1..10", "energy");
   }
   const timeAvailableMin = toNumber(checkIn.timeAvailableMin);
-  if (timeAvailableMin == null || !TIME_OPTIONS.has(timeAvailableMin)) {
-    return fail("checkin_invalid", "timeAvailableMin must be 5,10,15,20,30,45,60", "timeAvailableMin");
+  const allowedTimes = Array.isArray(options.allowedTimes) && options.allowedTimes.length ? options.allowedTimes : Array.from(TIME_OPTIONS);
+  const allowedSet = new Set(allowedTimes);
+  if (timeAvailableMin == null || !allowedSet.has(timeAvailableMin)) {
+    return fail("checkin_invalid", `timeAvailableMin must be ${allowedTimes.join(",")}`, "timeAvailableMin");
   }
 
   return ok({

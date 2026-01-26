@@ -5,9 +5,27 @@
   "dayPlan": {
     "focus": "rebuild",
     "profile": "Balanced",
-    "workout": { "id": "w_zone2_30", "minutes": 30 },
-    "reset": { "id": "r_breath_3", "minutes": 3 },
-    "nutrition": { "id": "n_rebuild_training" },
-    "rationaleFirst2": ["Profile: Balanced", "Focus: rebuild"]
+    "workout": {
+      "id": "w_zone2_30",
+      "minutes": 30
+    },
+    "reset": {
+      "id": "r_breath_3",
+      "minutes": 3
+    },
+    "nutrition": {
+      "id": "n_rebuild_training"
+    },
+    "rationaleFirst2": [
+      "Profile: Balanced",
+      "Focus: rebuild"
+    ]
+  },
+  "paramsVersion": {
+    "profileThresholds": 1,
+    "recoveryDebtWeights": 1,
+    "timeBuckets": 1,
+    "focusBiasRules": 1,
+    "contentPackWeights": 1
   }
 }
