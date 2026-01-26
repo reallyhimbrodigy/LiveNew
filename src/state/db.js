@@ -3,9 +3,17 @@ import path from "path";
 import crypto from "crypto";
 import { DatabaseSync } from "node:sqlite";
 import { runMigrations } from "../db/migrate.js";
+import {
+  encryptString,
+  decryptString,
+  hashString,
+  normalizeEmail,
+  isEncrypted,
+} from "../security/crypto.js";
 
 const DB_PATH = process.env.DB_PATH || "data/livenew.sqlite";
 let db = null;
+const columnCache = new Map();
 
 async function ensureDir() {
   await fs.mkdir(path.dirname(DB_PATH), { recursive: true });
@@ -18,6 +26,15 @@ export function getDbPath() {
 export function getDb() {
   if (!db) throw new Error("DB not initialized");
   return db;
+}
+
+function hasColumn(table, column) {
+  const key = `${table}.${column}`;
+  if (columnCache.has(key)) return columnCache.get(key);
+  const rows = getDb().prepare(`PRAGMA table_info(${table})`).all();
+  const exists = rows.some((row) => row.name === column);
+  columnCache.set(key, exists);
+  return exists;
 }
 
 export async function initDb() {
@@ -57,20 +74,49 @@ export async function checkReady() {
 }
 
 export async function getUserByEmail(email) {
-  const row = getDb().prepare("SELECT id, email FROM users WHERE email = ?").get(email);
-  return row || null;
+  const normalized = normalizeEmail(email);
+  const emailHash = hashString(normalized);
+  let row = null;
+  if (hasColumn("users", "email_hash") && emailHash) {
+    row = getDb().prepare("SELECT id, email, email_hash FROM users WHERE email_hash = ?").get(emailHash);
+  }
+  if (!row) {
+    row = getDb().prepare("SELECT id, email, email_hash FROM users WHERE email = ?").get(normalized);
+  }
+  if (!row) return null;
+  const decrypted = decryptString(row.email);
+  if (hasColumn("users", "email_hash") && emailHash) {
+    const encrypted = encryptString(decrypted);
+    if (row.email_hash !== emailHash || encrypted !== row.email) {
+      getDb()
+        .prepare("UPDATE users SET email = ?, email_hash = ? WHERE id = ?")
+        .run(encrypted, emailHash, row.id);
+    }
+  }
+  return { id: row.id, email: decrypted };
 }
 
 export async function getUserById(userId) {
-  const row = getDb().prepare("SELECT id, email FROM users WHERE id = ?").get(userId);
-  return row || null;
+  const row = getDb().prepare("SELECT id, email, email_hash FROM users WHERE id = ?").get(userId);
+  if (!row) return null;
+  const decrypted = decryptString(row.email);
+  return { id: row.id, email: decrypted };
 }
 
 export async function createUser(email) {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  getDb().prepare("INSERT INTO users (id, email, created_at) VALUES (?, ?, ?)").run(id, email, now);
-  return { id, email };
+  const normalized = normalizeEmail(email);
+  const emailHash = hashString(normalized);
+  const encrypted = encryptString(normalized);
+  if (hasColumn("users", "email_hash")) {
+    getDb()
+      .prepare("INSERT INTO users (id, email, email_hash, created_at) VALUES (?, ?, ?, ?)")
+      .run(id, encrypted, emailHash, now);
+  } else {
+    getDb().prepare("INSERT INTO users (id, email, created_at) VALUES (?, ?, ?)").run(id, encrypted, now);
+  }
+  return { id, email: normalized };
 }
 
 export async function getOrCreateUser(email) {
@@ -81,50 +127,117 @@ export async function getOrCreateUser(email) {
 
 export async function createAuthCode(userId, email, code, expiresAtISO) {
   const now = new Date().toISOString();
-  getDb()
-    .prepare("INSERT OR REPLACE INTO auth_codes (email, code, user_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
-    .run(email, code, userId, expiresAtISO, now);
+  const normalized = normalizeEmail(email);
+  const emailHash = hashString(normalized);
+  const encrypted = encryptString(normalized);
+  if (hasColumn("auth_codes", "email_hash")) {
+    getDb()
+      .prepare(
+        "INSERT OR REPLACE INTO auth_codes (email, email_hash, code, user_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+      )
+      .run(encrypted, emailHash, code, userId, expiresAtISO, now);
+  } else {
+    getDb()
+      .prepare("INSERT OR REPLACE INTO auth_codes (email, code, user_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(encrypted, code, userId, expiresAtISO, now);
+  }
 }
 
 export async function verifyAuthCode(email, code) {
-  const row = getDb()
-    .prepare("SELECT user_id, expires_at FROM auth_codes WHERE email = ? AND code = ?")
-    .get(email, code);
+  const normalized = normalizeEmail(email);
+  const emailHash = hashString(normalized);
+  let row = null;
+  if (hasColumn("auth_codes", "email_hash") && emailHash) {
+    row = getDb()
+      .prepare("SELECT user_id, expires_at FROM auth_codes WHERE email_hash = ? AND code = ?")
+      .get(emailHash, code);
+  }
+  if (!row) {
+    row = getDb()
+      .prepare("SELECT user_id, expires_at FROM auth_codes WHERE email = ? AND code = ?")
+      .get(normalized, code);
+  }
   if (!row) return null;
   if (row.expires_at < new Date().toISOString()) {
-    getDb().prepare("DELETE FROM auth_codes WHERE email = ? AND code = ?").run(email, code);
+    if (hasColumn("auth_codes", "email_hash") && emailHash) {
+      getDb().prepare("DELETE FROM auth_codes WHERE email_hash = ? AND code = ?").run(emailHash, code);
+    } else {
+      getDb().prepare("DELETE FROM auth_codes WHERE email = ? AND code = ?").run(normalized, code);
+    }
     return null;
   }
-  getDb().prepare("DELETE FROM auth_codes WHERE email = ? AND code = ?").run(email, code);
+  if (hasColumn("auth_codes", "email_hash") && emailHash) {
+    getDb().prepare("DELETE FROM auth_codes WHERE email_hash = ? AND code = ?").run(emailHash, code);
+  } else {
+    getDb().prepare("DELETE FROM auth_codes WHERE email = ? AND code = ?").run(normalized, code);
+  }
   return { userId: row.user_id };
 }
 
 export async function createSession(userId, ttlMinutes = 60 * 24 * 7) {
   const token = crypto.randomUUID().replace(/-/g, "");
+  const tokenHash = hashString(token);
+  const encrypted = encryptString(token);
   const now = new Date();
   const expires = new Date(now.getTime() + ttlMinutes * 60 * 1000);
-  getDb()
-    .prepare("INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
-    .run(token, userId, expires.toISOString(), now.toISOString());
+  if (hasColumn("sessions", "token_hash")) {
+    getDb()
+      .prepare("INSERT INTO sessions (token, token_hash, user_id, expires_at, created_at) VALUES (?, ?, ?, ?, ?)")
+      .run(encrypted, tokenHash, userId, expires.toISOString(), now.toISOString());
+  } else {
+    getDb()
+      .prepare("INSERT INTO sessions (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)")
+      .run(encrypted, userId, expires.toISOString(), now.toISOString());
+  }
   return token;
 }
 
 export async function deleteSession(token) {
-  getDb().prepare("DELETE FROM sessions WHERE token = ?").run(token);
+  const tokenHash = hashString(token);
+  if (hasColumn("sessions", "token_hash") && tokenHash) {
+    getDb().prepare("DELETE FROM sessions WHERE token_hash = ? OR token = ?").run(tokenHash, token);
+  } else {
+    getDb().prepare("DELETE FROM sessions WHERE token = ?").run(token);
+  }
 }
 
 export async function getSession(token) {
-  const row = getDb()
-    .prepare(
-      "SELECT sessions.token, sessions.user_id, sessions.expires_at, users.email FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token = ?"
-    )
-    .get(token);
+  const tokenHash = hashString(token);
+  let row = null;
+  if (hasColumn("sessions", "token_hash") && tokenHash) {
+    row = getDb()
+      .prepare(
+        "SELECT sessions.token, sessions.token_hash, sessions.user_id, sessions.expires_at, users.email FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ?"
+      )
+      .get(tokenHash);
+  }
+  if (!row) {
+    row = getDb()
+      .prepare(
+        "SELECT sessions.token, sessions.token_hash, sessions.user_id, sessions.expires_at, users.email FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token = ?"
+      )
+      .get(token);
+  }
   if (!row) return null;
   if (row.expires_at < new Date().toISOString()) {
-    getDb().prepare("DELETE FROM sessions WHERE token = ?").run(token);
+    await deleteSession(token);
     return null;
   }
-  return row;
+  if (hasColumn("sessions", "token_hash") && tokenHash && !row.token_hash) {
+    const encrypted = encryptString(token);
+    getDb().prepare("UPDATE sessions SET token = ?, token_hash = ? WHERE token = ?").run(encrypted, tokenHash, row.token);
+  } else if (hasColumn("sessions", "token_hash") && tokenHash && !isEncrypted(row.token)) {
+    const encrypted = encryptString(token);
+    if (encrypted !== row.token) {
+      getDb().prepare("UPDATE sessions SET token = ?, token_hash = ? WHERE token_hash = ?").run(encrypted, tokenHash, tokenHash);
+    }
+  }
+  return {
+    token: row.token,
+    user_id: row.user_id,
+    expires_at: row.expires_at,
+    email: decryptString(row.email),
+  };
 }
 
 export async function getUserState(userId) {
@@ -234,6 +347,24 @@ export async function getUserEvents(userId, fromSeq = 1, limit = 200) {
   }));
 }
 
+export async function getUserEventsRecent(userId, limit = 200) {
+  const rows = getDb()
+    .prepare(
+      "SELECT id, seq, type, payload_json, at_iso, created_at FROM user_events WHERE user_id = ? ORDER BY seq DESC LIMIT ?"
+    )
+    .all(userId, Math.min(limit, 500));
+  return rows
+    .map((row) => ({
+      id: row.id,
+      seq: row.seq,
+      type: row.type,
+      payload: JSON.parse(row.payload_json),
+      atISO: row.at_iso,
+      createdAt: row.created_at,
+    }))
+    .reverse();
+}
+
 export async function listUserEventsPaged(userId, page = 1, pageSize = 50) {
   const size = Math.min(Math.max(pageSize, 1), 200);
   const offset = (Math.max(page, 1) - 1) * size;
@@ -329,6 +460,25 @@ export async function listDecisionTraces(userId, fromISO, toISO, page = 1, pageS
     .all(userId, fromISO, toISO, size, offset);
   return rows.map((row) => ({
     userId,
+    dateISO: row.date_iso,
+    pipelineVersion: row.pipeline_version,
+    inputs: JSON.parse(row.inputs_json),
+    stressState: JSON.parse(row.stress_state_json),
+    selected: JSON.parse(row.selected_json),
+    appliedRules: JSON.parse(row.applied_rules_json),
+    rationale: JSON.parse(row.rationale_json),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function listDecisionTracesRecent(userId, limit = 30) {
+  const rows = getDb()
+    .prepare(
+      "SELECT date_iso, pipeline_version, inputs_json, stress_state_json, selected_json, applied_rules_json, rationale_json, created_at, updated_at FROM decision_traces WHERE user_id = ? ORDER BY date_iso DESC LIMIT ?"
+    )
+    .all(userId, Math.min(limit, 200));
+  return rows.map((row) => ({
     dateISO: row.date_iso,
     pipelineVersion: row.pipeline_version,
     inputs: JSON.parse(row.inputs_json),
@@ -539,4 +689,55 @@ export async function listAnalyticsDaily(fromISO, toISO) {
     activeUsersCount: row.active_users_count,
     updatedAt: row.updated_at,
   }));
+}
+
+export async function seedFeatureFlags(defaults) {
+  if (!defaults || typeof defaults !== "object") return false;
+  const now = new Date().toISOString();
+  const stmt = getDb().prepare(
+    "INSERT OR IGNORE INTO feature_flags (key, value, updated_at) VALUES (?, ?, ?)"
+  );
+  Object.entries(defaults).forEach(([key, value]) => {
+    stmt.run(key, String(value), now);
+  });
+  return true;
+}
+
+export async function listFeatureFlags() {
+  const rows = getDb().prepare("SELECT key, value, updated_at FROM feature_flags").all();
+  const flags = {};
+  rows.forEach((row) => {
+    flags[row.key] = row.value;
+  });
+  return flags;
+}
+
+export async function setFeatureFlag(key, value) {
+  const now = new Date().toISOString();
+  getDb()
+    .prepare("INSERT INTO feature_flags (key, value, updated_at) VALUES (?, ?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+    .run(key, String(value), now);
+  return { key, value: String(value), updatedAt: now };
+}
+
+export async function deleteUserData(userId) {
+  const instance = getDb();
+  instance.exec("BEGIN;");
+  try {
+    instance.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM auth_codes WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM user_state WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM user_state_history WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM user_events WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM user_events_archive WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM decision_traces WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM content_stats WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM analytics_active_users WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM users WHERE id = ?").run(userId);
+    instance.exec("COMMIT;");
+    return { ok: true };
+  } catch (err) {
+    instance.exec("ROLLBACK;");
+    throw err;
+  }
 }

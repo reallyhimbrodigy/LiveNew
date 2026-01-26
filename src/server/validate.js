@@ -174,7 +174,14 @@ export function validateRules(body) {
   if (!ruleToggles || typeof ruleToggles !== "object") {
     return fail("rules_invalid", "ruleToggles is required", "ruleToggles");
   }
-  const fields = ["constraintsEnabled", "noveltyEnabled", "feedbackEnabled", "badDayEnabled"];
+  const fields = [
+    "constraintsEnabled",
+    "noveltyEnabled",
+    "feedbackEnabled",
+    "badDayEnabled",
+    "recoveryDebtEnabled",
+    "circadianAnchorsEnabled",
+  ];
   for (const field of fields) {
     if (field in ruleToggles && typeof ruleToggles[field] !== "boolean") {
       return fail("rules_invalid", `${field} must be boolean`, field);

@@ -7,6 +7,8 @@ export function initialStatePatch() {
       noveltyEnabled: true,
       feedbackEnabled: true,
       badDayEnabled: true,
+      recoveryDebtEnabled: true,
+      circadianAnchorsEnabled: true,
     },
     eventLog: [],
     feedback: [],
@@ -588,6 +590,8 @@ function buildQualityRules(ruleToggles) {
     avoidNoveltyWindowDays: ruleToggles.noveltyEnabled === false ? 0 : 2,
     noveltyEnabled: ruleToggles.noveltyEnabled !== false,
     constraintsEnabled: ruleToggles.constraintsEnabled !== false,
+    recoveryDebtEnabled: ruleToggles.recoveryDebtEnabled !== false,
+    circadianAnchorsEnabled: ruleToggles.circadianAnchorsEnabled !== false,
   };
 }
 
@@ -728,7 +732,11 @@ function buildStressStateMap(user, plan, checkInsByDate, domain) {
   const map = {};
   plan.days.forEach((day) => {
     const checkIn = checkInsByDate ? checkInsByDate[day.dateISO] : undefined;
-    map[day.dateISO] = domain.assignStressProfile({ user, dateISO: day.dateISO, checkIn });
+    const stressState = domain.assignStressProfile({ user, dateISO: day.dateISO, checkIn });
+    if (typeof domain.computeRecoveryDebt === "function") {
+      stressState.recoveryDebt = domain.computeRecoveryDebt(checkInsByDate, day.dateISO);
+    }
+    map[day.dateISO] = stressState;
   });
   return map;
 }

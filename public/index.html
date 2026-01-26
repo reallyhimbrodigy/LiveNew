@@ -1,310 +1,342 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>LiveNew - Daily Plan Console</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Space+Grotesk:wght@400;500;600&display=swap"
-      rel="stylesheet"
-    />
+    <title>LiveNew</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header>
-      <div class="shell">
-        <h1>LiveNew Daily Command</h1>
-        <p class="subtitle">
-          A lightweight cockpit for your daily plan engine - save profile, get a day contract, log check-ins, and
-          test rules.
-        </p>
-      </div>
+    <header class="topbar">
+      <div class="brand">LiveNew</div>
+      <div class="auth-status" id="auth-status">Not signed in</div>
     </header>
 
-    <main class="shell">
-      <section class="card" id="profile-panel">
-        <div class="panel-header">
-          <div>
-            <p class="section-title">Profile</p>
-            <p class="subtitle">Baseline inputs that shape the week plan.</p>
-          </div>
-          <button id="save-profile" class="secondary">Save profile</button>
+    <main>
+      <section class="card" id="auth-panel">
+        <h2>Sign in</h2>
+        <div class="grid">
+          <label>
+            Email
+            <input type="email" id="auth-email" placeholder="you@example.com" />
+          </label>
+          <button id="request-code" class="primary">Send code</button>
         </div>
-        <div class="form-row">
-          <div>
-            <label for="wakeTime">Wake time</label>
-            <input type="time" id="wakeTime" value="07:00" />
-          </div>
-          <div>
-            <label for="bedTime">Bed time</label>
-            <input type="time" id="bedTime" value="23:00" />
-          </div>
-          <div>
-            <label for="sleepRegularity">Sleep regularity (1-10)</label>
-            <input type="number" id="sleepRegularity" min="1" max="10" value="5" />
-          </div>
-          <div>
-            <label for="sunlightMinutes">Sunlight minutes/day</label>
-            <input type="number" id="sunlightMinutes" min="0" value="10" />
-          </div>
+        <div class="grid">
+          <label>
+            Code
+            <input type="text" id="auth-code" placeholder="123456" />
+          </label>
+          <button id="verify-code">Verify</button>
         </div>
-        <div class="form-row" style="margin-top: 12px;">
-          <div>
-            <label for="preferredWindow">Preferred workout window</label>
-            <select id="preferredWindow">
-              <option value="AM">AM</option>
-              <option value="MIDDAY">MIDDAY</option>
-              <option value="PM" selected>PM</option>
-            </select>
-          </div>
-          <div>
-            <label for="busyDays">Busy days (comma dates)</label>
-            <input type="text" id="busyDays" placeholder="2026-01-28, 2026-01-30" />
-          </div>
-          <div>
-            <label for="caffeineCups">Caffeine cups/day</label>
-            <input type="number" id="caffeineCups" min="0" value="1" />
-          </div>
-          <div>
-            <label for="lateScreen">Late screen minutes/night</label>
-            <input type="number" id="lateScreen" min="0" value="45" />
-          </div>
+        <div class="auth-actions">
+          <button id="logout" class="ghost">Sign out</button>
+          <span id="auth-message" class="status"></span>
         </div>
-        <p class="status" id="profile-status"></p>
       </section>
 
-      <section class="grid" style="margin-top: 20px;">
-        <div class="card" id="day-panel">
-          <div class="panel-header">
-            <div>
-              <p class="section-title">Day Plan</p>
-              <p class="subtitle">Strict What/Why/How long contract.</p>
-            </div>
-            <div>
+      <nav class="tabs">
+        <button data-tab="day" class="tab active">Day</button>
+        <button data-tab="week" class="tab">Week</button>
+        <button data-tab="trends" class="tab">Trends</button>
+        <button data-tab="profile" class="tab">Profile</button>
+        <button data-tab="admin" class="tab" id="admin-tab" style="display:none;">Admin</button>
+      </nav>
+
+      <section id="view-day" class="view">
+        <div class="card">
+          <div class="row">
+            <label>
+              Date
               <input type="date" id="day-date" />
-              <button id="load-day" class="ghost" style="margin-left: 8px;">Load day</button>
-            </div>
+            </label>
+            <button id="load-day" class="primary">Load day</button>
+            <button id="bad-day" class="danger">Bad day mode</button>
           </div>
-          <div class="plan-grid" id="day-contract">
-            <div class="plan-block">
-              <h4>What</h4>
-              <div><strong>Workout:</strong> <span data-what-workout></span></div>
-              <div><strong>Reset:</strong> <span data-what-reset></span></div>
-              <div><strong>Nutrition:</strong> <span data-what-nutrition></span></div>
-            </div>
-            <div class="plan-block alt">
-              <h4>Why</h4>
-              <div><strong>Profile:</strong> <span data-why-profile></span></div>
-              <div><strong>Focus:</strong> <span data-why-focus></span></div>
-              <div><strong>Statement:</strong> <span data-why-statement></span></div>
-              <div class="pill-group" data-why-drivers></div>
-            </div>
-            <div class="plan-block">
-              <h4>How long</h4>
-              <div><strong>Total minutes:</strong> <span data-howlong-total></span></div>
-              <div><strong>Time available:</strong> <span data-howlong-available></span></div>
-            </div>
+          <div class="row wrap" id="signal-buttons">
+            <button data-signal="im_stressed">I'm stressed</button>
+            <button data-signal="im_exhausted">I'm exhausted</button>
+            <button data-signal="i_have_10_min">I have 10 min</button>
+            <button data-signal="i_have_more_energy">More energy</button>
+            <button data-signal="poor_sleep">Poor sleep</button>
+            <button data-signal="anxious">Anxious</button>
+            <button data-signal="wired">Wired</button>
           </div>
-          <details class="details" id="day-details">
-            <summary>Details</summary>
-            <div class="form-row" style="margin-top: 12px;">
-              <div>
-                <strong>Workout steps</strong>
-                <ul data-details-workout></ul>
-              </div>
-              <div>
-                <strong>Reset steps</strong>
-                <ul data-details-reset></ul>
-              </div>
-              <div>
-                <strong>Nutrition priorities</strong>
-                <ul data-details-nutrition></ul>
-              </div>
-            </div>
-          </details>
-          <p class="status" id="day-status"></p>
+          <div id="day-status" class="status"></div>
         </div>
 
+        <div class="grid-3">
+          <div class="card">
+            <h3>What</h3>
+            <div class="label">Workout</div>
+            <div id="day-what-workout">-</div>
+            <div class="label">Reset</div>
+            <div id="day-what-reset">-</div>
+            <div class="label">Nutrition</div>
+            <div id="day-what-nutrition">-</div>
+          </div>
+          <div class="card">
+            <h3>Why</h3>
+            <div class="label">Profile</div>
+            <div id="day-why-profile">-</div>
+            <div class="label">Focus</div>
+            <div id="day-why-focus">-</div>
+            <div id="day-why-statement" class="muted"></div>
+            <div class="chips" id="day-why-drivers"></div>
+          </div>
+          <div class="card">
+            <h3>How long</h3>
+            <div class="label">Total minutes</div>
+            <div id="day-howlong-total">-</div>
+            <div class="label">Time available</div>
+            <div id="day-howlong-available">-</div>
+          </div>
+        </div>
+
+        <details class="card" id="day-details">
+          <summary>Details</summary>
+          <div class="details-grid">
+            <div>
+              <h4>Workout steps</h4>
+              <ul id="day-workout-steps"></ul>
+            </div>
+            <div>
+              <h4>Reset steps</h4>
+              <ul id="day-reset-steps"></ul>
+            </div>
+            <div>
+              <h4>Nutrition priorities</h4>
+              <ul id="day-nutrition-priorities"></ul>
+            </div>
+            <div>
+              <h4>Anchors</h4>
+              <div id="day-anchors"></div>
+            </div>
+          </div>
+        </details>
+
         <div class="card">
-          <p class="section-title">Signals & Check-in</p>
-          <div>
-            <strong>Quick signals</strong>
-            <div class="pill-group" style="margin-top: 8px;" id="signal-buttons">
-              <button class="ghost" data-signal="im_stressed">I'm stressed</button>
-              <button class="ghost" data-signal="poor_sleep">Poor sleep</button>
-              <button class="ghost" data-signal="wired">Wired</button>
-              <button class="ghost" data-signal="anxious">Anxious</button>
-              <button class="ghost" data-signal="im_exhausted">Exhausted</button>
-              <button class="ghost" data-signal="i_have_10_min">Only 10 min</button>
-              <button class="ghost" data-signal="i_have_more_energy">More energy</button>
-            </div>
-          </div>
-          <div style="margin-top: 16px;">
-            <button id="bad-day" class="secondary">Bad day mode</button>
-          </div>
-          <form id="checkin-form" style="margin-top: 20px;">
-            <div class="form-row">
-              <div>
-                <label for="checkin-date">Date</label>
-                <input type="date" id="checkin-date" />
-              </div>
-              <div>
-                <label for="checkin-stress">Stress (1-10)</label>
-                <input type="number" id="checkin-stress" min="1" max="10" value="6" />
-              </div>
-              <div>
-                <label for="checkin-sleep">Sleep quality (1-10)</label>
-                <input type="number" id="checkin-sleep" min="1" max="10" value="6" />
-              </div>
-              <div>
-                <label for="checkin-energy">Energy (1-10)</label>
-                <input type="number" id="checkin-energy" min="1" max="10" value="6" />
-              </div>
-              <div>
-                <label for="checkin-time">Time available (min)</label>
-                <input type="number" id="checkin-time" min="0" value="20" />
-              </div>
-            </div>
-            <div style="margin-top: 12px;">
-              <label for="checkin-notes">Notes</label>
-              <textarea id="checkin-notes" placeholder="Optional notes..."></textarea>
-            </div>
-            <button type="submit" style="margin-top: 12px;">Submit check-in</button>
+          <h3>Check-in</h3>
+          <form id="checkin-form" class="grid-2">
+            <label>
+              Date
+              <input type="date" id="checkin-date" />
+            </label>
+            <label>
+              Stress (1-10)
+              <input type="number" min="1" max="10" id="checkin-stress" value="5" />
+            </label>
+            <label>
+              Sleep (1-10)
+              <input type="number" min="1" max="10" id="checkin-sleep" value="6" />
+            </label>
+            <label>
+              Energy (1-10)
+              <input type="number" min="1" max="10" id="checkin-energy" value="6" />
+            </label>
+            <label>
+              Time available
+              <select id="checkin-time">
+                <option value="5">5 min</option>
+                <option value="10">10 min</option>
+                <option value="15">15 min</option>
+                <option value="20" selected>20 min</option>
+                <option value="30">30 min</option>
+                <option value="45">45 min</option>
+                <option value="60">60 min</option>
+              </select>
+            </label>
+            <label>
+              Notes
+              <input type="text" id="checkin-notes" />
+            </label>
+            <button class="primary" type="submit">Save check-in</button>
           </form>
-          <p class="status" id="checkin-status"></p>
-        </div>
-      </section>
-
-      <section class="grid" style="margin-top: 20px;">
-        <div class="card">
-          <p class="section-title">Completion</p>
-          <div class="toggle-row" id="completion-buttons">
-            <button class="ghost" data-part="workout">Workout done</button>
-            <button class="ghost" data-part="reset">Reset done</button>
-            <button class="ghost" data-part="nutrition">Nutrition done</button>
-          </div>
-          <p class="status" id="completion-status"></p>
+          <div id="checkin-status" class="status"></div>
         </div>
 
-        <div class="card">
-          <p class="section-title">Feedback</p>
-          <div class="form-row">
-            <div>
-              <label for="feedback-date">Date</label>
-              <input type="date" id="feedback-date" />
+        <div class="grid-2">
+          <div class="card">
+            <h3>Completion</h3>
+            <div class="row wrap" id="completion-buttons">
+              <button data-part="workout">Workout</button>
+              <button data-part="reset">Reset</button>
+              <button data-part="nutrition">Nutrition</button>
             </div>
-            <div>
-              <label for="feedback-helped">Helped?</label>
+            <div id="completion-status" class="status"></div>
+          </div>
+          <div class="card">
+            <h3>Feedback</h3>
+            <label>
+              Date
+              <input type="date" id="feedback-date" />
+            </label>
+            <label>
+              Helped?
               <select id="feedback-helped">
                 <option value="true">Yes</option>
                 <option value="false">No</option>
               </select>
-            </div>
-            <div>
-              <label for="feedback-reason">Reason</label>
+            </label>
+            <label>
+              Reason (if no)
               <select id="feedback-reason">
-                <option value="">Optional</option>
+                <option value="">--</option>
                 <option value="too_hard">Too hard</option>
                 <option value="too_easy">Too easy</option>
                 <option value="wrong_time">Wrong time</option>
                 <option value="not_relevant">Not relevant</option>
               </select>
-            </div>
+            </label>
+            <button id="submit-feedback">Send feedback</button>
+            <div id="feedback-status" class="status"></div>
           </div>
-          <button id="submit-feedback" style="margin-top: 12px;">Send feedback</button>
-          <p class="status" id="feedback-status"></p>
         </div>
+      </section>
 
+      <section id="view-week" class="view" style="display:none;">
         <div class="card">
-          <div class="panel-header">
-            <div>
-              <p class="section-title">Progress</p>
-              <p class="subtitle">7-day averages + adherence.</p>
-            </div>
-            <button id="refresh-progress" class="ghost">Refresh</button>
+          <div class="row">
+            <label>
+              Week of
+              <input type="date" id="week-date" />
+            </label>
+            <button id="load-week" class="primary">Load week</button>
           </div>
-          <div id="progress-panel" style="margin-top: 10px;"></div>
+          <div id="week-status" class="status"></div>
         </div>
+        <div class="card" id="week-list"></div>
+      </section>
 
+      <section id="view-trends" class="view" style="display:none;">
         <div class="card">
-          <div class="panel-header">
-            <div>
-              <p class="section-title">Trends</p>
-              <p class="subtitle">Daily averages with no gamification.</p>
-            </div>
-            <div>
+          <div class="row">
+            <label>
+              Range
               <select id="trends-days">
                 <option value="7">7 days</option>
                 <option value="14">14 days</option>
                 <option value="30">30 days</option>
               </select>
-              <button id="refresh-trends" class="ghost" style="margin-left: 6px;">Refresh</button>
-            </div>
+            </label>
+            <button id="load-trends" class="primary">Load trends</button>
           </div>
-          <div id="trends-panel" style="margin-top: 10px;"></div>
+        </div>
+        <div class="card" id="trends-table"></div>
+      </section>
+
+      <section id="view-profile" class="view" style="display:none;">
+        <div class="card">
+          <h3>Your baseline</h3>
+          <form id="profile-form" class="grid-2">
+            <label>
+              Wake time
+              <input type="time" id="wakeTime" />
+            </label>
+            <label>
+              Bed time
+              <input type="time" id="bedTime" />
+            </label>
+            <label>
+              Sleep regularity (1-10)
+              <input type="number" min="1" max="10" id="sleepRegularity" value="6" />
+            </label>
+            <label>
+              Caffeine cups per day (0-5)
+              <input type="number" min="0" max="5" id="caffeineCups" value="1" />
+            </label>
+            <label>
+              Late caffeine days per week (0-7)
+              <input type="number" min="0" max="7" id="lateCaffeineDays" value="0" />
+            </label>
+            <label>
+              Sunlight minutes per day (0-120)
+              <input type="number" min="0" max="120" id="sunlightMinutes" value="15" />
+            </label>
+            <label>
+              Late screen minutes per night (0-240)
+              <input type="number" min="0" max="240" id="lateScreen" value="30" />
+            </label>
+            <label>
+              Alcohol nights per week (0-7)
+              <input type="number" min="0" max="7" id="alcoholNights" value="0" />
+            </label>
+            <label>
+              Meal timing consistency (1-10)
+              <input type="number" min="1" max="10" id="mealTiming" value="6" />
+            </label>
+            <label>
+              Preferred workout window
+              <select id="preferredWindow">
+                <option value="AM">AM</option>
+                <option value="MIDDAY">Midday</option>
+                <option value="PM" selected>PM</option>
+              </select>
+            </label>
+            <label>
+              Busy days (comma separated YYYY-MM-DD)
+              <input type="text" id="busyDays" />
+            </label>
+            <button class="primary" type="submit">Save profile</button>
+          </form>
+          <div id="profile-status" class="status"></div>
         </div>
       </section>
 
-      <section class="card" id="tomorrow-panel" style="margin-top: 20px; display: none;">
-        <div class="panel-header">
-          <div>
-            <p class="section-title">Tomorrow (auto-adjust)</p>
-            <p class="subtitle">Shown after high stress + poor sleep check-in.</p>
+      <section id="view-admin" class="view" style="display:none;">
+        <div class="card">
+          <h3>Content management</h3>
+          <div class="row">
+            <label>
+              Kind
+              <select id="admin-kind">
+                <option value="workout">Workout</option>
+                <option value="nutrition">Nutrition</option>
+                <option value="reset">Reset</option>
+              </select>
+            </label>
+            <button id="admin-load" class="primary">Load</button>
           </div>
+          <div id="admin-content"></div>
         </div>
-        <div class="plan-grid" id="tomorrow-contract"></div>
-      </section>
 
-      <section class="card" id="dev-panel" style="margin-top: 20px; display: none;">
-        <div class="panel-header">
-          <div>
-            <p class="section-title">Dev QA Controls</p>
-            <p class="subtitle">Rules, scenarios, snapshots, and bundle viewer.</p>
+        <div class="card">
+          <h3>Edit item</h3>
+          <div id="admin-edit" class="grid-2"></div>
+          <div class="row">
+            <button id="admin-save" class="primary">Save</button>
+            <span id="admin-status" class="status"></span>
           </div>
         </div>
-        <div class="form-row">
-          <div>
-            <label>Rule toggles</label>
-            <div>
-              <label><input type="checkbox" id="rule-constraints" /> Constraints enabled</label><br />
-              <label><input type="checkbox" id="rule-novelty" /> Novelty enabled</label><br />
-              <label><input type="checkbox" id="rule-feedback" /> Feedback enabled</label><br />
-              <label><input type="checkbox" id="rule-badday" /> Bad day enabled</label>
-            </div>
-            <button id="save-rules" class="secondary" style="margin-top: 8px;">Save rules</button>
-          </div>
-          <div>
-            <label for="scenario-select">Scenario</label>
-            <select id="scenario-select"></select>
-            <div style="margin-top: 8px;">
-              <button id="run-scenario" class="secondary">Apply scenario</button>
-            </div>
-          </div>
-          <div>
-            <label for="snapshot-select">Snapshot</label>
-            <select id="snapshot-select"></select>
-            <div style="margin-top: 8px;">
-              <button id="run-snapshot" class="secondary">Run snapshot</button>
-            </div>
-            <p class="status" id="snapshot-status"></p>
+
+        <div class="card">
+          <h3>Bulk actions</h3>
+          <div class="row wrap">
+            <button id="bulk-enable">Enable</button>
+            <button id="bulk-disable">Disable</button>
+            <button id="bulk-priority-up">Priority +1</button>
+            <button id="bulk-priority-down">Priority -1</button>
           </div>
         </div>
-        <div style="margin-top: 16px;">
-          <strong>Debug bundle</strong>
-          <pre id="debug-bundle">Loading...</pre>
+
+        <div class="card">
+          <h3>Worst items</h3>
+          <div class="row">
+            <label>
+              Kind
+              <select id="worst-kind">
+                <option value="workout">Workout</option>
+                <option value="nutrition">Nutrition</option>
+                <option value="reset">Reset</option>
+              </select>
+            </label>
+            <button id="load-worst">Load report</button>
+          </div>
+          <div id="worst-table"></div>
         </div>
       </section>
-
-      <footer>
-        LiveNew local server UI - single-state demo surface.
-      </footer>
     </main>
 
-    <script>
-      window.__IS_DEV__ = __IS_DEV__;
-    </script>
     <script src="/app.js"></script>
   </body>
 </html>

@@ -4,6 +4,7 @@ export const RULES_ORDER = [
   "poor_sleep_constraint",
   "wired_constraint",
   "depleted_constraint",
+  "recovery_debt_bias",
   "signal_override",
   "bad_day_mode",
   "feedback_modifier",

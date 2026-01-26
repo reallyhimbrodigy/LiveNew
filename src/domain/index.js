@@ -4,6 +4,7 @@ export { weekStartMonday, addDaysISO, isoToday } from "./utils/date.js";
 export { computeStressLoad } from "./scoring/stressLoad.js";
 export { computeCapacity } from "./scoring/capacity.js";
 export { assignStressProfile } from "./scoring/profile.js";
+export { computeRecoveryDebt } from "./scoring/recoveryDebt.js";
 
 export { APP_LOG_SCHEMA_VERSION } from "./constants.js";
 export { DECISION_PIPELINE_VERSION, STATE_SCHEMA_VERSION, normalizeState, validateState } from "./schema.js";

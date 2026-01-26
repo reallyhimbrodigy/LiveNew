@@ -29,6 +29,7 @@ import {
   saveUserState,
   appendUserEvent,
   getUserEvents,
+  getUserEventsRecent,
   listUserEventsPaged,
   getOrCreateUser,
   createAuthCode,
@@ -48,18 +49,24 @@ import {
   upsertDecisionTrace,
   getDecisionTrace,
   listDecisionTraces,
+  listDecisionTracesRecent,
   recordActiveUser,
   updateAnalyticsDaily,
   listAnalyticsDaily,
   getUserStateHistory,
   getWorstItems,
+  seedFeatureFlags,
+  listFeatureFlags,
+  setFeatureFlag,
+  deleteUserData,
 } from "../state/db.js";
 import { createBackup, restoreBackup, listBackups } from "../db/backup.js";
 
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const ALPHA_MODE = process.env.ALPHA_MODE === "true";
-const isDevEnabled = NODE_ENV !== "production" && !ALPHA_MODE;
+const isDevRoutesEnabled =
+  process.env.DEV_ROUTES_ENABLED === "true" || (NODE_ENV !== "production" && process.env.ALPHA_MODE !== "true");
 const EVENT_SOURCING = process.env.EVENT_SOURCING === "true";
 const EVENT_RETENTION_DAYS = Number(process.env.EVENT_RETENTION_DAYS || 90);
 const ADMIN_EMAILS = new Set(
@@ -78,12 +85,40 @@ const rateLimiters = new Map();
 let shuttingDown = false;
 const authRateLimiters = new Map();
 const readCache = new Map();
+const latencySamples = new Map();
+const featureFlagsCache = { data: null, loadedAt: 0 };
+const FEATURE_FLAGS_TTL_MS = 10 * 1000;
+const DEFAULT_FLAGS = {
+  "rules.constraints.enabled": "true",
+  "rules.novelty.enabled": "true",
+  "rules.feedback.enabled": "true",
+  "rules.badDay.enabled": "true",
+  "rules.recoveryDebt.enabled": "true",
+  "rules.circadianAnchors.enabled": "true",
+};
+const LATENCY_ROUTES = new Set(["GET /v1/plan/day", "POST /v1/checkin", "POST /v1/signal"]);
+
+if ((NODE_ENV === "production" || ALPHA_MODE) && !process.env.SECRET_KEY) {
+  console.error("LiveNew SECRET_KEY is required in production/alpha.");
+  process.exit(1);
+}
 
 await ensureDataDirWritable();
 await initDb();
 await seedContentItems(domain.defaultLibrary);
+await seedFeatureFlags(DEFAULT_FLAGS);
 await applyLibraryFromDb();
 await cleanupOldEvents(EVENT_RETENTION_DAYS);
+console.log(
+  JSON.stringify({
+    event: "boot",
+    node: process.version,
+    apiVersion: "1",
+    schemaVersion: domain.STATE_SCHEMA_VERSION ?? null,
+    pipelineVersion: domain.DECISION_PIPELINE_VERSION ?? null,
+    devRoutesEnabled: isDevRoutesEnabled,
+  })
+);
 setInterval(() => {
   cleanupOldEvents(EVENT_RETENTION_DAYS).catch((err) => {
     console.error("Event retention cleanup failed", err);
@@ -119,18 +154,58 @@ async function applyLibraryFromDb() {
   if (resets.length) domain.defaultLibrary.resets = resets;
 }
 
+async function getFeatureFlags() {
+  const now = Date.now();
+  if (featureFlagsCache.data && now - featureFlagsCache.loadedAt < FEATURE_FLAGS_TTL_MS) {
+    return featureFlagsCache.data;
+  }
+  const loaded = await listFeatureFlags();
+  const merged = { ...DEFAULT_FLAGS, ...(loaded || {}) };
+  featureFlagsCache.data = merged;
+  featureFlagsCache.loadedAt = now;
+  return merged;
+}
+
+function flagEnabled(flags, key) {
+  const value = flags?.[key];
+  if (value == null) return true;
+  return String(value) !== "false";
+}
+
+function resolveRuleToggles(state, flags) {
+  const base = {
+    constraintsEnabled: flagEnabled(flags, "rules.constraints.enabled"),
+    noveltyEnabled: flagEnabled(flags, "rules.novelty.enabled"),
+    feedbackEnabled: flagEnabled(flags, "rules.feedback.enabled"),
+    badDayEnabled: flagEnabled(flags, "rules.badDay.enabled"),
+    recoveryDebtEnabled: flagEnabled(flags, "rules.recoveryDebt.enabled"),
+    circadianAnchorsEnabled: flagEnabled(flags, "rules.circadianAnchors.enabled"),
+  };
+  if (!isDevRoutesEnabled) return base;
+  const overrides = state.ruleToggles || {};
+  return {
+    constraintsEnabled: base.constraintsEnabled && overrides.constraintsEnabled !== false,
+    noveltyEnabled: base.noveltyEnabled && overrides.noveltyEnabled !== false,
+    feedbackEnabled: base.feedbackEnabled && overrides.feedbackEnabled !== false,
+    badDayEnabled: base.badDayEnabled && overrides.badDayEnabled !== false,
+    recoveryDebtEnabled: base.recoveryDebtEnabled && overrides.recoveryDebtEnabled !== false,
+    circadianAnchorsEnabled: base.circadianAnchorsEnabled && overrides.circadianAnchorsEnabled !== false,
+  };
+}
+
 async function repairUserState(userId, reason) {
   const baseNow = new Date().toISOString();
   const events = await getUserEvents(userId, 1, 5000);
   if (events.length) {
+    const flags = await getFeatureFlags();
     let rebuilt = normalizeState({});
     for (const evt of events) {
       const ctx = {
         domain,
         now: { todayISO: domain.isoToday(), atISO: evt.atISO || baseNow },
-        ruleToggles: rebuilt.ruleToggles,
+        ruleToggles: resolveRuleToggles(rebuilt, flags),
         scenarios: { getScenarioById },
-        isDev: isDevEnabled,
+        isDev: isDevRoutesEnabled,
       };
       const result = reduceEvent(rebuilt, { type: evt.type, payload: evt.payload, atISO: evt.atISO || baseNow }, ctx);
       rebuilt = appendLogEvent(result.nextState, result.logEvent);
@@ -265,10 +340,10 @@ function appendLogEvent(current, logEvent) {
 function dispatch(state, event, ctxOverrides = {}) {
   const ctx = {
     domain,
-    ruleToggles: state.ruleToggles,
+    ruleToggles: ctxOverrides.ruleToggles || state.ruleToggles,
     now: { todayISO: domain.isoToday(), atISO: new Date().toISOString() },
     scenarios: { getScenarioById },
-    isDev: isDevEnabled,
+    isDev: isDevRoutesEnabled,
     ...ctxOverrides,
   };
 
@@ -280,7 +355,9 @@ function dispatch(state, event, ctxOverrides = {}) {
 function sendJson(res, status, payload, userId) {
   const body = userId ? { userId, ...payload } : { ...payload };
   if (res?.livenewRequestId) body.requestId = res.livenewRequestId;
-  res.writeHead(status, { "Content-Type": "application/json" });
+  const headers = { "Content-Type": "application/json" };
+  if (res?.livenewApiVersion) headers["x-api-version"] = res.livenewApiVersion;
+  res.writeHead(status, headers);
   res.end(JSON.stringify(body));
 }
 
@@ -329,6 +406,7 @@ function contentTypeForPath(filePath) {
   if (filePath.endsWith(".js")) return "text/javascript";
   if (filePath.endsWith(".css")) return "text/css";
   if (filePath.endsWith(".html")) return "text/html";
+  if (filePath.endsWith(".json")) return "application/json";
   return "application/octet-stream";
 }
 
@@ -396,6 +474,30 @@ function checkRateLimit(userId, isMutating) {
     if (!okMutating) return { ok: false, kind: "mutating" };
   }
   return { ok: true };
+}
+
+function recordLatency(routeKey, ms) {
+  if (!LATENCY_ROUTES.has(routeKey)) return;
+  const list = latencySamples.get(routeKey) || [];
+  list.push(ms);
+  if (list.length > 500) list.shift();
+  latencySamples.set(routeKey, list);
+}
+
+function percentile(values, p) {
+  if (!values.length) return null;
+  const sorted = values.slice().sort((a, b) => a - b);
+  const idx = Math.min(sorted.length - 1, Math.floor((p / 100) * sorted.length));
+  return Math.round(sorted[idx] * 10) / 10;
+}
+
+function latencyStats(routeKey) {
+  const samples = latencySamples.get(routeKey) || [];
+  return {
+    count: samples.length,
+    p50: percentile(samples, 50),
+    p95: percentile(samples, 95),
+  };
 }
 
 function diffSelectionStats(prevStats, nextStats) {
@@ -497,7 +599,7 @@ function getCachedResponse(userId, reqPath, query) {
   return entry.payload;
 }
 
-function setCachedResponse(userId, reqPath, query, payload, ttlMs = 2000) {
+function setCachedResponse(userId, reqPath, query, payload, ttlMs = 10000) {
   const key = readCacheKey(userId, reqPath, query);
   readCache.set(key, { payload, expiresAt: Date.now() + ttlMs });
 }
@@ -524,6 +626,7 @@ function buildDecisionTrace(state, dateISO) {
       : null,
     modifiers: state.modifiers || {},
     busyDay: Boolean(state.userProfile?.busyDays?.includes?.(dateISO)),
+    recoveryDebt: state.lastStressStateByDate?.[dateISO]?.recoveryDebt ?? null,
   };
   return {
     pipelineVersion: dayPlan.pipelineVersion ?? null,
@@ -598,7 +701,7 @@ function defaultDateRange(days) {
 async function serveFile(res, filePath, { replaceDevFlag } = {}) {
   try {
     const raw = await fs.readFile(filePath, "utf8");
-    const body = replaceDevFlag ? raw.replace("__IS_DEV__", isDevEnabled ? "true" : "false") : raw;
+    const body = replaceDevFlag ? raw.replace("__IS_DEV__", isDevRoutesEnabled ? "true" : "false") : raw;
     res.writeHead(200, { "Content-Type": contentTypeForPath(filePath) });
     res.end(body);
   } catch (err) {
@@ -612,14 +715,20 @@ const server = http.createServer(async (req, res) => {
   const requestId = getRequestId(req);
   const started = process.hrtime.bigint();
   res.livenewRequestId = requestId;
+  if (pathname.startsWith("/v1")) {
+    res.livenewApiVersion = "1";
+  }
 
   res.on("finish", () => {
     const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
+    const routeKey = `${req.method} ${pathname}`;
+    recordLatency(routeKey, durationMs);
     const logEntry = {
       atISO: new Date().toISOString(),
       requestId,
       userId: res.livenewUserId || null,
       route: pathname,
+      method: req.method,
       status: res.statusCode,
       ms: Math.round(durationMs),
       errorCode: res.errorCode || undefined,
@@ -648,6 +757,16 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && pathname === "/openapi.v1.json") {
+    await serveFile(res, path.join(PUBLIC_DIR, "openapi.v1.json"));
+    return;
+  }
+
+  if (pathname.startsWith("/dev") || pathname.startsWith("/api") || pathname.startsWith("/v0")) {
+    sendError(res, 410, "route_deprecated", "This route is deprecated. Use /v1.");
+    return;
+  }
+
   try {
     if (pathname === "/healthz" && req.method === "GET") {
       await checkDbConnection();
@@ -665,6 +784,7 @@ const server = http.createServer(async (req, res) => {
     if (pathname === "/readyz" && req.method === "GET") {
       await checkDbConnection();
       await checkReady();
+      await getFeatureFlags();
       sendJson(res, 200, { ok: true });
       return;
     }
@@ -697,7 +817,7 @@ const server = http.createServer(async (req, res) => {
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
       await createAuthCode(user.id, user.email, code, expiresAt);
       res.livenewUserId = user.id;
-      if (isDevEnabled) {
+      if (isDevRoutesEnabled) {
         sendJson(res, 200, { ok: true, code }, user.id);
       } else {
         console.log(`LiveNew auth code for ${email}: ${code}`);
@@ -798,7 +918,9 @@ const server = http.createServer(async (req, res) => {
       while (attempts < 2) {
         const prevStats = currentState.selectionStats;
         const prevState = currentState;
-        const resEvent = dispatch(currentState, eventWithAt);
+        const flags = await getFeatureFlags();
+        const effectiveToggles = resolveRuleToggles(currentState, flags);
+        const resEvent = dispatch(currentState, eventWithAt, { ruleToggles: effectiveToggles });
         const nextState = resEvent.state;
 
         if (!resEvent.effects.persist && !resEvent.logEvent) {
@@ -1064,6 +1186,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/trends" && req.method === "GET") {
+      const cached = getCachedResponse(userId, pathname, url.search);
+      if (cached) {
+        send(200, cached);
+        return;
+      }
       const daysParam = url.searchParams.get("days") || "7";
       const daysNum = Number(daysParam);
       const allowed = [7, 14, 30];
@@ -1072,7 +1199,111 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const trends = buildTrends(state, daysNum);
-      send(200, { ok: true, days: trends });
+      const payload = { ok: true, days: trends };
+      setCachedResponse(userId, pathname, url.search, payload);
+      send(200, payload);
+      return;
+    }
+
+    if (pathname === "/v1/account/export" && req.method === "GET") {
+      const events = await getUserEventsRecent(userId, 200);
+      const traces = await listDecisionTracesRecent(userId, 30);
+      const exportPayload = {
+        userProfile: state.userProfile || null,
+        checkIns: state.checkIns || [],
+        completions: state.partCompletionByDate || {},
+        feedback: state.feedback || [],
+        events,
+        decisionTraces: traces,
+      };
+      send(200, { ok: true, export: exportPayload });
+      return;
+    }
+
+    if (pathname === "/v1/account" && req.method === "DELETE") {
+      const confirmHeader = req.headers["x-confirm-delete"];
+      if (confirmHeader !== "DELETE") {
+        sendError(res, 400, "confirm_required", "x-confirm-delete must be DELETE", "x-confirm-delete");
+        return;
+      }
+      let body = {};
+      if (ALPHA_MODE) {
+        body = await parseJson(req);
+        if (body?.confirm !== "LiveNew") {
+          sendError(res, 400, "confirm_required", "confirm must be LiveNew", "confirm");
+          return;
+        }
+      }
+      await deleteUserData(userId);
+      userStates.delete(userId);
+      send(200, { ok: true });
+      return;
+    }
+
+    if (pathname === "/v1/admin/me" && req.method === "GET") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      const admin = isAdmin(userEmail);
+      send(200, { ok: true, isAdmin: admin, email: userEmail });
+      return;
+    }
+
+    if (pathname === "/v1/admin/flags" && req.method === "GET") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const flags = await getFeatureFlags();
+      send(200, { ok: true, flags });
+      return;
+    }
+
+    if (pathname === "/v1/admin/flags" && req.method === "PATCH") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const body = await parseJson(req);
+      const key = body?.key;
+      const value = body?.value;
+      if (!key || typeof key !== "string") {
+        sendError(res, 400, "key_required", "key is required", "key");
+        return;
+      }
+      if (value == null) {
+        sendError(res, 400, "value_required", "value is required", "value");
+        return;
+      }
+      const updated = await setFeatureFlag(key, value);
+      featureFlagsCache.data = null;
+      send(200, { ok: true, flag: updated });
+      return;
+    }
+
+    if (pathname === "/v1/admin/metrics/latency" && req.method === "GET") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const entries = Array.from(LATENCY_ROUTES).map((routeKey) => ({
+        route: routeKey,
+        ...latencyStats(routeKey),
+      }));
+      send(200, { ok: true, metrics: entries });
       return;
     }
 
@@ -1145,7 +1376,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const contentPatchMatch = pathname.match(/^\\/v1\\/admin\\/content\\/(workout|nutrition|reset)\\/([^/]+)$/);
+    const contentPatchMatch = pathname.match(/^\/v1\/admin\/content\/(workout|nutrition|reset)\/([^/]+)$/);
     if (contentPatchMatch && req.method === "PATCH") {
       if (!userEmail) {
         sendError(res, 401, "auth_required", "Authorization required");
@@ -1416,266 +1647,229 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (pathname === "/v1/dev/replay" && req.method === "POST") {
-      if (!isDevEnabled) {
-        sendError(res, 404, "not_found", "Not found");
-        return;
-      }
-      const body = await parseJson(req);
-      const validation = validateReplay(body);
-      if (!validation.ok) {
-        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
-        return;
-      }
-      const replayUserId = sanitizeUserId(validation.value.userId || userId);
-      res.livenewUserId = replayUserId;
+    if (isDevRoutesEnabled) {
+      if (pathname === "/v1/dev/replay" && req.method === "POST") {
+        const body = await parseJson(req);
+        const validation = validateReplay(body);
+        if (!validation.ok) {
+          sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+          return;
+        }
+        const replayUserId = sanitizeUserId(validation.value.userId || userId);
+        res.livenewUserId = replayUserId;
 
-      let replayState = normalizeState(validation.value.initialState || {});
-      const now = { todayISO: domain.isoToday(), atISO: new Date().toISOString() };
+        let replayState = normalizeState(validation.value.initialState || {});
+        const now = { todayISO: domain.isoToday(), atISO: new Date().toISOString() };
+        const flags = await getFeatureFlags();
 
-      for (const evt of validation.value.events) {
-        const atISO = evt.atISO || now.atISO;
-        const ctx = {
-          domain,
-          now: { todayISO: now.todayISO, atISO },
-          ruleToggles: replayState.ruleToggles,
-          scenarios: { getScenarioById },
-          isDev: true,
+        for (const evt of validation.value.events) {
+          const atISO = evt.atISO || now.atISO;
+          const ctx = {
+            domain,
+            now: { todayISO: now.todayISO, atISO },
+            ruleToggles: resolveRuleToggles(replayState, flags),
+            scenarios: { getScenarioById },
+            isDev: true,
+          };
+          const result = reduceEvent(replayState, { type: evt.type, payload: evt.payload, atISO }, ctx);
+          replayState = appendLogEvent(result.nextState, result.logEvent);
+        }
+
+        const day = toDayContract(replayState, now.todayISO, domain);
+        const progress = domain.computeProgress({
+          checkIns: replayState.checkIns || [],
+          weekPlan: replayState.weekPlan,
+          completions: replayState.partCompletionByDate || {},
+        });
+        const finalStateSummary = {
+          hasProfile: Boolean(replayState.userProfile),
+          weekStartDateISO: replayState.weekPlan?.startDateISO || null,
+          checkInsCount: replayState.checkIns?.length || 0,
+          feedbackCount: replayState.feedback?.length || 0,
+          modifiers: replayState.modifiers || {},
+          ruleToggles: replayState.ruleToggles || {},
         };
-        const result = reduceEvent(replayState, { type: evt.type, payload: evt.payload, atISO }, ctx);
-        replayState = appendLogEvent(result.nextState, result.logEvent);
+        sendJson(res, 200, { ok: true, finalStateSummary, day, progress }, replayUserId);
+        return;
       }
 
-      const day = toDayContract(replayState, now.todayISO, domain);
-      const progress = domain.computeProgress({
-        checkIns: replayState.checkIns || [],
-        weekPlan: replayState.weekPlan,
-        completions: replayState.partCompletionByDate || {},
-      });
-      const finalStateSummary = {
-        hasProfile: Boolean(replayState.userProfile),
-        weekStartDateISO: replayState.weekPlan?.startDateISO || null,
-        checkInsCount: replayState.checkIns?.length || 0,
-        feedbackCount: replayState.feedback?.length || 0,
-        modifiers: replayState.modifiers || {},
-        ruleToggles: replayState.ruleToggles || {},
-      };
-      sendJson(res, 200, { ok: true, finalStateSummary, day, progress }, replayUserId);
-      return;
-    }
+      if (pathname === "/v1/dev/trace" && req.method === "GET") {
+        const dateISO = url.searchParams.get("date");
+        if (!dateISO) {
+          sendError(res, 400, "date_required", "date query param is required", "date");
+          return;
+        }
+        const validation = validateDateParam(dateISO, "date");
+        if (!validation.ok) {
+          sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+          return;
+        }
+        const trace = await getDecisionTrace(userId, dateISO);
+        send(200, { ok: true, trace });
+        return;
+      }
 
-    if (pathname === "/v1/dev/trace" && req.method === "GET") {
-      if (!isDevEnabled) {
-        sendError(res, 404, "not_found", "Not found");
+      if (pathname === "/v1/dev/events" && req.method === "GET") {
+        const userIdParam = url.searchParams.get("userId");
+        const targetUserId = userIdParam ? sanitizeUserId(userIdParam) : userId;
+        const page = Number(url.searchParams.get("page") || 0);
+        const pageSize = Number(url.searchParams.get("pageSize") || 0);
+        let events = [];
+        if (page || pageSize) {
+          events = await listUserEventsPaged(targetUserId, page || 1, pageSize || 50);
+        } else {
+          const fromSeq = Number(url.searchParams.get("fromSeq") || 1);
+          const limit = Math.min(Number(url.searchParams.get("limit") || 200), 500);
+          events = await getUserEvents(targetUserId, fromSeq, limit);
+        }
+        send(200, { ok: true, events, userId: targetUserId });
         return;
       }
-      const dateISO = url.searchParams.get("date");
-      if (!dateISO) {
-        sendError(res, 400, "date_required", "date query param is required", "date");
-        return;
-      }
-      const validation = validateDateParam(dateISO, "date");
-      if (!validation.ok) {
-        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
-        return;
-      }
-      const trace = await getDecisionTrace(userId, dateISO);
-      send(200, { ok: true, trace });
-      return;
-    }
 
-    if (pathname === "/v1/dev/events" && req.method === "GET") {
-      if (!isDevEnabled) {
-        sendError(res, 404, "not_found", "Not found");
+      if (pathname === "/v1/dev/rewind" && req.method === "POST") {
+        const body = await parseJson(req);
+        const targetUserId = sanitizeUserId(body?.userId || userId);
+        const seq = Number(body?.seq);
+        if (!Number.isInteger(seq) || seq < 0) {
+          sendError(res, 400, "seq_invalid", "seq must be a non-negative integer", "seq");
+          return;
+        }
+        const events = seq === 0 ? [] : await getUserEvents(targetUserId, 1, seq);
+        let rebuilt = normalizeState({});
+        const flags = await getFeatureFlags();
+        for (const evt of events) {
+          const ctx = {
+            domain,
+            now: { todayISO: domain.isoToday(), atISO: evt.atISO },
+            ruleToggles: resolveRuleToggles(rebuilt, flags),
+            scenarios: { getScenarioById },
+            isDev: true,
+          };
+          const result = reduceEvent(rebuilt, { type: evt.type, payload: evt.payload, atISO: evt.atISO }, ctx);
+          rebuilt = appendLogEvent(result.nextState, result.logEvent);
+        }
+        const latest = await loadUserState(targetUserId);
+        const saveRes = await saveUserState(targetUserId, latest.version, rebuilt);
+        if (!saveRes.ok) {
+          sendError(res, 409, "state_conflict", "State conflict during rewind");
+          return;
+        }
+        updateUserCache(targetUserId, rebuilt, saveRes.version);
+        sendJson(res, 200, { ok: true, userId: targetUserId, version: saveRes.version }, targetUserId);
         return;
       }
-      const userIdParam = url.searchParams.get("userId");
-      const targetUserId = userIdParam ? sanitizeUserId(userIdParam) : userId;
-      const page = Number(url.searchParams.get("page") || 0);
-      const pageSize = Number(url.searchParams.get("pageSize") || 0);
-      let events = [];
-      if (page || pageSize) {
-        events = await listUserEventsPaged(targetUserId, page || 1, pageSize || 50);
-      } else {
-        const fromSeq = Number(url.searchParams.get("fromSeq") || 1);
-        const limit = Math.min(Number(url.searchParams.get("limit") || 200), 500);
-        events = await getUserEvents(targetUserId, fromSeq, limit);
-      }
-      send(200, { ok: true, events, userId: targetUserId });
-      return;
-    }
 
-    if (pathname === "/v1/dev/rewind" && req.method === "POST") {
-      if (!isDevEnabled) {
-        sendError(res, 404, "not_found", "Not found");
+      if (pathname === "/v1/dev/repair" && req.method === "POST") {
+        const repaired = await repairUserState(userId, "manual_dev");
+        if (!repaired.ok) {
+          sendError(res, 500, "repair_failed", "Unable to repair user state");
+          return;
+        }
+        send(200, { ok: true, repaired: true });
         return;
       }
-      const body = await parseJson(req);
-      const targetUserId = sanitizeUserId(body?.userId || userId);
-      const seq = Number(body?.seq);
-      if (!Number.isInteger(seq) || seq < 0) {
-        sendError(res, 400, "seq_invalid", "seq must be a non-negative integer", "seq");
-        return;
-      }
-      const events = seq === 0 ? [] : await getUserEvents(targetUserId, 1, seq);
-      let rebuilt = normalizeState({});
-      for (const evt of events) {
-        const ctx = {
-          domain,
-          now: { todayISO: domain.isoToday(), atISO: evt.atISO },
-          ruleToggles: rebuilt.ruleToggles,
-          scenarios: { getScenarioById },
-          isDev: true,
-        };
-        const result = reduceEvent(rebuilt, { type: evt.type, payload: evt.payload, atISO: evt.atISO }, ctx);
-        rebuilt = appendLogEvent(result.nextState, result.logEvent);
-      }
-      const latest = await loadUserState(targetUserId);
-      const saveRes = await saveUserState(targetUserId, latest.version, rebuilt);
-      if (!saveRes.ok) {
-        sendError(res, 409, "state_conflict", "State conflict during rewind");
-        return;
-      }
-      updateUserCache(targetUserId, rebuilt, saveRes.version);
-      sendJson(res, 200, { ok: true, userId: targetUserId, version: saveRes.version }, targetUserId);
-      return;
-    }
 
-    if (pathname === "/v1/dev/repair" && req.method === "POST") {
-      if (!isDevEnabled) {
-        sendError(res, 404, "not_found", "Not found");
-        return;
-      }
-      const repaired = await repairUserState(userId, "manual_dev");
-      if (!repaired.ok) {
-        sendError(res, 500, "repair_failed", "Unable to repair user state");
-        return;
-      }
-      send(200, { ok: true, repaired: true });
-      return;
-    }
-
-    if (pathname === "/v1/dev/content" && req.method === "GET") {
-      if (!isDevEnabled) {
-        sendError(res, 404, "not_found", "Not found");
-        return;
-      }
-      const items = await listContentItems();
-      if (items.length) {
-        const workouts = items.filter((item) => item.kind === "workout");
-        const nutrition = items.filter((item) => item.kind === "nutrition");
-        const resets = items.filter((item) => item.kind === "reset");
+      if (pathname === "/v1/dev/content" && req.method === "GET") {
+        const items = await listContentItems();
+        if (items.length) {
+          const workouts = items.filter((item) => item.kind === "workout");
+          const nutrition = items.filter((item) => item.kind === "nutrition");
+          const resets = items.filter((item) => item.kind === "reset");
+          send(200, {
+            ok: true,
+            library: {
+              workouts: summarizeLibraryItems(workouts),
+              nutrition: summarizeLibraryItems(nutrition),
+              resets: summarizeLibraryItems(resets),
+            },
+          });
+          return;
+        }
+        const library = domain.defaultLibrary || {};
         send(200, {
           ok: true,
           library: {
-            workouts: summarizeLibraryItems(workouts),
-            nutrition: summarizeLibraryItems(nutrition),
-            resets: summarizeLibraryItems(resets),
+            workouts: summarizeLibraryItems(library.workouts),
+            nutrition: summarizeLibraryItems(library.nutrition),
+            resets: summarizeLibraryItems(library.resets),
           },
         });
         return;
       }
-      const library = domain.defaultLibrary || {};
-      send(200, {
-        ok: true,
-        library: {
-          workouts: summarizeLibraryItems(library.workouts),
-          nutrition: summarizeLibraryItems(library.nutrition),
-          resets: summarizeLibraryItems(library.resets),
-        },
-      });
-      return;
-    }
 
-    if (pathname === "/v1/dev/stats" && req.method === "GET") {
-      if (!isDevEnabled) {
-        sendError(res, 404, "not_found", "Not found");
+      if (pathname === "/v1/dev/stats" && req.method === "GET") {
+        const dbStats = await getContentStats(userId);
+        send(200, { ok: true, selectionStats: state.selectionStats || {}, contentStats: dbStats });
         return;
       }
-      const dbStats = await getContentStats(userId);
-      send(200, { ok: true, selectionStats: state.selectionStats || {}, contentStats: dbStats });
-      return;
-    }
 
-    if (pathname === "/v1/dev/bundle" && req.method === "GET") {
-      if (!isDevEnabled) {
-        sendError(res, 404, "not_found", "Not found");
-        return;
-      }
-      const lastCheckIns = (state.checkIns || []).slice(0, 14);
-      const stressKeys = Object.keys(state.lastStressStateByDate || {}).sort().slice(-7);
-      const stressSubset = {};
-      stressKeys.forEach((key) => {
-        stressSubset[key] = state.lastStressStateByDate[key];
-      });
-      send(200, {
-        ok: true,
-        bundle: {
-          versions: {
-            pipelineVersion: state.weekPlan?.days?.[0]?.pipelineVersion ?? domain.DECISION_PIPELINE_VERSION ?? null,
-            schemaVersion: state.schemaVersion ?? null,
-          },
-          userProfile: state.userProfile,
-          weekPlan: state.weekPlan,
-          checkIns: lastCheckIns,
-          lastStressStateByDate: stressSubset,
-          modifiers: state.modifiers,
-          ruleToggles: state.ruleToggles,
-          eventLog: (state.eventLog || []).slice(0, 30),
-        },
-      });
-      return;
-    }
-
-    if (pathname === "/v1/dev/rules" && req.method === "POST") {
-      if (!isDevEnabled) {
-        sendError(res, 404, "not_found", "Not found");
-        return;
-      }
-      const body = await parseJson(req);
-      const validation = validateRules(body);
-      if (!validation.ok) {
-        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
-        return;
-      }
-      const { ruleToggles } = validation.value;
-      const { result } = await dispatchForUser({ type: "SET_RULE_TOGGLES", payload: { ruleToggles } });
-      send(200, { ok: true, ruleToggles: result?.ruleToggles || state.ruleToggles });
-      return;
-    }
-
-    if (pathname === "/v1/dev/scenario" && req.method === "POST") {
-      if (!isDevEnabled) {
-        sendError(res, 404, "not_found", "Not found");
-        return;
-      }
-      const body = await parseJson(req);
-      const scenarioId = body.scenarioId;
-      await dispatchForUser({ type: "APPLY_SCENARIO", payload: { scenarioId } });
-      const todayISO = domain.isoToday();
-      const day = toDayContract(state, todayISO, domain);
-      send(200, { ok: true, scenarioId, day });
-      return;
-    }
-
-    if (pathname === "/v1/dev/snapshot/run" && req.method === "POST") {
-      if (!isDevEnabled) {
-        sendError(res, 404, "not_found", "Not found");
-        return;
-      }
-      const body = await parseJson(req);
-      const scenarioId = body.scenarioId;
-      const ids = scenarioId ? [scenarioId] : SNAPSHOT_IDS;
-      const results = [];
-      for (const id of ids) {
-        const resCheck = await runSnapshotCheck(id, state, {
-          now: { todayISO: domain.isoToday(), atISO: new Date().toISOString() },
-          ruleToggles: state.ruleToggles,
+      if (pathname === "/v1/dev/bundle" && req.method === "GET") {
+        const lastCheckIns = (state.checkIns || []).slice(0, 14);
+        const stressKeys = Object.keys(state.lastStressStateByDate || {}).sort().slice(-7);
+        const stressSubset = {};
+        stressKeys.forEach((key) => {
+          stressSubset[key] = state.lastStressStateByDate[key];
         });
-        results.push({ scenarioId: id, ok: resCheck.ok, diffsCount: resCheck.diffs.length });
+        const flags = await getFeatureFlags();
+        send(200, {
+          ok: true,
+          bundle: {
+            versions: {
+              pipelineVersion: state.weekPlan?.days?.[0]?.pipelineVersion ?? domain.DECISION_PIPELINE_VERSION ?? null,
+              schemaVersion: state.schemaVersion ?? null,
+            },
+            userProfile: state.userProfile,
+            weekPlan: state.weekPlan,
+            checkIns: lastCheckIns,
+            lastStressStateByDate: stressSubset,
+            modifiers: state.modifiers,
+            ruleToggles: state.ruleToggles,
+            featureFlags: flags,
+            eventLog: (state.eventLog || []).slice(0, 30),
+          },
+        });
+        return;
       }
-      send(200, { ok: true, results });
-      return;
+
+      if (pathname === "/v1/dev/rules" && req.method === "POST") {
+        const body = await parseJson(req);
+        const validation = validateRules(body);
+        if (!validation.ok) {
+          sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+          return;
+        }
+        const { ruleToggles } = validation.value;
+        const { result } = await dispatchForUser({ type: "SET_RULE_TOGGLES", payload: { ruleToggles } });
+        send(200, { ok: true, ruleToggles: result?.ruleToggles || state.ruleToggles });
+        return;
+      }
+
+      if (pathname === "/v1/dev/scenario" && req.method === "POST") {
+        const body = await parseJson(req);
+        const scenarioId = body.scenarioId;
+        await dispatchForUser({ type: "APPLY_SCENARIO", payload: { scenarioId } });
+        const todayISO = domain.isoToday();
+        const day = toDayContract(state, todayISO, domain);
+        send(200, { ok: true, scenarioId, day });
+        return;
+      }
+
+      if (pathname === "/v1/dev/snapshot/run" && req.method === "POST") {
+        const body = await parseJson(req);
+        const scenarioId = body.scenarioId;
+        const ids = scenarioId ? [scenarioId] : SNAPSHOT_IDS;
+        const results = [];
+        const flags = await getFeatureFlags();
+        for (const id of ids) {
+          const resCheck = await runSnapshotCheck(id, state, {
+            now: { todayISO: domain.isoToday(), atISO: new Date().toISOString() },
+            ruleToggles: resolveRuleToggles(state, flags),
+          });
+          results.push({ scenarioId: id, ok: resCheck.ok, diffsCount: resCheck.diffs.length });
+        }
+        send(200, { ok: true, results });
+        return;
+      }
     }
 
     sendError(res, 404, "not_found", "Not found");
@@ -1683,7 +1877,25 @@ const server = http.createServer(async (req, res) => {
     const status = err?.status || 500;
     if (err?.code) {
       sendError(res, status, err.code, err.message || "Request error", err.field);
+      if (NODE_ENV !== "production") {
+        console.error(
+          JSON.stringify({
+            atISO: new Date().toISOString(),
+            errorCode: err.code,
+            stack: err.stack,
+          })
+        );
+      }
       return;
+    }
+    if (NODE_ENV !== "production") {
+      console.error(
+        JSON.stringify({
+          atISO: new Date().toISOString(),
+          errorCode: "server_error",
+          stack: err?.stack,
+        })
+      );
     }
     sendError(res, status, "server_error", err?.message || "Server error");
   }

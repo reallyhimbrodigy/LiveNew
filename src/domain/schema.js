@@ -20,6 +20,8 @@ export function normalizeState(state = {}) {
     noveltyEnabled: true,
     feedbackEnabled: true,
     badDayEnabled: true,
+    recoveryDebtEnabled: true,
+    circadianAnchorsEnabled: true,
     ...(next.ruleToggles || {}),
   };
 

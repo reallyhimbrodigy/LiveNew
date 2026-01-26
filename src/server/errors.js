@@ -15,7 +15,11 @@ export function sendError(res, httpCode, code, message, field) {
     payload.requestId = res.livenewRequestId;
   }
 
-  res.writeHead(httpCode, { "Content-Type": "application/json" });
+  const headers = { "Content-Type": "application/json" };
+  if (res && res.livenewApiVersion) {
+    headers["x-api-version"] = res.livenewApiVersion;
+  }
+  res.writeHead(httpCode, headers);
   res.errorCode = code;
   res.end(JSON.stringify(payload));
 }

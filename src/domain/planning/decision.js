@@ -1,4 +1,5 @@
 import { assignStressProfile } from "../scoring/profile.js";
+import { computeRecoveryDebt } from "../scoring/recoveryDebt.js";
 import { defaultLibrary } from "../content/library.js";
 import { applyConstraints } from "./constraints.js";
 import { DECISION_PIPELINE_VERSION } from "../constants.js";
@@ -13,17 +14,20 @@ export function buildDayPlan({
   overrides,
   qualityRules,
 }) {
-  void checkInsByDate;
   const ctx = weekContext || {};
   const rules = {
     avoidNoveltyWindowDays: 2,
     constraintsEnabled: true,
     noveltyEnabled: true,
+    recoveryDebtEnabled: true,
+    circadianAnchorsEnabled: true,
     ...(qualityRules || {}),
   };
   const ov = overrides || {};
 
+  const recoveryDebt = rules.recoveryDebtEnabled ? computeRecoveryDebt(checkInsByDate, dateISO) : 0;
   const stressState = assignStressProfile({ user, dateISO, checkIn });
+  stressState.recoveryDebt = recoveryDebt;
   const appliedRules = [];
   const markOverride = () => {
     if (ov.source === "feedback") {
@@ -47,6 +51,18 @@ export function buildDayPlan({
   if (ov.forceBadDayMode) {
     focus = "downshift";
     appliedRules.push("bad_day_mode");
+  }
+
+  if (!ov.forceBadDayMode && rules.recoveryDebtEnabled && recoveryDebt >= 20) {
+    const priorFocus = focus;
+    if (recoveryDebt >= 35) {
+      focus = "downshift";
+    } else if (focus === "rebuild") {
+      focus = "stabilize";
+    }
+    if (focus !== priorFocus) {
+      appliedRules.push("recovery_debt_bias");
+    }
   }
 
   let timeMin = checkIn ? checkIn.timeAvailableMin : 20;
@@ -92,6 +108,7 @@ export function buildDayPlan({
   if (ov.focusBias && !ov.forceBadDayMode) rationale.push("Adjusted: focus bias");
   if (ov.timeOverrideMin != null && !ov.forceBadDayMode) rationale.push("Adjusted: time override");
   if (ov.intensityCap != null && !ov.forceBadDayMode) rationale.push("Adjusted: intensity cap");
+  if (rules.recoveryDebtEnabled && recoveryDebt >= 20) rationale.push("Recovery debt elevated");
 
   let dayDraft = {
     dateISO,
@@ -102,6 +119,7 @@ export function buildDayPlan({
     reset,
     rationale,
     workoutWindow,
+    anchors: rules.circadianAnchorsEnabled ? buildAnchors(user) : null,
     selectedNoveltyGroups: {
       workout: workout.noveltyGroup,
       nutrition: nutrition.noveltyGroup,
@@ -286,3 +304,22 @@ function enforceWorkoutCap(current, { focus, timeMin, checkIn, intensityCap, avo
 }
 
 export { focusFromProfile };
+function buildAnchors(user) {
+  const sunlightTarget = Number(user.sunlightMinutesPerDay || 0);
+  const minutes = Math.max(5, Math.min(15, Math.round(sunlightTarget ? sunlightTarget / 4 : 10)));
+  const sunlightAnchor = {
+    minutes,
+    timing: "AM",
+    instruction: `Get ${minutes} minutes of daylight within 2 hours of waking.`,
+  };
+
+  const mealConsistency = Number(user.mealTimingConsistency || 5);
+  const mealTimingAnchor = {
+    instruction:
+      mealConsistency <= 5
+        ? "Protein-forward breakfast within 2 hours of waking."
+        : "Keep meals at consistent times today.",
+  };
+
+  return { sunlightAnchor, mealTimingAnchor };
+}

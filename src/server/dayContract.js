@@ -55,6 +55,7 @@ export function toDayContract(state, dateISO, domain) {
       workoutSteps: Array.isArray(workout.steps) ? workout.steps : [],
       resetSteps: Array.isArray(reset.steps) ? reset.steps : [],
       nutritionPriorities: Array.isArray(nutrition.priorities) ? nutrition.priorities : [],
+      anchors: dayPlan?.anchors || null,
     },
   };
 }
