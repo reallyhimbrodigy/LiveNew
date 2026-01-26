@@ -1,21 +1,13 @@
 import crypto from "crypto";
-
-const SECRET_KEY = process.env.SECRET_KEY || "";
-const NODE_ENV = process.env.NODE_ENV || "development";
-const ALPHA_MODE = process.env.ALPHA_MODE === "true";
-const REQUIRE_KEY = NODE_ENV === "production" || ALPHA_MODE;
+import { requireSecretKeyOrFallback } from "../server/env.js";
 
 let cachedKey = null;
 
 function deriveKey() {
   if (cachedKey) return cachedKey;
-  if (!SECRET_KEY) {
-    if (REQUIRE_KEY) {
-      throw new Error("SECRET_KEY is required for encryption in production/alpha");
-    }
-    return null;
-  }
-  cachedKey = crypto.createHash("sha256").update(SECRET_KEY).digest();
+  const secret = requireSecretKeyOrFallback();
+  if (!secret) return null;
+  cachedKey = crypto.createHash("sha256").update(secret).digest();
   return cachedKey;
 }
 
@@ -59,4 +51,3 @@ export function decryptString(value) {
   const decrypted = Buffer.concat([decipher.update(encrypted), decipher.final()]);
   return decrypted.toString("utf8");
 }
-

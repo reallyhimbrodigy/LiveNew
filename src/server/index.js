@@ -61,10 +61,11 @@ import {
   deleteUserData,
 } from "../state/db.js";
 import { createBackup, restoreBackup, listBackups } from "../db/backup.js";
+import { isAlphaMode, requireSecretKeyOrFallback, isEphemeralSecretKey } from "./env.js";
 
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
-const ALPHA_MODE = process.env.ALPHA_MODE === "true";
+const ALPHA_MODE = isAlphaMode();
 const isDevRoutesEnabled =
   process.env.DEV_ROUTES_ENABLED === "true" || (NODE_ENV !== "production" && process.env.ALPHA_MODE !== "true");
 const EVENT_SOURCING = process.env.EVENT_SOURCING === "true";
@@ -96,11 +97,14 @@ const DEFAULT_FLAGS = {
   "rules.recoveryDebt.enabled": "true",
   "rules.circadianAnchors.enabled": "true",
 };
+let SESSION_TTL_MINUTES = undefined;
 const LATENCY_ROUTES = new Set(["GET /v1/plan/day", "POST /v1/checkin", "POST /v1/signal"]);
 
-if ((NODE_ENV === "production" || ALPHA_MODE) && !process.env.SECRET_KEY) {
-  console.error("LiveNew SECRET_KEY is required in production/alpha.");
-  process.exit(1);
+requireSecretKeyOrFallback();
+const secretStatus = isEphemeralSecretKey() ? "generated" : "present";
+console.log(`LiveNew env: NODE_ENV=${NODE_ENV} ALPHA_MODE=${ALPHA_MODE} SECRET_KEY=${secretStatus}`);
+if (isEphemeralSecretKey()) {
+  SESSION_TTL_MINUTES = 60;
 }
 
 await ensureDataDirWritable();
@@ -853,7 +857,7 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 401, "code_invalid", "code is invalid or expired", "code");
         return;
       }
-      const token = await createSession(verified.userId);
+      const token = await createSession(verified.userId, SESSION_TTL_MINUTES || undefined);
       res.livenewUserId = verified.userId;
       sendJson(res, 200, { ok: true, token }, verified.userId);
       return;
@@ -877,7 +881,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       await deleteSession(token);
-      const newToken = await createSession(userId);
+      const newToken = await createSession(userId, SESSION_TTL_MINUTES || undefined);
       res.livenewUserId = userId;
       sendJson(res, 200, { ok: true, token: newToken }, userId);
       return;
