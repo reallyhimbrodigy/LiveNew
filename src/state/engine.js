@@ -491,6 +491,32 @@ export function reduceEvent(state, event, ctx) {
       return { nextState, effects, logEvent, result };
     }
 
+    case "SET_RULE_TOGGLES": {
+      const incoming = event.payload?.ruleToggles || {};
+      const base = initialStatePatch().ruleToggles;
+      const nextToggles = { ...base, ...(nextState.ruleToggles || {}), ...incoming };
+      nextState.ruleToggles = nextToggles;
+
+      const user = ensureUser();
+      if (user) {
+        const checkInsByDate = buildCheckInsByDate(checkIns);
+        const weekAnchorISO = nextState.weekPlan?.startDateISO || domain.weekStartMonday(todayISO);
+        const effectiveUser = effectiveUserForDate(user, nextState.modifiers || {}, weekAnchorISO);
+        nextState.weekPlan = domain.generateWeekPlan({
+          user: effectiveUser,
+          weekAnchorISO,
+          checkInsByDate,
+          qualityRules: buildQualityRules(nextToggles),
+        });
+        nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain);
+      }
+
+      effects.persist = true;
+      logEvent = { type: "rule_toggles", payload: { ruleToggles: nextToggles }, atISO: event.atISO };
+      result = { ruleToggles: nextToggles };
+      return { nextState, effects, logEvent, result };
+    }
+
     case "APPLY_SCENARIO": {
       const scenarioId = event.payload?.scenarioId;
       if (!scenarioId || !ctx.scenarios) return { nextState, effects, logEvent, result };

@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LiveNew - Daily Plan Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600&family=Space+Grotesk:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header>
+      <div class="shell">
+        <h1>LiveNew Daily Command</h1>
+        <p class="subtitle">
+          A lightweight cockpit for your daily plan engine - save profile, get a day contract, log check-ins, and
+          test rules.
+        </p>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section class="card" id="profile-panel">
+        <div class="panel-header">
+          <div>
+            <p class="section-title">Profile</p>
+            <p class="subtitle">Baseline inputs that shape the week plan.</p>
+          </div>
+          <button id="save-profile" class="secondary">Save profile</button>
+        </div>
+        <div class="form-row">
+          <div>
+            <label for="wakeTime">Wake time</label>
+            <input type="time" id="wakeTime" value="07:00" />
+          </div>
+          <div>
+            <label for="bedTime">Bed time</label>
+            <input type="time" id="bedTime" value="23:00" />
+          </div>
+          <div>
+            <label for="sleepRegularity">Sleep regularity (1-10)</label>
+            <input type="number" id="sleepRegularity" min="1" max="10" value="5" />
+          </div>
+          <div>
+            <label for="sunlightMinutes">Sunlight minutes/day</label>
+            <input type="number" id="sunlightMinutes" min="0" value="10" />
+          </div>
+        </div>
+        <div class="form-row" style="margin-top: 12px;">
+          <div>
+            <label for="preferredWindow">Preferred workout window</label>
+            <select id="preferredWindow">
+              <option value="AM">AM</option>
+              <option value="MIDDAY">MIDDAY</option>
+              <option value="PM" selected>PM</option>
+            </select>
+          </div>
+          <div>
+            <label for="busyDays">Busy days (comma dates)</label>
+            <input type="text" id="busyDays" placeholder="2026-01-28, 2026-01-30" />
+          </div>
+          <div>
+            <label for="caffeineCups">Caffeine cups/day</label>
+            <input type="number" id="caffeineCups" min="0" value="1" />
+          </div>
+          <div>
+            <label for="lateScreen">Late screen minutes/night</label>
+            <input type="number" id="lateScreen" min="0" value="45" />
+          </div>
+        </div>
+        <p class="status" id="profile-status"></p>
+      </section>
+
+      <section class="grid" style="margin-top: 20px;">
+        <div class="card" id="day-panel">
+          <div class="panel-header">
+            <div>
+              <p class="section-title">Day Plan</p>
+              <p class="subtitle">Strict What/Why/How long contract.</p>
+            </div>
+            <div>
+              <input type="date" id="day-date" />
+              <button id="load-day" class="ghost" style="margin-left: 8px;">Load day</button>
+            </div>
+          </div>
+          <div class="plan-grid" id="day-contract">
+            <div class="plan-block">
+              <h4>What</h4>
+              <div><strong>Workout:</strong> <span data-what-workout></span></div>
+              <div><strong>Reset:</strong> <span data-what-reset></span></div>
+              <div><strong>Nutrition:</strong> <span data-what-nutrition></span></div>
+            </div>
+            <div class="plan-block alt">
+              <h4>Why</h4>
+              <div><strong>Profile:</strong> <span data-why-profile></span></div>
+              <div><strong>Focus:</strong> <span data-why-focus></span></div>
+              <div><strong>Statement:</strong> <span data-why-statement></span></div>
+              <div class="pill-group" data-why-drivers></div>
+            </div>
+            <div class="plan-block">
+              <h4>How long</h4>
+              <div><strong>Total minutes:</strong> <span data-howlong-total></span></div>
+              <div><strong>Time available:</strong> <span data-howlong-available></span></div>
+            </div>
+          </div>
+          <details class="details" id="day-details">
+            <summary>Details</summary>
+            <div class="form-row" style="margin-top: 12px;">
+              <div>
+                <strong>Workout steps</strong>
+                <ul data-details-workout></ul>
+              </div>
+              <div>
+                <strong>Reset steps</strong>
+                <ul data-details-reset></ul>
+              </div>
+              <div>
+                <strong>Nutrition priorities</strong>
+                <ul data-details-nutrition></ul>
+              </div>
+            </div>
+          </details>
+          <p class="status" id="day-status"></p>
+        </div>
+
+        <div class="card">
+          <p class="section-title">Signals & Check-in</p>
+          <div>
+            <strong>Quick signals</strong>
+            <div class="pill-group" style="margin-top: 8px;" id="signal-buttons">
+              <button class="ghost" data-signal="im_stressed">I'm stressed</button>
+              <button class="ghost" data-signal="poor_sleep">Poor sleep</button>
+              <button class="ghost" data-signal="wired">Wired</button>
+              <button class="ghost" data-signal="anxious">Anxious</button>
+              <button class="ghost" data-signal="im_exhausted">Exhausted</button>
+              <button class="ghost" data-signal="i_have_10_min">Only 10 min</button>
+              <button class="ghost" data-signal="i_have_more_energy">More energy</button>
+            </div>
+          </div>
+          <div style="margin-top: 16px;">
+            <button id="bad-day" class="secondary">Bad day mode</button>
+          </div>
+          <form id="checkin-form" style="margin-top: 20px;">
+            <div class="form-row">
+              <div>
+                <label for="checkin-date">Date</label>
+                <input type="date" id="checkin-date" />
+              </div>
+              <div>
+                <label for="checkin-stress">Stress (1-10)</label>
+                <input type="number" id="checkin-stress" min="1" max="10" value="6" />
+              </div>
+              <div>
+                <label for="checkin-sleep">Sleep quality (1-10)</label>
+                <input type="number" id="checkin-sleep" min="1" max="10" value="6" />
+              </div>
+              <div>
+                <label for="checkin-energy">Energy (1-10)</label>
+                <input type="number" id="checkin-energy" min="1" max="10" value="6" />
+              </div>
+              <div>
+                <label for="checkin-time">Time available (min)</label>
+                <input type="number" id="checkin-time" min="0" value="20" />
+              </div>
+            </div>
+            <div style="margin-top: 12px;">
+              <label for="checkin-notes">Notes</label>
+              <textarea id="checkin-notes" placeholder="Optional notes..."></textarea>
+            </div>
+            <button type="submit" style="margin-top: 12px;">Submit check-in</button>
+          </form>
+          <p class="status" id="checkin-status"></p>
+        </div>
+      </section>
+
+      <section class="grid" style="margin-top: 20px;">
+        <div class="card">
+          <p class="section-title">Completion</p>
+          <div class="toggle-row" id="completion-buttons">
+            <button class="ghost" data-part="workout">Workout done</button>
+            <button class="ghost" data-part="reset">Reset done</button>
+            <button class="ghost" data-part="nutrition">Nutrition done</button>
+          </div>
+          <p class="status" id="completion-status"></p>
+        </div>
+
+        <div class="card">
+          <p class="section-title">Feedback</p>
+          <div class="form-row">
+            <div>
+              <label for="feedback-date">Date</label>
+              <input type="date" id="feedback-date" />
+            </div>
+            <div>
+              <label for="feedback-helped">Helped?</label>
+              <select id="feedback-helped">
+                <option value="true">Yes</option>
+                <option value="false">No</option>
+              </select>
+            </div>
+            <div>
+              <label for="feedback-reason">Reason</label>
+              <select id="feedback-reason">
+                <option value="">Optional</option>
+                <option value="too_hard">Too hard</option>
+                <option value="too_easy">Too easy</option>
+                <option value="wrong_time">Wrong time</option>
+                <option value="not_relevant">Not relevant</option>
+              </select>
+            </div>
+          </div>
+          <button id="submit-feedback" style="margin-top: 12px;">Send feedback</button>
+          <p class="status" id="feedback-status"></p>
+        </div>
+
+        <div class="card">
+          <div class="panel-header">
+            <div>
+              <p class="section-title">Progress</p>
+              <p class="subtitle">7-day averages + adherence.</p>
+            </div>
+            <button id="refresh-progress" class="ghost">Refresh</button>
+          </div>
+          <div id="progress-panel" style="margin-top: 10px;"></div>
+        </div>
+      </section>
+
+      <section class="card" id="tomorrow-panel" style="margin-top: 20px; display: none;">
+        <div class="panel-header">
+          <div>
+            <p class="section-title">Tomorrow (auto-adjust)</p>
+            <p class="subtitle">Shown after high stress + poor sleep check-in.</p>
+          </div>
+        </div>
+        <div class="plan-grid" id="tomorrow-contract"></div>
+      </section>
+
+      <section class="card" id="dev-panel" style="margin-top: 20px; display: none;">
+        <div class="panel-header">
+          <div>
+            <p class="section-title">Dev QA Controls</p>
+            <p class="subtitle">Rules, scenarios, snapshots, and bundle viewer.</p>
+          </div>
+        </div>
+        <div class="form-row">
+          <div>
+            <label>Rule toggles</label>
+            <div>
+              <label><input type="checkbox" id="rule-constraints" /> Constraints enabled</label><br />
+              <label><input type="checkbox" id="rule-novelty" /> Novelty enabled</label><br />
+              <label><input type="checkbox" id="rule-feedback" /> Feedback enabled</label><br />
+              <label><input type="checkbox" id="rule-badday" /> Bad day enabled</label>
+            </div>
+            <button id="save-rules" class="secondary" style="margin-top: 8px;">Save rules</button>
+          </div>
+          <div>
+            <label for="scenario-select">Scenario</label>
+            <select id="scenario-select"></select>
+            <div style="margin-top: 8px;">
+              <button id="run-scenario" class="secondary">Apply scenario</button>
+            </div>
+          </div>
+          <div>
+            <label for="snapshot-select">Snapshot</label>
+            <select id="snapshot-select"></select>
+            <div style="margin-top: 8px;">
+              <button id="run-snapshot" class="secondary">Run snapshot</button>
+            </div>
+            <p class="status" id="snapshot-status"></p>
+          </div>
+        </div>
+        <div style="margin-top: 16px;">
+          <strong>Debug bundle</strong>
+          <pre id="debug-bundle">Loading...</pre>
+        </div>
+      </section>
+
+      <footer>
+        LiveNew local server UI - single-state demo surface.
+      </footer>
+    </main>
+
+    <script>
+      window.__IS_DEV__ = __IS_DEV__;
+    </script>
+    <script src="/app.js"></script>
+  </body>
+</html>

@@ -1,5 +1,5 @@
 import fs from "fs/promises";
-import { dirname } from "path";
+import path from "path";
 import { normalizeState } from "../domain/schema.js";
 
 export const STATE_PATH = process.env.STATE_PATH || "data/state.json";
@@ -10,7 +10,7 @@ let writing = false;
 let dirty = false;
 
 async function ensureDir() {
-  await fs.mkdir(dirname(STATE_PATH), { recursive: true });
+  await fs.mkdir(path.dirname(STATE_PATH), { recursive: true });
 }
 
 export async function loadState() {
@@ -25,9 +25,11 @@ export async function loadState() {
     }
     if (err instanceof SyntaxError) {
       const stamp = Date.now();
+      const dir = path.dirname(STATE_PATH);
       try {
-        await fs.mkdir("data", { recursive: true });
-        await fs.rename(STATE_PATH, `data/state.corrupt.${stamp}.json`);
+        await fs.mkdir(dir, { recursive: true });
+        const corruptPath = path.join(dir, `state.corrupt.${stamp}.json`);
+        await fs.rename(STATE_PATH, corruptPath);
       } catch (renameErr) {
         console.warn("Failed to rename corrupt state", renameErr);
       }

@@ -4,7 +4,7 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "start": "node --experimental-specifier-resolution=node src/server/index.js",
+    "start": "node src/server/index.js",
     "start:app": "expo start",
     "android": "expo start --android",
     "ios": "expo start --ios",
