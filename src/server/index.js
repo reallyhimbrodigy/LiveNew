@@ -29,24 +29,39 @@ import {
   saveUserState,
   appendUserEvent,
   getUserEvents,
+  listUserEventsPaged,
   getOrCreateUser,
   createAuthCode,
   verifyAuthCode,
   createSession,
+  deleteSession,
   getSession,
   seedContentItems,
   listContentItems,
+  listContentItemsPaged,
+  patchContentItem,
   upsertContentItem,
   bumpContentStats,
   getContentStats,
   getAdminStats,
+  cleanupOldEvents,
+  upsertDecisionTrace,
+  getDecisionTrace,
+  listDecisionTraces,
+  recordActiveUser,
+  updateAnalyticsDaily,
+  listAnalyticsDaily,
+  getUserStateHistory,
+  getWorstItems,
 } from "../state/db.js";
+import { createBackup, restoreBackup, listBackups } from "../db/backup.js";
 
 const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
 const ALPHA_MODE = process.env.ALPHA_MODE === "true";
 const isDevEnabled = NODE_ENV !== "production" && !ALPHA_MODE;
 const EVENT_SOURCING = process.env.EVENT_SOURCING === "true";
+const EVENT_RETENTION_DAYS = Number(process.env.EVENT_RETENTION_DAYS || 90);
 const ADMIN_EMAILS = new Set(
   (process.env.ADMIN_EMAILS || "")
     .split(",")
@@ -61,11 +76,19 @@ const MAX_USERS = 50;
 const lastSignalByUser = new Map();
 const rateLimiters = new Map();
 let shuttingDown = false;
+const authRateLimiters = new Map();
+const readCache = new Map();
 
 await ensureDataDirWritable();
 await initDb();
 await seedContentItems(domain.defaultLibrary);
 await applyLibraryFromDb();
+await cleanupOldEvents(EVENT_RETENTION_DAYS);
+setInterval(() => {
+  cleanupOldEvents(EVENT_RETENTION_DAYS).catch((err) => {
+    console.error("Event retention cleanup failed", err);
+  });
+}, 24 * 60 * 60 * 1000);
 
 async function ensureDataDirWritable() {
   const dir = path.dirname(getDbPath());
@@ -81,7 +104,7 @@ async function ensureDataDirWritable() {
 }
 
 async function applyLibraryFromDb() {
-  const items = await listContentItems();
+  const items = await listContentItems(undefined, false);
   if (!items.length) return;
   const workouts = [];
   const nutrition = [];
@@ -94,6 +117,59 @@ async function applyLibraryFromDb() {
   if (workouts.length) domain.defaultLibrary.workouts = workouts;
   if (nutrition.length) domain.defaultLibrary.nutrition = nutrition;
   if (resets.length) domain.defaultLibrary.resets = resets;
+}
+
+async function repairUserState(userId, reason) {
+  const baseNow = new Date().toISOString();
+  const events = await getUserEvents(userId, 1, 5000);
+  if (events.length) {
+    let rebuilt = normalizeState({});
+    for (const evt of events) {
+      const ctx = {
+        domain,
+        now: { todayISO: domain.isoToday(), atISO: evt.atISO || baseNow },
+        ruleToggles: rebuilt.ruleToggles,
+        scenarios: { getScenarioById },
+        isDev: isDevEnabled,
+      };
+      const result = reduceEvent(rebuilt, { type: evt.type, payload: evt.payload, atISO: evt.atISO || baseNow }, ctx);
+      rebuilt = appendLogEvent(result.nextState, result.logEvent);
+    }
+    try {
+      validateState(rebuilt);
+      const latest = await getUserState(userId);
+      const saveRes = await saveUserState(userId, latest?.version || 0, rebuilt);
+      if (saveRes.ok) {
+        updateUserCache(userId, rebuilt, saveRes.version);
+        console.log(
+          JSON.stringify({ atISO: baseNow, event: "auto_repair", userId, reason: reason || "events_replay" })
+        );
+        return { ok: true, state: rebuilt };
+      }
+    } catch {
+      // fallthrough to history
+    }
+  }
+
+  const history = await getUserStateHistory(userId, 50);
+  for (const entry of history) {
+    try {
+      validateState(entry.state);
+      const latest = await getUserState(userId);
+      const saveRes = await saveUserState(userId, latest?.version || 0, entry.state);
+      if (saveRes.ok) {
+        updateUserCache(userId, entry.state, saveRes.version);
+        console.log(
+          JSON.stringify({ atISO: baseNow, event: "auto_repair", userId, reason: reason || "history_fallback" })
+        );
+        return { ok: true, state: entry.state };
+      }
+    } catch {
+      // continue
+    }
+  }
+
+  return { ok: false };
 }
 
 function evictIfNeeded() {
@@ -117,7 +193,19 @@ async function loadUserState(userId) {
   }
   const snapshot = await getUserState(userId);
   const state = normalizeState(snapshot?.state || {});
-  validateState(state);
+  try {
+    validateState(state);
+  } catch (err) {
+    const repaired = await repairUserState(userId, "invalid_snapshot");
+    if (repaired.ok) {
+      const latest = await getUserState(userId);
+      const entry = { state: repaired.state, version: latest?.version || 0, lastAccessAt: Date.now() };
+      userStates.set(userId, entry);
+      evictIfNeeded();
+      return entry;
+    }
+    throw err;
+  }
   const version = snapshot?.version ?? 0;
   const entry = { state, version, lastAccessAt: Date.now() };
   userStates.set(userId, entry);
@@ -260,6 +348,10 @@ function getRequestId(req) {
   return value && String(value).trim() ? String(value).trim() : crypto.randomUUID();
 }
 
+function getClientIp(req) {
+  return req.headers["x-forwarded-for"]?.split(",")[0]?.trim() || req.socket?.remoteAddress || "unknown";
+}
+
 function isAuthRequired() {
   return ALPHA_MODE || NODE_ENV === "production";
 }
@@ -328,6 +420,135 @@ function diffSelectionStats(prevStats, nextStats) {
   return diffs;
 }
 
+function parseCookies(req) {
+  const header = req.headers.cookie || "";
+  const pairs = header.split(";").map((part) => part.trim()).filter(Boolean);
+  const cookies = {};
+  pairs.forEach((pair) => {
+    const idx = pair.indexOf("=");
+    if (idx === -1) return;
+    const key = pair.slice(0, idx);
+    const value = pair.slice(idx + 1);
+    cookies[key] = decodeURIComponent(value);
+  });
+  return cookies;
+}
+
+function issueCsrfToken(res) {
+  const token = crypto.randomBytes(16).toString("hex");
+  const cookie = `csrf=${token}; HttpOnly; SameSite=Strict; Path=/`;
+  res.setHeader("Set-Cookie", cookie);
+  return token;
+}
+
+function getCsrfToken(req) {
+  const cookies = parseCookies(req);
+  return cookies.csrf || null;
+}
+
+function isApiBypassAllowed(req) {
+  const token = parseAuthToken(req);
+  const clientType = req.headers["x-client-type"];
+  return Boolean(token && clientType === "api");
+}
+
+function requireCsrf(req, res) {
+  const method = req.method || "GET";
+  if (["GET", "HEAD", "OPTIONS"].includes(method)) return true;
+  if (isApiBypassAllowed(req)) return true;
+  const csrfCookie = getCsrfToken(req);
+  const csrfHeader = req.headers["x-csrf-token"];
+  if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
+    sendError(res, 403, "csrf_required", "CSRF token missing or invalid");
+    return false;
+  }
+  return true;
+}
+
+function authLimiterKey(type, value) {
+  return `${type}:${value || "unknown"}`;
+}
+
+function getAuthLimiter(key) {
+  if (!authRateLimiters.has(key)) {
+    authRateLimiters.set(key, { tokens: 10, last: Date.now() });
+  }
+  return authRateLimiters.get(key);
+}
+
+function checkAuthRateLimit(key) {
+  const limiter = getAuthLimiter(key);
+  const ok = takeToken(limiter, 10, 10 / 60000);
+  return ok;
+}
+
+function readCacheKey(userId, reqPath, query) {
+  return `${userId || "anon"}:${reqPath}?${query || ""}`;
+}
+
+function getCachedResponse(userId, reqPath, query) {
+  const key = readCacheKey(userId, reqPath, query);
+  const entry = readCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    readCache.delete(key);
+    return null;
+  }
+  return entry.payload;
+}
+
+function setCachedResponse(userId, reqPath, query, payload, ttlMs = 2000) {
+  const key = readCacheKey(userId, reqPath, query);
+  readCache.set(key, { payload, expiresAt: Date.now() + ttlMs });
+}
+
+function invalidateUserCache(userId) {
+  const prefix = `${userId || "anon"}:`;
+  for (const key of readCache.keys()) {
+    if (key.startsWith(prefix)) readCache.delete(key);
+  }
+}
+
+function buildDecisionTrace(state, dateISO) {
+  const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO);
+  if (!dayPlan) return null;
+  const checkIn = (state.checkIns || []).find((item) => item.dateISO === dateISO) || null;
+  const inputs = {
+    checkIn: checkIn
+      ? {
+          stress: checkIn.stress,
+          sleepQuality: checkIn.sleepQuality,
+          energy: checkIn.energy,
+          timeAvailableMin: checkIn.timeAvailableMin,
+        }
+      : null,
+    modifiers: state.modifiers || {},
+    busyDay: Boolean(state.userProfile?.busyDays?.includes?.(dateISO)),
+  };
+  return {
+    pipelineVersion: dayPlan.pipelineVersion ?? null,
+    inputs,
+    stressState: state.lastStressStateByDate?.[dateISO] || {},
+    selected: dayPlan.meta?.selected || {},
+    appliedRules: dayPlan.meta?.appliedRules || [],
+    rationale: (dayPlan.rationale || []).slice(0, 3),
+  };
+}
+
+function findChangedDates(prevState, nextState) {
+  const prevDays = prevState.weekPlan?.days || [];
+  const nextDays = nextState.weekPlan?.days || [];
+  const map = new Map();
+  prevDays.forEach((day) => map.set(day.dateISO, JSON.stringify(day)));
+  const changed = [];
+  nextDays.forEach((day) => {
+    const prev = map.get(day.dateISO);
+    const next = JSON.stringify(day);
+    if (prev !== next) changed.push(day.dateISO);
+  });
+  return changed;
+}
+
 function buildTrends(state, days) {
   const todayISO = domain.isoToday();
   const result = [];
@@ -368,6 +589,12 @@ function buildTrends(state, days) {
   return result;
 }
 
+function defaultDateRange(days) {
+  const toISO = domain.isoToday();
+  const fromISO = domain.addDaysISO(toISO, -(days - 1));
+  return { fromISO, toISO };
+}
+
 async function serveFile(res, filePath, { replaceDevFlag } = {}) {
   try {
     const raw = await fs.readFile(filePath, "utf8");
@@ -406,6 +633,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && (pathname === "/" || pathname === "/index.html")) {
+    issueCsrfToken(res);
     await serveFile(res, path.join(PUBLIC_DIR, "index.html"), { replaceDevFlag: true });
     return;
   }
@@ -441,11 +669,27 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/csrf" && req.method === "GET") {
+      const token = issueCsrfToken(res);
+      sendJson(res, 200, { ok: true, token });
+      return;
+    }
+
     if (pathname === "/v1/auth/request" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
       const body = await parseJson(req);
       const email = body?.email;
       if (!email || typeof email !== "string") {
         sendError(res, 400, "email_required", "email is required", "email");
+        return;
+      }
+      const ip = getClientIp(req);
+      if (!checkAuthRateLimit(authLimiterKey("ip", ip))) {
+        sendError(res, 429, "rate_limited", "Too many auth attempts");
+        return;
+      }
+      if (!checkAuthRateLimit(authLimiterKey("email", email.toLowerCase()))) {
+        sendError(res, 429, "rate_limited", "Too many auth attempts");
         return;
       }
       const user = await getOrCreateUser(email.toLowerCase());
@@ -463,6 +707,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/auth/verify" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
       const body = await parseJson(req);
       const email = body?.email;
       const code = body?.code;
@@ -472,6 +717,15 @@ const server = http.createServer(async (req, res) => {
       }
       if (!code || typeof code !== "string") {
         sendError(res, 400, "code_required", "code is required", "code");
+        return;
+      }
+      const ip = getClientIp(req);
+      if (!checkAuthRateLimit(authLimiterKey("ip", ip))) {
+        sendError(res, 429, "rate_limited", "Too many auth attempts");
+        return;
+      }
+      if (!checkAuthRateLimit(authLimiterKey("email", email.toLowerCase()))) {
+        sendError(res, 429, "rate_limited", "Too many auth attempts");
         return;
       }
       const verified = await verifyAuthCode(email.toLowerCase(), code);
@@ -496,6 +750,19 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (pathname === "/v1/auth/refresh" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
+      if (!token || !userId) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      await deleteSession(token);
+      const newToken = await createSession(userId);
+      res.livenewUserId = userId;
+      sendJson(res, 200, { ok: true, token: newToken }, userId);
+      return;
+    }
+
     if (!userId) {
       if (isAuthRequired()) {
         sendError(res, 401, "auth_required", "Authorization required");
@@ -506,6 +773,8 @@ const server = http.createServer(async (req, res) => {
 
     res.livenewUserId = userId;
     const send = (status, payload) => sendJson(res, status, payload, userId);
+
+    if (!requireCsrf(req, res)) return;
 
     const rateKey = userId || "anon";
     const isMutating = !["GET", "HEAD"].includes(req.method);
@@ -528,6 +797,7 @@ const server = http.createServer(async (req, res) => {
 
       while (attempts < 2) {
         const prevStats = currentState.selectionStats;
+        const prevState = currentState;
         const resEvent = dispatch(currentState, eventWithAt);
         const nextState = resEvent.state;
 
@@ -547,9 +817,45 @@ const server = http.createServer(async (req, res) => {
             const field = diff.field === "notRelevant" ? "not_relevant" : diff.field;
             await bumpContentStats(userId, diff.itemId, field, diff.delta);
           }
+
+          const changedDates = findChangedDates(prevState, nextState);
+          for (const dateISO of changedDates) {
+            const trace = buildDecisionTrace(nextState, dateISO);
+            if (trace) {
+              await upsertDecisionTrace(userId, dateISO, trace);
+            }
+          }
+
+          const todayISO = domain.isoToday();
+          const analyticsUpdates = {};
+          if (eventWithAt.type === "CHECKIN_SAVED") analyticsUpdates.checkins_count = 1;
+          if (eventWithAt.type === "BAD_DAY_MODE") analyticsUpdates.bad_day_mode_count = 1;
+          if (eventWithAt.type === "FEEDBACK_SUBMITTED" && eventWithAt.payload?.reason === "not_relevant") {
+            analyticsUpdates.feedback_not_relevant_count = 1;
+          }
+          if (eventWithAt.type === "TOGGLE_PART_COMPLETION") {
+            const dateISO = eventWithAt.payload?.dateISO;
+            if (dateISO) {
+              const prevParts = prevState.partCompletionByDate?.[dateISO] || {};
+              const nextParts = nextState.partCompletionByDate?.[dateISO] || {};
+              const prevAny = Boolean(prevParts.workout || prevParts.reset || prevParts.nutrition);
+              const nextAny = Boolean(nextParts.workout || nextParts.reset || nextParts.nutrition);
+              if (!prevAny && nextAny) analyticsUpdates.any_part_days_count = 1;
+            }
+          }
+          if (Object.keys(analyticsUpdates).length) {
+            const activeCount = await recordActiveUser(todayISO, userId);
+            analyticsUpdates.active_users_count = activeCount;
+            await updateAnalyticsDaily(todayISO, analyticsUpdates);
+          } else if (resEvent.effects.persist) {
+            const activeCount = await recordActiveUser(todayISO, userId);
+            await updateAnalyticsDaily(todayISO, { active_users_count: activeCount });
+          }
+
           state = nextState;
           version = saveRes.version;
           updateUserCache(userId, state, version);
+          invalidateUserCache(userId);
           return { ...resEvent, state: nextState };
         }
 
@@ -580,6 +886,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/plan/week" && req.method === "GET") {
+      const cached = getCachedResponse(userId, pathname, url.search);
+      if (cached) {
+        send(200, cached);
+        return;
+      }
       const date = url.searchParams.get("date");
       if (date) {
         const validation = validateDateParam(date, "date");
@@ -592,11 +903,18 @@ const server = http.createServer(async (req, res) => {
       if (date) {
         await dispatchForUser({ type: "WEEK_REBUILD", payload: { weekAnchorISO: date } });
       }
-      send(200, { ok: true, weekPlan: state.weekPlan });
+      const payload = { ok: true, weekPlan: state.weekPlan };
+      setCachedResponse(userId, pathname, url.search, payload);
+      send(200, payload);
       return;
     }
 
     if (pathname === "/v1/plan/day" && req.method === "GET") {
+      const cached = getCachedResponse(userId, pathname, url.search);
+      if (cached) {
+        send(200, cached);
+        return;
+      }
       const dateISO = url.searchParams.get("date");
       if (!dateISO) {
         sendError(res, 400, "date_required", "date query param is required", "date");
@@ -609,7 +927,9 @@ const server = http.createServer(async (req, res) => {
       }
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
       const day = toDayContract(state, dateISO, domain);
-      send(200, { ok: true, day });
+      const payload = { ok: true, day };
+      setCachedResponse(userId, pathname, url.search, payload);
+      send(200, payload);
       return;
     }
 
@@ -727,12 +1047,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/progress" && req.method === "GET") {
+      const cached = getCachedResponse(userId, pathname, url.search);
+      if (cached) {
+        send(200, cached);
+        return;
+      }
       const progress = domain.computeProgress({
         checkIns: state.checkIns || [],
         weekPlan: state.weekPlan,
         completions: state.partCompletionByDate || {},
       });
-      send(200, { ok: true, progress });
+      const payload = { ok: true, progress };
+      setCachedResponse(userId, pathname, url.search, payload);
+      send(200, payload);
       return;
     }
 
@@ -749,6 +1076,131 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/admin/trace" && req.method === "GET") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const userIdParam = url.searchParams.get("userId");
+      const dateISO = url.searchParams.get("date");
+      if (!userIdParam || !dateISO) {
+        sendError(res, 400, "params_required", "userId and date are required");
+        return;
+      }
+      const validation = validateDateParam(dateISO, "date");
+      if (!validation.ok) {
+        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+        return;
+      }
+      const trace = await getDecisionTrace(userIdParam, dateISO);
+      send(200, { ok: true, trace });
+      return;
+    }
+
+    if (pathname === "/v1/admin/traces" && req.method === "GET") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const userIdParam = url.searchParams.get("userId");
+      const fromISO = url.searchParams.get("from");
+      const toISO = url.searchParams.get("to");
+      if (!userIdParam || !fromISO || !toISO) {
+        sendError(res, 400, "params_required", "userId, from, and to are required");
+        return;
+      }
+      const page = Number(url.searchParams.get("page") || 1);
+      const pageSize = Number(url.searchParams.get("pageSize") || 50);
+      const traces = await listDecisionTraces(userIdParam, fromISO, toISO, page, pageSize);
+      send(200, { ok: true, traces, page, pageSize });
+      return;
+    }
+
+    if (pathname === "/v1/admin/events" && req.method === "GET") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const userIdParam = url.searchParams.get("userId");
+      if (!userIdParam) {
+        sendError(res, 400, "userId_required", "userId is required", "userId");
+        return;
+      }
+      const page = Number(url.searchParams.get("page") || 1);
+      const pageSize = Number(url.searchParams.get("pageSize") || 50);
+      const events = await listUserEventsPaged(userIdParam, page, pageSize);
+      send(200, { ok: true, events, page, pageSize });
+      return;
+    }
+
+    const contentPatchMatch = pathname.match(/^\\/v1\\/admin\\/content\\/(workout|nutrition|reset)\\/([^/]+)$/);
+    if (contentPatchMatch && req.method === "PATCH") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const kind = contentPatchMatch[1];
+      const id = contentPatchMatch[2];
+      const body = await parseJson(req);
+      const allowed = ["enabled", "priority", "noveltyGroup", "tags", "minutes", "steps", "priorities", "title"];
+      const patch = {};
+      allowed.forEach((key) => {
+        if (key in body) patch[key] = body[key];
+      });
+      if ("enabled" in patch && typeof patch.enabled !== "boolean") {
+        sendError(res, 400, "field_invalid", "enabled must be boolean", "enabled");
+        return;
+      }
+      if ("priority" in patch && !Number.isFinite(Number(patch.priority))) {
+        sendError(res, 400, "field_invalid", "priority must be number", "priority");
+        return;
+      }
+      if ("noveltyGroup" in patch && patch.noveltyGroup != null && typeof patch.noveltyGroup !== "string") {
+        sendError(res, 400, "field_invalid", "noveltyGroup must be string", "noveltyGroup");
+        return;
+      }
+      if ("tags" in patch && !Array.isArray(patch.tags)) {
+        sendError(res, 400, "field_invalid", "tags must be array", "tags");
+        return;
+      }
+      if ("steps" in patch && !Array.isArray(patch.steps)) {
+        sendError(res, 400, "field_invalid", "steps must be array", "steps");
+        return;
+      }
+      if ("priorities" in patch && !Array.isArray(patch.priorities)) {
+        sendError(res, 400, "field_invalid", "priorities must be array", "priorities");
+        return;
+      }
+      if ("minutes" in patch && !Number.isFinite(Number(patch.minutes))) {
+        sendError(res, 400, "field_invalid", "minutes must be number", "minutes");
+        return;
+      }
+      const updated = await patchContentItem(kind, id, patch);
+      if (!updated) {
+        sendError(res, 404, "not_found", "Content item not found");
+        return;
+      }
+      await applyLibraryFromDb();
+      send(200, { ok: true, item: updated });
+      return;
+    }
+
     if (pathname === "/v1/admin/content" && req.method === "GET") {
       if (!userEmail) {
         sendError(res, 401, "auth_required", "Authorization required");
@@ -759,8 +1211,10 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const kind = url.searchParams.get("kind");
-      const items = await listContentItems(kind || undefined);
-      send(200, { ok: true, items });
+      const page = Number(url.searchParams.get("page") || 1);
+      const pageSize = Number(url.searchParams.get("pageSize") || 50);
+      const items = await listContentItemsPaged(kind || undefined, page, pageSize);
+      send(200, { ok: true, items, page, pageSize });
       return;
     }
 
@@ -843,6 +1297,125 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/admin/analytics/daily" && req.method === "GET") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      let fromISO = url.searchParams.get("from");
+      let toISO = url.searchParams.get("to");
+      if (!fromISO || !toISO) {
+        const range = defaultDateRange(14);
+        fromISO = fromISO || range.fromISO;
+        toISO = toISO || range.toISO;
+      }
+      const fromValidation = validateDateParam(fromISO, "from");
+      if (!fromValidation.ok) {
+        sendError(res, 400, fromValidation.error.code, fromValidation.error.message, fromValidation.error.field);
+        return;
+      }
+      const toValidation = validateDateParam(toISO, "to");
+      if (!toValidation.ok) {
+        sendError(res, 400, toValidation.error.code, toValidation.error.message, toValidation.error.field);
+        return;
+      }
+      const days = await listAnalyticsDaily(fromISO, toISO);
+      send(200, { ok: true, fromISO, toISO, days });
+      return;
+    }
+
+    if (pathname === "/v1/admin/reports/worst-items" && req.method === "GET") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const kind = url.searchParams.get("kind");
+      if (!["workout", "nutrition", "reset"].includes(kind)) {
+        sendError(res, 400, "kind_invalid", "kind must be workout, nutrition, or reset", "kind");
+        return;
+      }
+      const limitRaw = Number(url.searchParams.get("limit") || 20);
+      const limit = Number.isFinite(limitRaw) ? Math.min(limitRaw, 100) : 20;
+      const items = await getWorstItems(kind, limit);
+      send(200, { ok: true, kind, limit, items });
+      return;
+    }
+
+    if (pathname === "/v1/admin/db/backup" && req.method === "POST") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const backup = await createBackup();
+      send(200, { ok: true, backup });
+      return;
+    }
+
+    if (pathname === "/v1/admin/db/restore" && req.method === "POST") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const body = await parseJson(req);
+      const backupId = body?.backupId;
+      if (!backupId || typeof backupId !== "string") {
+        sendError(res, 400, "backupId_required", "backupId is required", "backupId");
+        return;
+      }
+      const backups = await listBackups();
+      if (!backups.includes(backupId)) {
+        sendError(res, 404, "backup_not_found", "backupId not found", "backupId");
+        return;
+      }
+      const restored = await restoreBackup(backupId);
+      send(200, { ok: true, backupId: restored.backupId });
+      return;
+    }
+
+    if (pathname === "/v1/admin/repair" && req.method === "POST") {
+      if (!userEmail) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAdmin(userEmail)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return;
+      }
+      const userIdParam = url.searchParams.get("userId");
+      if (!userIdParam) {
+        sendError(res, 400, "userId_required", "userId is required", "userId");
+        return;
+      }
+      const sanitized = sanitizeUserId(userIdParam);
+      if (sanitized !== userIdParam) {
+        sendError(res, 400, "userId_invalid", "userId is invalid", "userId");
+        return;
+      }
+      const repaired = await repairUserState(userIdParam, "manual_admin");
+      if (!repaired.ok) {
+        sendError(res, 500, "repair_failed", "Unable to repair user state");
+        return;
+      }
+      send(200, { ok: true, repaired: true, userId: userIdParam });
+      return;
+    }
+
     if (pathname === "/v1/dev/replay" && req.method === "POST") {
       if (!isDevEnabled) {
         sendError(res, 404, "not_found", "Not found");
@@ -891,6 +1464,26 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/dev/trace" && req.method === "GET") {
+      if (!isDevEnabled) {
+        sendError(res, 404, "not_found", "Not found");
+        return;
+      }
+      const dateISO = url.searchParams.get("date");
+      if (!dateISO) {
+        sendError(res, 400, "date_required", "date query param is required", "date");
+        return;
+      }
+      const validation = validateDateParam(dateISO, "date");
+      if (!validation.ok) {
+        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+        return;
+      }
+      const trace = await getDecisionTrace(userId, dateISO);
+      send(200, { ok: true, trace });
+      return;
+    }
+
     if (pathname === "/v1/dev/events" && req.method === "GET") {
       if (!isDevEnabled) {
         sendError(res, 404, "not_found", "Not found");
@@ -898,9 +1491,16 @@ const server = http.createServer(async (req, res) => {
       }
       const userIdParam = url.searchParams.get("userId");
       const targetUserId = userIdParam ? sanitizeUserId(userIdParam) : userId;
-      const fromSeq = Number(url.searchParams.get("fromSeq") || 1);
-      const limit = Math.min(Number(url.searchParams.get("limit") || 200), 500);
-      const events = await getUserEvents(targetUserId, fromSeq, limit);
+      const page = Number(url.searchParams.get("page") || 0);
+      const pageSize = Number(url.searchParams.get("pageSize") || 0);
+      let events = [];
+      if (page || pageSize) {
+        events = await listUserEventsPaged(targetUserId, page || 1, pageSize || 50);
+      } else {
+        const fromSeq = Number(url.searchParams.get("fromSeq") || 1);
+        const limit = Math.min(Number(url.searchParams.get("limit") || 200), 500);
+        events = await getUserEvents(targetUserId, fromSeq, limit);
+      }
       send(200, { ok: true, events, userId: targetUserId });
       return;
     }
@@ -938,6 +1538,20 @@ const server = http.createServer(async (req, res) => {
       }
       updateUserCache(targetUserId, rebuilt, saveRes.version);
       sendJson(res, 200, { ok: true, userId: targetUserId, version: saveRes.version }, targetUserId);
+      return;
+    }
+
+    if (pathname === "/v1/dev/repair" && req.method === "POST") {
+      if (!isDevEnabled) {
+        sendError(res, 404, "not_found", "Not found");
+        return;
+      }
+      const repaired = await repairUserState(userId, "manual_dev");
+      if (!repaired.ok) {
+        sendError(res, 500, "repair_failed", "Unable to repair user state");
+        return;
+      }
+      send(200, { ok: true, repaired: true });
       return;
     }
 

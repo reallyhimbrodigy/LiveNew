@@ -33,6 +33,9 @@ const scenarioOptions = [
   "depleted_day",
 ];
 
+let csrfToken = null;
+let csrfPromise = null;
+
 function setStatus(key, message, tone = "") {
   const el = statusEls[key];
   if (!el) return;
@@ -40,12 +43,36 @@ function setStatus(key, message, tone = "") {
   el.dataset.tone = tone;
 }
 
+async function ensureCsrfToken() {
+  if (csrfToken) return csrfToken;
+  if (!csrfPromise) {
+    csrfPromise = fetch("/v1/csrf", { credentials: "same-origin" })
+      .then((res) => res.json())
+      .then((payload) => {
+        csrfToken = payload?.token || null;
+        if (!csrfToken) csrfPromise = null;
+        return csrfToken;
+      })
+      .catch(() => {
+        csrfPromise = null;
+        return null;
+      });
+  }
+  return csrfPromise;
+}
+
 async function api(path, options = {}) {
   const headers = { "Content-Type": "application/json" };
+  const method = options.method || "GET";
+  if (method !== "GET") {
+    const token = await ensureCsrfToken();
+    if (token) headers["x-csrf-token"] = token;
+  }
   const res = await fetch(path, {
-    method: options.method || "GET",
+    method,
     headers,
     body: options.body ? JSON.stringify(options.body) : undefined,
+    credentials: "same-origin",
   });
   let payload = null;
   try {
@@ -451,6 +478,7 @@ function initDates() {
 }
 
 function bootstrap() {
+  ensureCsrfToken();
   initDates();
   populateDevSelects();
   bindEvents();
