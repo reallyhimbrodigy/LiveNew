@@ -14,6 +14,7 @@ export function normalizeState(state = {}) {
   next.partCompletionByDate = next.partCompletionByDate ?? {};
   next.history = Array.isArray(next.history) ? next.history : [];
   next.eventLog = Array.isArray(next.eventLog) ? next.eventLog : [];
+  next.selectionStats = next.selectionStats ?? { workouts: {}, nutrition: {}, resets: {} };
   next.ruleToggles = {
     constraintsEnabled: true,
     noveltyEnabled: true,

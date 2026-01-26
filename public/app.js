@@ -54,8 +54,8 @@ async function api(path, options = {}) {
     payload = null;
   }
   if (!res.ok || (payload && payload.ok === false)) {
-    const error = payload?.error || res.statusText || "request_failed";
-    throw new Error(error);
+    const errorMessage = payload?.error?.message || payload?.error || res.statusText || "request_failed";
+    throw new Error(errorMessage);
   }
   return payload;
 }

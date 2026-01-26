@@ -2,6 +2,7 @@ import { assignStressProfile } from "../scoring/profile.js";
 import { defaultLibrary } from "../content/library.js";
 import { applyConstraints } from "./constraints.js";
 import { DECISION_PIPELINE_VERSION } from "../constants.js";
+import { normalizeAppliedRules } from "./rules.js";
 
 export function buildDayPlan({
   user,
@@ -24,6 +25,13 @@ export function buildDayPlan({
 
   const stressState = assignStressProfile({ user, dateISO, checkIn });
   const appliedRules = [];
+  const markOverride = () => {
+    if (ov.source === "feedback") {
+      appliedRules.push("feedback_modifier");
+    } else {
+      appliedRules.push("signal_override");
+    }
+  };
 
   let focus = focusFromProfile(stressState.profile, stressState.capacity);
 
@@ -33,7 +41,7 @@ export function buildDayPlan({
     } else {
       focus = ov.focusBias;
     }
-    appliedRules.push("focus_bias");
+    markOverride();
   }
 
   if (ov.forceBadDayMode) {
@@ -44,7 +52,7 @@ export function buildDayPlan({
   let timeMin = checkIn ? checkIn.timeAvailableMin : 20;
   if (ov.timeOverrideMin != null) {
     timeMin = ov.timeOverrideMin;
-    appliedRules.push("time_override");
+    markOverride();
   }
 
   const busyDays = new Set([...(user.busyDays || []), ...((ctx.busyDays || []))]);
@@ -60,12 +68,13 @@ export function buildDayPlan({
   let intensityCap = baseCap;
   if (ov.intensityCap != null) {
     intensityCap = Math.min(intensityCap, ov.intensityCap);
-    appliedRules.push("intensity_cap");
+    markOverride();
   }
   if (ov.forceBadDayMode) intensityCap = Math.min(intensityCap, 2);
 
   const avoidGroups =
     rules.noveltyEnabled && rules.avoidNoveltyWindowDays > 0 ? ctx.recentNoveltyGroups || [] : [];
+  if (avoidGroups.length) appliedRules.push("novelty_avoidance");
 
   let workout = pickWorkout({ focus, timeMin, checkIn, intensityCap, avoidGroups });
   let nutrition = pickNutrition({ focus, avoidGroups, forceBadDayMode: ov.forceBadDayMode });
@@ -136,7 +145,7 @@ export function buildDayPlan({
 
   const meta = {
     pipelineVersion: DECISION_PIPELINE_VERSION,
-    appliedRules,
+    appliedRules: normalizeAppliedRules(appliedRules),
     selected: {
       workoutId: dayDraft.workout.id,
       resetId: dayDraft.reset.id,

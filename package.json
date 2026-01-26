@@ -24,5 +24,8 @@
     "react-native-screens": "~4.16.0",
     "zustand": "^5.0.10"
   },
-  "private": true
+  "private": true,
+  "engines": {
+    "node": "22.x"
+  }
 }

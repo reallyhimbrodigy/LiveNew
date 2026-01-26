@@ -104,15 +104,15 @@ function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate, quali
   const checkIn = checkInsByDate ? checkInsByDate[todayISO] : undefined;
 
   if (signal === "im_stressed" || signal === "poor_sleep" || signal === "wired" || signal === "anxious") {
-    return { focusBias: "downshift" };
+    return { focusBias: "downshift", source: "signal" };
   }
 
   if (signal === "im_exhausted") {
-    return { focusBias: "stabilize", timeOverrideMin: 10 };
+    return { focusBias: "stabilize", timeOverrideMin: 10, source: "signal" };
   }
 
   if (signal === "i_have_10_min") {
-    return { timeOverrideMin: 10 };
+    return { timeOverrideMin: 10, source: "signal" };
   }
 
   if (signal === "i_have_more_energy") {
@@ -125,8 +125,8 @@ function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate, quali
       overrides: null,
       qualityRules,
     });
-    if (stressState.capacity >= 60 && stressState.loadBand !== "high") return { focusBias: "rebuild" };
-    return { focusBias: "stabilize" };
+    if (stressState.capacity >= 60 && stressState.loadBand !== "high") return { focusBias: "rebuild", source: "signal" };
+    return { focusBias: "stabilize", source: "signal" };
   }
 
   return null;

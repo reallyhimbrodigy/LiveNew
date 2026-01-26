@@ -12,5 +12,6 @@ export { buildDayPlan } from "./planning/decision.js";
 export { generateWeekPlan } from "./planning/generator.js";
 export { adaptPlan } from "./planning/adapt.js";
 export { swapWorkoutForDownshift, shortenDayTo10Min, upgradeDayIfReady } from "./planning/swap.js";
+export { RULES_ORDER, normalizeAppliedRules } from "./planning/rules.js";
 
 export { computeProgress } from "./kpis.js";
