@@ -15,20 +15,24 @@ function focusStatementFor(dayPlan) {
 export function toDayContract(state, dateISO, domain) {
   void domain;
   const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
-  const workout = dayPlan?.workout || {};
+  const workout = dayPlan?.workout === null ? null : dayPlan?.workout || {};
   const reset = dayPlan?.reset || {};
   const nutrition = dayPlan?.nutrition || {};
   const checkIn = latestCheckInForDate(state.checkIns, dateISO);
+  const workoutMinutes = workout ? workout.minutes || 0 : 0;
+  const resetMinutes = reset.minutes || 0;
 
   return {
     dateISO,
     what: {
-      workout: {
-        id: workout.id || null,
-        title: workout.title || null,
-        minutes: workout.minutes ?? null,
-        window: dayPlan?.workoutWindow || null,
-      },
+      workout: workout
+        ? {
+            id: workout.id || null,
+            title: workout.title || null,
+            minutes: workout.minutes ?? null,
+            window: dayPlan?.workoutWindow || null,
+          }
+        : null,
       reset: {
         id: reset.id || null,
         title: reset.title || null,
@@ -46,9 +50,10 @@ export function toDayContract(state, dateISO, domain) {
       statement: focusStatementFor(dayPlan),
       rationale: (dayPlan?.rationale || []).slice(0, 2),
       meta: dayPlan?.meta || null,
+      safety: dayPlan?.safety || { level: "ok", reasons: [] },
     },
     howLong: {
-      totalMinutes: (workout.minutes || 0) + (reset.minutes || 0),
+      totalMinutes: workoutMinutes + resetMinutes,
       timeAvailableMin: checkIn?.timeAvailableMin ?? null,
     },
     details: {

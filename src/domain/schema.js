@@ -22,6 +22,7 @@ export function normalizeState(state = {}) {
     badDayEnabled: true,
     recoveryDebtEnabled: true,
     circadianAnchorsEnabled: true,
+    safetyEnabled: true,
     ...(next.ruleToggles || {}),
   };
 

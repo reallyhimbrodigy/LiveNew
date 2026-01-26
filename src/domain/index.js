@@ -1,4 +1,5 @@
 export { defaultLibrary } from "./content/library.js";
+export { getLibraryIndex, setLibraryIndex } from "./content/indexer.js";
 export { weekStartMonday, addDaysISO, isoToday } from "./utils/date.js";
 
 export { computeStressLoad } from "./scoring/stressLoad.js";

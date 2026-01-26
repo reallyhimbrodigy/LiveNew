@@ -122,6 +122,13 @@ export function validateCheckIn(body, options = {}) {
     return fail("checkin_invalid", `timeAvailableMin must be ${allowedTimes.join(",")}`, "timeAvailableMin");
   }
 
+  const safetyFields = ["illness", "injury", "panic", "fever"];
+  for (const field of safetyFields) {
+    if (field in checkIn && typeof checkIn[field] !== "boolean") {
+      return fail("checkin_invalid", `${field} must be boolean`, field);
+    }
+  }
+
   return ok({
     checkIn: {
       ...checkIn,
@@ -187,6 +194,7 @@ export function validateRules(body) {
     "badDayEnabled",
     "recoveryDebtEnabled",
     "circadianAnchorsEnabled",
+    "safetyEnabled",
   ];
   for (const field of fields) {
     if (field in ruleToggles && typeof ruleToggles[field] !== "boolean") {

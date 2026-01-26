@@ -9,6 +9,7 @@ export function initialStatePatch() {
       badDayEnabled: true,
       recoveryDebtEnabled: true,
       circadianAnchorsEnabled: true,
+      safetyEnabled: true,
     },
     eventLog: [],
     feedback: [],
@@ -605,6 +606,7 @@ function buildQualityRules(ruleToggles) {
     constraintsEnabled: ruleToggles.constraintsEnabled !== false,
     recoveryDebtEnabled: ruleToggles.recoveryDebtEnabled !== false,
     circadianAnchorsEnabled: ruleToggles.circadianAnchorsEnabled !== false,
+    safetyEnabled: ruleToggles.safetyEnabled !== false,
   };
 }
 
@@ -623,6 +625,10 @@ function normalizeCheckIn(checkIn) {
     sleepQuality: Number.isFinite(Number(checkIn.sleepQuality)) ? Number(checkIn.sleepQuality) : 6,
     energy: Number.isFinite(Number(checkIn.energy)) ? Number(checkIn.energy) : 6,
     timeAvailableMin: Number.isFinite(Number(checkIn.timeAvailableMin)) ? Number(checkIn.timeAvailableMin) : 20,
+    illness: Boolean(checkIn.illness),
+    injury: Boolean(checkIn.injury),
+    panic: Boolean(checkIn.panic),
+    fever: Boolean(checkIn.fever),
   };
 }
 

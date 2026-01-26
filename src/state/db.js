@@ -104,10 +104,9 @@ export async function getUserByEmail(email) {
 }
 
 export async function getUserById(userId) {
-  const row = getDb().prepare("SELECT id, email, email_hash FROM users WHERE id = ?").get(userId);
+  const row = getDb().prepare("SELECT id, email, created_at FROM users WHERE id = ?").get(userId);
   if (!row) return null;
-  const decrypted = decryptString(row.email);
-  return { id: row.id, email: decrypted };
+  return { id: row.id, email: decryptString(row.email), createdAt: row.created_at };
 }
 
 export async function createUser(email) {
@@ -242,6 +241,60 @@ export async function deleteSession(token) {
   } else {
     getDb().prepare("DELETE FROM sessions WHERE token = ?").run(token);
   }
+}
+
+export async function createRefreshTokenRow({ id, userId, tokenHash, createdAt, expiresAt, deviceName }) {
+  getDb()
+    .prepare(
+      "INSERT INTO refresh_tokens (id, user_id, token_hash, created_at, expires_at, device_name) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .run(id, userId, tokenHash, createdAt, expiresAt, deviceName || null);
+}
+
+export async function getRefreshTokenByHash(tokenHash) {
+  if (!tokenHash) return null;
+  return getDb()
+    .prepare(
+      "SELECT id, user_id, token_hash, created_at, expires_at, revoked_at, replaced_by_id, device_name FROM refresh_tokens WHERE token_hash = ?"
+    )
+    .get(tokenHash);
+}
+
+export async function revokeRefreshTokenById(id) {
+  if (!id) return;
+  const now = new Date().toISOString();
+  getDb().prepare("UPDATE refresh_tokens SET revoked_at = ? WHERE id = ?").run(now, id);
+}
+
+export async function replaceRefreshToken(oldId, newId) {
+  if (!oldId || !newId) return;
+  const now = new Date().toISOString();
+  getDb()
+    .prepare("UPDATE refresh_tokens SET revoked_at = ?, replaced_by_id = ? WHERE id = ?")
+    .run(now, newId, oldId);
+}
+
+export async function listRefreshTokensByUser(userId) {
+  const rows = getDb()
+    .prepare(
+      "SELECT id, created_at, expires_at, revoked_at, replaced_by_id, device_name FROM refresh_tokens WHERE user_id = ? ORDER BY created_at DESC"
+    )
+    .all(userId);
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    revokedAt: row.revoked_at,
+    replacedById: row.replaced_by_id,
+    deviceName: row.device_name || null,
+  }));
+}
+
+export async function updateRefreshTokenDeviceName(id, deviceName) {
+  if (!id || !deviceName) return;
+  getDb()
+    .prepare("UPDATE refresh_tokens SET device_name = COALESCE(device_name, ?) WHERE id = ?")
+    .run(deviceName, id);
 }
 
 export async function deleteSessionByTokenOrHash(value) {
@@ -603,6 +656,52 @@ export async function listDecisionTracesRecent(userId, limit = 30) {
   }));
 }
 
+export async function insertDayPlanHistory({ userId, dateISO, cause, dayContract, traceRef }) {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO day_plan_history (id, user_id, date_iso, created_at, cause, day_contract_json, trace_ref) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    )
+    .run(id, userId, dateISO, now, cause, JSON.stringify(dayContract), traceRef || null);
+  return { id, createdAt: now };
+}
+
+export async function listDayPlanHistory(userId, dateISO, limit = 10) {
+  const size = Math.min(Math.max(limit, 1), 50);
+  const rows = getDb()
+    .prepare(
+      "SELECT id, created_at, cause, day_contract_json, trace_ref FROM day_plan_history WHERE user_id = ? AND date_iso = ? ORDER BY created_at DESC LIMIT ?"
+    )
+    .all(userId, dateISO, size);
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    cause: row.cause,
+    day: JSON.parse(row.day_contract_json),
+    traceRef: row.trace_ref,
+  }));
+}
+
+export async function getDayPlanHistoryById(id) {
+  if (!id) return null;
+  const row = getDb()
+    .prepare(
+      "SELECT id, user_id, date_iso, created_at, cause, day_contract_json, trace_ref FROM day_plan_history WHERE id = ?"
+    )
+    .get(id);
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id,
+    dateISO: row.date_iso,
+    createdAt: row.created_at,
+    cause: row.cause,
+    day: JSON.parse(row.day_contract_json),
+    traceRef: row.trace_ref,
+  };
+}
+
 export async function upsertContentItem(kind, item) {
   const id = item.id || crypto.randomUUID();
   const payload = { ...item, id, kind };
@@ -883,8 +982,10 @@ export async function deleteUserData(userId) {
     instance.prepare("DELETE FROM user_events WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM user_events_archive WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM decision_traces WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM day_plan_history WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM content_stats WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM analytics_active_users WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM users WHERE id = ?").run(userId);
     instance.exec("COMMIT;");
     return { ok: true };

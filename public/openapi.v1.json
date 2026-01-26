@@ -78,7 +78,7 @@
         },
         "responses": {
           "200": {
-            "description": "OK"
+            "description": "OK (access + refresh tokens)"
           },
           "401": {
             "description": "Invalid code"
@@ -88,7 +88,25 @@
     },
     "/v1/auth/refresh": {
       "post": {
-        "summary": "Refresh session token",
+        "summary": "Refresh access token",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "refreshToken"
+                ]
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "description": "OK"
@@ -97,6 +115,76 @@
             "description": "Unauthorized"
           }
         }
+      }
+    },
+    "/v1/auth/logout": {
+      "post": {
+        "summary": "Logout (revoke refresh token)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "refreshToken": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/onboard/complete": {
+      "post": {
+        "summary": "Complete onboarding in one call",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "email": { "type": "string" },
+                  "userProfile": { "type": "object" },
+                  "firstCheckIn": { "type": "object" }
+                },
+                "required": ["userProfile", "firstCheckIn"]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+    "/v1/plan/history/day": {
+      "get": {
+        "summary": "List day plan history",
+        "parameters": [
+          { "name": "date", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
+      }
+    },
+    "/v1/plan/compare": {
+      "get": {
+        "summary": "Compare two day plan history entries",
+        "parameters": [
+          { "name": "date", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "fromId", "in": "query", "required": true, "schema": { "type": "string" } },
+          { "name": "toId", "in": "query", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": { "200": { "description": "OK" } }
       }
     },
     "/v1/profile": {

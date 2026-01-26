@@ -6,7 +6,10 @@ import {
   verifyAuth,
   getToken,
   setToken,
-  clearToken,
+  clearTokens,
+  setRefreshToken,
+  getRefreshToken,
+  logoutAuth,
   setDeviceName,
   getDeviceName,
   ensureCsrf,
@@ -61,15 +64,21 @@ function bindAuth() {
     const code = codeInput?.value?.trim();
     if (!email || !code) return;
     const res = await verifyAuth(email, code);
-    if (res?.token) {
-      setToken(res.token);
+    if (res?.accessToken || res?.token) {
+      setToken(res.accessToken || res.token);
+      if (res.refreshToken) setRefreshToken(res.refreshToken);
       updateAuthStatus();
       await updateAdminVisibility();
     }
   });
 
-  logoutBtn?.addEventListener("click", () => {
-    clearToken();
+  logoutBtn?.addEventListener("click", async () => {
+    try {
+      if (getRefreshToken()) await logoutAuth();
+    } catch {
+      // ignore
+    }
+    clearTokens();
     updateAuthStatus();
     updateAdminVisibility();
   });
@@ -78,13 +87,13 @@ function bindAuth() {
 function updateAuthStatus() {
   const status = qs("#auth-status");
   if (!status) return;
-  status.textContent = getToken() ? "Signed in" : "Not signed in";
+  status.textContent = getToken() || getRefreshToken() ? "Signed in" : "Not signed in";
 }
 
 async function updateAdminVisibility() {
   const adminLinks = qsa(".admin-link");
   adminLinks.forEach((link) => (link.style.display = "none"));
-  if (!getToken()) return;
+  if (!getToken() && !getRefreshToken()) return;
   try {
     const res = await apiGet("/v1/admin/me");
     if (res?.isAdmin) {
@@ -97,16 +106,23 @@ async function updateAdminVisibility() {
 
 function renderDay(day) {
   setText(qs("#day-what"),
-    `Workout: ${day.what.workout.title || "–"} (${day.what.workout.minutes || "–"} min)\n` +
+    `Workout: ${day.what.workout?.title || "–"} (${day.what.workout?.minutes || "–"} min)\n` +
     `Reset: ${day.what.reset.title || "–"} (${day.what.reset.minutes || "–"} min)\n` +
     `Nutrition: ${day.what.nutrition.title || "–"}`
   );
-  setText(qs("#day-why"),
+  const whyEl = qs("#day-why");
+  setText(whyEl,
     `Profile: ${day.why.profile || "–"}\n` +
     `Focus: ${day.why.focus || "–"}\n` +
     `${day.why.statement || ""}\n` +
     `${(day.why.rationale || []).join(" | ")}`
   );
+  if (day.why?.safety?.level && day.why.safety.level !== "ok" && whyEl) {
+    setText(
+      whyEl,
+      `${whyEl.textContent}\nSafety: ${day.why.safety.level} (${(day.why.safety.reasons || []).join(", ")})`
+    );
+  }
   setText(qs("#day-howlong"),
     `Total: ${formatMinutes(day.howLong.totalMinutes)}\n` +
     `Available: ${day.howLong.timeAvailableMin || "–"} min`
@@ -285,7 +301,7 @@ function initProfile() {
   };
 
   const loadSessions = async () => {
-    if (!getToken()) return;
+    if (!getToken() && !getRefreshToken()) return;
     const res = await apiGet("/v1/account/sessions");
     clear(sessionsList);
     (res.sessions || []).forEach((session) => {
@@ -327,7 +343,7 @@ function initProfile() {
     const name = deviceInput?.value?.trim();
     if (!name) return;
     setDeviceName(name);
-    if (getToken()) await apiPost("/v1/account/sessions/name", { deviceName: name });
+    if (getToken() || getRefreshToken()) await apiPost("/v1/account/sessions/name", { deviceName: name });
     loadSessions();
   });
 

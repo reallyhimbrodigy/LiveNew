@@ -34,8 +34,6 @@ import {
   getOrCreateUser,
   createAuthCode,
   verifyAuthCode,
-  createSession,
-  deleteSession,
   getSession,
   seedContentItems,
   listContentItems,
@@ -48,6 +46,8 @@ import {
   listSessionsByUser,
   touchSession,
   deleteSessionByTokenOrHash,
+  updateRefreshTokenDeviceName,
+  revokeRefreshTokenById,
   seedParameters,
   cleanupOldEvents,
   upsertDecisionTrace,
@@ -64,6 +64,11 @@ import {
   setFeatureFlag,
   upsertParameter,
   listAppliedMigrations,
+  listRefreshTokensByUser,
+  getUserById,
+  insertDayPlanHistory,
+  listDayPlanHistory,
+  getDayPlanHistoryById,
   deleteUserData,
 } from "../state/db.js";
 import { createBackup, restoreBackup, listBackups } from "../db/backup.js";
@@ -73,6 +78,8 @@ import { computeBootSummary } from "./bootSummary.js";
 import { handleSetupRoutes } from "./setupRoutes.js";
 import { getParameters, getDefaultParameters, resetParametersCache } from "./parameters.js";
 import { createTaskScheduler } from "./tasks.js";
+import { signAccessToken, verifyAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshToken } from "../security/tokens.js";
+import { diffDayContracts } from "./diff.js";
 
 const NODE_ENV = process.env.NODE_ENV || "development";
 const config = getConfig();
@@ -81,6 +88,10 @@ const isDevRoutesEnabled = config.devRoutesEnabled;
 const EVENT_SOURCING = process.env.EVENT_SOURCING === "true";
 const EVENT_RETENTION_DAYS = Number(process.env.EVENT_RETENTION_DAYS || 90);
 const runtimeAdminEmails = config.adminEmails;
+const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
+  .split(",")
+  .map((entry) => entry.trim())
+  .filter(Boolean);
 
 const PUBLIC_DIR = path.join(process.cwd(), "public");
 
@@ -101,14 +112,12 @@ const DEFAULT_FLAGS = {
   "rules.badDay.enabled": "true",
   "rules.recoveryDebt.enabled": "true",
   "rules.circadianAnchors.enabled": "true",
+  "rules.safety.enabled": "true",
 };
-let SESSION_TTL_MINUTES = undefined;
 const LATENCY_ROUTES = new Set(["GET /v1/plan/day", "POST /v1/checkin", "POST /v1/signal"]);
+const ACCESS_TOKEN_TTL_SEC = 15 * 60;
 
 const secretState = ensureSecretKey(config);
-if (secretState.secretKeyEphemeral) {
-  SESSION_TTL_MINUTES = 60;
-}
 
 await ensureDataDirWritable(config);
 await initDb();
@@ -173,6 +182,9 @@ async function applyLibraryFromDb() {
   if (workouts.length) domain.defaultLibrary.workouts = workouts;
   if (nutrition.length) domain.defaultLibrary.nutrition = nutrition;
   if (resets.length) domain.defaultLibrary.resets = resets;
+  if (typeof domain.setLibraryIndex === "function") {
+    domain.setLibraryIndex(domain.defaultLibrary);
+  }
 }
 
 async function getFeatureFlags() {
@@ -201,6 +213,7 @@ function resolveRuleToggles(state, flags) {
     badDayEnabled: flagEnabled(flags, "rules.badDay.enabled"),
     recoveryDebtEnabled: flagEnabled(flags, "rules.recoveryDebt.enabled"),
     circadianAnchorsEnabled: flagEnabled(flags, "rules.circadianAnchors.enabled"),
+    safetyEnabled: flagEnabled(flags, "rules.safety.enabled"),
   };
   if (!isDevRoutesEnabled) return base;
   const overrides = state.ruleToggles || {};
@@ -211,6 +224,7 @@ function resolveRuleToggles(state, flags) {
     badDayEnabled: base.badDayEnabled && overrides.badDayEnabled !== false,
     recoveryDebtEnabled: base.recoveryDebtEnabled && overrides.recoveryDebtEnabled !== false,
     circadianAnchorsEnabled: base.circadianAnchorsEnabled && overrides.circadianAnchorsEnabled !== false,
+    safetyEnabled: base.safetyEnabled && overrides.safetyEnabled !== false,
   };
 }
 
@@ -475,6 +489,20 @@ function contentTypeForPath(filePath) {
   return "application/octet-stream";
 }
 
+function applyCors(req, res) {
+  if (!ALLOWED_ORIGINS.length) return false;
+  const origin = req.headers.origin;
+  if (!origin || !ALLOWED_ORIGINS.includes(origin)) return false;
+  res.setHeader("Access-Control-Allow-Origin", origin);
+  res.setHeader("Vary", "Origin");
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Authorization, Content-Type, X-Device-Name, X-Request-Id, X-Client-Type, X-CSRF-Token"
+  );
+  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+  return true;
+}
+
 function summarizeLibraryItems(items) {
   return (items || []).map((item) => ({
     id: item.id,
@@ -502,11 +530,6 @@ function getDeviceName(req) {
   const trimmed = String(value).trim();
   if (!trimmed) return null;
   return trimmed.slice(0, 64);
-}
-
-function hashToken(token) {
-  if (!token) return null;
-  return crypto.createHash("sha256").update(token).digest("hex");
 }
 
 function isAuthRequired() {
@@ -638,15 +661,16 @@ function getCsrfToken(req) {
 }
 
 function isApiBypassAllowed(req) {
-  const token = parseAuthToken(req);
   const clientType = req.headers["x-client-type"];
-  return Boolean(token && clientType === "api");
+  return clientType === "api";
 }
 
 function requireCsrf(req, res) {
   if (!config.csrfEnabled) return true;
   const method = req.method || "GET";
   if (["GET", "HEAD", "OPTIONS"].includes(method)) return true;
+  const authHeader = parseAuthToken(req);
+  if (authHeader) return true;
   if (isApiBypassAllowed(req)) return true;
   const csrfCookie = getCsrfToken(req);
   const csrfHeader = req.headers["x-csrf-token"];
@@ -742,6 +766,29 @@ function findChangedDates(prevState, nextState) {
   return changed;
 }
 
+function historyCauseForEvent(eventType) {
+  switch (eventType) {
+    case "ENSURE_WEEK":
+      return "week_generated";
+    case "WEEK_REBUILD":
+      return "week_rebuild";
+    case "CHECKIN_SAVED":
+      return "checkin_saved";
+    case "QUICK_SIGNAL":
+      return "quick_signal";
+    case "BAD_DAY_MODE":
+      return "bad_day";
+    case "FEEDBACK_SUBMITTED":
+      return "feedback";
+    case "APPLY_SCENARIO":
+      return "scenario";
+    case "BASELINE_SAVED":
+      return "baseline_saved";
+    default:
+      return "update";
+  }
+}
+
 function buildTrends(state, days) {
   const todayISO = domain.isoToday();
   const result = [];
@@ -824,6 +871,14 @@ const server = http.createServer(async (req, res) => {
   res.livenewRequestId = requestId;
   if (pathname.startsWith("/v1")) {
     res.livenewApiVersion = "1";
+  }
+  const corsApplied = applyCors(req, res);
+  if (req.method === "OPTIONS") {
+    if (corsApplied) {
+      res.writeHead(204);
+      res.end();
+      return;
+    }
   }
 
   res.on("finish", () => {
@@ -1031,36 +1086,133 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const deviceName = getDeviceName(req);
-      const token = await createSession(verified.userId, SESSION_TTL_MINUTES || undefined, deviceName);
+      const refresh = await issueRefreshToken({ userId: verified.userId, deviceName });
+      const accessToken = signAccessToken({
+        userId: verified.userId,
+        scope: "user",
+        ttlSec: ACCESS_TOKEN_TTL_SEC,
+        sessionId: refresh.refreshTokenId,
+      });
       res.livenewUserId = verified.userId;
-      sendJson(res, 200, { ok: true, token }, verified.userId);
+      sendJson(
+        res,
+        200,
+        {
+          ok: true,
+          accessToken,
+          refreshToken: refresh.refreshToken,
+          expiresInSec: ACCESS_TOKEN_TTL_SEC,
+          token: accessToken,
+        },
+        verified.userId
+      );
       return;
     }
 
     let userId = null;
     let userEmail = null;
+    let authSessionId = null;
+    let usedLegacySession = false;
     const token = parseAuthToken(req);
     if (token) {
-      const session = await getSession(token);
-      if (session) {
-        userId = session.user_id;
-        userEmail = session.email;
-        const deviceName = getDeviceName(req);
-        await touchSession(token, deviceName);
+      try {
+        const verified = verifyAccessToken(token);
+        userId = verified.userId;
+        authSessionId = verified.sessionId || null;
+      } catch {
+        const session = await getSession(token);
+        if (session) {
+          usedLegacySession = true;
+          userId = session.user_id;
+          userEmail = session.email;
+          const deviceName = getDeviceName(req);
+          await touchSession(token, deviceName);
+        }
       }
     }
 
     if (pathname === "/v1/auth/refresh" && req.method === "POST") {
       if (!requireCsrf(req, res)) return;
-      if (!token || !userId) {
-        sendError(res, 401, "auth_required", "Authorization required");
+      const body = await parseJson(req);
+      const refreshToken = body?.refreshToken || body?.token;
+      if (!refreshToken || typeof refreshToken !== "string") {
+        if (usedLegacySession && token && userId) {
+          const deviceName = getDeviceName(req);
+          await deleteSessionByTokenOrHash(token);
+          const refresh = await issueRefreshToken({ userId, deviceName });
+          const accessToken = signAccessToken({
+            userId,
+            scope: "user",
+            ttlSec: ACCESS_TOKEN_TTL_SEC,
+            sessionId: refresh.refreshTokenId,
+          });
+          res.livenewUserId = userId;
+          sendJson(
+            res,
+            200,
+            {
+              ok: true,
+              accessToken,
+              refreshToken: refresh.refreshToken,
+              expiresInSec: ACCESS_TOKEN_TTL_SEC,
+              token: accessToken,
+            },
+            userId
+          );
+          return;
+        }
+        sendError(res, 400, "refresh_required", "refreshToken is required", "refreshToken");
         return;
       }
-      await deleteSession(token);
-      const deviceName = getDeviceName(req);
-      const newToken = await createSession(userId, SESSION_TTL_MINUTES || undefined, deviceName);
-      res.livenewUserId = userId;
-      sendJson(res, 200, { ok: true, token: newToken }, userId);
+      let rotated;
+      try {
+        const deviceName = getDeviceName(req);
+        rotated = await rotateRefreshToken(refreshToken, deviceName);
+      } catch (err) {
+        sendError(res, 401, err.code || "refresh_invalid", err.message || "refresh token invalid");
+        return;
+      }
+      const accessToken = signAccessToken({
+        userId: rotated.userId,
+        scope: "user",
+        ttlSec: ACCESS_TOKEN_TTL_SEC,
+        sessionId: rotated.refreshTokenId,
+      });
+      res.livenewUserId = rotated.userId;
+      sendJson(
+        res,
+        200,
+        {
+          ok: true,
+          accessToken,
+          refreshToken: rotated.refreshToken,
+          expiresInSec: ACCESS_TOKEN_TTL_SEC,
+          token: accessToken,
+        },
+        rotated.userId
+      );
+      return;
+    }
+
+    if (pathname === "/v1/auth/logout" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
+      const body = await parseJson(req);
+      const refreshToken = body?.refreshToken || body?.token;
+      let revoked = false;
+      if (refreshToken && typeof refreshToken === "string") {
+        revoked = await revokeRefreshToken(refreshToken);
+      } else if (authSessionId) {
+        await revokeRefreshTokenById(authSessionId);
+        revoked = true;
+      } else if (usedLegacySession && token) {
+        await deleteSessionByTokenOrHash(token);
+        revoked = true;
+      }
+      if (!revoked) {
+        sendError(res, 400, "refresh_required", "refreshToken is required", "refreshToken");
+        return;
+      }
+      sendJson(res, 200, { ok: true }, userId || null);
       return;
     }
 
@@ -1074,6 +1226,25 @@ const server = http.createServer(async (req, res) => {
 
     res.livenewUserId = userId;
     const send = (status, payload) => sendJson(res, status, payload, userId);
+    const ensureUserEmail = async () => {
+      if (userEmail) return userEmail;
+      if (!userId) return null;
+      const user = await getUserById(userId);
+      userEmail = user?.email || null;
+      return userEmail;
+    };
+    const requireAdmin = async () => {
+      const email = await ensureUserEmail();
+      if (!email) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return null;
+      }
+      if (!isAdmin(email)) {
+        sendError(res, 403, "forbidden", "Admin access required");
+        return null;
+      }
+      return email;
+    };
 
     if (!requireCsrf(req, res)) return;
 
@@ -1126,11 +1297,20 @@ const server = http.createServer(async (req, res) => {
           }
 
           const changedDates = findChangedDates(prevState, nextState);
+          const historyCause = historyCauseForEvent(eventWithAt.type);
           for (const dateISO of changedDates) {
             const trace = buildDecisionTrace(nextState, dateISO);
             if (trace) {
               await upsertDecisionTrace(userId, dateISO, trace);
             }
+            const dayContract = toDayContract(nextState, dateISO, domain);
+            await insertDayPlanHistory({
+              userId,
+              dateISO,
+              cause: historyCause,
+              dayContract,
+              traceRef: null,
+            });
           }
 
           const todayISO = domain.isoToday();
@@ -1192,6 +1372,73 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/onboard/complete" && req.method === "POST") {
+      const body = await parseJson(req);
+      const profileValidation = validateProfile({ userProfile: body?.userProfile });
+      if (!profileValidation.ok) {
+        sendError(res, 400, profileValidation.error.code, profileValidation.error.message, profileValidation.error.field);
+        return;
+      }
+      const paramsState = await getParameters();
+      const checkinValidation = validateCheckIn(
+        { checkIn: body?.firstCheckIn },
+        { allowedTimes: paramsState.map?.timeBuckets?.allowed }
+      );
+      if (!checkinValidation.ok) {
+        sendError(res, 400, checkinValidation.error.code, checkinValidation.error.message, checkinValidation.error.field);
+        return;
+      }
+      let targetUserId = userId;
+      let targetEmail = userEmail;
+      let issueTokens = false;
+      const email = typeof body?.email === "string" ? body.email.trim().toLowerCase() : "";
+      if (!targetUserId && isAuthRequired()) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      if (!isAuthRequired() && email) {
+        const user = await getOrCreateUser(email);
+        targetUserId = user.id;
+        targetEmail = user.email;
+        issueTokens = true;
+      }
+      if (!targetUserId) {
+        targetUserId = getUserId(req);
+      }
+      if (targetUserId !== userId) {
+        userId = targetUserId;
+        userEmail = targetEmail;
+        res.livenewUserId = userId;
+        const cached = await loadUserState(userId);
+        state = cached.state;
+        version = cached.version;
+      }
+
+      const userProfile = normalizeUserProfile(profileValidation.value.userProfile);
+      const checkIn = checkinValidation.value.checkIn;
+      await dispatchForUser({ type: "BASELINE_SAVED", payload: { userProfile } });
+      await dispatchForUser({ type: "CHECKIN_SAVED", payload: { checkIn } });
+      await dispatchForUser({ type: "ENSURE_WEEK", payload: {} });
+      const day = checkIn?.dateISO ? toDayContract(state, checkIn.dateISO, domain) : null;
+      const payload = { ok: true, weekPlan: state.weekPlan, day };
+      if (issueTokens) {
+        const deviceName = getDeviceName(req);
+        const refresh = await issueRefreshToken({ userId, deviceName });
+        const accessToken = signAccessToken({
+          userId,
+          scope: "user",
+          ttlSec: ACCESS_TOKEN_TTL_SEC,
+          sessionId: refresh.refreshTokenId,
+        });
+        payload.accessToken = accessToken;
+        payload.refreshToken = refresh.refreshToken;
+        payload.expiresInSec = ACCESS_TOKEN_TTL_SEC;
+        payload.token = accessToken;
+      }
+      send(200, payload);
+      return;
+    }
+
     if (pathname === "/v1/plan/week" && req.method === "GET") {
       const cached = getCachedResponse(userId, pathname, url.search);
       if (cached) {
@@ -1237,6 +1484,48 @@ const server = http.createServer(async (req, res) => {
       const payload = { ok: true, day };
       setCachedResponse(userId, pathname, url.search, payload);
       send(200, payload);
+      return;
+    }
+
+    if (pathname === "/v1/plan/history/day" && req.method === "GET") {
+      const dateISO = url.searchParams.get("date");
+      if (!dateISO) {
+        sendError(res, 400, "date_required", "date query param is required", "date");
+        return;
+      }
+      const validation = validateDateParam(dateISO, "date");
+      if (!validation.ok) {
+        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+        return;
+      }
+      const limitRaw = Number(url.searchParams.get("limit") || 10);
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 10;
+      const history = await listDayPlanHistory(userId, dateISO, limit);
+      send(200, { ok: true, dateISO, history });
+      return;
+    }
+
+    if (pathname === "/v1/plan/compare" && req.method === "GET") {
+      const dateISO = url.searchParams.get("date");
+      const fromId = url.searchParams.get("fromId");
+      const toId = url.searchParams.get("toId");
+      if (!dateISO || !fromId || !toId) {
+        sendError(res, 400, "params_required", "date, fromId, and toId are required");
+        return;
+      }
+      const validation = validateDateParam(dateISO, "date");
+      if (!validation.ok) {
+        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+        return;
+      }
+      const from = await getDayPlanHistoryById(fromId);
+      const to = await getDayPlanHistoryById(toId);
+      if (!from || !to || from.userId !== userId || to.userId !== userId) {
+        sendError(res, 404, "history_not_found", "history item not found");
+        return;
+      }
+      const diff = diffDayContracts(from.day, to.day);
+      send(200, { ok: true, dateISO, from, to, diff });
       return;
     }
 
@@ -1411,16 +1700,29 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 401, "auth_required", "Authorization required");
         return;
       }
-      const sessions = await listSessionsByUser(userId);
-      const currentHash = hashToken(token);
+      const sessions = await listRefreshTokensByUser(userId);
       const list = sessions.map((session) => ({
-        token: session.tokenHash,
+        token: session.id,
         deviceName: session.deviceName,
         createdAt: session.createdAt,
-        lastSeenAt: session.lastSeenAt,
+        lastSeenAt: session.createdAt,
         expiresAt: session.expiresAt,
-        isCurrent: currentHash && session.tokenHash === currentHash,
+        isCurrent: authSessionId ? session.id === authSessionId : false,
+        revokedAt: session.revokedAt,
       }));
+      if (!list.length && usedLegacySession) {
+        const legacy = await listSessionsByUser(userId);
+        legacy.forEach((session) => {
+          list.push({
+            token: session.tokenHash,
+            deviceName: session.deviceName,
+            createdAt: session.createdAt,
+            lastSeenAt: session.lastSeenAt,
+            expiresAt: session.expiresAt,
+            isCurrent: false,
+          });
+        });
+      }
       send(200, { ok: true, sessions: list });
       return;
     }
@@ -1436,12 +1738,19 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "token_required", "token is required", "token");
         return;
       }
-      const currentHash = hashToken(token);
-      if (revokeToken === token || revokeToken === currentHash) {
+      if (authSessionId && revokeToken === authSessionId) {
         sendError(res, 400, "cannot_revoke_current", "Use auth/refresh or logout to revoke current session");
         return;
       }
-      await deleteSessionByTokenOrHash(revokeToken);
+      const sessions = await listRefreshTokensByUser(userId);
+      if (sessions.some((session) => session.id === revokeToken)) {
+        await revokeRefreshTokenById(revokeToken);
+      } else if (usedLegacySession) {
+        await deleteSessionByTokenOrHash(revokeToken);
+      } else {
+        sendError(res, 404, "session_not_found", "session not found");
+        return;
+      }
       send(200, { ok: true });
       return;
     }
@@ -1457,8 +1766,13 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "device_name_required", "deviceName is required", "deviceName");
         return;
       }
-      await touchSession(token, deviceName.slice(0, 64));
-      send(200, { ok: true, deviceName: deviceName.slice(0, 64) });
+      const trimmed = deviceName.slice(0, 64);
+      if (authSessionId) {
+        await updateRefreshTokenDeviceName(authSessionId, trimmed);
+      } else if (usedLegacySession) {
+        await touchSession(token, trimmed);
+      }
+      send(200, { ok: true, deviceName: trimmed });
       return;
     }
 
@@ -1483,38 +1797,27 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/me" && req.method === "GET") {
-      if (!userEmail) {
+      const email = await ensureUserEmail();
+      if (!email) {
         sendError(res, 401, "auth_required", "Authorization required");
         return;
       }
-      const admin = isAdmin(userEmail);
-      send(200, { ok: true, isAdmin: admin, email: userEmail });
+      const admin = isAdmin(email);
+      send(200, { ok: true, isAdmin: admin, email });
       return;
     }
 
     if (pathname === "/v1/admin/flags" && req.method === "GET") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const flags = await getFeatureFlags();
       send(200, { ok: true, flags });
       return;
     }
 
     if (pathname === "/v1/admin/flags" && req.method === "PATCH") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const body = await parseJson(req);
       const key = body?.key;
       const value = body?.value;
@@ -1533,14 +1836,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/parameters" && req.method === "GET") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const paramsState = await getParameters();
       send(200, {
         ok: true,
@@ -1552,14 +1849,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/parameters" && req.method === "PATCH") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const body = await parseJson(req);
       const key = body?.key;
       if (!key || typeof key !== "string") {
@@ -1591,14 +1882,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/metrics/latency" && req.method === "GET") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const entries = Array.from(LATENCY_ROUTES).map((routeKey) => ({
         route: routeKey,
         ...latencyStats(routeKey),
@@ -1608,14 +1893,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/trace" && req.method === "GET") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const userIdParam = url.searchParams.get("userId");
       const dateISO = url.searchParams.get("date");
       if (!userIdParam || !dateISO) {
@@ -1633,14 +1912,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/traces" && req.method === "GET") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const userIdParam = url.searchParams.get("userId");
       const fromISO = url.searchParams.get("from");
       const toISO = url.searchParams.get("to");
@@ -1656,14 +1929,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/events" && req.method === "GET") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const userIdParam = url.searchParams.get("userId");
       if (!userIdParam) {
         sendError(res, 400, "userId_required", "userId is required", "userId");
@@ -1678,14 +1945,8 @@ const server = http.createServer(async (req, res) => {
 
     const contentDisableMatch = pathname.match(/^\/v1\/admin\/content\/(workout|nutrition|reset)\/([^/]+)\/disable$/);
     if (contentDisableMatch && req.method === "POST") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const kind = contentDisableMatch[1];
       const id = contentDisableMatch[2];
       const updated = await patchContentItem(kind, id, { enabled: false });
@@ -1700,14 +1961,8 @@ const server = http.createServer(async (req, res) => {
 
     const contentPatchMatch = pathname.match(/^\/v1\/admin\/content\/(workout|nutrition|reset)\/([^/]+)$/);
     if (contentPatchMatch && req.method === "PATCH") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const kind = contentPatchMatch[1];
       const id = contentPatchMatch[2];
       const body = await parseJson(req);
@@ -1755,14 +2010,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/content" && req.method === "GET") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const kind = url.searchParams.get("kind");
       const page = Number(url.searchParams.get("page") || 1);
       const pageSize = Number(url.searchParams.get("pageSize") || 50);
@@ -1772,14 +2021,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/content" && req.method === "POST") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const body = await parseJson(req);
       const kind = body?.kind;
       const item = body?.item;
@@ -1798,14 +2041,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/content/bulk" && req.method === "POST") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const body = await parseJson(req);
       const items = body?.items;
       if (!Array.isArray(items) || !items.length) {
@@ -1826,14 +2063,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/stats/content" && req.method === "GET") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const kind = url.searchParams.get("kind");
       if (!["workout", "nutrition", "reset"].includes(kind)) {
         sendError(res, 400, "kind_invalid", "kind must be workout, nutrition, or reset", "kind");
@@ -1882,14 +2113,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/stats" && req.method === "GET") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const userIdParam = url.searchParams.get("userId");
       if (userIdParam) {
         const sanitized = sanitizeUserId(userIdParam);
@@ -1907,14 +2132,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/analytics/daily" && req.method === "GET") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       let fromISO = url.searchParams.get("from");
       let toISO = url.searchParams.get("to");
       if (!fromISO || !toISO) {
@@ -1938,14 +2157,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/reports/worst-items" && req.method === "GET") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const kind = url.searchParams.get("kind");
       if (!["workout", "nutrition", "reset"].includes(kind)) {
         sendError(res, 400, "kind_invalid", "kind must be workout, nutrition, or reset", "kind");
@@ -1959,28 +2172,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/db/backup" && req.method === "POST") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const backup = await createBackup();
       send(200, { ok: true, backup });
       return;
     }
 
     if (pathname === "/v1/admin/db/restore" && req.method === "POST") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const body = await parseJson(req);
       const backupId = body?.backupId;
       if (!backupId || typeof backupId !== "string") {
@@ -1998,14 +2199,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/tasks/run" && req.method === "POST") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const body = await parseJson(req);
       const task = body?.task;
       if (!["backup", "cleanup"].includes(task)) {
@@ -2018,14 +2213,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/admin/repair" && req.method === "POST") {
-      if (!userEmail) {
-        sendError(res, 401, "auth_required", "Authorization required");
-        return;
-      }
-      if (!isAdmin(userEmail)) {
-        sendError(res, 403, "forbidden", "Admin access required");
-        return;
-      }
+      const email = await requireAdmin();
+      if (!email) return;
       const userIdParam = url.searchParams.get("userId");
       if (!userIdParam) {
         sendError(res, 400, "userId_required", "userId is required", "userId");
