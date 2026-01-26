@@ -1,0 +1,93 @@
+import fs from "fs";
+import path from "path";
+
+const ALLOWED_MODES = new Set(["dev", "dogfood", "alpha", "prod"]);
+let cachedConfig = null;
+
+function parseBool(value) {
+  if (value == null) return undefined;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  return undefined;
+}
+
+function parseAdminEmails(input) {
+  return (input || "")
+    .split(",")
+    .map((entry) => entry.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+function readAdminEmailsFile(dataDir) {
+  const filePath = path.join(dataDir, "admin_emails.json");
+  if (!fs.existsSync(filePath)) return [];
+  try {
+    const raw = fs.readFileSync(filePath, "utf8");
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map((entry) => String(entry).trim().toLowerCase()).filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
+export function getEnvMode() {
+  const raw = (process.env.ENV_MODE || "").trim().toLowerCase();
+  if (!raw) return "dogfood";
+  if (!ALLOWED_MODES.has(raw)) {
+    throw new Error(`ENV_MODE must be one of dev|dogfood|alpha|prod. Received: ${process.env.ENV_MODE}`);
+  }
+  return raw;
+}
+
+export function getConfig() {
+  if (cachedConfig) return cachedConfig;
+
+  const envMode = getEnvMode();
+  const isDevLike = envMode === "dev" || envMode === "dogfood";
+  const isAlphaLike = envMode === "alpha";
+  const isProdLike = envMode === "prod";
+
+  const dataDir = process.env.DATA_DIR || "data";
+  const envAdmins = parseAdminEmails(process.env.ADMIN_EMAILS);
+  const fileAdmins = readAdminEmailsFile(dataDir);
+  const adminEmails = new Set([...envAdmins, ...fileAdmins]);
+
+  const devOverride = parseBool(process.env.DEV_ROUTES_ENABLED);
+  const devRoutesEnabled = devOverride !== undefined ? devOverride : isDevLike;
+
+  const authOverride = parseBool(process.env.AUTH_REQUIRED);
+  const requireAuth = isAlphaLike || isProdLike ? true : authOverride === true;
+
+  const csrfOverride = parseBool(process.env.CSRF_ENABLED);
+  const csrfEnabled = isAlphaLike || isProdLike ? true : csrfOverride !== undefined ? csrfOverride : true;
+
+  const rateLimits = isAlphaLike || isProdLike
+    ? { general: 40, mutating: 8, auth: 5 }
+    : { general: 60, mutating: 10, auth: 10 };
+
+  const cacheTTLSeconds = isAlphaLike || isProdLike ? 20 : 10;
+
+  const config = {
+    envMode,
+    isDevLike,
+    isAlphaLike,
+    isProdLike,
+    requireAuth,
+    devRoutesEnabled,
+    secretKeyPolicy: {
+      allowEphemeral: isDevLike,
+      requireReal: isAlphaLike || isProdLike,
+    },
+    rateLimits,
+    cacheTTLSeconds,
+    csrfEnabled,
+    adminEmails,
+    port: Number(process.env.PORT || 3000),
+    dataDir,
+    dbStatusRequired: true,
+  };
+
+  cachedConfig = Object.freeze(config);
+  return cachedConfig;
+}

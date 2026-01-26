@@ -1,12 +1,14 @@
 import crypto from "crypto";
-import { requireSecretKeyOrFallback } from "../server/env.js";
+import { ensureSecretKey } from "../server/env.js";
+import { getConfig } from "../server/config.js";
 
 let cachedKey = null;
 
 function deriveKey() {
   if (cachedKey) return cachedKey;
-  const secret = requireSecretKeyOrFallback();
-  if (!secret) return null;
+  const status = ensureSecretKey(getConfig());
+  if (!status.secretKeyPresent) return null;
+  const secret = process.env.SECRET_KEY || "";
   cachedKey = crypto.createHash("sha256").update(secret).digest();
   return cachedKey;
 }

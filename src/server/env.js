@@ -1,38 +1,44 @@
 import crypto from "crypto";
 
-let generatedSecret = false;
+let warned = false;
+let lastStatus = { secretKeyPresent: false, secretKeyEphemeral: false };
 
-export function isAlphaMode() {
-  return process.env.ALPHA_MODE === "true";
-}
-
-export function isProd() {
-  return process.env.NODE_ENV === "production";
-}
-
-export function requireSecretKeyOrFallback() {
+export function ensureSecretKey(config) {
   const secret = process.env.SECRET_KEY;
-  if (isAlphaMode()) {
-    if (!secret || secret.length < 32) {
+  const hasSecret = Boolean(secret);
+  const ephemeralFlag = process.env.SECRET_KEY_EPHEMERAL === "true";
+
+  if (config.secretKeyPolicy?.requireReal) {
+    if (!hasSecret || secret.length < 32 || ephemeralFlag) {
       throw new Error("LiveNew SECRET_KEY is required in production/alpha.");
     }
-    return secret;
+    lastStatus = { secretKeyPresent: true, secretKeyEphemeral: false };
+    return lastStatus;
   }
-  if (!secret) {
+
+  if (!hasSecret) {
     const k = crypto.randomBytes(32).toString("hex");
     process.env.SECRET_KEY = k;
-    generatedSecret = true;
-    console.warn(
-      "LiveNew: SECRET_KEY missing; generated ephemeral dev key. Sessions/data will not survive restarts."
-    );
-    return k;
+    process.env.SECRET_KEY_EPHEMERAL = "true";
+    lastStatus = { secretKeyPresent: true, secretKeyEphemeral: true };
+    if (!warned) {
+      console.warn(
+        "LiveNew: SECRET_KEY missing; generated ephemeral dev key. Sessions/data will not survive restarts."
+      );
+      warned = true;
+    }
+    return lastStatus;
   }
-  if (secret.length < 32) {
+
+  if (secret.length < 32 && !warned) {
     console.warn("LiveNew: SECRET_KEY is shorter than 32 chars; using as-is for non-alpha.");
+    warned = true;
   }
-  return secret;
+
+  lastStatus = { secretKeyPresent: true, secretKeyEphemeral: ephemeralFlag };
+  return lastStatus;
 }
 
-export function isEphemeralSecretKey() {
-  return generatedSecret;
+export function getSecretKeyStatus() {
+  return lastStatus;
 }

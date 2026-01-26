@@ -61,21 +61,18 @@ import {
   deleteUserData,
 } from "../state/db.js";
 import { createBackup, restoreBackup, listBackups } from "../db/backup.js";
-import { isAlphaMode, requireSecretKeyOrFallback, isEphemeralSecretKey } from "./env.js";
+import { getConfig } from "./config.js";
+import { ensureSecretKey } from "./env.js";
+import { computeBootSummary } from "./bootSummary.js";
+import { handleSetupRoutes } from "./setupRoutes.js";
 
-const PORT = process.env.PORT || 3000;
 const NODE_ENV = process.env.NODE_ENV || "development";
-const ALPHA_MODE = isAlphaMode();
-const isDevRoutesEnabled =
-  process.env.DEV_ROUTES_ENABLED === "true" || (NODE_ENV !== "production" && process.env.ALPHA_MODE !== "true");
+const config = getConfig();
+const PORT = config.port;
+const isDevRoutesEnabled = config.devRoutesEnabled;
 const EVENT_SOURCING = process.env.EVENT_SOURCING === "true";
 const EVENT_RETENTION_DAYS = Number(process.env.EVENT_RETENTION_DAYS || 90);
-const ADMIN_EMAILS = new Set(
-  (process.env.ADMIN_EMAILS || "")
-    .split(",")
-    .map((entry) => entry.trim().toLowerCase())
-    .filter(Boolean)
-);
+const runtimeAdminEmails = config.adminEmails;
 
 const PUBLIC_DIR = path.join(process.cwd(), "public");
 
@@ -100,45 +97,53 @@ const DEFAULT_FLAGS = {
 let SESSION_TTL_MINUTES = undefined;
 const LATENCY_ROUTES = new Set(["GET /v1/plan/day", "POST /v1/checkin", "POST /v1/signal"]);
 
-requireSecretKeyOrFallback();
-const secretStatus = isEphemeralSecretKey() ? "generated" : "present";
-console.log(`LiveNew env: NODE_ENV=${NODE_ENV} ALPHA_MODE=${ALPHA_MODE} SECRET_KEY=${secretStatus}`);
-if (isEphemeralSecretKey()) {
+const secretState = ensureSecretKey(config);
+if (secretState.secretKeyEphemeral) {
   SESSION_TTL_MINUTES = 60;
 }
 
-await ensureDataDirWritable();
+await ensureDataDirWritable(config);
 await initDb();
 await seedContentItems(domain.defaultLibrary);
 await seedFeatureFlags(DEFAULT_FLAGS);
 await applyLibraryFromDb();
 await cleanupOldEvents(EVENT_RETENTION_DAYS);
-console.log(
-  JSON.stringify({
-    event: "boot",
-    node: process.version,
-    apiVersion: "1",
-    schemaVersion: domain.STATE_SCHEMA_VERSION ?? null,
-    pipelineVersion: domain.DECISION_PIPELINE_VERSION ?? null,
-    devRoutesEnabled: isDevRoutesEnabled,
-  })
-);
+const bootSummary = await computeBootSummary(config);
+enforceGuardrails(config, bootSummary);
+console.log(JSON.stringify({ boot: bootSummary }));
 setInterval(() => {
   cleanupOldEvents(EVENT_RETENTION_DAYS).catch((err) => {
     console.error("Event retention cleanup failed", err);
   });
 }, 24 * 60 * 60 * 1000);
 
-async function ensureDataDirWritable() {
-  const dir = path.dirname(getDbPath());
-  const testPath = path.join(dir, `.write-test-${process.pid}.tmp`);
-  try {
-    await fs.mkdir(dir, { recursive: true });
-    await fs.writeFile(testPath, "ok");
-    await fs.unlink(testPath);
-  } catch (err) {
-    console.error("LiveNew server cannot write to data directory:", dir, err);
-    process.exit(1);
+function enforceGuardrails(runtimeConfig, summary) {
+  if (!(runtimeConfig.isAlphaLike || runtimeConfig.isProdLike)) return;
+  const failures = [];
+  if (!summary.secretKey.present || summary.secretKey.ephemeral) failures.push("SECRET_KEY");
+  if (!summary.admin.configured) failures.push("ADMIN_EMAILS");
+  if (summary.devRoutes.enabled) failures.push("DEV_ROUTES_ENABLED");
+  if (!summary.csrf.enabled) failures.push("CSRF");
+  if (runtimeConfig.requireAuth && !summary.storage.ok) failures.push("DB");
+  if (failures.length) {
+    throw new Error(
+      `ENV_MODE=${runtimeConfig.envMode} requires SECRET_KEY (32+ chars) and ADMIN_EMAILS and CSRF enabled. Refusing to boot.`
+    );
+  }
+}
+
+async function ensureDataDirWritable(runtimeConfig) {
+  const dirs = new Set([runtimeConfig.dataDir, path.dirname(getDbPath())]);
+  for (const dir of dirs) {
+    const testPath = path.join(dir, `.write-test-${process.pid}.tmp`);
+    try {
+      await fs.mkdir(dir, { recursive: true });
+      await fs.writeFile(testPath, "ok");
+      await fs.unlink(testPath);
+    } catch (err) {
+      console.error("LiveNew server cannot write to data directory:", dir, err);
+      process.exit(1);
+    }
   }
 }
 
@@ -322,6 +327,37 @@ function normalizeUserProfile(profile) {
   };
 }
 
+async function seedInitialProfile(email, profile) {
+  const normalized = normalizeUserProfile(profile);
+  if (!normalized) return;
+  const user = await getOrCreateUser(email);
+  let cached = await loadUserState(user.id);
+  let currentState = cached.state;
+  let currentVersion = cached.version;
+  const flags = await getFeatureFlags();
+  const effectiveToggles = resolveRuleToggles(currentState, flags);
+
+  const baseline = dispatch(currentState, { type: "BASELINE_SAVED", payload: { userProfile: normalized } }, { ruleToggles: effectiveToggles });
+  currentState = baseline.state;
+  const ensured = dispatch(currentState, { type: "ENSURE_WEEK", payload: {} }, { ruleToggles: effectiveToggles });
+  currentState = ensured.state;
+
+  let saveRes = await saveUserState(user.id, currentVersion, currentState);
+  if (!saveRes.ok) {
+    cached = await loadUserState(user.id);
+    currentState = cached.state;
+    currentVersion = cached.version;
+    const retryBaseline = dispatch(currentState, { type: "BASELINE_SAVED", payload: { userProfile: normalized } }, { ruleToggles: effectiveToggles });
+    currentState = retryBaseline.state;
+    const retryEnsured = dispatch(currentState, { type: "ENSURE_WEEK", payload: {} }, { ruleToggles: effectiveToggles });
+    currentState = retryEnsured.state;
+    saveRes = await saveUserState(user.id, currentVersion, currentState);
+  }
+  if (saveRes.ok) {
+    updateUserCache(user.id, currentState, saveRes.version);
+  }
+}
+
 function appendLogEvent(current, logEvent) {
   if (!logEvent) return current;
   const entries = Array.isArray(logEvent) ? logEvent : [logEvent];
@@ -435,7 +471,7 @@ function getClientIp(req) {
 }
 
 function isAuthRequired() {
-  return ALPHA_MODE || NODE_ENV === "production";
+  return config.requireAuth;
 }
 
 function parseAuthToken(req) {
@@ -446,14 +482,24 @@ function parseAuthToken(req) {
 
 function isAdmin(email) {
   if (!email) return false;
-  return ADMIN_EMAILS.has(email.toLowerCase());
+  return runtimeAdminEmails.has(email.toLowerCase());
+}
+
+function addAdminEmail(email) {
+  if (!email) return;
+  runtimeAdminEmails.add(email.toLowerCase());
+}
+
+function isAdminConfigured() {
+  return runtimeAdminEmails.size > 0;
 }
 
 function getLimiter(userId) {
   if (!rateLimiters.has(userId)) {
+    const { general, mutating } = config.rateLimits;
     rateLimiters.set(userId, {
-      general: { tokens: 60, last: Date.now() },
-      mutating: { tokens: 10, last: Date.now() },
+      general: { tokens: general, last: Date.now() },
+      mutating: { tokens: mutating, last: Date.now() },
     });
   }
   return rateLimiters.get(userId);
@@ -471,10 +517,10 @@ function takeToken(bucket, capacity, refillPerMs) {
 
 function checkRateLimit(userId, isMutating) {
   const limiter = getLimiter(userId);
-  const okGeneral = takeToken(limiter.general, 60, 60 / 60000);
+  const okGeneral = takeToken(limiter.general, config.rateLimits.general, config.rateLimits.general / 60000);
   if (!okGeneral) return { ok: false, kind: "general" };
   if (isMutating) {
-    const okMutating = takeToken(limiter.mutating, 10, 10 / 60000);
+    const okMutating = takeToken(limiter.mutating, config.rateLimits.mutating, config.rateLimits.mutating / 60000);
     if (!okMutating) return { ok: false, kind: "mutating" };
   }
   return { ok: true };
@@ -559,6 +605,7 @@ function isApiBypassAllowed(req) {
 }
 
 function requireCsrf(req, res) {
+  if (!config.csrfEnabled) return true;
   const method = req.method || "GET";
   if (["GET", "HEAD", "OPTIONS"].includes(method)) return true;
   if (isApiBypassAllowed(req)) return true;
@@ -577,14 +624,14 @@ function authLimiterKey(type, value) {
 
 function getAuthLimiter(key) {
   if (!authRateLimiters.has(key)) {
-    authRateLimiters.set(key, { tokens: 10, last: Date.now() });
+    authRateLimiters.set(key, { tokens: config.rateLimits.auth, last: Date.now() });
   }
   return authRateLimiters.get(key);
 }
 
 function checkAuthRateLimit(key) {
   const limiter = getAuthLimiter(key);
-  const ok = takeToken(limiter, 10, 10 / 60000);
+  const ok = takeToken(limiter, config.rateLimits.auth, config.rateLimits.auth / 60000);
   return ok;
 }
 
@@ -603,7 +650,7 @@ function getCachedResponse(userId, reqPath, query) {
   return entry.payload;
 }
 
-function setCachedResponse(userId, reqPath, query, payload, ttlMs = 10000) {
+function setCachedResponse(userId, reqPath, query, payload, ttlMs = config.cacheTTLSeconds * 1000) {
   const key = readCacheKey(userId, reqPath, query);
   readCache.set(key, { payload, expiresAt: Date.now() + ttlMs });
 }
@@ -696,6 +743,19 @@ function buildTrends(state, days) {
   return result;
 }
 
+function assessReadiness(runtimeConfig, summary) {
+  const failures = [];
+  if (runtimeConfig.dbStatusRequired && !summary.storage.ok) failures.push("db");
+  if (!summary.dataDir.writable) failures.push("dataDir");
+  if (runtimeConfig.secretKeyPolicy.requireReal && summary.secretKey.ephemeral) failures.push("secretKey");
+  if (runtimeConfig.isAlphaLike || runtimeConfig.isProdLike) {
+    if (!summary.admin.configured) failures.push("adminEmails");
+    if (summary.devRoutes.enabled) failures.push("devRoutes");
+    if (!summary.csrf.enabled) failures.push("csrf");
+  }
+  return { ok: failures.length === 0, failures };
+}
+
 function defaultDateRange(days) {
   const toISO = domain.isoToday();
   const fromISO = domain.addDaysISO(toISO, -(days - 1));
@@ -772,6 +832,17 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    const handledSetup = await handleSetupRoutes(req, res, config, {
+      url,
+      sendJson,
+      sendError,
+      computeSummary: () => computeBootSummary(config),
+      isAdminConfigured,
+      addAdminEmail,
+      seedInitialProfile,
+    });
+    if (handledSetup) return;
+
     if (pathname === "/healthz" && req.method === "GET") {
       await checkDbConnection();
       sendJson(res, 200, {
@@ -786,10 +857,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/readyz" && req.method === "GET") {
-      await checkDbConnection();
       await checkReady();
       await getFeatureFlags();
-      sendJson(res, 200, { ok: true });
+      const summary = await computeBootSummary(config);
+      const readiness = assessReadiness(config, summary);
+      sendJson(res, 200, { ok: readiness.ok, summary, failures: readiness.failures });
       return;
     }
 
@@ -1231,7 +1303,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       let body = {};
-      if (ALPHA_MODE) {
+      if (config.isAlphaLike) {
         body = await parseJson(req);
         if (body?.confirm !== "LiveNew") {
           sendError(res, 400, "confirm_required", "confirm must be LiveNew", "confirm");
