@@ -56,6 +56,34 @@
     </section>
 
     <section class="card">
+      <h2 data-i18n="profile.constraints">Constraints</h2>
+      <div class="grid-2">
+        <label><input id="constraint-injury-knee" type="checkbox" /> <span data-i18n="profile.injuryKnee">Knee injury</span></label>
+        <label><input id="constraint-injury-shoulder" type="checkbox" /> <span data-i18n="profile.injuryShoulder">Shoulder injury</span></label>
+        <label><input id="constraint-injury-back" type="checkbox" /> <span data-i18n="profile.injuryBack">Back injury</span></label>
+        <label><input id="constraint-eq-none" type="checkbox" /> <span data-i18n="profile.equipmentNone">No equipment</span></label>
+        <label><input id="constraint-eq-dumbbells" type="checkbox" /> <span data-i18n="profile.equipmentDumbbells">Dumbbells</span></label>
+        <label><input id="constraint-eq-bands" type="checkbox" /> <span data-i18n="profile.equipmentBands">Bands</span></label>
+        <label><input id="constraint-eq-gym" type="checkbox" /> <span data-i18n="profile.equipmentGym">Gym access</span></label>
+        <label class="span-2"><span data-i18n="profile.timePref">Preferred time of day</span>
+          <select id="constraint-time-pref">
+            <option value="any" data-i18n="profile.timeAny">Any</option>
+            <option value="morning" data-i18n="profile.timeMorning">Morning</option>
+            <option value="midday" data-i18n="profile.timeMidday">Midday</option>
+            <option value="evening" data-i18n="profile.timeEvening">Evening</option>
+          </select>
+        </label>
+      </div>
+      <button id="constraints-save" data-i18n="profile.saveConstraints">Save constraints</button>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="profile.community">Community</h2>
+      <label><input id="community-opt-in" type="checkbox" /> <span data-i18n="profile.communityOptIn">Share anonymous “what worked” responses</span></label>
+      <button id="community-opt-save" data-i18n="profile.saveCommunity">Save community preference</button>
+    </section>
+
+    <section class="card">
       <h2 data-i18n="profile.sessions">Sessions</h2>
       <div class="row">
         <input id="device-name" type="text" placeholder="Device name" data-i18n-placeholder="profile.deviceName" />

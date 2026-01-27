@@ -15,6 +15,9 @@ const FEEDBACK_REASONS = new Set(["too_hard", "too_easy", "wrong_time", "not_rel
 const PARTS = new Set(["workout", "reset", "nutrition"]);
 const TIME_OPTIONS = new Set([5, 10, 15, 20, 30, 45, 60]);
 const CONTENT_PACKS = new Set(["calm_reset", "balanced_routine", "rebuild_strength"]);
+const INJURY_KEYS = new Set(["knee", "shoulder", "back"]);
+const EQUIPMENT_KEYS = new Set(["none", "dumbbells", "bands", "gym"]);
+const TIME_PREFS = new Set(["morning", "midday", "evening", "any"]);
 const REPLAY_EVENT_TYPES = new Set([
   "BASELINE_SAVED",
   "ENSURE_WEEK",
@@ -30,6 +33,9 @@ const REPLAY_EVENT_TYPES = new Set([
   "CLEAR_EVENT_LOG",
   "SET_RULE_TOGGLES",
   "APPLY_SCENARIO",
+  "LAST_ACTIVE_TOUCHED",
+  "REENTRY_STARTED",
+  "REENTRY_ADVANCED",
 ]);
 
 function ok(value) {
@@ -126,6 +132,52 @@ export function validateProfile(body) {
     }
     if ("historyRetentionDays" in dm && !isIntegerInRange(dm.historyRetentionDays, 1, 365)) {
       return fail("profile_invalid", "historyRetentionDays must be 1..365", "dataMinimization.historyRetentionDays");
+    }
+  }
+
+  if (userProfile.constraints != null) {
+    const constraints = userProfile.constraints;
+    if (typeof constraints !== "object") {
+      return fail("profile_invalid", "constraints must be object", "constraints");
+    }
+    if (constraints.injuries != null) {
+      if (typeof constraints.injuries !== "object") {
+        return fail("profile_invalid", "injuries must be object", "constraints.injuries");
+      }
+      for (const [key, value] of Object.entries(constraints.injuries)) {
+        if (!INJURY_KEYS.has(key)) {
+          return fail("profile_invalid", "injuries contains invalid key", "constraints.injuries");
+        }
+        if (typeof value !== "boolean") {
+          return fail("profile_invalid", "injuries values must be boolean", `constraints.injuries.${key}`);
+        }
+      }
+    }
+    if (constraints.equipment != null) {
+      if (typeof constraints.equipment !== "object") {
+        return fail("profile_invalid", "equipment must be object", "constraints.equipment");
+      }
+      for (const [key, value] of Object.entries(constraints.equipment)) {
+        if (!EQUIPMENT_KEYS.has(key)) {
+          return fail("profile_invalid", "equipment contains invalid key", "constraints.equipment");
+        }
+        if (typeof value !== "boolean") {
+          return fail("profile_invalid", "equipment values must be boolean", `constraints.equipment.${key}`);
+        }
+      }
+    }
+    if (constraints.timeOfDayPreference != null) {
+      if (typeof constraints.timeOfDayPreference !== "string") {
+        return fail("profile_invalid", "timeOfDayPreference must be string", "constraints.timeOfDayPreference");
+      }
+      const pref = constraints.timeOfDayPreference.trim().toLowerCase();
+      if (!TIME_PREFS.has(pref)) {
+        return fail(
+          "profile_invalid",
+          "timeOfDayPreference must be morning, midday, evening, or any",
+          "constraints.timeOfDayPreference"
+        );
+      }
     }
   }
 

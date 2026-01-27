@@ -11,6 +11,7 @@ export function adaptPlan({
   completionsByDate,
   feedback,
   overridesBase,
+  overridesForDate,
   qualityRules,
   weekContextBase,
   params,
@@ -30,6 +31,8 @@ export function adaptPlan({
   };
 
   if (signal) {
+    const baseOverrides =
+      (typeof overridesForDate === "function" && overridesForDate(todayISO)) || overridesBase || null;
     const override = buildOverrideFromSignal({
       signal,
       user,
@@ -40,11 +43,11 @@ export function adaptPlan({
       feedback,
       qualityRules: baseQualityRules,
       params,
-      overridesBase,
+      overridesBase: baseOverrides,
       ruleConfig,
       library,
     });
-    const mergedOverride = { ...(overridesBase || {}), ...(override || {}) };
+    const mergedOverride = { ...(baseOverrides || {}), ...(override || {}) };
     const res = rebuildDay({
       user,
       dateISO: todayISO,
@@ -68,7 +71,9 @@ export function adaptPlan({
 
   if (checkIn && checkIn.stress >= 7 && checkIn.sleepQuality <= 5) {
     const tomorrowISO = addDaysISO(todayISO, 1);
-    const mergedOverride = { ...(overridesBase || {}), focusBias: "downshift" };
+    const tomorrowBase =
+      (typeof overridesForDate === "function" && overridesForDate(tomorrowISO)) || overridesBase || null;
+    const mergedOverride = { ...(tomorrowBase || {}), focusBias: "downshift" };
     const res = rebuildDay({
       user,
       dateISO: tomorrowISO,

@@ -9,7 +9,7 @@ import { getScenarioById } from "../dev/scenarios.js";
 import { runSnapshotCheck, SNAPSHOT_IDS } from "../dev/snapshot.js";
 import { toDayContract } from "./dayContract.js";
 import { getUserId, sanitizeUserId } from "./userId.js";
-import { AppError, badRequest, internal, sendError } from "./errors.js";
+import { AppError, badRequest, forbidden, internal, sendError as baseSendError } from "./errors.js";
 import { logInfo, logError } from "./logger.js";
 import { assertDayContract, assertWeekPlan } from "./invariants.js";
 import { validateWorkoutItem, validateResetItem, validateNutritionItem } from "../domain/content/validateContent.js";
@@ -113,6 +113,20 @@ import {
   listAllUserStates,
   cleanupUserRetention,
   deleteUserData,
+  insertValidatorRun,
+  getLatestValidatorRun,
+  getValidatorRun,
+  listValidatorRuns,
+  cleanupValidatorRuns,
+  upsertUserConsents,
+  missingUserConsents,
+  listUserConsents,
+  setCommunityOptIn,
+  getCommunityOptIn,
+  insertCommunityResponse,
+  listCommunityResponses,
+  listCommunityPending,
+  moderateCommunityResponse,
 } from "../state/db.js";
 import { createBackup, restoreBackup, listBackups } from "../db/backup.js";
 import { getConfig } from "./config.js";
@@ -122,6 +136,7 @@ import { handleSetupRoutes } from "./setupRoutes.js";
 import { getParameters, getDefaultParameters, resetParametersCache, validateParamValue } from "./parameters.js";
 import { applyExperiments, SAFETY_DENYLIST } from "./experiments.js";
 import { createTaskScheduler } from "./tasks.js";
+import { createEngineValidator } from "./tasks/engineValidator.js";
 import { signAccessToken, verifyAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshToken } from "../security/tokens.js";
 import { diffDayContracts } from "./diff.js";
 import { toDateISOWithBoundary, validateTimeZone } from "../domain/utils/time.js";
@@ -142,6 +157,7 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
 const PUBLIC_DIR = path.join(process.cwd(), "public");
 const CITATIONS_PATH = path.join(PUBLIC_DIR, "citations.json");
 const REQUIRED_CONTENT_IDS = new Set(["r_panic_mode"]);
+const REQUIRED_CONSENTS = ["terms", "privacy", "alpha_processing"];
 const DEFAULT_TIMEZONE = "America/Los_Angeles";
 const ALL_PROFILES = [
   "Balanced",
@@ -174,8 +190,14 @@ const authEmailRateLimiters = new Map();
 const authIpRateLimiters = new Map();
 const readCache = new Map();
 const latencySamples = new Map();
+const errorCounters = new Map();
+const recent5xx = [];
 const featureFlagsCache = { data: null, loadedAt: 0 };
 const FEATURE_FLAGS_TTL_MS = 10 * 1000;
+const ERROR_WINDOW_MS = 60 * 60 * 1000;
+const ERROR_SPIKE_WINDOW_MS = 5 * 60 * 1000;
+const ERROR_SPIKE_THRESHOLD = 10;
+let last5xxAlertAt = 0;
 const DEFAULT_FLAGS = {
   "rules.constraints.enabled": "true",
   "rules.novelty.enabled": "true",
@@ -187,6 +209,11 @@ const DEFAULT_FLAGS = {
   "reminders.enabled": "true",
   "feature.freeze.enabled": "false",
   "incident.mode.enabled": "false",
+  "engine.regen.enabled": "true",
+  "engine.signals.enabled": "true",
+  "engine.checkins.enabled": "true",
+  "engine.reentry.enabled": "true",
+  "community.enabled": "true",
 };
 const DEFAULT_COHORTS = [
   { id: "new_users", name: "New Users" },
@@ -210,6 +237,39 @@ await seedCohorts(DEFAULT_COHORTS);
 resetParametersCache();
 await applyLibraryFromDb();
 await cleanupOldEvents(EVENT_RETENTION_DAYS);
+const engineValidator = createEngineValidator({
+  domain,
+  toDayContract,
+  assertDayContract,
+  getParameters,
+  listContentPacks,
+  listContentItems,
+  validateContentItem,
+  logInfo,
+});
+
+async function runEngineValidatorTask(options = {}) {
+  const report = await engineValidator(options);
+  const atISO = report.endedAt || new Date().toISOString();
+  await insertValidatorRun({
+    id: report.runId,
+    kind: "engine_matrix",
+    ok: report.ok,
+    report,
+    atISO,
+  });
+  await cleanupValidatorRuns("engine_matrix", 30);
+  if (!report.ok) {
+    void postAlert("validator_failed", {
+      kind: "engine_matrix",
+      runId: report.runId,
+      totals: report.totals,
+      failures: (report.failures || []).slice(0, 20),
+    });
+  }
+  return report;
+}
+
 const bootSummary = await computeBootSummary(config);
 enforceGuardrails(config, bootSummary);
 logInfo({ boot: bootSummary });
@@ -220,6 +280,8 @@ const taskScheduler = createTaskScheduler({
   retentionDays: EVENT_RETENTION_DAYS,
   listAllUserStates,
   cleanupUserRetention,
+  runEngineValidator: runEngineValidatorTask,
+  cleanupValidatorRuns,
 });
 taskScheduler.schedule();
 
@@ -404,6 +466,19 @@ function resolveFeatureFreeze(flags) {
 
 function resolveIncidentMode(flags) {
   return flagEnabledDefault(flags, "incident.mode.enabled", false);
+}
+
+function resolveEngineGuards(flags, incidentModeEnabled) {
+  const incidentMode = Boolean(incidentModeEnabled);
+  const guards = {
+    incidentMode,
+    regenEnabled: !incidentMode && flagEnabled(flags, "engine.regen.enabled"),
+    signalsEnabled: !incidentMode && flagEnabled(flags, "engine.signals.enabled"),
+    checkinsEnabled: !incidentMode && flagEnabled(flags, "engine.checkins.enabled"),
+    reentryEnabled: !incidentMode && flagEnabled(flags, "engine.reentry.enabled"),
+    communityEnabled: !incidentMode && flagEnabled(flags, "community.enabled"),
+  };
+  return guards;
 }
 
 function resolveRuleToggles(state, flags) {
@@ -917,23 +992,71 @@ function buildRegenPolicy(prevState, eventWithAt, nextState) {
   return { lockSelectionsByDate, reason: "regen_throttle" };
 }
 
-const INCIDENT_PLAN_EVENTS = new Set(["CHECKIN_SAVED", "QUICK_SIGNAL", "FORCE_REFRESH", "WEEK_REBUILD"]);
+const PLAN_MUTATION_EVENTS = new Set([
+  "ENSURE_WEEK",
+  "WEEK_REBUILD",
+  "CHECKIN_SAVED",
+  "QUICK_SIGNAL",
+  "BAD_DAY_MODE",
+  "FORCE_REFRESH",
+]);
 
-function applyIncidentMode(prevState, nextState, eventType, incidentModeEnabled) {
-  if (!incidentModeEnabled) return nextState;
-  if (!INCIDENT_PLAN_EVENTS.has(eventType)) return nextState;
+function revertPlanState(prevState, nextState) {
   return {
     ...nextState,
     weekPlan: prevState.weekPlan,
     lastStressStateByDate: prevState.lastStressStateByDate,
     selectionStats: prevState.selectionStats,
     history: prevState.history,
+    modifiers: prevState.modifiers,
+    regenWindow: prevState.regenWindow,
   };
+}
+
+function applyPlanGuards(prevState, nextState, eventType, guards, requestId, userId) {
+  if (!PLAN_MUTATION_EVENTS.has(eventType)) return nextState;
+  const policy = guards || {};
+  let reason = null;
+  if (policy.incidentMode) {
+    reason = "incident_mode";
+  } else if (policy.regenEnabled === false) {
+    reason = "regen_disabled";
+  } else if (eventType === "CHECKIN_SAVED" && policy.checkinsEnabled === false) {
+    reason = "checkins_disabled";
+  } else if (eventType === "QUICK_SIGNAL" && policy.signalsEnabled === false) {
+    reason = "signals_disabled";
+  }
+  if (!reason) return nextState;
+  logInfo({ requestId, userId, event: "engine_guard_blocked", reason, eventType });
+  return revertPlanState(prevState, nextState);
 }
 
 function toNumber(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function normalizeConstraintsPayload(constraints) {
+  const injuries = constraints?.injuries || {};
+  const equipment = constraints?.equipment || {};
+  const timePrefRaw =
+    typeof constraints?.timeOfDayPreference === "string" ? constraints.timeOfDayPreference.trim().toLowerCase() : "any";
+  const timeOfDayPreference = ["morning", "midday", "evening", "any"].includes(timePrefRaw) ? timePrefRaw : "any";
+  const normalizedInjuries = {
+    knee: Boolean(injuries.knee),
+    shoulder: Boolean(injuries.shoulder),
+    back: Boolean(injuries.back),
+  };
+  const normalizedEquipment = {
+    none: equipment.none !== false,
+    dumbbells: Boolean(equipment.dumbbells),
+    bands: Boolean(equipment.bands),
+    gym: Boolean(equipment.gym),
+  };
+  if (!normalizedEquipment.none && !normalizedEquipment.dumbbells && !normalizedEquipment.bands && !normalizedEquipment.gym) {
+    normalizedEquipment.none = true;
+  }
+  return { injuries: normalizedInjuries, equipment: normalizedEquipment, timeOfDayPreference };
 }
 
 function normalizeUserProfile(profile) {
@@ -942,6 +1065,7 @@ function normalizeUserProfile(profile) {
   const timezone = getUserTimezone(profile);
   const dayBoundaryHour = getDayBoundaryHour(profile);
   const createdAtISO = profile.createdAtISO || toDateISOWithBoundary(new Date(), timezone, dayBoundaryHour) || domain.isoToday();
+  const constraints = normalizeConstraintsPayload(profile.constraints || {});
   return {
     ...profile,
     id: profile.id || Math.random().toString(36).slice(2),
@@ -960,6 +1084,7 @@ function normalizeUserProfile(profile) {
     contentPack: profile.contentPack || "balanced_routine",
     timezone,
     dayBoundaryHour,
+    constraints,
     dataMinimization: (() => {
       const enabled = Boolean(dataMin.enabled);
       const eventDays = Number.isFinite(Number(dataMin.eventRetentionDays)) ? Number(dataMin.eventRetentionDays) : 90;
@@ -985,6 +1110,28 @@ function applyDataMinimizationToCheckIn(checkIn, userProfile) {
     return { ...rest };
   }
   return checkIn;
+}
+
+async function ensureRequiredConsents(userId, res) {
+  if (!userId) return true;
+  const missing = await missingUserConsents(userId, REQUIRED_CONSENTS);
+  if (!missing.length) return true;
+  sendError(
+    res,
+    forbidden("consent_required", "Consent required before accessing plans", null, {
+      required: missing,
+      expose: true,
+    })
+  );
+  return false;
+}
+
+function daysBetweenISO(startISO, endISO) {
+  if (!startISO || !endISO) return null;
+  const start = new Date(`${startISO}T00:00:00Z`).getTime();
+  const end = new Date(`${endISO}T00:00:00Z`).getTime();
+  if (!Number.isFinite(start) || !Number.isFinite(end)) return null;
+  return Math.floor((end - start) / (24 * 60 * 60 * 1000));
 }
 
 async function seedInitialProfile(email, profile) {
@@ -1075,6 +1222,10 @@ function dispatch(state, event, ctxOverrides = {}) {
   return { state: next, result, logEvent, effects };
 }
 
+function sendError(res, errOrStatus, code, message, field) {
+  baseSendError(res, errOrStatus, code, message, field, res?.livenewRequestId);
+}
+
 function sendJson(res, status, payload, userId) {
   const body = userId ? { userId, ...payload } : { ...payload };
   if (res?.livenewRequestId) body.requestId = res.livenewRequestId;
@@ -1133,6 +1284,142 @@ function parseMaybeJson(value, fieldName) {
   } catch {
     throw badRequest("field_invalid", `${fieldName} must be valid JSON`, fieldName);
   }
+}
+
+function cleanOutlineLine(line) {
+  return String(line || "")
+    .trim()
+    .replace(/^[-*•]\s+/, "")
+    .replace(/^\d+\.\s+/, "")
+    .trim();
+}
+
+function slugify(text) {
+  return String(text || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 32);
+}
+
+function shortHash(text) {
+  return crypto.createHash("sha256").update(String(text || "")).digest("hex").slice(0, 8);
+}
+
+function deriveTags({ kind, title, steps, suggestedTags }) {
+  const tags = new Set();
+  (suggestedTags || []).forEach((tag) => {
+    if (typeof tag === "string" && tag.trim()) tags.add(tag.trim().toLowerCase());
+  });
+  const haystack = `${title || ""} ${Array.isArray(steps) ? steps.join(" ") : ""}`.toLowerCase();
+  const keywordTags = [
+    ["breath", "breath"],
+    ["breathe", "breath"],
+    ["walk", "walk"],
+    ["mobility", "mobility"],
+    ["stretch", "mobility"],
+    ["yoga", "mobility"],
+    ["strength", "strength"],
+    ["weights", "strength"],
+    ["lift", "strength"],
+    ["run", "cardio"],
+    ["sprint", "cardio"],
+    ["hiit", "cardio"],
+    ["calm", "downshift"],
+    ["downshift", "downshift"],
+    ["rebuild", "rebuild"],
+    ["stabilize", "stabilize"],
+    ["focus", "focus"],
+  ];
+  keywordTags.forEach(([needle, tag]) => {
+    if (haystack.includes(needle)) tags.add(tag);
+  });
+  if (kind === "reset") tags.add("downshift");
+  if (kind !== "nutrition" && (steps?.length || 0) <= 3) tags.add("short");
+  if (!tags.size) tags.add("general");
+  return Array.from(tags);
+}
+
+function estimateMinutes(kind, steps, minutesHint) {
+  const count = Array.isArray(steps) ? steps.length : 1;
+  const hint = Number(minutesHint);
+  if (Number.isFinite(hint) && hint > 0) {
+    if (kind === "reset") return Math.min(Math.max(hint, 2), 5);
+    if (kind === "workout") return Math.min(Math.max(hint, 10), 30);
+  }
+  if (kind === "reset") {
+    return Math.min(5, Math.max(2, 2 + Math.floor(count / 2)));
+  }
+  if (kind === "workout") {
+    return Math.min(30, Math.max(10, 10 + count * 2));
+  }
+  return null;
+}
+
+function estimateIntensity(title, steps) {
+  const text = `${title || ""} ${Array.isArray(steps) ? steps.join(" ") : ""}`.toLowerCase();
+  const high = ["hiit", "sprint", "burpee", "interval"];
+  const low = ["breath", "mobility", "stretch", "yoga", "walk"];
+  const moderate = ["strength", "lift", "run", "cardio"];
+  if (high.some((k) => text.includes(k))) return 8;
+  if (low.some((k) => text.includes(k))) return 3;
+  if (moderate.some((k) => text.includes(k))) return 6;
+  return 5;
+}
+
+function outlineToContentItem({ kind, outlineText, suggestedTags, minutesHint }) {
+  const lines = String(outlineText || "")
+    .split(/\r?\n/)
+    .map(cleanOutlineLine)
+    .filter(Boolean);
+  const title = lines[0] || "Untitled";
+  const stepsOrPriorities = lines.slice(1);
+  const baseSteps = stepsOrPriorities.length ? stepsOrPriorities : [title];
+  const tags = deriveTags({ kind, title, steps: baseSteps, suggestedTags });
+  const id = `${kind}_${slugify(title) || "item"}_${shortHash(outlineText)}`;
+  if (kind === "nutrition") {
+    return {
+      id,
+      kind,
+      title,
+      tags,
+      priorities: baseSteps,
+      enabled: false,
+      status: "draft",
+    };
+  }
+  if (kind === "reset") {
+    return {
+      id,
+      kind,
+      title,
+      tags,
+      minutes: estimateMinutes(kind, baseSteps, minutesHint),
+      steps: baseSteps,
+      intensityCost: 0,
+      enabled: false,
+      status: "draft",
+    };
+  }
+  return {
+    id,
+    kind,
+    title,
+    tags,
+    minutes: estimateMinutes(kind, baseSteps, minutesHint),
+    steps: baseSteps,
+    intensityCost: estimateIntensity(title, baseSteps),
+    enabled: false,
+    status: "draft",
+  };
+}
+
+function sanitizeCommunityText(text) {
+  if (typeof text !== "string") return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+  const normalized = trimmed.replace(/\s+/g, " ");
+  return normalized.slice(0, 400);
 }
 
 function redactSensitive(value, depth = 0) {
@@ -1382,6 +1669,88 @@ function latencyStats(routeKey) {
     p50: percentile(samples, 50),
     p95: percentile(samples, 95),
   };
+}
+
+async function postAlert(type, payload = {}) {
+  const alert = {
+    type,
+    atISO: new Date().toISOString(),
+    envMode: config.envMode,
+    ...payload,
+  };
+  if (!config.alertWebhookUrl) {
+    logInfo({ event: "alert", alert });
+    return { ok: false, skipped: true };
+  }
+  try {
+    const res = await fetch(config.alertWebhookUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(alert),
+    });
+    if (!res.ok) {
+      logError({ event: "alert_failed", status: res.status, type });
+      return { ok: false, status: res.status };
+    }
+    return { ok: true };
+  } catch (err) {
+    logError({ event: "alert_failed", type, error: err?.message || String(err) });
+    return { ok: false, error: err?.message || String(err) };
+  }
+}
+
+function pruneWindow(timestamps, cutoff) {
+  if (!timestamps.length) return timestamps;
+  return timestamps.filter((ts) => ts >= cutoff);
+}
+
+function record5xx(nowMs) {
+  const cutoff = nowMs - ERROR_SPIKE_WINDOW_MS;
+  const pruned = pruneWindow(recent5xx, cutoff);
+  recent5xx.length = 0;
+  recent5xx.push(...pruned, nowMs);
+  if (recent5xx.length < ERROR_SPIKE_THRESHOLD) return;
+  if (nowMs - last5xxAlertAt < ERROR_SPIKE_WINDOW_MS) return;
+  last5xxAlertAt = nowMs;
+  void postAlert("5xx_spike", {
+    count: recent5xx.length,
+    windowMinutes: Math.round(ERROR_SPIKE_WINDOW_MS / 60000),
+  });
+}
+
+function recordErrorCounter({ routeKey, code, status }) {
+  if (!routeKey || status < 400) return;
+  const nowMs = Date.now();
+  const cutoff = nowMs - ERROR_WINDOW_MS;
+  const key = `${code || "error"}::${routeKey}`;
+  const existing = errorCounters.get(key) || { code: code || "error", routeKey, timestamps: [], lastSeenAtISO: null };
+  existing.timestamps = pruneWindow(existing.timestamps, cutoff);
+  existing.timestamps.push(nowMs);
+  existing.lastSeenAtISO = new Date(nowMs).toISOString();
+  errorCounters.set(key, existing);
+  if (status >= 500) {
+    record5xx(nowMs);
+  }
+}
+
+function snapshotErrorCounters(limit = 50) {
+  const nowMs = Date.now();
+  const cutoff = nowMs - ERROR_WINDOW_MS;
+  const entries = [];
+  for (const entry of errorCounters.values()) {
+    const timestamps = pruneWindow(entry.timestamps || [], cutoff);
+    if (!timestamps.length) continue;
+    entry.timestamps = timestamps;
+    entry.lastSeenAtISO = new Date(timestamps[timestamps.length - 1]).toISOString();
+    entries.push({
+      code: entry.code,
+      routeKey: entry.routeKey,
+      count: timestamps.length,
+      lastSeenAtISO: entry.lastSeenAtISO,
+    });
+  }
+  entries.sort((a, b) => b.count - a.count || String(a.code).localeCompare(String(b.code)));
+  return entries.slice(0, Math.max(1, Math.min(Number(limit) || 50, 200)));
 }
 
 function diffSelectionStats(prevStats, nextStats) {
@@ -1829,11 +2198,13 @@ async function serveFile(res, filePath, { replaceDevFlag } = {}) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
+  const routeKey = `${req.method} ${pathname}`;
   const requestId = getRequestId(req);
   const started = process.hrtime.bigint();
   const clientIp = getClientIp(req);
   res.livenewRequestId = requestId;
   res.livenewClientIp = clientIp;
+  res.livenewRouteKey = routeKey;
   if (pathname.startsWith("/v1")) {
     res.livenewApiVersion = "1";
   }
@@ -1848,8 +2219,13 @@ const server = http.createServer(async (req, res) => {
 
   res.on("finish", () => {
     const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
-    const routeKey = `${req.method} ${pathname}`;
     recordLatency(routeKey, durationMs);
+    if (res.statusCode >= 400) {
+      const code =
+        res.errorCode ||
+        (res.statusCode >= 500 ? "server_error" : `http_${res.statusCode}`);
+      recordErrorCounter({ routeKey, code, status: res.statusCode });
+    }
     const logEntry = {
       atISO: new Date().toISOString(),
       requestId,
@@ -1881,6 +2257,12 @@ const server = http.createServer(async (req, res) => {
     ["/profile.html", "profile.html"],
     ["/admin", "admin.html"],
     ["/admin.html", "admin.html"],
+    ["/legal/privacy", "legal/privacy.html"],
+    ["/legal/privacy.html", "legal/privacy.html"],
+    ["/legal/terms", "legal/terms.html"],
+    ["/legal/terms.html", "legal/terms.html"],
+    ["/legal/alpha-data-processing", "legal/alpha-data-processing.html"],
+    ["/legal/alpha-data-processing.html", "legal/alpha-data-processing.html"],
   ]);
 
   if (req.method === "GET" && pageRoutes.has(pathname)) {
@@ -2322,6 +2704,7 @@ const server = http.createServer(async (req, res) => {
         requestFlags = flags;
         featureFreezeEnabled = resolveFeatureFreeze(flags);
         incidentModeEnabled = resolveIncidentMode(flags);
+        const engineGuards = resolveEngineGuards(flags, incidentModeEnabled);
         const effectiveToggles = resolveRuleToggles(currentState, flags);
         const remindersEnabled = flagEnabled(flags, "reminders.enabled");
         const paramsState = await getParameters(userId);
@@ -2361,6 +2744,7 @@ const server = http.createServer(async (req, res) => {
           paramsMeta,
           now: { todayISO, atISO },
           incidentMode: incidentModeEnabled,
+          engineGuards,
           packOverride,
           experimentMeta,
           ruleConfig,
@@ -2372,9 +2756,9 @@ const server = http.createServer(async (req, res) => {
           resEvent = dispatch(currentState, eventWithAt, { ...ctxBase, regenPolicy });
           nextState = resEvent.state;
         }
-        const incidentApplied = applyIncidentMode(prevState, nextState, eventWithAt.type, incidentModeEnabled);
-        if (incidentApplied !== nextState) {
-          nextState = incidentApplied;
+        const guarded = applyPlanGuards(prevState, nextState, eventWithAt.type, engineGuards, res.livenewRequestId, userId);
+        if (guarded !== nextState) {
+          nextState = guarded;
           resEvent = { ...resEvent, state: nextState };
         }
 
@@ -2498,6 +2882,43 @@ const server = http.createServer(async (req, res) => {
       });
     };
 
+    const getEngineGuardsSnapshot = () => resolveEngineGuards(requestFlags, incidentModeEnabled);
+
+    const maybeStartReEntry = async (dateISO) => {
+      if (!state.userProfile || !dateISO) return;
+      const guards = getEngineGuardsSnapshot();
+      if (guards.reentryEnabled === false) return;
+      if (state.reEntry?.active) return;
+      const profile = state.userProfile;
+      const lastCompletion = profile.lastCompletionDateISO;
+      const lastActiveAtISO = profile.lastActiveAtISO;
+      const tz = getUserTimezone(profile);
+      const boundary = getDayBoundaryHour(profile);
+      const lastActiveDateISO = lastActiveAtISO
+        ? toDateISOWithBoundary(new Date(lastActiveAtISO), tz, boundary)
+        : null;
+      const baseline = lastCompletion || lastActiveDateISO || profile.createdAtISO;
+      if (!baseline || baseline >= dateISO) return;
+      const diff = daysBetweenISO(baseline, dateISO);
+      if (diff != null && diff >= 14) {
+        const resEvent = await dispatchForUser({ type: "REENTRY_STARTED", payload: { startDateISO: dateISO } });
+        state = resEvent.state;
+      }
+    };
+
+    if (userId && state.userProfile) {
+      const nowISO = new Date().toISOString();
+      if (state.userProfile.lastActiveAtISO !== nowISO) {
+        const touched = await dispatchForUser({ type: "LAST_ACTIVE_TOUCHED", payload: {}, atISO: nowISO });
+        state = touched.state;
+      }
+    }
+
+    if (pathname.startsWith("/v1/plan/") || pathname === "/v1/rail/today") {
+      const ok = await ensureRequiredConsents(userId, res);
+      if (!ok) return;
+    }
+
     if (pathname === "/v1/profile" && req.method === "POST") {
       const body = await parseJson(req);
       const validation = validateProfile(body);
@@ -2505,7 +2926,22 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
         return;
       }
-      const userProfile = normalizeUserProfile(validation.value.userProfile);
+      const baseProfile = state.userProfile || {};
+      const incomingProfile = validation.value.userProfile;
+      const mergedProfile = { ...baseProfile, ...incomingProfile };
+      if (!("dataMinimization" in incomingProfile)) {
+        mergedProfile.dataMinimization = baseProfile.dataMinimization;
+      }
+      if (!("lastActiveAtISO" in incomingProfile)) {
+        mergedProfile.lastActiveAtISO = baseProfile.lastActiveAtISO;
+      }
+      if (!("lastCompletionDateISO" in incomingProfile)) {
+        mergedProfile.lastCompletionDateISO = baseProfile.lastCompletionDateISO;
+      }
+      if (!("createdAtISO" in incomingProfile)) {
+        mergedProfile.createdAtISO = baseProfile.createdAtISO;
+      }
+      const userProfile = normalizeUserProfile(mergedProfile);
       await dispatchForUser({ type: "BASELINE_SAVED", payload: { userProfile } });
       await dispatchForUser({ type: "ENSURE_WEEK", payload: {} });
       send(200, { ok: true, userProfile: state.userProfile, weekPlan: state.weekPlan });
@@ -2539,11 +2975,52 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/consents/accept" && req.method === "POST") {
+      const body = await parseJson(req);
+      const consents = Array.isArray(body?.consents)
+        ? body.consents.filter((entry) => typeof entry === "string")
+        : [];
+      const acceptTerms = body?.acceptTerms === true;
+      const acceptPrivacy = body?.acceptPrivacy === true;
+      const acceptAlpha = body?.acceptAlphaProcessing === true;
+      const accepted = new Set(consents.map((c) => c.trim().toLowerCase()).filter(Boolean));
+      if (acceptTerms) accepted.add("terms");
+      if (acceptPrivacy) accepted.add("privacy");
+      if (acceptAlpha) accepted.add("alpha_processing");
+      const missing = REQUIRED_CONSENTS.filter((key) => !accepted.has(key));
+      if (missing.length) {
+        sendError(
+          res,
+          badRequest("consent_required", "Missing required consent", "consents", {
+            required: missing,
+            expose: true,
+          })
+        );
+        return;
+      }
+      await upsertUserConsents(userId, REQUIRED_CONSENTS);
+      send(200, { ok: true, accepted: REQUIRED_CONSENTS });
+      return;
+    }
+
     if (pathname === "/v1/onboard/complete" && req.method === "POST") {
       const body = await parseJson(req);
       const profileValidation = validateProfile({ userProfile: body?.userProfile });
       if (!profileValidation.ok) {
         sendError(res, 400, profileValidation.error.code, profileValidation.error.message, profileValidation.error.field);
+        return;
+      }
+      const acceptTerms = body?.acceptTerms === true;
+      const acceptPrivacy = body?.acceptPrivacy === true;
+      const acceptAlpha = body?.acceptAlphaProcessing === true;
+      if (!acceptTerms || !acceptPrivacy || !acceptAlpha) {
+        sendError(
+          res,
+          badRequest("consent_required", "Terms, privacy, and alpha processing consent required", "consents", {
+            required: REQUIRED_CONSENTS,
+            expose: true,
+          })
+        );
         return;
       }
       const paramsState = await getParameters();
@@ -2580,6 +3057,7 @@ const server = http.createServer(async (req, res) => {
         state = cached.state;
         version = cached.version;
       }
+      await upsertUserConsents(userId, REQUIRED_CONSENTS);
 
       const userProfile = normalizeUserProfile(profileValidation.value.userProfile);
       const checkIn = applyDataMinimizationToCheckIn(checkinValidation.value.checkIn, userProfile);
@@ -2642,6 +3120,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/plan/force-refresh" && req.method === "POST") {
+      const guards = getEngineGuardsSnapshot();
+      if (guards.regenEnabled === false) {
+        sendError(res, 403, "feature_disabled", "Plan regeneration is disabled");
+        return;
+      }
       const body = await parseJson(req);
       const dateISO = body?.dateISO || getTodayISOForProfile(state.userProfile);
       const validation = validateDateParam(dateISO, "dateISO");
@@ -2663,6 +3146,7 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === "/v1/rail/today" && req.method === "GET") {
       const dateISO = getTodayISOForProfile(state.userProfile);
+      await maybeStartReEntry(dateISO);
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
       const ensured = await ensureValidDayContract(userId, state, dateISO, "rail_today_invariant", requestId);
       state = ensured.state;
@@ -2699,6 +3183,9 @@ const server = http.createServer(async (req, res) => {
       if (!validation.ok) {
         sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
         return;
+      }
+      if (!dateParam) {
+        await maybeStartReEntry(dateISO);
       }
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
       const ensured = await ensureValidDayContract(userId, state, dateISO, "plan_day_invariant", requestId);
@@ -2806,6 +3293,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/checkin" && req.method === "POST") {
+      const guards = getEngineGuardsSnapshot();
+      if (guards.checkinsEnabled === false) {
+        sendError(res, 403, "feature_disabled", "Check-ins are disabled");
+        return;
+      }
       const body = await parseJson(req);
       const paramsState = await getParameters(userId);
       const validation = validateCheckIn(body, { allowedTimes: paramsState.map?.timeBuckets?.allowed });
@@ -2832,6 +3324,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/signal" && req.method === "POST") {
+      const guards = getEngineGuardsSnapshot();
+      if (guards.signalsEnabled === false) {
+        sendError(res, 403, "feature_disabled", "Signals are disabled");
+        return;
+      }
       const body = await parseJson(req);
       const validation = validateSignal(body);
       if (!validation.ok) {
@@ -2865,6 +3362,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/bad-day" && req.method === "POST") {
+      const guards = getEngineGuardsSnapshot();
+      if (guards.regenEnabled === false) {
+        sendError(res, 403, "feature_disabled", "Plan regeneration is disabled");
+        return;
+      }
       const body = await parseJson(req);
       const validation = validateDateParam(body?.dateISO, "dateISO");
       if (!validation.ok) {
@@ -2918,6 +3420,74 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         completion: state.partCompletionByDate?.[dateISO] || {},
         progress,
+      });
+      return;
+    }
+
+    if (pathname === "/v1/community/opt-in" && req.method === "POST") {
+      const guards = getEngineGuardsSnapshot();
+      if (guards.communityEnabled === false) {
+        sendError(res, 403, "feature_disabled", "Community is disabled");
+        return;
+      }
+      const body = await parseJson(req);
+      const optedIn = body?.optedIn === true;
+      const updated = await setCommunityOptIn(userId, optedIn);
+      send(200, { ok: true, optedIn: updated.optedIn, updatedAt: updated.updatedAt });
+      return;
+    }
+
+    if (pathname === "/v1/community/opt-in" && req.method === "GET") {
+      const guards = getEngineGuardsSnapshot();
+      if (guards.communityEnabled === false) {
+        sendError(res, 403, "feature_disabled", "Community is disabled");
+        return;
+      }
+      const status = await getCommunityOptIn(userId);
+      send(200, { ok: true, optedIn: status.optedIn, updatedAt: status.updatedAt });
+      return;
+    }
+
+    const communityRespondMatch = pathname.match(/^\/v1\/community\/resets\/([^/]+)\/respond$/);
+    if (communityRespondMatch && req.method === "POST") {
+      const guards = getEngineGuardsSnapshot();
+      if (guards.communityEnabled === false) {
+        sendError(res, 403, "feature_disabled", "Community is disabled");
+        return;
+      }
+      const resetId = communityRespondMatch[1];
+      const body = await parseJson(req);
+      const text = sanitizeCommunityText(body?.text);
+      if (!text || text.length < 5) {
+        sendError(res, 400, "response_invalid", "Response text is required", "text");
+        return;
+      }
+      const optIn = await getCommunityOptIn(userId);
+      if (!optIn.optedIn) {
+        sendError(res, 403, "opt_in_required", "Opt-in required to respond");
+        return;
+      }
+      const created = await insertCommunityResponse({ resetItemId: resetId, userId, text, status: "pending" });
+      send(200, { ok: true, response: { id: created.id, status: created.status } });
+      return;
+    }
+
+    const communityListMatch = pathname.match(/^\/v1\/community\/resets\/([^/]+)$/);
+    if (communityListMatch && req.method === "GET") {
+      const guards = getEngineGuardsSnapshot();
+      if (guards.communityEnabled === false) {
+        sendError(res, 403, "feature_disabled", "Community is disabled");
+        return;
+      }
+      const resetId = communityListMatch[1];
+      const responses = await listCommunityResponses(resetId, "approved", 20);
+      send(200, {
+        ok: true,
+        responses: responses.map((entry) => ({
+          id: entry.id,
+          text: entry.text,
+          created_at: entry.createdAt,
+        })),
       });
       return;
     }
@@ -3137,6 +3707,86 @@ const server = http.createServer(async (req, res) => {
       }
       const admin = isAdmin(email);
       send(200, { ok: true, isAdmin: admin, email });
+      return;
+    }
+
+    const validatorRunMatch = pathname.match(/^\/v1\/admin\/validator\/runs\/([^/]+)$/);
+    if (validatorRunMatch && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const runId = validatorRunMatch[1];
+      const run = await getValidatorRun(runId);
+      if (!run) {
+        sendError(res, 404, "validator_run_not_found", "validator run not found");
+        return;
+      }
+      send(200, { ok: true, run });
+      return;
+    }
+
+    if (pathname === "/v1/admin/validator/latest" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const kind = "engine_matrix";
+      const run = await getLatestValidatorRun(kind);
+      send(200, {
+        ok: true,
+        kind,
+        latest: run,
+        releaseBlocked: run ? !run.ok : false,
+      });
+      return;
+    }
+
+    if (pathname === "/v1/admin/validator/run" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const kind = String(body?.kind || "engine_matrix");
+      if (kind !== "engine_matrix") {
+        sendError(res, 400, "validator_kind_invalid", "kind must be engine_matrix", "kind");
+        return;
+      }
+      const report = await runEngineValidatorTask();
+      await auditAdmin("validator.run", report.runId, { kind, ok: report.ok, failed: report.totals?.failed || 0 });
+      send(200, { ok: true, kind, runId: report.runId, report });
+      return;
+    }
+
+    if (pathname === "/v1/admin/monitoring/errors" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const limitRaw = Number(url.searchParams.get("limit") || 50);
+      const limit = Number.isFinite(limitRaw) ? limitRaw : 50;
+      const errors = snapshotErrorCounters(limit);
+      send(200, { ok: true, windowMinutes: Math.round(ERROR_WINDOW_MS / 60000), errors });
+      return;
+    }
+
+    if (pathname === "/v1/admin/community/pending" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const page = Number(url.searchParams.get("page") || 1);
+      const pageSize = Number(url.searchParams.get("pageSize") || 50);
+      const items = await listCommunityPending(page, pageSize);
+      send(200, { ok: true, items, page, pageSize });
+      return;
+    }
+
+    const communityModerateMatch = pathname.match(/^\/v1\/admin\/community\/([^/]+)\/(approve|reject)$/);
+    if (communityModerateMatch && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const id = communityModerateMatch[1];
+      const action = communityModerateMatch[2];
+      const status = action === "approve" ? "approved" : "rejected";
+      const updated = await moderateCommunityResponse(id, status, userId);
+      if (!updated) {
+        sendError(res, 404, "not_found", "Response not found");
+        return;
+      }
+      await auditAdmin(`community.${action}`, id, { status, resetItemId: updated.resetItemId });
+      send(200, { ok: true, response: updated });
       return;
     }
 
@@ -3883,6 +4533,49 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/admin/content/from-outline" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const kind = normalizeContentKind(body?.kind);
+      const outlineText = body?.outlineText;
+      const suggestedTags = Array.isArray(body?.suggestedTags) ? body.suggestedTags : [];
+      const minutesHint = body?.minutesHint;
+      if (!kind) {
+        sendError(res, 400, "kind_invalid", "kind must be workout, nutrition, or reset", "kind");
+        return;
+      }
+      if (!outlineText || typeof outlineText !== "string") {
+        sendError(res, 400, "outline_required", "outlineText is required", "outlineText");
+        return;
+      }
+      const draftItem = outlineToContentItem({ kind, outlineText, suggestedTags, minutesHint });
+      const report = runContentChecks([draftItem], { kind, scope: "draft" });
+      const allowForce = config.isDevLike && url.searchParams.get("forceDraft") === "true";
+      const previewOnly = url.searchParams.get("preview") === "true";
+      if (report.errors.length && !allowForce && !previewOnly) {
+        sendError(
+          res,
+          badRequest("invalid_content_item", "Content checks failed", "outlineText", {
+            report,
+            expose: true,
+          })
+        );
+        return;
+      }
+      if (previewOnly) {
+        send(200, { ok: true, draftItem, validationReport: report, saved: false });
+        return;
+      }
+      if (!allowForce) {
+        validateContentItemOrThrow(kind, draftItem, { allowDisabled: true });
+      }
+      const saved = await upsertContentItem(kind, draftItem, { status: "draft", updatedByAdmin: userId });
+      await auditAdmin("content.from_outline", `${kind}:${saved.id}`, { kind, id: saved.id, forced: allowForce });
+      send(200, { ok: true, draftItem: saved, validationReport: report });
+      return;
+    }
+
     const contentStageMatch = pathname.match(/^\/v1\/admin\/content\/stage\/(workout|nutrition|reset)\/([^/]+)$/);
     if (contentStageMatch && req.method === "POST") {
       const email = await requireAdmin();
@@ -4005,7 +4698,19 @@ const server = http.createServer(async (req, res) => {
       const kind = contentPatchMatch[1];
       const id = contentPatchMatch[2];
       const body = await parseJson(req);
-      const allowed = ["enabled", "priority", "noveltyGroup", "tags", "minutes", "steps", "priorities", "title"];
+      const allowed = [
+        "enabled",
+        "priority",
+        "noveltyGroup",
+        "tags",
+        "minutes",
+        "steps",
+        "priorities",
+        "title",
+        "contraindications",
+        "equipment",
+        "idealTimeOfDay",
+      ];
       const patch = {};
       allowed.forEach((key) => {
         if (key in body) patch[key] = body[key];
@@ -4036,6 +4741,18 @@ const server = http.createServer(async (req, res) => {
       }
       if ("priorities" in patch && !Array.isArray(patch.priorities)) {
         sendError(res, 400, "field_invalid", "priorities must be array", "priorities");
+        return;
+      }
+      if ("contraindications" in patch && !Array.isArray(patch.contraindications)) {
+        sendError(res, 400, "field_invalid", "contraindications must be array", "contraindications");
+        return;
+      }
+      if ("equipment" in patch && !Array.isArray(patch.equipment)) {
+        sendError(res, 400, "field_invalid", "equipment must be array", "equipment");
+        return;
+      }
+      if ("idealTimeOfDay" in patch && !Array.isArray(patch.idealTimeOfDay)) {
+        sendError(res, 400, "field_invalid", "idealTimeOfDay must be array", "idealTimeOfDay");
         return;
       }
       if ("minutes" in patch && !Number.isFinite(Number(patch.minutes))) {

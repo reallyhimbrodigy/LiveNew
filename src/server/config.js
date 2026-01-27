@@ -82,6 +82,7 @@ export function getConfig() {
   const rulesFrozenOverride = parseBool(process.env.RULES_FROZEN);
   const rulesFrozen = rulesFrozenOverride !== undefined ? rulesFrozenOverride : isAlphaLike || isProdLike;
   const contentStageMode = process.env.CONTENT_STAGE_MODE === "true";
+  const alertWebhookUrl = (process.env.ALERT_WEBHOOK_URL || "").trim();
 
   const config = {
     envMode,
@@ -104,6 +105,7 @@ export function getConfig() {
     adminInDevEnabled,
     rulesFrozen,
     contentStageMode,
+    alertWebhookUrl,
     port: Number(process.env.PORT || 3000),
     dataDir,
     dbStatusRequired: true,

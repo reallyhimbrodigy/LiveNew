@@ -1788,6 +1788,181 @@ export async function getDebugBundle(id, nowISO = new Date().toISOString()) {
   };
 }
 
+export async function insertValidatorRun({ kind, ok, report, atISO = null, id = null }) {
+  const runId = id || crypto.randomUUID();
+  const atIso = atISO || new Date().toISOString();
+  getDb()
+    .prepare("INSERT INTO validator_runs (id, kind, at_iso, ok, report_json) VALUES (?, ?, ?, ?, ?)")
+    .run(runId, kind, atIso, ok ? 1 : 0, JSON.stringify(report || {}));
+  return { id: runId, kind, atISO: atIso, ok: Boolean(ok), report: report || {} };
+}
+
+export async function getValidatorRun(id) {
+  const row = getDb()
+    .prepare("SELECT id, kind, at_iso, ok, report_json FROM validator_runs WHERE id = ?")
+    .get(id);
+  if (!row) return null;
+  return {
+    id: row.id,
+    kind: row.kind,
+    atISO: row.at_iso,
+    ok: row.ok === 1,
+    report: JSON.parse(row.report_json || "{}"),
+  };
+}
+
+export async function getLatestValidatorRun(kind = "engine_matrix") {
+  const row = getDb()
+    .prepare("SELECT id, kind, at_iso, ok, report_json FROM validator_runs WHERE kind = ? ORDER BY at_iso DESC LIMIT 1")
+    .get(kind);
+  if (!row) return null;
+  return {
+    id: row.id,
+    kind: row.kind,
+    atISO: row.at_iso,
+    ok: row.ok === 1,
+    report: JSON.parse(row.report_json || "{}"),
+  };
+}
+
+export async function listValidatorRuns(kind = "engine_matrix", limit = 20) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 200));
+  const rows = getDb()
+    .prepare("SELECT id, kind, at_iso, ok, report_json FROM validator_runs WHERE kind = ? ORDER BY at_iso DESC LIMIT ?")
+    .all(kind, safeLimit);
+  return rows.map((row) => ({
+    id: row.id,
+    kind: row.kind,
+    atISO: row.at_iso,
+    ok: row.ok === 1,
+    report: JSON.parse(row.report_json || "{}"),
+  }));
+}
+
+export async function cleanupValidatorRuns(kind = "engine_matrix", keep = 50) {
+  const safeKeep = Math.max(1, Math.min(Number(keep) || 50, 500));
+  getDb()
+    .prepare(
+      "DELETE FROM validator_runs WHERE kind = ? AND id NOT IN (SELECT id FROM validator_runs WHERE kind = ? ORDER BY at_iso DESC LIMIT ?)"
+    )
+    .run(kind, kind, safeKeep);
+}
+
+export async function listUserConsents(userId) {
+  const rows = getDb()
+    .prepare("SELECT consent_key, accepted_at FROM user_consents WHERE user_id = ?")
+    .all(userId);
+  const map = {};
+  rows.forEach((row) => {
+    map[row.consent_key] = row.accepted_at;
+  });
+  return map;
+}
+
+export async function upsertUserConsents(userId, consentKeys, acceptedAtISO = null) {
+  const keys = Array.isArray(consentKeys) ? consentKeys.filter((key) => typeof key === "string" && key.trim()) : [];
+  if (!keys.length) return { ok: false, keys: [] };
+  const acceptedAt = acceptedAtISO || new Date().toISOString();
+  const stmt = getDb().prepare(
+    "INSERT INTO user_consents (user_id, consent_key, accepted_at) VALUES (?, ?, ?) ON CONFLICT(user_id, consent_key) DO UPDATE SET accepted_at=excluded.accepted_at"
+  );
+  keys.forEach((key) => {
+    stmt.run(userId, key.trim(), acceptedAt);
+  });
+  return { ok: true, acceptedAtISO: acceptedAt, keys };
+}
+
+export async function missingUserConsents(userId, requiredKeys) {
+  const required = Array.isArray(requiredKeys) ? requiredKeys.filter((key) => typeof key === "string" && key.trim()) : [];
+  if (!required.length) return [];
+  const existing = await listUserConsents(userId);
+  return required.filter((key) => !existing[key]);
+}
+
+export async function setCommunityOptIn(userId, optedIn) {
+  const now = new Date().toISOString();
+  const value = optedIn ? 1 : 0;
+  getDb()
+    .prepare("INSERT INTO community_opt_in (user_id, opted_in, updated_at) VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET opted_in=excluded.opted_in, updated_at=excluded.updated_at")
+    .run(userId, value, now);
+  return { userId, optedIn: Boolean(optedIn), updatedAt: now };
+}
+
+export async function getCommunityOptIn(userId) {
+  const row = getDb()
+    .prepare("SELECT user_id, opted_in, updated_at FROM community_opt_in WHERE user_id = ?")
+    .get(userId);
+  if (!row) return { userId, optedIn: false, updatedAt: null };
+  return { userId, optedIn: row.opted_in === 1, updatedAt: row.updated_at };
+}
+
+export async function insertCommunityResponse({ resetItemId, userId, text, status = "pending" }) {
+  const id = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO community_responses (id, reset_item_id, user_id, created_at, text, status, moderated_by, moderated_at) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)"
+    )
+    .run(id, resetItemId, userId, createdAt, text, status);
+  return { id, resetItemId, userId, createdAt, text, status };
+}
+
+export async function listCommunityResponses(resetItemId, status = "approved", limit = 20) {
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 100));
+  const rows = getDb()
+    .prepare(
+      "SELECT id, reset_item_id, created_at, text, status FROM community_responses WHERE reset_item_id = ? AND status = ? ORDER BY created_at DESC LIMIT ?"
+    )
+    .all(resetItemId, status, safeLimit);
+  return rows.map((row) => ({
+    id: row.id,
+    resetItemId: row.reset_item_id,
+    createdAt: row.created_at,
+    text: row.text,
+    status: row.status,
+  }));
+}
+
+export async function listCommunityPending(page = 1, pageSize = 50) {
+  const size = Math.min(Math.max(Number(pageSize) || 50, 1), 200);
+  const offset = (Math.max(Number(page) || 1, 1) - 1) * size;
+  const rows = getDb()
+    .prepare(
+      "SELECT id, reset_item_id, user_id, created_at, text, status FROM community_responses WHERE status = 'pending' ORDER BY created_at ASC LIMIT ? OFFSET ?"
+    )
+    .all(size, offset);
+  return rows.map((row) => ({
+    id: row.id,
+    resetItemId: row.reset_item_id,
+    userId: row.user_id,
+    createdAt: row.created_at,
+    text: row.text,
+    status: row.status,
+  }));
+}
+
+export async function moderateCommunityResponse(id, status, moderatedBy) {
+  const moderatedAt = new Date().toISOString();
+  const res = getDb()
+    .prepare("UPDATE community_responses SET status = ?, moderated_by = ?, moderated_at = ? WHERE id = ?")
+    .run(status, moderatedBy || null, moderatedAt, id);
+  if (res.changes === 0) return null;
+  const row = getDb()
+    .prepare("SELECT id, reset_item_id, user_id, created_at, text, status, moderated_by, moderated_at FROM community_responses WHERE id = ?")
+    .get(id);
+  if (!row) return null;
+  return {
+    id: row.id,
+    resetItemId: row.reset_item_id,
+    userId: row.user_id,
+    createdAt: row.created_at,
+    text: row.text,
+    status: row.status,
+    moderatedBy: row.moderated_by,
+    moderatedAt: row.moderated_at,
+  };
+}
+
 export async function searchUserByEmail(email) {
   const user = await getUserByEmail(email);
   if (!user) return null;
@@ -1836,6 +2011,9 @@ export async function deleteUserData(userId) {
     instance.prepare("DELETE FROM user_cohorts WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM experiment_assignments WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM debug_bundles WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM community_responses WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM community_opt_in WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM user_consents WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM admin_audit WHERE admin_user_id = ?").run(userId);
     if (normalizedEmail) {
       instance.prepare("DELETE FROM auth_attempts WHERE email = ?").run(normalizedEmail);

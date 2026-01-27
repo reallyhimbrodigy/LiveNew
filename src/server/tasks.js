@@ -7,6 +7,8 @@ export function createTaskScheduler({
   retentionDays,
   listAllUserStates,
   cleanupUserRetention,
+  runEngineValidator,
+  cleanupValidatorRuns,
 }) {
   const running = new Set();
   const timers = [];
@@ -32,6 +34,16 @@ export function createTaskScheduler({
         }
         return { ok: true };
       }
+      if (name === "engine_validator") {
+        if (typeof runEngineValidator !== "function") {
+          return { ok: false, error: "validator_unavailable" };
+        }
+        const report = await runEngineValidator();
+        if (typeof cleanupValidatorRuns === "function") {
+          await cleanupValidatorRuns("engine_matrix", 30);
+        }
+        return { ok: true, result: report };
+      }
       return { ok: false, error: "unknown_task" };
     } finally {
       running.delete(name);
@@ -42,6 +54,7 @@ export function createTaskScheduler({
     if (!(config.isAlphaLike || config.isProdLike)) return;
     timers.push(setInterval(() => runTask("backup").catch(() => {}), DAY_MS));
     timers.push(setInterval(() => runTask("cleanup").catch(() => {}), DAY_MS));
+    timers.push(setInterval(() => runTask("engine_validator").catch(() => {}), DAY_MS));
   }
 
   function stop() {

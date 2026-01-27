@@ -37,6 +37,7 @@
     </section>
 
     <section class="card hidden" id="admin-panel">
+      <div id="admin-validator-banner" class="banner hidden"></div>
       <div class="tabs">
         <button class="tab active" data-tab="content" data-i18n="admin.content">Content</button>
         <button class="tab" data-tab="supplyChain" data-i18n="admin.supplyChain">Supply chain</button>
@@ -46,6 +47,7 @@
         <button class="tab" data-tab="packs" data-i18n="admin.packs">Packs</button>
         <button class="tab" data-tab="experiments" data-i18n="admin.experiments">Experiments</button>
         <button class="tab" data-tab="previewMatrix" data-i18n="admin.previewMatrix">Preview matrix</button>
+        <button class="tab" data-tab="validator" data-i18n="admin.validator">Validator</button>
         <button class="tab" data-tab="params" data-i18n="admin.parameters">Parameters</button>
         <button class="tab" data-tab="cohorts" data-i18n="admin.cohorts">Cohorts</button>
         <button class="tab" data-tab="reminders" data-i18n="admin.reminders">Reminders</button>
@@ -148,6 +150,29 @@
             <pre id="sc-report-output" class="list-item"></pre>
             <div id="sc-reports" class="list"></div>
           </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="admin.outlineTitle">Create from outline</h3>
+          <div class="row">
+            <label><span data-i18n="admin.kind">Kind</span>
+              <select id="outline-kind">
+                <option value="workout" data-i18n="admin.workouts">Workouts</option>
+                <option value="nutrition" data-i18n="admin.nutritionLabel">Nutrition</option>
+                <option value="reset" data-i18n="admin.resets">Resets</option>
+              </select>
+            </label>
+            <label><span data-i18n="admin.minutesHint">Minutes hint</span> <input id="outline-minutes" type="number" /></label>
+          </div>
+          <label><span data-i18n="admin.suggestedTags">Suggested tags (comma)</span> <input id="outline-tags" type="text" /></label>
+          <label><span data-i18n="admin.outlineText">Outline</span>
+            <textarea id="outline-text" rows="6"></textarea>
+          </label>
+          <div class="row">
+            <button id="outline-preview" class="ghost" data-i18n="admin.preview">Preview</button>
+            <button id="outline-save" data-i18n="admin.saveDraft">Save draft</button>
+            <span id="outline-status" class="muted"></span>
+          </div>
+          <pre id="outline-output" class="list-item"></pre>
         </div>
       </div>
 
@@ -310,6 +335,15 @@
         </div>
       </div>
 
+      <div class="tab-panel hidden" data-panel="validator">
+        <div class="row">
+          <button id="validator-load" data-i18n="admin.load">Load latest</button>
+          <button id="validator-run" class="ghost" data-i18n="admin.runValidator">Run now</button>
+        </div>
+        <div id="validator-status" class="muted"></div>
+        <pre id="validator-output" class="list-item"></pre>
+      </div>
+
       <div class="tab-panel hidden" data-panel="cohorts">
         <div class="row">
           <button id="cohorts-load" data-i18n="admin.load">Load cohorts</button>
@@ -352,6 +386,11 @@
         <label><span data-i18n="admin.bundleId">Bundle ID</span> <input id="support-bundle-id" type="text" /></label>
         <button id="support-bundle-load" class="ghost" data-i18n="admin.loadBundle">Load bundle</button>
         <pre id="support-output" class="list-item"></pre>
+        <h3 data-i18n="admin.communityModeration">Community moderation</h3>
+        <div class="row">
+          <button id="community-pending-load" data-i18n="admin.load">Load pending</button>
+        </div>
+        <div id="community-pending-list" class="list"></div>
       </div>
 
       <div class="tab-panel hidden" data-panel="changelog">

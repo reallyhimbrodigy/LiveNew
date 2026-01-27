@@ -50,6 +50,55 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function getErrorCode(err) {
+  return err?.payload?.error?.code || null;
+}
+
+function getErrorDetails(err) {
+  return err?.payload?.details || null;
+}
+
+function setupConsentGate(onAccepted) {
+  const card = qs("#consent-card");
+  if (!card) return { show: () => false };
+  const terms = qs("#consent-terms");
+  const privacy = qs("#consent-privacy");
+  const alpha = qs("#consent-alpha");
+  const submit = qs("#consent-submit");
+  const status = qs("#consent-status");
+  let pending = false;
+  submit?.addEventListener("click", async () => {
+    if (pending) return;
+    if (!terms?.checked || !privacy?.checked || !alpha?.checked) {
+      if (status) status.textContent = t("consent.missing");
+      return;
+    }
+    pending = true;
+    if (status) status.textContent = t("consent.saving");
+    try {
+      await apiPost("/v1/consents/accept", {
+        acceptTerms: true,
+        acceptPrivacy: true,
+        acceptAlphaProcessing: true,
+      });
+      card.classList.add("hidden");
+      if (status) status.textContent = "";
+      if (typeof onAccepted === "function") onAccepted();
+    } catch {
+      if (status) status.textContent = t("consent.failed");
+    } finally {
+      pending = false;
+    }
+  });
+  return {
+    show: () => {
+      card.classList.remove("hidden");
+      if (status) status.textContent = "";
+      return true;
+    },
+  };
+}
+
 async function init() {
   await ensureCsrf();
   applyI18n(STRINGS);
@@ -144,12 +193,13 @@ function renderDay(day) {
   const whyEl = qs("#day-why");
   const short = day.why?.shortRationale || day.why?.statement || "";
   const whyNot = (day.why?.whyNot || []).join(" ");
+  const reEntryMsg = day.why?.reEntry?.active ? `${t("labels.reEntry")}: ${day.why.reEntry.message}` : "";
   setText(
     whyEl,
     `${t("labels.profile")}: ${day.why.profile || "–"}\n` +
       `${t("labels.focus")}: ${day.why.focus || "–"}\n` +
       `${short}\n` +
-      `${whyNot}`
+      `${whyNot}${reEntryMsg ? `\n${reEntryMsg}` : ""}`
   );
   if (day.why?.safety?.level && day.why.safety.level !== "ok" && whyEl) {
     setText(
@@ -214,6 +264,11 @@ function initDay() {
   const railSubmit = qs("#rail-submit");
   const railResetEl = qs("#rail-reset");
   const railViewFull = qs("#rail-view-full");
+  const communityList = qs("#community-list");
+  const communityText = qs("#community-text");
+  const communitySubmit = qs("#community-submit");
+  const communityStatus = qs("#community-status");
+  let currentResetId = null;
 
   if (dateInput) dateInput.value = todayISO();
 
@@ -234,13 +289,60 @@ function initDay() {
     }
   };
 
+  const renderCommunity = (responses) => {
+    if (!communityList) return;
+    clear(communityList);
+    const list = Array.isArray(responses) ? responses : [];
+    if (!list.length) {
+      communityList.appendChild(el("div", { class: "list-item muted", text: t("community.none") }));
+      return;
+    }
+    list.forEach((entry) => {
+      communityList.appendChild(el("div", { class: "list-item", text: entry.text }));
+    });
+  };
+
+  const loadCommunity = async (resetId) => {
+    if (!resetId) return;
+    currentResetId = resetId;
+    try {
+      const res = await apiGet(`/v1/community/resets/${encodeURIComponent(resetId)}`);
+      renderCommunity(res.responses || []);
+    } catch (err) {
+      if (getErrorCode(err) === "feature_disabled") {
+        if (communityList) clear(communityList);
+      }
+    }
+  };
+
+  const consentGate = setupConsentGate(() => {
+    loadDay();
+  });
+
   const loadRail = async () => {
-    const res = await apiGet("/v1/rail/today");
-    const dateISO = res.day?.dateISO || todayISO();
-    if (dateInput) dateInput.value = dateISO;
-    await ensureCitations();
-    if (res.day) renderDay(res.day);
-    renderRailReset(res.rail?.reset || null);
+    try {
+      const res = await apiGet("/v1/rail/today");
+      const dateISO = res.day?.dateISO || todayISO();
+      if (dateInput) dateInput.value = dateISO;
+      await ensureCitations();
+      if (res.day) {
+        renderDay(res.day);
+        const resetId = res.day?.what?.reset?.id;
+        if (resetId) {
+          await loadCommunity(resetId);
+        } else {
+          currentResetId = null;
+          renderCommunity([]);
+        }
+      }
+      renderRailReset(res.rail?.reset || null);
+    } catch (err) {
+      if (getErrorCode(err) === "consent_required") {
+        consentGate.show();
+        return;
+      }
+      throw err;
+    }
   };
 
   const loadDay = async () => {
@@ -249,9 +351,24 @@ function initDay() {
       await loadRail();
       return;
     }
-    const res = await apiGet(`/v1/plan/day?date=${dateISO}`);
-    await ensureCitations();
-    renderDay(res.day);
+    try {
+      const res = await apiGet(`/v1/plan/day?date=${dateISO}`);
+      await ensureCitations();
+      renderDay(res.day);
+      const resetId = res.day?.what?.reset?.id;
+      if (resetId) {
+        await loadCommunity(resetId);
+      } else {
+        currentResetId = null;
+        renderCommunity([]);
+      }
+    } catch (err) {
+      if (getErrorCode(err) === "consent_required") {
+        consentGate.show();
+        return;
+      }
+      throw err;
+    }
   };
 
   loadBtn?.addEventListener("click", loadDay);
@@ -352,6 +469,23 @@ function initDay() {
     const reason = qs("#feedback-reason")?.value;
     await apiPost("/v1/feedback", { dateISO, helped, reason: helped ? undefined : reason });
   });
+
+  communitySubmit?.addEventListener("click", async () => {
+    if (!currentResetId) return;
+    const text = communityText?.value || "";
+    if (communityStatus) communityStatus.textContent = "";
+    try {
+      await apiPost(`/v1/community/resets/${encodeURIComponent(currentResetId)}/respond`, { text });
+      if (communityText) communityText.value = "";
+      if (communityStatus) communityStatus.textContent = t("community.thanks");
+    } catch (err) {
+      const code = getErrorCode(err);
+      if (communityStatus) {
+        communityStatus.textContent =
+          code === "opt_in_required" ? t("community.optInRequired") : t("community.submitFailed");
+      }
+    }
+  });
 }
 
 function initWeek() {
@@ -363,18 +497,28 @@ function initWeek() {
   const loadWeek = async () => {
     const dateISO = dateInput?.value;
     const url = dateISO ? `/v1/plan/week?date=${dateISO}` : "/v1/plan/week";
-    const res = await apiGet(url);
-    clear(list);
-    (res.weekPlan?.days || []).forEach((day) => {
-      const total = (day.workout?.minutes || 0) + (day.reset?.minutes || 0);
-      list.appendChild(
-        el("div", { class: "list-item" }, [
-          el("div", { text: `${day.dateISO} • ${day.profile} • ${day.focus}` }),
-          el("div", { class: "muted", text: `${day.workout?.title || ""} + ${day.reset?.title || ""} (${total} min)` }),
-        ])
-      );
-    });
+    try {
+      const res = await apiGet(url);
+      clear(list);
+      (res.weekPlan?.days || []).forEach((day) => {
+        const total = (day.workout?.minutes || 0) + (day.reset?.minutes || 0);
+        list.appendChild(
+          el("div", { class: "list-item" }, [
+            el("div", { text: `${day.dateISO} • ${day.profile} • ${day.focus}` }),
+            el("div", { class: "muted", text: `${day.workout?.title || ""} + ${day.reset?.title || ""} (${total} min)` }),
+          ])
+        );
+      });
+    } catch (err) {
+      if (getErrorCode(err) === "consent_required") {
+        consentGate.show();
+        return;
+      }
+      throw err;
+    }
   };
+
+  const consentGate = setupConsentGate(loadWeek);
 
   loadBtn?.addEventListener("click", loadWeek);
   loadWeek();
@@ -408,6 +552,8 @@ function initTrends() {
 
 function initProfile() {
   const saveBtn = qs("#profile-save");
+  const constraintsSave = qs("#constraints-save");
+  const communityOptSave = qs("#community-opt-save");
   const sessionsList = qs("#sessions-list");
   const deviceInput = qs("#device-name");
   const deviceSave = qs("#device-name-save");
@@ -442,6 +588,25 @@ function initProfile() {
       if (qs("#privacy-store-traces")) qs("#privacy-store-traces").checked = profile.dataMinimization?.storeTraces !== false;
       if (qs("#privacy-event-days")) qs("#privacy-event-days").value = profile.dataMinimization?.eventRetentionDays || 90;
       if (qs("#privacy-history-days")) qs("#privacy-history-days").value = profile.dataMinimization?.historyRetentionDays || 90;
+      const constraints = profile.constraints || {};
+      const injuries = constraints.injuries || {};
+      const equipment = constraints.equipment || {};
+      if (qs("#constraint-injury-knee")) qs("#constraint-injury-knee").checked = Boolean(injuries.knee);
+      if (qs("#constraint-injury-shoulder")) qs("#constraint-injury-shoulder").checked = Boolean(injuries.shoulder);
+      if (qs("#constraint-injury-back")) qs("#constraint-injury-back").checked = Boolean(injuries.back);
+      if (qs("#constraint-eq-none")) qs("#constraint-eq-none").checked = equipment.none !== false;
+      if (qs("#constraint-eq-dumbbells")) qs("#constraint-eq-dumbbells").checked = Boolean(equipment.dumbbells);
+      if (qs("#constraint-eq-bands")) qs("#constraint-eq-bands").checked = Boolean(equipment.bands);
+      if (qs("#constraint-eq-gym")) qs("#constraint-eq-gym").checked = Boolean(equipment.gym);
+      if (qs("#constraint-time-pref")) {
+        qs("#constraint-time-pref").value = constraints.timeOfDayPreference || "any";
+      }
+      try {
+        const community = await apiGet("/v1/community/opt-in");
+        if (qs("#community-opt-in")) qs("#community-opt-in").checked = Boolean(community.optedIn);
+      } catch {
+        // ignore
+      }
     } catch {
       // ignore
     }
@@ -470,21 +635,47 @@ function initProfile() {
     });
   };
 
+  const buildProfileFromForm = () => ({
+    wakeTime: qs("#profile-wake").value,
+    bedTime: qs("#profile-bed").value,
+    sleepRegularity: Number(qs("#profile-sleep-regular").value),
+    caffeineCupsPerDay: Number(qs("#profile-caffeine").value),
+    lateCaffeineDaysPerWeek: Number(qs("#profile-late-caffeine").value),
+    sunlightMinutesPerDay: Number(qs("#profile-sunlight").value),
+    lateScreenMinutesPerNight: Number(qs("#profile-screen").value),
+    alcoholNightsPerWeek: Number(qs("#profile-alcohol").value),
+    mealTimingConsistency: Number(qs("#profile-meal").value),
+    contentPack: qs("#profile-pack").value,
+    timezone: qs("#profile-timezone")?.value?.trim() || "America/Los_Angeles",
+    constraints: {
+      injuries: {
+        knee: Boolean(qs("#constraint-injury-knee")?.checked),
+        shoulder: Boolean(qs("#constraint-injury-shoulder")?.checked),
+        back: Boolean(qs("#constraint-injury-back")?.checked),
+      },
+      equipment: {
+        none: Boolean(qs("#constraint-eq-none")?.checked),
+        dumbbells: Boolean(qs("#constraint-eq-dumbbells")?.checked),
+        bands: Boolean(qs("#constraint-eq-bands")?.checked),
+        gym: Boolean(qs("#constraint-eq-gym")?.checked),
+      },
+      timeOfDayPreference: qs("#constraint-time-pref")?.value || "any",
+    },
+  });
+
   saveBtn?.addEventListener("click", async () => {
-    const userProfile = {
-      wakeTime: qs("#profile-wake").value,
-      bedTime: qs("#profile-bed").value,
-      sleepRegularity: Number(qs("#profile-sleep-regular").value),
-      caffeineCupsPerDay: Number(qs("#profile-caffeine").value),
-      lateCaffeineDaysPerWeek: Number(qs("#profile-late-caffeine").value),
-      sunlightMinutesPerDay: Number(qs("#profile-sunlight").value),
-      lateScreenMinutesPerNight: Number(qs("#profile-screen").value),
-      alcoholNightsPerWeek: Number(qs("#profile-alcohol").value),
-      mealTimingConsistency: Number(qs("#profile-meal").value),
-      contentPack: qs("#profile-pack").value,
-      timezone: qs("#profile-timezone")?.value?.trim() || "America/Los_Angeles",
-    };
+    const userProfile = buildProfileFromForm();
     await apiPost("/v1/profile", { userProfile });
+  });
+
+  constraintsSave?.addEventListener("click", async () => {
+    const userProfile = buildProfileFromForm();
+    await apiPost("/v1/profile", { userProfile });
+  });
+
+  communityOptSave?.addEventListener("click", async () => {
+    const optedIn = Boolean(qs("#community-opt-in")?.checked);
+    await apiPost("/v1/community/opt-in", { optedIn });
   });
 
   privacySave?.addEventListener("click", async () => {
@@ -582,6 +773,11 @@ function initAdmin() {
   const guardText = qs("#admin-guard-text");
   const panel = qs("#admin-panel");
   const guard = qs("#admin-guard");
+  const validatorBanner = qs("#admin-validator-banner");
+  const validatorStatus = qs("#validator-status");
+  const validatorOutput = qs("#validator-output");
+  const outlineOutput = qs("#outline-output");
+  const outlineStatus = qs("#outline-status");
 
   const showPanel = (ok) => {
     if (ok) {
@@ -641,6 +837,84 @@ function initAdmin() {
     input.addEventListener("change", () => setStageMode(input.checked));
   });
   const stageHeaders = () => (stageModeEnabled ? { "x-content-stage": "true" } : undefined);
+
+  const renderValidatorBanner = (latest) => {
+    if (!validatorBanner) return;
+    if (latest && latest.releaseBlocked) {
+      validatorBanner.textContent = t("admin.releaseBlocked");
+      validatorBanner.classList.remove("hidden");
+    } else {
+      validatorBanner.classList.add("hidden");
+      validatorBanner.textContent = "";
+    }
+  };
+
+  const loadValidatorLatest = async () => {
+    const res = await apiGet("/v1/admin/validator/latest");
+    const latest = res.latest || null;
+    renderValidatorBanner(res);
+    if (validatorStatus) {
+      const kind = latest?.kind || res.kind || "engine_matrix";
+      validatorStatus.textContent = latest
+        ? `${kind} • ${latest.atISO} • ${latest.ok ? t("admin.ok") : t("admin.failed")}`
+        : t("admin.noRuns");
+    }
+    if (validatorOutput) {
+      validatorOutput.textContent = latest ? JSON.stringify(latest.report || {}, null, 2) : "";
+    }
+  };
+
+  const runValidatorNow = async () => {
+    if (validatorStatus) validatorStatus.textContent = t("admin.running");
+    const res = await apiPost("/v1/admin/validator/run", { kind: "engine_matrix" });
+    if (validatorStatus) {
+      validatorStatus.textContent = res.report?.ok ? t("admin.ok") : t("admin.failed");
+    }
+    if (validatorOutput) validatorOutput.textContent = JSON.stringify(res.report || {}, null, 2);
+    renderValidatorBanner({ releaseBlocked: res.report ? !res.report.ok : false });
+  };
+
+  const buildOutlinePayload = () => {
+    const kind = qs("#outline-kind")?.value || "workout";
+    const outlineText = qs("#outline-text")?.value || "";
+    const tags = qs("#outline-tags")?.value || "";
+    const minutesHint = qs("#outline-minutes")?.value;
+    return {
+      kind,
+      outlineText,
+      suggestedTags: tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+      minutesHint: minutesHint ? Number(minutesHint) : undefined,
+    };
+  };
+
+  const previewOutline = async () => {
+    const payload = buildOutlinePayload();
+    if (outlineStatus) outlineStatus.textContent = "";
+    try {
+      const res = await apiPost("/v1/admin/content/from-outline?preview=true", payload);
+      if (outlineOutput) outlineOutput.textContent = JSON.stringify(res, null, 2);
+      if (outlineStatus) outlineStatus.textContent = t("admin.previewReady");
+    } catch (err) {
+      const details = getErrorDetails(err);
+      if (outlineOutput) outlineOutput.textContent = JSON.stringify(details || {}, null, 2);
+      if (outlineStatus) outlineStatus.textContent = t("admin.previewFailed");
+    }
+  };
+
+  const saveOutlineDraft = async () => {
+    const payload = buildOutlinePayload();
+    if (outlineStatus) outlineStatus.textContent = "";
+    try {
+      const res = await apiPost("/v1/admin/content/from-outline", payload);
+      if (outlineOutput) outlineOutput.textContent = JSON.stringify(res, null, 2);
+      if (outlineStatus) outlineStatus.textContent = t("misc.saved");
+      scLoadList();
+    } catch (err) {
+      const details = getErrorDetails(err);
+      if (outlineOutput) outlineOutput.textContent = JSON.stringify(details || {}, null, 2);
+      if (outlineStatus) outlineStatus.textContent = t("admin.previewFailed");
+    }
+  };
 
   const loadContentList = async () => {
     const kind = qs("#admin-kind")?.value || "workout";
@@ -1162,6 +1436,32 @@ function initAdmin() {
     if (qs("#support-output")) qs("#support-output").textContent = JSON.stringify(res, null, 2);
   };
 
+  const loadCommunityPending = async () => {
+    const res = await apiGet("/v1/admin/community/pending?page=1&pageSize=50");
+    const list = qs("#community-pending-list");
+    if (!list) return;
+    clear(list);
+    (res.items || []).forEach((item) => {
+      const row = el("div", { class: "list-item" }, [
+        el("div", { text: `${item.resetItemId} • ${item.id}` }),
+        el("div", { class: "muted", text: item.text }),
+      ]);
+      const approve = el("button", { class: "ghost", text: t("admin.approve") });
+      approve.addEventListener("click", async () => {
+        await apiPost(`/v1/admin/community/${encodeURIComponent(item.id)}/approve`, {});
+        loadCommunityPending();
+      });
+      const reject = el("button", { class: "ghost", text: t("admin.reject") });
+      reject.addEventListener("click", async () => {
+        await apiPost(`/v1/admin/community/${encodeURIComponent(item.id)}/reject`, {});
+        loadCommunityPending();
+      });
+      row.appendChild(approve);
+      row.appendChild(reject);
+      list.appendChild(row);
+    });
+  };
+
   const loadChangelog = async () => {
     const res = await apiGet("/v1/admin/changelog?page=1&pageSize=20");
     const list = qs("#changelog-list");
@@ -1280,10 +1580,15 @@ function initAdmin() {
     qs("#weekly-download")?.addEventListener("click", downloadWeeklyReport);
     qs("#weekly-disable-all")?.addEventListener("click", disableWeeklyCandidates);
     qs("#weekly-bump")?.addEventListener("click", bumpWeeklyPriority);
+    qs("#outline-preview")?.addEventListener("click", previewOutline);
+    qs("#outline-save")?.addEventListener("click", saveOutlineDraft);
+    qs("#validator-load")?.addEventListener("click", loadValidatorLatest);
+    qs("#validator-run")?.addEventListener("click", runValidatorNow);
     qs("#support-search")?.addEventListener("click", searchSupportUser);
     qs("#support-debug-bundle")?.addEventListener("click", createSupportDebugBundle);
     qs("#support-replay")?.addEventListener("click", replaySupportSandbox);
     qs("#support-bundle-load")?.addEventListener("click", () => loadSupportBundle());
+    qs("#community-pending-load")?.addEventListener("click", loadCommunityPending);
     qs("#changelog-create")?.addEventListener("click", createChangelog);
     qs("#changelog-load")?.addEventListener("click", loadChangelog);
   };
@@ -1307,6 +1612,8 @@ function initAdmin() {
     loadAdminReminders();
     loadWeeklyReport();
     loadChangelog();
+    loadValidatorLatest();
+    loadCommunityPending();
   });
 }
 

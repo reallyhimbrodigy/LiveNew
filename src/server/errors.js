@@ -71,9 +71,17 @@ export function sendError(res, errOrStatus, code, message, field, requestId) {
   };
 
   if (res?.livenewUserId) payload.userId = res.livenewUserId;
-  if (isDevLike()) {
+  const exposeDetails = err.details?.expose === true || err.code === "consent_required";
+  if (isDevLike() || exposeDetails) {
     const details = err.details || undefined;
-    if (details) payload.details = details;
+    if (details) {
+      if (details.expose) {
+        const { expose, ...rest } = details;
+        payload.details = rest;
+      } else {
+        payload.details = details;
+      }
+    }
   }
 
   const headers = { "Content-Type": "application/json" };

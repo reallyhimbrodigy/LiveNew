@@ -147,6 +147,15 @@ export function toDayContract(state, dateISO, domain) {
   const appliedRules = dayPlan?.meta?.appliedRules || [];
   const whatWouldChange = buildWhatWouldChange({ dayPlan, checkIn, drivers, appliedRules });
   const citations = buildCitations(dayPlan);
+  const reEntryMeta = dayPlan?.meta?.reEntry || null;
+  const reEntry =
+    reEntryMeta && reEntryMeta.active
+      ? {
+          active: true,
+          dayIndex: reEntryMeta.dayIndex || 1,
+          message: `Gentle re-entry day ${reEntryMeta.dayIndex || 1} of 3.`,
+        }
+      : null;
 
   return {
     dateISO,
@@ -179,6 +188,7 @@ export function toDayContract(state, dateISO, domain) {
       relevance,
       whatWouldChange,
       whyNot,
+      reEntry,
       expanded: {
         drivers,
         appliedRules,

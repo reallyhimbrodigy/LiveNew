@@ -1,68 +1,94 @@
-# Mobile MVP scope (Authorization-only)
-
-This MVP targets 5 screens and uses the portable API contract (no cookies required).
+# Mobile MVP scope
 
 ## Global requirements
+- Auth: `Authorization: Bearer <accessToken>` on every request.
+- No cookies required or expected.
+- CSRF is ignored for Authorization-based requests.
+- Error shape:
+  ```json
+  {"ok":false,"error":{"code":"...","message":"...","field":"...","requestId":"..."}}
+  ```
 
-- Send `Authorization: Bearer <accessToken>` on authenticated requests.
-- Do not rely on cookies.
-- Errors follow `{ ok:false, error:{ code, message, field?, requestId } }`.
+## Screen: Auth
+Purpose: request and verify access, refresh tokens.
 
-## Screens and API usage
+Endpoints:
+- `POST /v1/auth/request` body `{ email }`
+- `POST /v1/auth/verify` body `{ email, code }`
+- `POST /v1/auth/refresh` body `{ refreshToken }`
 
-### 1) Auth
-
-- `POST /v1/auth/request` `{ email }`
-- `POST /v1/auth/verify` `{ email, code }` -> store `accessToken`, `refreshToken`
-- `POST /v1/auth/refresh` `{ refreshToken }`
-
-Caching: none.
-
-### 2) Today (home rail)
-
-Primary call:
-
-- `GET /v1/rail/today` -> `{ rail, day }`
-
-Secondary calls:
-
-- `GET /v1/citations` (cache for session)
+Headers:
+- `Authorization` not required for request/verify.
+- Optional `x-device-name` (string).
 
 Caching:
+- No caching.
 
-- Cache `rail/today` for a short window (e.g., 30-60s) and refresh on foreground.
+Errors:
+- `rate_limited_auth`, `code_invalid`, `auth_locked`.
 
-### 3) Check-in
+## Screen: Today
+Purpose: default daily rail and day contract.
 
-- `POST /v1/checkin` `{ checkIn }`
-  - Required fields for the fast path: `stress`, `sleepQuality`, `energy`, `timeAvailableMin`
+Endpoints:
+- `GET /v1/rail/today`
+- `GET /v1/plan/day?date=YYYY-MM-DD` (optional for explicit date)
 
-Behavior:
-
-- After success, refetch `GET /v1/rail/today`.
-
-### 4) Week
-
-- `GET /v1/plan/week?date=YYYY-MM-DD` -> `{ weekPlan }`
+Headers:
+- `Authorization` required.
 
 Caching:
+- Cache the response for the current day; invalidate after a check-in or completion.
 
-- Cache by `date` key; invalidate after check-in or force refresh.
+Errors:
+- `consent_required` (must complete consent screen).
+- `feature_disabled` if engine features are paused.
 
-### 5) Profile
+## Screen: Check-in
+Purpose: send a quick or full check-in.
 
-- `POST /v1/profile` `{ userProfile }`
-- `PATCH /v1/profile/timezone` `{ timezone, dayBoundaryHour? }`
+Endpoints:
+- `POST /v1/checkin` body `{ checkIn }`
+
+Headers:
+- `Authorization` required.
+
+Caching:
+- Invalidate today’s cached day/rail after success.
+
+Errors:
+- `checkin_invalid`, `feature_disabled`.
+
+## Screen: Week
+Purpose: weekly plan overview.
+
+Endpoints:
+- `GET /v1/plan/week?date=YYYY-MM-DD`
+
+Headers:
+- `Authorization` required.
+
+Caching:
+- Cache per week; invalidate on check-ins or signals.
+
+Errors:
+- `consent_required`.
+
+## Screen: Profile
+Purpose: profile edits, privacy settings, and release notes.
+
+Endpoints:
+- `POST /v1/profile` body `{ userProfile }`
+- `PATCH /v1/profile/timezone` body `{ timezone, dayBoundaryHour }`
+- `PATCH /v1/account/privacy` body `{ dataMinimization }`
+- `GET /v1/account/export`
 - `GET /v1/changelog?audience=user&limit=5`
-- Optional: `GET /v1/account/export`, `DELETE /v1/account` (with confirmations)
+
+Headers:
+- `Authorization` required.
 
 Caching:
+- No caching for edits. Cache changelog for 24h.
 
-- Profile can be cached locally; refetch on edit or session restore.
-
-## Suggested screen flows
-
-- Auth -> Today (`rail/today`)
-- Today -> Check-in -> Today (refetch)
-- Today -> Week (week plan)
-- Today -> Profile (settings + notes)
+Errors:
+- `profile_invalid`, `timezone_invalid`.
