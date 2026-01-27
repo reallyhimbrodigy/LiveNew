@@ -58,6 +58,20 @@ function isTime(value) {
   return typeof value === "string" && TIME_RE.test(value);
 }
 
+function isTimeZone(value) {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.length > 64) return false;
+  if (typeof Intl?.supportedValuesOf === "function") {
+    try {
+      return Intl.supportedValuesOf("timeZone").includes(trimmed);
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
 export function validateProfile(body) {
   const userProfile = body?.userProfile;
   if (!userProfile || typeof userProfile !== "object") {
@@ -94,8 +108,41 @@ export function validateProfile(body) {
   if (userProfile.contentPack != null && !CONTENT_PACKS.has(userProfile.contentPack)) {
     return fail("profile_invalid", "contentPack is not allowed", "contentPack");
   }
+  if (userProfile.timezone != null && !isTimeZone(userProfile.timezone)) {
+    return fail("profile_invalid", "timezone is invalid", "timezone");
+  }
+
+  if (userProfile.dataMinimization != null) {
+    const dm = userProfile.dataMinimization;
+    if (typeof dm !== "object") {
+      return fail("profile_invalid", "dataMinimization must be object", "dataMinimization");
+    }
+    const boolFields = ["enabled", "storeNotes", "storeTraces"];
+    for (const field of boolFields) {
+      if (field in dm && typeof dm[field] !== "boolean") {
+        return fail("profile_invalid", `${field} must be boolean`, `dataMinimization.${field}`);
+      }
+    }
+    if ("eventRetentionDays" in dm && !isIntegerInRange(dm.eventRetentionDays, 1, 365)) {
+      return fail("profile_invalid", "eventRetentionDays must be 1..365", "dataMinimization.eventRetentionDays");
+    }
+    if ("historyRetentionDays" in dm && !isIntegerInRange(dm.historyRetentionDays, 1, 365)) {
+      return fail("profile_invalid", "historyRetentionDays must be 1..365", "dataMinimization.historyRetentionDays");
+    }
+  }
 
   return ok({ userProfile });
+}
+
+export function validateTimezone(body) {
+  const timezone = body?.timezone;
+  if (!timezone || typeof timezone !== "string") {
+    return fail("timezone_required", "timezone is required", "timezone");
+  }
+  if (!isTimeZone(timezone)) {
+    return fail("timezone_invalid", "timezone is invalid", "timezone");
+  }
+  return ok({ timezone: timezone.trim() });
 }
 
 export function validateCheckIn(body, options = {}) {

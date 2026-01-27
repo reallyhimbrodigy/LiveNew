@@ -30,6 +30,21 @@ export function normalizeState(state = {}) {
     next.userProfile = {
       ...next.userProfile,
       contentPack: next.userProfile.contentPack || "balanced_routine",
+      timezone: next.userProfile.timezone || "America/Los_Angeles",
+      dataMinimization: (() => {
+        const dataMin = next.userProfile.dataMinimization || {};
+        const enabled = Boolean(dataMin.enabled);
+        const eventDays = Number.isFinite(Number(dataMin.eventRetentionDays)) ? Number(dataMin.eventRetentionDays) : 90;
+        const historyDays = Number.isFinite(Number(dataMin.historyRetentionDays)) ? Number(dataMin.historyRetentionDays) : 90;
+        const cap = enabled ? 30 : 365;
+        return {
+          enabled,
+          storeNotes: dataMin.storeNotes !== false,
+          storeTraces: dataMin.storeTraces !== false,
+          eventRetentionDays: Math.min(eventDays, cap),
+          historyRetentionDays: Math.min(historyDays, cap),
+        };
+      })(),
     };
   }
 

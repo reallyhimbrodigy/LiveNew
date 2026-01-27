@@ -1,6 +1,71 @@
 function latestCheckInForDate(checkIns, dateISO) {
   if (!Array.isArray(checkIns)) return null;
-  return checkIns.find((entry) => entry.dateISO === dateISO) || null;
+  let latest = null;
+  checkIns.forEach((entry) => {
+    if (entry?.dateISO !== dateISO) return;
+    if (!latest) {
+      latest = entry;
+      return;
+    }
+    const prevAt = latest.atISO || "";
+    const nextAt = entry.atISO || "";
+    if (!prevAt || nextAt >= prevAt) latest = entry;
+  });
+  return latest;
+}
+
+function countQuickSignalsForDate(eventLog, dateISO) {
+  if (!Array.isArray(eventLog)) return 0;
+  return eventLog.filter((entry) => entry?.type === "quick_signal" && entry?.payload?.dateISO === dateISO).length;
+}
+
+function shouldPromptForCheckIn({ dayPlan, checkIn, eventLog, dateISO }) {
+  const confidence = dayPlan?.meta?.confidence ?? 0.6;
+  if (confidence < 0.55) {
+    return { shouldPrompt: true, reason: "A quick check-in helps personalize today." };
+  }
+  const quickSignals = countQuickSignalsForDate(eventLog, dateISO);
+  if (quickSignals >= 2) {
+    return { shouldPrompt: true, reason: "We can tune today with a quick check-in." };
+  }
+  if (!checkIn) {
+    return { shouldPrompt: true, reason: "Share a quick check-in to adjust today." };
+  }
+  if (checkIn.atISO) {
+    const last = new Date(checkIn.atISO).getTime();
+    if (Number.isFinite(last) && Date.now() - last > 24 * 60 * 60 * 1000) {
+      return { shouldPrompt: true, reason: "It’s been a bit—refresh today with a quick check-in." };
+    }
+  }
+  return { shouldPrompt: false, reason: null };
+}
+
+function shortRationaleFor({ focus, driver }) {
+  const focusLabel = focus === "downshift" ? "Downshift" : focus === "rebuild" ? "Rebuild" : "Stabilize";
+  if (!driver) return `${focusLabel} today to support recovery.`;
+  const trimmed = driver.trim();
+  const normalized = trimmed ? trimmed.charAt(0).toLowerCase() + trimmed.slice(1) : "today’s signals";
+  return `${focusLabel} today because ${normalized}.`;
+}
+
+function buildWhyNot({ dayPlan, checkIn, safety }) {
+  const reasons = [];
+  if (safety?.level === "block") {
+    reasons.push("Not intensity today because safety signals are active.");
+  }
+  if (checkIn?.timeAvailableMin != null && Number(checkIn.timeAvailableMin) <= 10) {
+    reasons.push("Not a longer session because time available is limited.");
+  }
+  if (checkIn?.sleepQuality != null && Number(checkIn.sleepQuality) <= 5) {
+    reasons.push("Not intensity today because sleep quality was low.");
+  }
+  if (checkIn?.energy != null && Number(checkIn.energy) <= 4) {
+    reasons.push("Not intensity today because energy is low.");
+  }
+  if (dayPlan?.workout === null) {
+    reasons.push("Not a workout today because gentle recovery is prioritized.");
+  }
+  return reasons.slice(0, 2);
 }
 
 function focusStatementFor(dayPlan) {
@@ -21,6 +86,15 @@ export function toDayContract(state, dateISO, domain) {
   const checkIn = latestCheckInForDate(state.checkIns, dateISO);
   const workoutMinutes = workout ? workout.minutes || 0 : 0;
   const resetMinutes = reset.minutes || 0;
+  const prompt = shouldPromptForCheckIn({ dayPlan, checkIn, eventLog: state.eventLog, dateISO });
+  const safety = { ...(dayPlan?.safety || { level: "ok", reasons: [] }) };
+  if (safety.level === "block" || safety.reasons?.includes?.("panic")) {
+    safety.disclaimer = "If symptoms feel severe or unsafe, consider professional support.";
+  }
+  const drivers = state.lastStressStateByDate?.[dateISO]?.drivers || [];
+  const driversTop2 = drivers.slice(0, 2);
+  const shortRationale = shortRationaleFor({ focus: dayPlan?.focus, driver: driversTop2[0] }).slice(0, 160);
+  const whyNot = buildWhyNot({ dayPlan, checkIn, safety });
 
   return {
     dateISO,
@@ -46,11 +120,23 @@ export function toDayContract(state, dateISO, domain) {
     why: {
       profile: dayPlan?.profile || null,
       focus: dayPlan?.focus || null,
-      drivers: (state.lastStressStateByDate?.[dateISO]?.drivers || []).slice(0, 2),
+      driversTop2,
+      shortRationale,
+      whyNot,
+      expanded: {
+        drivers,
+        appliedRules: dayPlan?.meta?.appliedRules || [],
+        anchors: dayPlan?.anchors || null,
+        safety,
+        rationale: (dayPlan?.rationale || []).slice(0, 4),
+      },
       statement: focusStatementFor(dayPlan),
       rationale: (dayPlan?.rationale || []).slice(0, 2),
       meta: dayPlan?.meta || null,
-      safety: dayPlan?.safety || { level: "ok", reasons: [] },
+      safety,
+      confidence: dayPlan?.meta?.confidence ?? null,
+      relevance: dayPlan?.meta?.relevance ?? null,
+      checkInPrompt: prompt,
     },
     howLong: {
       totalMinutes: workoutMinutes + resetMinutes,

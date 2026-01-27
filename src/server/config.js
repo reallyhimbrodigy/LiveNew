@@ -64,7 +64,7 @@ export function getConfig() {
 
   const rateLimits = isAlphaLike || isProdLike
     ? { general: 40, mutating: 8, auth: 5 }
-    : { general: 60, mutating: 10, auth: 10 };
+    : { general: 60, mutating: 10, auth: 5 };
 
   const cacheTTLSeconds = isAlphaLike || isProdLike ? 20 : 10;
 

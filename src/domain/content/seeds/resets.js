@@ -1,5 +1,21 @@
 export const resetsSeed = [
   {
+    id: "r_panic_mode",
+    title: "Panic mode reset (2-3 min)",
+    minutes: 3,
+    tags: ["downshift", "panic_mode", "breath", "short"],
+    steps: [
+      "Name 5 things you can see",
+      "Inhale 4s, exhale 6s for 6 cycles",
+      "Place one hand on chest, one on belly; slow your exhale",
+    ],
+    contraindications: [],
+    intensityCost: 0,
+    noveltyGroup: "panic_mode",
+    priority: 6,
+    required: true,
+  },
+  {
     id: "r_breath_2",
     title: "2-min long-exhale breathing",
     minutes: 2,

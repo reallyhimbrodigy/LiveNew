@@ -297,6 +297,215 @@ export async function updateRefreshTokenDeviceName(id, deviceName) {
     .run(deviceName, id);
 }
 
+export async function insertPlanChangeSummary({
+  id,
+  userId,
+  dateISO,
+  cause,
+  fromHistoryId,
+  toHistoryId,
+  summary,
+  createdAt,
+}) {
+  const summaryId = id || crypto.randomUUID();
+  const now = createdAt || new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO plan_change_summaries (id, user_id, date_iso, created_at, cause, from_history_id, to_history_id, summary_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    .run(
+      summaryId,
+      userId,
+      dateISO,
+      now,
+      cause,
+      fromHistoryId || null,
+      toHistoryId || null,
+      JSON.stringify(summary || {})
+    );
+  return { id: summaryId, createdAt: now };
+}
+
+export async function listPlanChangeSummaries(userId, dateISO, limit = 10) {
+  const size = Math.min(Math.max(limit, 1), 50);
+  const rows = getDb()
+    .prepare(
+      "SELECT id, created_at, cause, summary_json FROM plan_change_summaries WHERE user_id = ? AND date_iso = ? ORDER BY created_at DESC LIMIT ?"
+    )
+    .all(userId, dateISO, size);
+  return rows.map((row) => ({
+    id: row.id,
+    createdAt: row.created_at,
+    cause: row.cause,
+    summary: JSON.parse(row.summary_json),
+  }));
+}
+
+export async function upsertReminderIntent({ id, userId, dateISO, intentKey, scheduledForISO, status }) {
+  const now = new Date().toISOString();
+  const intentId = id || crypto.randomUUID();
+  getDb()
+    .prepare(
+      "INSERT INTO reminder_intents (id, user_id, date_iso, intent_key, scheduled_for_iso, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, date_iso, intent_key) DO UPDATE SET scheduled_for_iso=excluded.scheduled_for_iso, status=excluded.status, updated_at=excluded.updated_at"
+    )
+    .run(
+      intentId,
+      userId,
+      dateISO,
+      intentKey,
+      scheduledForISO,
+      status,
+      now,
+      now
+    );
+  return { id: intentId, scheduledForISO, status, updatedAt: now };
+}
+
+export async function listReminderIntentsByDate(userId, dateISO) {
+  const rows = getDb()
+    .prepare(
+      "SELECT id, intent_key, scheduled_for_iso, status, created_at, updated_at FROM reminder_intents WHERE user_id = ? AND date_iso = ? ORDER BY scheduled_for_iso ASC"
+    )
+    .all(userId, dateISO);
+  return rows.map((row) => ({
+    id: row.id,
+    intentKey: row.intent_key,
+    scheduledForISO: row.scheduled_for_iso,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function updateReminderIntentStatus(id, status, userId = null) {
+  if (!id) return null;
+  const now = new Date().toISOString();
+  const stmt = userId
+    ? getDb().prepare("UPDATE reminder_intents SET status = ?, updated_at = ? WHERE id = ? AND user_id = ?")
+    : getDb().prepare("UPDATE reminder_intents SET status = ?, updated_at = ? WHERE id = ?");
+  const result = userId ? stmt.run(status, now, id, userId) : stmt.run(status, now, id);
+  if (!result.changes) return null;
+  return { id, status, updatedAt: now };
+}
+
+export async function listReminderIntentsAdmin({ dateISO, status, page = 1, pageSize = 50 }) {
+  const size = Math.min(Math.max(pageSize, 1), 200);
+  const offset = (Math.max(page, 1) - 1) * size;
+  const filters = [];
+  const params = [];
+  if (dateISO) {
+    filters.push("date_iso = ?");
+    params.push(dateISO);
+  }
+  if (status) {
+    filters.push("status = ?");
+    params.push(status);
+  }
+  const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+  const rows = getDb()
+    .prepare(
+      `SELECT id, user_id, date_iso, intent_key, scheduled_for_iso, status, created_at, updated_at FROM reminder_intents ${where} ORDER BY scheduled_for_iso ASC LIMIT ? OFFSET ?`
+    )
+    .all(...params, size, offset);
+  return rows.map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    dateISO: row.date_iso,
+    intentKey: row.intent_key,
+    scheduledForISO: row.scheduled_for_iso,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function seedCohorts(cohorts) {
+  if (!Array.isArray(cohorts) || !cohorts.length) return;
+  const now = new Date().toISOString();
+  const stmt = getDb().prepare("INSERT OR IGNORE INTO cohorts (id, name, created_at) VALUES (?, ?, ?)");
+  getDb().exec("BEGIN;");
+  try {
+    cohorts.forEach((cohort) => {
+      stmt.run(cohort.id, cohort.name || cohort.id, now);
+    });
+    getDb().exec("COMMIT;");
+  } catch (err) {
+    getDb().exec("ROLLBACK;");
+    throw err;
+  }
+}
+
+export async function listCohorts() {
+  const rows = getDb().prepare("SELECT id, name, created_at FROM cohorts ORDER BY id ASC").all();
+  return rows.map((row) => ({ id: row.id, name: row.name, createdAt: row.created_at }));
+}
+
+export async function listCohortParameters(cohortId) {
+  const rows = getDb()
+    .prepare("SELECT key, value_json, version, updated_at FROM cohort_parameters WHERE cohort_id = ? ORDER BY key")
+    .all(cohortId);
+  return rows.map((row) => ({
+    key: row.key,
+    value: JSON.parse(row.value_json),
+    version: row.version,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function upsertCohortParameter(cohortId, key, value) {
+  const now = new Date().toISOString();
+  const row = getDb()
+    .prepare("SELECT version FROM cohort_parameters WHERE cohort_id = ? AND key = ?")
+    .get(cohortId, key);
+  const nextVersion = row ? row.version + 1 : 1;
+  getDb()
+    .prepare(
+      "INSERT INTO cohort_parameters (cohort_id, key, value_json, version, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(cohort_id, key) DO UPDATE SET value_json=excluded.value_json, version=excluded.version, updated_at=excluded.updated_at"
+    )
+    .run(cohortId, key, JSON.stringify(value ?? null), nextVersion, now);
+  return { key, version: nextVersion, updatedAt: now };
+}
+
+export async function getUserCohort(userId) {
+  const row = getDb()
+    .prepare("SELECT cohort_id, assigned_at, overridden_by_admin FROM user_cohorts WHERE user_id = ?")
+    .get(userId);
+  if (!row) return null;
+  return {
+    cohortId: row.cohort_id,
+    assignedAt: row.assigned_at,
+    overriddenByAdmin: Boolean(row.overridden_by_admin),
+  };
+}
+
+export async function setUserCohort(userId, cohortId, overridden = false) {
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO user_cohorts (user_id, cohort_id, assigned_at, overridden_by_admin) VALUES (?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET cohort_id=excluded.cohort_id, assigned_at=excluded.assigned_at, overridden_by_admin=excluded.overridden_by_admin"
+    )
+    .run(userId, cohortId, now, overridden ? 1 : 0);
+  return { userId, cohortId, assignedAt: now, overriddenByAdmin: overridden };
+}
+
+export async function listAllUserStates() {
+  const rows = getDb().prepare("SELECT user_id, state_json FROM user_state").all();
+  return rows.map((row) => ({ userId: row.user_id, state: JSON.parse(row.state_json) }));
+}
+
+export async function cleanupUserRetention(userId, policy) {
+  if (!userId || !policy) return;
+  const now = Date.now();
+  const eventDays = Math.max(1, Number(policy.eventRetentionDays || 0));
+  const historyDays = Math.max(1, Number(policy.historyRetentionDays || 0));
+  const eventCutoff = new Date(now - eventDays * 86400000).toISOString();
+  const historyCutoff = new Date(now - historyDays * 86400000).toISOString();
+  getDb().prepare("DELETE FROM user_events WHERE user_id = ? AND at_iso < ?").run(userId, eventCutoff);
+  getDb().prepare("DELETE FROM decision_traces WHERE user_id = ? AND created_at < ?").run(userId, historyCutoff);
+  getDb().prepare("DELETE FROM day_plan_history WHERE user_id = ? AND created_at < ?").run(userId, historyCutoff);
+  getDb().prepare("DELETE FROM plan_change_summaries WHERE user_id = ? AND created_at < ?").run(userId, historyCutoff);
+}
+
 export async function deleteSessionByTokenOrHash(value) {
   if (!value) return;
   const tokenHash = value.length >= 64 ? value : hashString(value);
@@ -860,6 +1069,11 @@ export async function updateAnalyticsDaily(dateISO, updates) {
     feedback_not_relevant_count: 0,
     bad_day_mode_count: 0,
     active_users_count: 0,
+    onboard_completed_count: 0,
+    first_plan_generated_count: 0,
+    first_completion_count: 0,
+    day3_retained_count: 0,
+    days_with_any_regulation_action_completed: 0,
   };
 
   const next = {
@@ -868,11 +1082,17 @@ export async function updateAnalyticsDaily(dateISO, updates) {
     feedback_not_relevant_count: current.feedback_not_relevant_count + (updates.feedback_not_relevant_count || 0),
     bad_day_mode_count: current.bad_day_mode_count + (updates.bad_day_mode_count || 0),
     active_users_count: updates.active_users_count ?? current.active_users_count,
+    onboard_completed_count: current.onboard_completed_count + (updates.onboard_completed_count || 0),
+    first_plan_generated_count: current.first_plan_generated_count + (updates.first_plan_generated_count || 0),
+    first_completion_count: current.first_completion_count + (updates.first_completion_count || 0),
+    day3_retained_count: current.day3_retained_count + (updates.day3_retained_count || 0),
+    days_with_any_regulation_action_completed:
+      current.days_with_any_regulation_action_completed + (updates.days_with_any_regulation_action_completed || 0),
   };
 
   getDb()
     .prepare(
-      "INSERT INTO analytics_daily (date_iso, checkins_count, any_part_days_count, feedback_not_relevant_count, bad_day_mode_count, active_users_count, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(date_iso) DO UPDATE SET checkins_count=excluded.checkins_count, any_part_days_count=excluded.any_part_days_count, feedback_not_relevant_count=excluded.feedback_not_relevant_count, bad_day_mode_count=excluded.bad_day_mode_count, active_users_count=excluded.active_users_count, updated_at=excluded.updated_at"
+      "INSERT INTO analytics_daily (date_iso, checkins_count, any_part_days_count, feedback_not_relevant_count, bad_day_mode_count, active_users_count, onboard_completed_count, first_plan_generated_count, first_completion_count, day3_retained_count, days_with_any_regulation_action_completed, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(date_iso) DO UPDATE SET checkins_count=excluded.checkins_count, any_part_days_count=excluded.any_part_days_count, feedback_not_relevant_count=excluded.feedback_not_relevant_count, bad_day_mode_count=excluded.bad_day_mode_count, active_users_count=excluded.active_users_count, onboard_completed_count=excluded.onboard_completed_count, first_plan_generated_count=excluded.first_plan_generated_count, first_completion_count=excluded.first_completion_count, day3_retained_count=excluded.day3_retained_count, days_with_any_regulation_action_completed=excluded.days_with_any_regulation_action_completed, updated_at=excluded.updated_at"
     )
     .run(
       dateISO,
@@ -881,6 +1101,11 @@ export async function updateAnalyticsDaily(dateISO, updates) {
       next.feedback_not_relevant_count,
       next.bad_day_mode_count,
       next.active_users_count,
+      next.onboard_completed_count,
+      next.first_plan_generated_count,
+      next.first_completion_count,
+      next.day3_retained_count,
+      next.days_with_any_regulation_action_completed,
       now
     );
 }
@@ -888,7 +1113,7 @@ export async function updateAnalyticsDaily(dateISO, updates) {
 export async function listAnalyticsDaily(fromISO, toISO) {
   const rows = getDb()
     .prepare(
-      "SELECT date_iso, checkins_count, any_part_days_count, feedback_not_relevant_count, bad_day_mode_count, active_users_count, updated_at FROM analytics_daily WHERE date_iso >= ? AND date_iso <= ? ORDER BY date_iso DESC"
+      "SELECT date_iso, checkins_count, any_part_days_count, feedback_not_relevant_count, bad_day_mode_count, active_users_count, onboard_completed_count, first_plan_generated_count, first_completion_count, day3_retained_count, days_with_any_regulation_action_completed, updated_at FROM analytics_daily WHERE date_iso >= ? AND date_iso <= ? ORDER BY date_iso DESC"
     )
     .all(fromISO, toISO);
   return rows.map((row) => ({
@@ -898,8 +1123,97 @@ export async function listAnalyticsDaily(fromISO, toISO) {
     feedbackNotRelevantCount: row.feedback_not_relevant_count,
     badDayModeCount: row.bad_day_mode_count,
     activeUsersCount: row.active_users_count,
+    onboardCompletedCount: row.onboard_completed_count,
+    firstPlanGeneratedCount: row.first_plan_generated_count,
+    firstCompletionCount: row.first_completion_count,
+    day3RetainedCount: row.day3_retained_count,
+    daysWithAnyRegulationActionCompleted: row.days_with_any_regulation_action_completed,
     updatedAt: row.updated_at,
   }));
+}
+
+export async function insertAnalyticsEvent({ userId, atISO, dateISO, eventKey, props }) {
+  const id = crypto.randomUUID();
+  getDb()
+    .prepare(
+      "INSERT INTO analytics_events (id, user_id, at_iso, date_iso, event_key, props_json) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .run(id, userId, atISO, dateISO, eventKey, JSON.stringify(props || {}));
+  return { id };
+}
+
+export async function setAnalyticsDailyFlag(dateISO, userId, flagKey) {
+  const info = getDb()
+    .prepare("INSERT OR IGNORE INTO analytics_daily_user_flags (date_iso, user_id, flag_key) VALUES (?, ?, ?)")
+    .run(dateISO, userId, flagKey);
+  return info.changes > 0;
+}
+
+export async function countAnalyticsDailyFlags(dateISO, flagKey) {
+  const row = getDb()
+    .prepare("SELECT COUNT(*) as count FROM analytics_daily_user_flags WHERE date_iso = ? AND flag_key = ?")
+    .get(dateISO, flagKey);
+  return row?.count || 0;
+}
+
+export async function getFirstAnalyticsFlagDate(userId, flagKey) {
+  const row = getDb()
+    .prepare(
+      "SELECT date_iso FROM analytics_daily_user_flags WHERE user_id = ? AND flag_key = ? ORDER BY date_iso ASC LIMIT 1"
+    )
+    .get(userId, flagKey);
+  return row?.date_iso || null;
+}
+
+export async function upsertAnalyticsDailyCounts(dateISO, counts) {
+  const now = new Date().toISOString();
+  const row = getDb().prepare("SELECT * FROM analytics_daily WHERE date_iso = ?").get(dateISO);
+  const current = row || {
+    date_iso: dateISO,
+    checkins_count: 0,
+    any_part_days_count: 0,
+    feedback_not_relevant_count: 0,
+    bad_day_mode_count: 0,
+    active_users_count: 0,
+    onboard_completed_count: 0,
+    first_plan_generated_count: 0,
+    first_completion_count: 0,
+    day3_retained_count: 0,
+    days_with_any_regulation_action_completed: 0,
+  };
+
+  const next = {
+    checkins_count: current.checkins_count,
+    any_part_days_count: current.any_part_days_count,
+    feedback_not_relevant_count: current.feedback_not_relevant_count,
+    bad_day_mode_count: current.bad_day_mode_count,
+    active_users_count: current.active_users_count,
+    onboard_completed_count: counts.onboard_completed_count ?? current.onboard_completed_count,
+    first_plan_generated_count: counts.first_plan_generated_count ?? current.first_plan_generated_count,
+    first_completion_count: counts.first_completion_count ?? current.first_completion_count,
+    day3_retained_count: counts.day3_retained_count ?? current.day3_retained_count,
+    days_with_any_regulation_action_completed:
+      counts.days_with_any_regulation_action_completed ?? current.days_with_any_regulation_action_completed,
+  };
+
+  getDb()
+    .prepare(
+      "INSERT INTO analytics_daily (date_iso, checkins_count, any_part_days_count, feedback_not_relevant_count, bad_day_mode_count, active_users_count, onboard_completed_count, first_plan_generated_count, first_completion_count, day3_retained_count, days_with_any_regulation_action_completed, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(date_iso) DO UPDATE SET checkins_count=excluded.checkins_count, any_part_days_count=excluded.any_part_days_count, feedback_not_relevant_count=excluded.feedback_not_relevant_count, bad_day_mode_count=excluded.bad_day_mode_count, active_users_count=excluded.active_users_count, onboard_completed_count=excluded.onboard_completed_count, first_plan_generated_count=excluded.first_plan_generated_count, first_completion_count=excluded.first_completion_count, day3_retained_count=excluded.day3_retained_count, days_with_any_regulation_action_completed=excluded.days_with_any_regulation_action_completed, updated_at=excluded.updated_at"
+    )
+    .run(
+      dateISO,
+      next.checkins_count,
+      next.any_part_days_count,
+      next.feedback_not_relevant_count,
+      next.bad_day_mode_count,
+      next.active_users_count,
+      next.onboard_completed_count,
+      next.first_plan_generated_count,
+      next.first_completion_count,
+      next.day3_retained_count,
+      next.days_with_any_regulation_action_completed,
+      now
+    );
 }
 
 export async function listParameters() {
@@ -983,9 +1297,14 @@ export async function deleteUserData(userId) {
     instance.prepare("DELETE FROM user_events_archive WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM decision_traces WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM day_plan_history WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM plan_change_summaries WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM content_stats WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM analytics_active_users WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM analytics_daily_user_flags WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM analytics_events WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM reminder_intents WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM user_cohorts WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM users WHERE id = ?").run(userId);
     instance.exec("COMMIT;");
     return { ok: true };

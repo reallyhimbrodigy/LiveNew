@@ -7,12 +7,15 @@ import { DECISION_PIPELINE_VERSION } from "../constants.js";
 import { normalizeAppliedRules } from "./rules.js";
 import { DEFAULT_PARAMETERS } from "../params.js";
 import { evaluateSafety } from "./safety.js";
+import { computeConfidence, computeRelevance } from "./quality.js";
 
 export function buildDayPlan({
   user,
   dateISO,
   checkIn,
   checkInsByDate,
+  completionsByDate,
+  feedback,
   weekContext,
   overrides,
   qualityRules,
@@ -197,6 +200,16 @@ export function buildDayPlan({
   dayDraft.meta = meta;
   dayDraft.safety = safety;
 
+  const confidence = computeConfidence({ userProfile: user, checkIn, stressState });
+  const relevance = computeRelevance({
+    dayPlan: dayDraft,
+    recentFeedback: feedback,
+    completionsByDate,
+    packWeights,
+  });
+  dayDraft.meta.confidence = confidence;
+  dayDraft.meta.relevance = relevance;
+
   return { dayPlan: dayDraft, stressState, meta };
 }
 
@@ -361,6 +374,12 @@ function pickEmergencyReset(packWeights) {
   return candidates.sort((a, b) => commonSort(a, b, packWeights?.resetTagWeights))[0];
 }
 
+function pickPanicReset() {
+  const candidates = defaultLibrary.resets.filter((r) => r.tags.includes("panic_mode"));
+  if (!candidates.length) return null;
+  return candidates[0];
+}
+
 function pickEmergencyNutrition(packWeights) {
   const candidates = defaultLibrary.nutrition.filter((n) => n.tags.includes("sleep") || n.tags.includes("downshift"));
   if (!candidates.length) return defaultLibrary.nutrition[0];
@@ -371,7 +390,7 @@ function applySafetyOverrides(dayDraft, safety, { timeMin, focus, packWeights })
   if (safety.level === "block") {
     const shouldNullWorkout = safety.reasons.includes("panic") || safety.reasons.includes("illness") || safety.reasons.includes("fever");
     const workout = shouldNullWorkout ? null : pickEmergencyWorkout(timeMin || 10, packWeights);
-    const reset = pickEmergencyReset(packWeights);
+    const reset = safety.reasons.includes("panic") ? pickPanicReset() || pickEmergencyReset(packWeights) : pickEmergencyReset(packWeights);
     const nutrition = pickEmergencyNutrition(packWeights);
     return {
       ...dayDraft,

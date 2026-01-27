@@ -1,7 +1,8 @@
-import { listParameters } from "../state/db.js";
+import { listParameters, getUserCohort, listCohortParameters } from "../state/db.js";
 import { DEFAULT_PARAMETERS } from "../domain/params.js";
 
-let cache = { map: DEFAULT_PARAMETERS, versions: {}, ok: true, errors: [], loadedAt: 0 };
+let cache = { map: DEFAULT_PARAMETERS, versions: {}, ok: true, errors: [], loadedAt: 0, versionsBySource: { base: {}, cohort: {} } };
+const userCache = new Map();
 const TTL_MS = 10 * 1000;
 
 function isNumber(value) {
@@ -95,13 +96,20 @@ export function getDefaultParameters() {
   return JSON.parse(JSON.stringify(DEFAULT_PARAMETERS));
 }
 
-export async function getParameters() {
+export async function getParameters(userId = null) {
   const now = Date.now();
-  if (cache.loadedAt && now - cache.loadedAt < TTL_MS) return cache;
+  if (!userId) {
+    if (cache.loadedAt && now - cache.loadedAt < TTL_MS) return cache;
+  } else {
+    const cached = userCache.get(userId);
+    if (cached && now - cached.loadedAt < TTL_MS) return cached;
+  }
 
   const rows = await listParameters();
   const map = getDefaultParameters();
   const versions = {};
+  const baseVersions = {};
+  const cohortVersions = {};
   const errors = [];
   const seen = new Set();
 
@@ -111,33 +119,65 @@ export async function getParameters() {
     if (validateParamValue(key, row.value)) {
       map[key] = row.value;
       versions[key] = row.version;
+      baseVersions[key] = row.version;
     } else {
       errors.push(`Invalid parameter: ${key}`);
       versions[key] = row.version;
+      baseVersions[key] = row.version;
     }
   });
 
   Object.keys(DEFAULT_PARAMETERS).forEach((key) => {
     if (!seen.has(key)) {
       versions[key] = versions[key] || 0;
+      baseVersions[key] = baseVersions[key] || 0;
     }
   });
 
-  cache = {
+  let cohortId = null;
+  if (userId) {
+    const cohort = await getUserCohort(userId);
+    cohortId = cohort?.cohortId || null;
+    if (cohortId) {
+      const overrides = await listCohortParameters(cohortId);
+      overrides.forEach((row) => {
+        const key = row.key;
+        if (validateParamValue(key, row.value)) {
+          map[key] = row.value;
+          versions[key] = row.version;
+          cohortVersions[key] = row.version;
+        } else {
+          errors.push(`Invalid cohort parameter: ${key}`);
+          cohortVersions[key] = row.version;
+        }
+      });
+    }
+  }
+
+  const assembled = {
     map,
     versions,
+    versionsBySource: { base: baseVersions, cohort: cohortVersions },
     ok: errors.length === 0,
     errors,
     loadedAt: now,
+    cohortId,
   };
 
   if (errors.length) {
     console.warn("LiveNew parameters invalid; using defaults:", errors.join("; "));
   }
 
-  return cache;
+  if (!userId) {
+    cache = assembled;
+  } else {
+    userCache.set(userId, assembled);
+  }
+
+  return assembled;
 }
 
 export function resetParametersCache() {
   cache.loadedAt = 0;
+  userCache.clear();
 }

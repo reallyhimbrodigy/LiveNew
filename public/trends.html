@@ -8,50 +8,50 @@
 </head>
 <body data-page="trends">
   <header class="topbar">
-    <div class="brand">LiveNew</div>
+    <div class="brand" data-i18n="appName">LiveNew</div>
     <nav class="nav">
-      <a href="/day">Day</a>
-      <a href="/week">Week</a>
-      <a href="/trends" class="active">Trends</a>
-      <a href="/profile">Profile</a>
-      <a class="admin-link" href="/admin">Admin</a>
+      <a href="/day" data-i18n="nav.day">Day</a>
+      <a href="/week" data-i18n="nav.week">Week</a>
+      <a href="/trends" class="active" data-i18n="nav.trends">Trends</a>
+      <a href="/profile" data-i18n="nav.profile">Profile</a>
+      <a class="admin-link" href="/admin" data-i18n="nav.admin">Admin</a>
     </nav>
     <div class="auth" id="auth-panel">
-      <div class="auth-status" id="auth-status">Not signed in</div>
+      <div class="auth-status" id="auth-status" data-i18n="auth.notSignedIn">Not signed in</div>
       <div class="auth-row">
-        <input id="auth-email" type="email" placeholder="email" />
-        <button id="auth-request">Send code</button>
+        <input id="auth-email" type="email" placeholder="email" data-i18n-placeholder="auth.emailPlaceholder" aria-label="email" data-i18n-aria="auth.emailPlaceholder" />
+        <button id="auth-request" data-i18n="auth.sendCode">Send code</button>
       </div>
       <div class="auth-row">
-        <input id="auth-code" type="text" placeholder="code" />
-        <button id="auth-verify">Verify</button>
-        <button id="auth-logout" class="ghost">Logout</button>
+        <input id="auth-code" type="text" placeholder="code" data-i18n-placeholder="auth.codePlaceholder" aria-label="code" data-i18n-aria="auth.codePlaceholder" />
+        <button id="auth-verify" data-i18n="auth.verify">Verify</button>
+        <button id="auth-logout" class="ghost" data-i18n="auth.logout">Logout</button>
       </div>
     </div>
   </header>
 
   <main class="container">
     <section class="card">
-      <h1>Trends</h1>
+      <h1 data-i18n="trends.title">Trends</h1>
       <div class="row">
-        <label>Range
+        <label><span data-i18n="trends.days">Days</span>
           <select id="trends-days">
-            <option value="7">7 days</option>
-            <option value="14">14 days</option>
-            <option value="30">30 days</option>
+            <option value="7">7</option>
+            <option value="14">14</option>
+            <option value="30">30</option>
           </select>
         </label>
-        <button id="trends-load">Load trends</button>
+        <button id="trends-load" data-i18n="trends.load">Load trends</button>
       </div>
       <table class="table" id="trends-table">
         <thead>
           <tr>
-            <th>Date</th>
-            <th>Stress</th>
-            <th>Sleep</th>
-            <th>Energy</th>
-            <th>Any part</th>
-            <th>Downshift min</th>
+            <th data-i18n="day.dateLabel">Date</th>
+            <th data-i18n="trends.stress">Stress</th>
+            <th data-i18n="trends.sleep">Sleep</th>
+            <th data-i18n="trends.energy">Energy</th>
+            <th data-i18n="trends.anyPart">Any part</th>
+            <th data-i18n="trends.downshift">Downshift min</th>
           </tr>
         </thead>
         <tbody></tbody>

@@ -8,59 +8,91 @@
 </head>
 <body data-page="profile">
   <header class="topbar">
-    <div class="brand">LiveNew</div>
+    <div class="brand" data-i18n="appName">LiveNew</div>
     <nav class="nav">
-      <a href="/day">Day</a>
-      <a href="/week">Week</a>
-      <a href="/trends">Trends</a>
-      <a href="/profile" class="active">Profile</a>
-      <a class="admin-link" href="/admin">Admin</a>
+      <a href="/day" data-i18n="nav.day">Day</a>
+      <a href="/week" data-i18n="nav.week">Week</a>
+      <a href="/trends" data-i18n="nav.trends">Trends</a>
+      <a href="/profile" class="active" data-i18n="nav.profile">Profile</a>
+      <a class="admin-link" href="/admin" data-i18n="nav.admin">Admin</a>
     </nav>
     <div class="auth" id="auth-panel">
-      <div class="auth-status" id="auth-status">Not signed in</div>
+      <div class="auth-status" id="auth-status" data-i18n="auth.notSignedIn">Not signed in</div>
       <div class="auth-row">
-        <input id="auth-email" type="email" placeholder="email" />
-        <button id="auth-request">Send code</button>
+        <input id="auth-email" type="email" placeholder="email" data-i18n-placeholder="auth.emailPlaceholder" aria-label="email" data-i18n-aria="auth.emailPlaceholder" />
+        <button id="auth-request" data-i18n="auth.sendCode">Send code</button>
       </div>
       <div class="auth-row">
-        <input id="auth-code" type="text" placeholder="code" />
-        <button id="auth-verify">Verify</button>
-        <button id="auth-logout" class="ghost">Logout</button>
+        <input id="auth-code" type="text" placeholder="code" data-i18n-placeholder="auth.codePlaceholder" aria-label="code" data-i18n-aria="auth.codePlaceholder" />
+        <button id="auth-verify" data-i18n="auth.verify">Verify</button>
+        <button id="auth-logout" class="ghost" data-i18n="auth.logout">Logout</button>
       </div>
     </div>
   </header>
 
   <main class="container">
     <section class="card">
-      <h1>Profile</h1>
+      <h1 data-i18n="profile.title">Profile</h1>
       <div class="grid-2">
-        <label>Wake time <input id="profile-wake" type="time" /></label>
-        <label>Bed time <input id="profile-bed" type="time" /></label>
-        <label>Sleep regularity (1-10) <input id="profile-sleep-regular" type="number" min="1" max="10" /></label>
-        <label>Caffeine cups/day <input id="profile-caffeine" type="number" min="0" max="5" /></label>
-        <label>Late caffeine days/week <input id="profile-late-caffeine" type="number" min="0" max="7" /></label>
-        <label>Sunlight minutes/day <input id="profile-sunlight" type="number" min="0" max="120" /></label>
-        <label>Late screen minutes/night <input id="profile-screen" type="number" min="0" max="240" /></label>
-        <label>Alcohol nights/week <input id="profile-alcohol" type="number" min="0" max="7" /></label>
-        <label>Meal timing consistency (1-10) <input id="profile-meal" type="number" min="1" max="10" /></label>
-        <label>Content pack
+        <label><span data-i18n="profile.wake">Wake time</span> <input id="profile-wake" type="time" /></label>
+        <label><span data-i18n="profile.bed">Bed time</span> <input id="profile-bed" type="time" /></label>
+        <label><span data-i18n="profile.sleepRegularity">Sleep regularity (1-10)</span> <input id="profile-sleep-regular" type="number" min="1" max="10" /></label>
+        <label><span data-i18n="profile.caffeine">Caffeine cups/day</span> <input id="profile-caffeine" type="number" min="0" max="5" /></label>
+        <label><span data-i18n="profile.lateCaffeine">Late caffeine days/week</span> <input id="profile-late-caffeine" type="number" min="0" max="7" /></label>
+        <label><span data-i18n="profile.sunlight">Sunlight minutes/day</span> <input id="profile-sunlight" type="number" min="0" max="120" /></label>
+        <label><span data-i18n="profile.screen">Late screen minutes/night</span> <input id="profile-screen" type="number" min="0" max="240" /></label>
+        <label><span data-i18n="profile.alcohol">Alcohol nights/week</span> <input id="profile-alcohol" type="number" min="0" max="7" /></label>
+        <label><span data-i18n="profile.meal">Meal timing consistency (1-10)</span> <input id="profile-meal" type="number" min="1" max="10" /></label>
+        <label><span data-i18n="profile.timezone">Timezone</span> <input id="profile-timezone" type="text" placeholder="America/Los_Angeles" /></label>
+        <label><span data-i18n="profile.pack">Content pack</span>
           <select id="profile-pack">
-            <option value="balanced_routine">Balanced routine</option>
-            <option value="calm_reset">Calm reset</option>
-            <option value="rebuild_strength">Rebuild strength</option>
+            <option value="balanced_routine" data-i18n="profile.packBalanced">Balanced routine</option>
+            <option value="calm_reset" data-i18n="profile.packCalm">Calm reset</option>
+            <option value="rebuild_strength" data-i18n="profile.packRebuild">Rebuild strength</option>
           </select>
         </label>
       </div>
-      <button id="profile-save">Save profile</button>
+      <button id="profile-save" data-i18n="profile.save">Save profile</button>
     </section>
 
     <section class="card">
-      <h2>Sessions</h2>
+      <h2 data-i18n="profile.sessions">Sessions</h2>
       <div class="row">
-        <input id="device-name" type="text" placeholder="Device name" />
-        <button id="device-name-save">Save device name</button>
+        <input id="device-name" type="text" placeholder="Device name" data-i18n-placeholder="profile.deviceName" />
+        <button id="device-name-save" data-i18n="profile.saveDevice">Save device name</button>
       </div>
       <div id="sessions-list" class="list"></div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="profile.privacy">Privacy</h2>
+      <div class="grid-2">
+        <label><input id="privacy-enabled" type="checkbox" /> <span data-i18n="profile.dataMin">Data minimization</span></label>
+        <label><input id="privacy-store-notes" type="checkbox" /> <span data-i18n="profile.storeNotes">Store notes</span></label>
+        <label><input id="privacy-store-traces" type="checkbox" /> <span data-i18n="profile.storeTraces">Store traces</span></label>
+        <label><span data-i18n="profile.eventRetention">Event retention days</span> <input id="privacy-event-days" type="number" min="1" max="365" /></label>
+        <label><span data-i18n="profile.historyRetention">History retention days</span> <input id="privacy-history-days" type="number" min="1" max="365" /></label>
+      </div>
+      <button id="privacy-save" data-i18n="profile.savePrivacy">Save privacy settings</button>
+      <div id="privacy-status" class="muted"></div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="profile.reminders">Reminders</h2>
+      <div class="row">
+        <input id="reminders-date" type="date" />
+        <button id="reminders-load" data-i18n="profile.loadReminders">Load reminders</button>
+      </div>
+      <div id="reminders-list" class="list"></div>
+    </section>
+
+    <section class="card">
+      <h2 data-i18n="profile.changes">Plan changes</h2>
+      <div class="row">
+        <input id="changes-date" type="date" />
+        <button id="changes-load" data-i18n="profile.loadChanges">Load changes</button>
+      </div>
+      <div id="changes-list" class="list"></div>
     </section>
   </main>
 

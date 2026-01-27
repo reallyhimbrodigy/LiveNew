@@ -8,66 +8,66 @@
 </head>
 <body data-page="day">
   <header class="topbar">
-    <div class="brand">LiveNew</div>
+    <div class="brand" data-i18n="appName">LiveNew</div>
     <nav class="nav">
-      <a href="/day" class="active">Day</a>
-      <a href="/week">Week</a>
-      <a href="/trends">Trends</a>
-      <a href="/profile">Profile</a>
-      <a class="admin-link" href="/admin">Admin</a>
+      <a href="/day" class="active" data-i18n="nav.day">Day</a>
+      <a href="/week" data-i18n="nav.week">Week</a>
+      <a href="/trends" data-i18n="nav.trends">Trends</a>
+      <a href="/profile" data-i18n="nav.profile">Profile</a>
+      <a class="admin-link" href="/admin" data-i18n="nav.admin">Admin</a>
     </nav>
     <div class="auth" id="auth-panel">
-      <div class="auth-status" id="auth-status">Not signed in</div>
+      <div class="auth-status" id="auth-status" data-i18n="auth.notSignedIn">Not signed in</div>
       <div class="auth-row">
-        <input id="auth-email" type="email" placeholder="email" />
-        <button id="auth-request">Send code</button>
+        <input id="auth-email" type="email" placeholder="email" data-i18n-placeholder="auth.emailPlaceholder" aria-label="email" data-i18n-aria="auth.emailPlaceholder" />
+        <button id="auth-request" data-i18n="auth.sendCode">Send code</button>
       </div>
       <div class="auth-row">
-        <input id="auth-code" type="text" placeholder="code" />
-        <button id="auth-verify">Verify</button>
-        <button id="auth-logout" class="ghost">Logout</button>
+        <input id="auth-code" type="text" placeholder="code" data-i18n-placeholder="auth.codePlaceholder" aria-label="code" data-i18n-aria="auth.codePlaceholder" />
+        <button id="auth-verify" data-i18n="auth.verify">Verify</button>
+        <button id="auth-logout" class="ghost" data-i18n="auth.logout">Logout</button>
       </div>
     </div>
   </header>
 
   <main class="container">
     <section class="card">
-      <h1>Today</h1>
+      <h1 data-i18n="day.title">Today</h1>
       <div class="row">
-        <label>Date <input id="day-date" type="date" /></label>
-        <button id="day-load">Load Day</button>
+        <label><span data-i18n="day.dateLabel">Date</span> <input id="day-date" type="date" /></label>
+        <button id="day-load" data-i18n="day.load">Load Day</button>
       </div>
       <div id="day-summary" class="grid-3">
         <div class="tile">
-          <h3>What</h3>
+          <h3 data-i18n="day.what">What</h3>
           <div id="day-what"></div>
         </div>
         <div class="tile">
-          <h3>Why</h3>
+          <h3 data-i18n="day.why">Why</h3>
           <div id="day-why"></div>
         </div>
         <div class="tile">
-          <h3>How long</h3>
+          <h3 data-i18n="day.howLong">How long</h3>
           <div id="day-howlong"></div>
         </div>
       </div>
-      <button id="day-details-toggle" class="ghost">Show details</button>
+      <button id="day-details-toggle" class="ghost" data-i18n="day.showDetails" aria-expanded="false" aria-controls="day-details">Show details</button>
       <div id="day-details" class="details hidden"></div>
     </section>
 
     <section class="card">
-      <h2>Quick signals</h2>
+      <h2 data-i18n="day.quickSignals">Quick signals</h2>
       <div id="signal-buttons" class="row wrap"></div>
-      <button id="bad-day-btn" class="danger">Bad day mode</button>
+      <button id="bad-day-btn" class="danger" data-i18n="day.badDay">Bad day mode</button>
     </section>
 
     <section class="card">
-      <h2>Check-in</h2>
+      <h2 data-i18n="day.checkIn">Check-in</h2>
       <div class="grid-2">
-        <label>Stress (1-10) <input id="checkin-stress" type="number" min="1" max="10" /></label>
-        <label>Sleep quality (1-10) <input id="checkin-sleep" type="number" min="1" max="10" /></label>
-        <label>Energy (1-10) <input id="checkin-energy" type="number" min="1" max="10" /></label>
-        <label>Time available
+        <label><span data-i18n="checkIn.stress">Stress (1-10)</span> <input id="checkin-stress" type="number" min="1" max="10" /></label>
+        <label><span data-i18n="checkIn.sleep">Sleep quality (1-10)</span> <input id="checkin-sleep" type="number" min="1" max="10" /></label>
+        <label><span data-i18n="checkIn.energy">Energy (1-10)</span> <input id="checkin-energy" type="number" min="1" max="10" /></label>
+        <label><span data-i18n="checkIn.timeAvailable">Time available</span>
           <select id="checkin-time">
             <option value="5">5</option>
             <option value="10">10</option>
@@ -78,34 +78,34 @@
             <option value="60">60</option>
           </select>
         </label>
-        <label class="span-2">Notes <input id="checkin-notes" type="text" placeholder="Optional" /></label>
+        <label class="span-2"><span data-i18n="labels.notes">Notes</span> <input id="checkin-notes" type="text" placeholder="Optional" data-i18n-placeholder="day.notesPlaceholder" /></label>
       </div>
-      <button id="checkin-submit">Save check-in</button>
+      <button id="checkin-submit" data-i18n="day.saveCheckIn">Save check-in</button>
     </section>
 
     <section class="card">
-      <h2>Completion</h2>
+      <h2 data-i18n="day.completion">Completion</h2>
       <div class="row wrap" id="completion-list">
-        <label><input type="checkbox" data-part="workout" /> Workout done</label>
-        <label><input type="checkbox" data-part="reset" /> Reset done</label>
-        <label><input type="checkbox" data-part="nutrition" /> Nutrition done</label>
+        <label><input type="checkbox" data-part="workout" /> <span data-i18n="day.workoutDone">Workout done</span></label>
+        <label><input type="checkbox" data-part="reset" /> <span data-i18n="day.resetDone">Reset done</span></label>
+        <label><input type="checkbox" data-part="nutrition" /> <span data-i18n="day.nutritionDone">Nutrition done</span></label>
       </div>
     </section>
 
     <section class="card">
-      <h2>Feedback</h2>
+      <h2 data-i18n="day.feedback">Feedback</h2>
       <div class="row">
         <select id="feedback-helped">
-          <option value="yes">Helped</option>
-          <option value="no">Did not help</option>
+          <option value="yes" data-i18n="feedback.helped">Helped</option>
+          <option value="no" data-i18n="feedback.notHelped">Did not help</option>
         </select>
         <select id="feedback-reason">
-          <option value="too_hard">Too hard</option>
-          <option value="too_easy">Too easy</option>
-          <option value="wrong_time">Wrong time</option>
-          <option value="not_relevant">Not relevant</option>
+          <option value="too_hard" data-i18n="feedback.tooHard">Too hard</option>
+          <option value="too_easy" data-i18n="feedback.tooEasy">Too easy</option>
+          <option value="wrong_time" data-i18n="feedback.wrongTime">Wrong time</option>
+          <option value="not_relevant" data-i18n="feedback.notRelevant">Not relevant</option>
         </select>
-        <button id="feedback-submit">Send feedback</button>
+        <button id="feedback-submit" data-i18n="day.sendFeedback">Send feedback</button>
       </div>
     </section>
   </main>

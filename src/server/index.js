@@ -10,6 +10,7 @@ import { runSnapshotCheck, SNAPSHOT_IDS } from "../dev/snapshot.js";
 import { toDayContract } from "./dayContract.js";
 import { getUserId, sanitizeUserId } from "./userId.js";
 import { sendError } from "./errors.js";
+import { logInfo, logError } from "./logger.js";
 import {
   validateProfile,
   validateCheckIn,
@@ -19,6 +20,7 @@ import {
   validateRules,
   validateReplay,
   validateDateParam,
+  validateTimezone,
 } from "./validate.js";
 import {
   initDb,
@@ -69,6 +71,20 @@ import {
   insertDayPlanHistory,
   listDayPlanHistory,
   getDayPlanHistoryById,
+  insertPlanChangeSummary,
+  listPlanChangeSummaries,
+  upsertReminderIntent,
+  listReminderIntentsByDate,
+  updateReminderIntentStatus,
+  listReminderIntentsAdmin,
+  seedCohorts,
+  listCohorts,
+  listCohortParameters,
+  upsertCohortParameter,
+  getUserCohort,
+  setUserCohort,
+  listAllUserStates,
+  cleanupUserRetention,
   deleteUserData,
 } from "../state/db.js";
 import { createBackup, restoreBackup, listBackups } from "../db/backup.js";
@@ -80,6 +96,8 @@ import { getParameters, getDefaultParameters, resetParametersCache } from "./par
 import { createTaskScheduler } from "./tasks.js";
 import { signAccessToken, verifyAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshToken } from "../security/tokens.js";
 import { diffDayContracts } from "./diff.js";
+import { nowDateISO } from "../domain/utils/dateISO.js";
+import { trackEvent, setDailyFlag, ensureDay3Retention, AnalyticsFlags, getFirstFlagDate } from "./analytics.js";
 
 const NODE_ENV = process.env.NODE_ENV || "development";
 const config = getConfig();
@@ -94,6 +112,8 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
   .filter(Boolean);
 
 const PUBLIC_DIR = path.join(process.cwd(), "public");
+const REQUIRED_CONTENT_IDS = new Set(["r_panic_mode"]);
+const DEFAULT_TIMEZONE = "America/Los_Angeles";
 
 const userStates = new Map();
 const MAX_USERS = 50;
@@ -113,7 +133,13 @@ const DEFAULT_FLAGS = {
   "rules.recoveryDebt.enabled": "true",
   "rules.circadianAnchors.enabled": "true",
   "rules.safety.enabled": "true",
+  "reminders.enabled": "true",
 };
+const DEFAULT_COHORTS = [
+  { id: "new_users", name: "New Users" },
+  { id: "high_stress", name: "High Stress" },
+  { id: "poor_sleep", name: "Poor Sleep" },
+];
 const LATENCY_ROUTES = new Set(["GET /v1/plan/day", "POST /v1/checkin", "POST /v1/signal"]);
 const ACCESS_TOKEN_TTL_SEC = 15 * 60;
 
@@ -122,19 +148,23 @@ const secretState = ensureSecretKey(config);
 await ensureDataDirWritable(config);
 await initDb();
 await seedContentItems(domain.defaultLibrary);
+await ensureRequiredContentItems();
 await seedFeatureFlags(DEFAULT_FLAGS);
 await seedParameters(getDefaultParameters());
+await seedCohorts(DEFAULT_COHORTS);
 resetParametersCache();
 await applyLibraryFromDb();
 await cleanupOldEvents(EVENT_RETENTION_DAYS);
 const bootSummary = await computeBootSummary(config);
 enforceGuardrails(config, bootSummary);
-console.log(JSON.stringify({ boot: bootSummary }));
+logInfo({ boot: bootSummary });
 const taskScheduler = createTaskScheduler({
   config,
   createBackup,
   cleanupOldEvents,
   retentionDays: EVENT_RETENTION_DAYS,
+  listAllUserStates,
+  cleanupUserRetention,
 });
 taskScheduler.schedule();
 
@@ -162,7 +192,7 @@ async function ensureDataDirWritable(runtimeConfig) {
       await fs.writeFile(testPath, "ok");
       await fs.unlink(testPath);
     } catch (err) {
-      console.error("LiveNew server cannot write to data directory:", dir, err);
+      logError({ event: "data_dir_write_failed", dir, error: err?.message || String(err) });
       process.exit(1);
     }
   }
@@ -185,6 +215,35 @@ async function applyLibraryFromDb() {
   if (typeof domain.setLibraryIndex === "function") {
     domain.setLibraryIndex(domain.defaultLibrary);
   }
+}
+
+async function ensureRequiredContentItems() {
+  const items = await listContentItems(undefined, true);
+  const byId = new Map(items.map((item) => [item.id, item]));
+  for (const reset of domain.defaultLibrary.resets || []) {
+    if (!REQUIRED_CONTENT_IDS.has(reset.id)) continue;
+    const existing = byId.get(reset.id);
+    if (!existing || existing.enabled === false) {
+      await upsertContentItem("reset", { ...reset, enabled: true });
+    }
+  }
+}
+
+function getUserTimezone(profile) {
+  const tz = profile?.timezone;
+  if (typeof tz !== "string" || !tz.trim()) return DEFAULT_TIMEZONE;
+  if (typeof Intl?.supportedValuesOf === "function") {
+    try {
+      if (!Intl.supportedValuesOf("timeZone").includes(tz)) return DEFAULT_TIMEZONE;
+    } catch {
+      return DEFAULT_TIMEZONE;
+    }
+  }
+  return tz;
+}
+
+function getTodayISOForProfile(profile) {
+  return nowDateISO(getUserTimezone(profile));
 }
 
 async function getFeatureFlags() {
@@ -228,12 +287,62 @@ function resolveRuleToggles(state, flags) {
   };
 }
 
+function addMinutesToTimeStr(timeStr, minutesToAdd) {
+  if (!timeStr) return "12:00";
+  const [h, m] = timeStr.split(":").map((val) => Number(val));
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return "12:00";
+  let total = h * 60 + m + minutesToAdd;
+  total = ((total % (24 * 60)) + 24 * 60) % (24 * 60);
+  const hh = String(Math.floor(total / 60)).padStart(2, "0");
+  const mm = String(total % 60).padStart(2, "0");
+  return `${hh}:${mm}`;
+}
+
+function toScheduledISO(dateISO, timeStr) {
+  return `${dateISO}T${timeStr}:00.000Z`;
+}
+
+function buildReminderSchedule(userProfile, dateISO) {
+  if (!userProfile) return [];
+  const wake = userProfile.wakeTime || "07:00";
+  const bed = userProfile.bedTime || "23:00";
+  const sunlightTime = addMinutesToTimeStr(wake, 30);
+  const mealTime = userProfile.mealTimingConsistency <= 5 ? addMinutesToTimeStr(wake, 5 * 60) : "12:00";
+  const downshiftTime = addMinutesToTimeStr(bed, -90);
+  return [
+    { intentKey: "sunlight_am", scheduledForISO: toScheduledISO(dateISO, sunlightTime) },
+    { intentKey: "meal_midday", scheduledForISO: toScheduledISO(dateISO, mealTime) },
+    { intentKey: "downshift_pm", scheduledForISO: toScheduledISO(dateISO, downshiftTime) },
+  ];
+}
+
+async function upsertDailyReminders(userId, state, dateISO) {
+  const schedule = buildReminderSchedule(state.userProfile, dateISO);
+  for (const intent of schedule) {
+    await upsertReminderIntent({
+      userId,
+      dateISO,
+      intentKey: intent.intentKey,
+      scheduledForISO: intent.scheduledForISO,
+      status: "scheduled",
+    });
+  }
+}
+
+function cohortForCheckIn(checkIn) {
+  if (!checkIn) return "new_users";
+  if (Number(checkIn.stress || 0) >= 8) return "high_stress";
+  if (Number(checkIn.sleepQuality || 10) <= 4) return "poor_sleep";
+  return "new_users";
+}
+
 async function repairUserState(userId, reason) {
   const baseNow = new Date().toISOString();
   const events = await getUserEvents(userId, 1, 5000);
   if (events.length) {
     const flags = await getFeatureFlags();
-    const paramsState = await getParameters();
+    const paramsState = await getParameters(userId);
+    const paramsMeta = { cohortId: paramsState.cohortId || null, versions: paramsState.versionsBySource || {} };
     let rebuilt = normalizeState({});
     for (const evt of events) {
       const ctx = {
@@ -243,6 +352,7 @@ async function repairUserState(userId, reason) {
         scenarios: { getScenarioById },
         isDev: isDevRoutesEnabled,
         params: paramsState.map,
+        paramsMeta,
       };
       const result = reduceEvent(rebuilt, { type: evt.type, payload: evt.payload, atISO: evt.atISO || baseNow }, ctx);
       rebuilt = appendLogEvent(result.nextState, result.logEvent);
@@ -253,9 +363,7 @@ async function repairUserState(userId, reason) {
       const saveRes = await saveUserState(userId, latest?.version || 0, rebuilt);
       if (saveRes.ok) {
         updateUserCache(userId, rebuilt, saveRes.version);
-        console.log(
-          JSON.stringify({ atISO: baseNow, event: "auto_repair", userId, reason: reason || "events_replay" })
-        );
+        logInfo({ atISO: baseNow, event: "auto_repair", userId, reason: reason || "events_replay" });
         return { ok: true, state: rebuilt };
       }
     } catch {
@@ -271,9 +379,7 @@ async function repairUserState(userId, reason) {
       const saveRes = await saveUserState(userId, latest?.version || 0, entry.state);
       if (saveRes.ok) {
         updateUserCache(userId, entry.state, saveRes.version);
-        console.log(
-          JSON.stringify({ atISO: baseNow, event: "auto_repair", userId, reason: reason || "history_fallback" })
-        );
+        logInfo({ atISO: baseNow, event: "auto_repair", userId, reason: reason || "history_fallback" });
         return { ok: true, state: entry.state };
       }
     } catch {
@@ -337,6 +443,7 @@ function toNumber(value, fallback) {
 
 function normalizeUserProfile(profile) {
   if (!profile) return null;
+  const dataMin = profile.dataMinimization || {};
   return {
     ...profile,
     id: profile.id || Math.random().toString(36).slice(2),
@@ -353,7 +460,32 @@ function normalizeUserProfile(profile) {
     preferredWorkoutWindows: Array.isArray(profile.preferredWorkoutWindows) ? profile.preferredWorkoutWindows : ["PM"],
     busyDays: Array.isArray(profile.busyDays) ? profile.busyDays : [],
     contentPack: profile.contentPack || "balanced_routine",
+    timezone: profile.timezone || "America/Los_Angeles",
+    dataMinimization: (() => {
+      const enabled = Boolean(dataMin.enabled);
+      const eventDays = Number.isFinite(Number(dataMin.eventRetentionDays)) ? Number(dataMin.eventRetentionDays) : 90;
+      const historyDays = Number.isFinite(Number(dataMin.historyRetentionDays)) ? Number(dataMin.historyRetentionDays) : 90;
+      const cap = enabled ? 30 : 365;
+      return {
+        enabled,
+        storeNotes: dataMin.storeNotes !== false,
+        storeTraces: dataMin.storeTraces !== false,
+        eventRetentionDays: Math.min(eventDays, cap),
+        historyRetentionDays: Math.min(historyDays, cap),
+      };
+    })(),
   };
+}
+
+function applyDataMinimizationToCheckIn(checkIn, userProfile) {
+  if (!checkIn) return checkIn;
+  const dataMin = userProfile?.dataMinimization;
+  if (!dataMin?.enabled) return checkIn;
+  if (dataMin.storeNotes === false) {
+    const { notes, ...rest } = checkIn;
+    return { ...rest };
+  }
+  return checkIn;
 }
 
 async function seedInitialProfile(email, profile) {
@@ -365,15 +497,20 @@ async function seedInitialProfile(email, profile) {
   let currentVersion = cached.version;
   const flags = await getFeatureFlags();
   const effectiveToggles = resolveRuleToggles(currentState, flags);
-  const paramsState = await getParameters();
+  const paramsState = await getParameters(user.id);
+  const paramsMeta = { cohortId: paramsState.cohortId || null, versions: paramsState.versionsBySource || {} };
 
   const baseline = dispatch(
     currentState,
     { type: "BASELINE_SAVED", payload: { userProfile: normalized } },
-    { ruleToggles: effectiveToggles, params: paramsState.map }
+    { ruleToggles: effectiveToggles, params: paramsState.map, paramsMeta }
   );
   currentState = baseline.state;
-  const ensured = dispatch(currentState, { type: "ENSURE_WEEK", payload: {} }, { ruleToggles: effectiveToggles, params: paramsState.map });
+  const ensured = dispatch(
+    currentState,
+    { type: "ENSURE_WEEK", payload: {} },
+    { ruleToggles: effectiveToggles, params: paramsState.map, paramsMeta }
+  );
   currentState = ensured.state;
 
   let saveRes = await saveUserState(user.id, currentVersion, currentState);
@@ -384,10 +521,14 @@ async function seedInitialProfile(email, profile) {
     const retryBaseline = dispatch(
       currentState,
       { type: "BASELINE_SAVED", payload: { userProfile: normalized } },
-      { ruleToggles: effectiveToggles, params: paramsState.map }
+      { ruleToggles: effectiveToggles, params: paramsState.map, paramsMeta }
     );
     currentState = retryBaseline.state;
-    const retryEnsured = dispatch(currentState, { type: "ENSURE_WEEK", payload: {} }, { ruleToggles: effectiveToggles, params: paramsState.map });
+    const retryEnsured = dispatch(
+      currentState,
+      { type: "ENSURE_WEEK", payload: {} },
+      { ruleToggles: effectiveToggles, params: paramsState.map, paramsMeta }
+    );
     currentState = retryEnsured.state;
     saveRes = await saveUserState(user.id, currentVersion, currentState);
   }
@@ -423,6 +564,7 @@ function dispatch(state, event, ctxOverrides = {}) {
     scenarios: { getScenarioById },
     isDev: isDevRoutesEnabled,
     params: ctxOverrides.params,
+    paramsMeta: ctxOverrides.paramsMeta,
     ...ctxOverrides,
   };
 
@@ -725,10 +867,26 @@ function invalidateUserCache(userId) {
   }
 }
 
+function latestCheckInForDate(checkIns, dateISO) {
+  if (!Array.isArray(checkIns)) return null;
+  let latest = null;
+  checkIns.forEach((entry) => {
+    if (entry?.dateISO !== dateISO) return;
+    if (!latest) {
+      latest = entry;
+      return;
+    }
+    const prevAt = latest.atISO || "";
+    const nextAt = entry.atISO || "";
+    if (!prevAt || nextAt >= prevAt) latest = entry;
+  });
+  return latest;
+}
+
 function buildDecisionTrace(state, dateISO) {
   const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO);
   if (!dayPlan) return null;
-  const checkIn = (state.checkIns || []).find((item) => item.dateISO === dateISO) || null;
+  const checkIn = latestCheckInForDate(state.checkIns, dateISO);
   const inputs = {
     checkIn: checkIn
       ? {
@@ -789,8 +947,56 @@ function historyCauseForEvent(eventType) {
   }
 }
 
-function buildTrends(state, days) {
-  const todayISO = domain.isoToday();
+function shortChangeSummary(flags) {
+  const parts = [];
+  if (flags.workout) parts.push("workout");
+  if (flags.reset) parts.push("reset");
+  if (flags.nutrition) parts.push("nutrition");
+  if (flags.anchors) parts.push("anchors");
+  if (!parts.length) return "Plan updated.";
+  const joined = parts.join(", ");
+  return `Updated ${joined}.`;
+}
+
+function nextActionForPlan(dayPlan) {
+  const safetyLevel = dayPlan?.safety?.level;
+  if (safetyLevel === "block") return "Use the reset now; keep movement gentle today.";
+  const focus = dayPlan?.focus || "stabilize";
+  if (focus === "downshift") return "Do the reset first; movement is optional.";
+  if (focus === "rebuild") return "Use the planned dose; stop early if stress rises.";
+  return "Keep it steady: short movement + consistent meal timing.";
+}
+
+function buildChangeSummary({ fromDay, toDay, dayPlan, drivers }) {
+  const flags = { workout: false, reset: false, nutrition: false, anchors: false };
+  if (!fromDay && toDay) {
+    flags.workout = Boolean(toDay.what?.workout);
+    flags.reset = Boolean(toDay.what?.reset);
+    flags.nutrition = Boolean(toDay.what?.nutrition);
+    flags.anchors = Boolean(toDay.details?.anchors);
+  } else if (fromDay && toDay) {
+    const diff = diffDayContracts(fromDay, toDay);
+    diff.changes.forEach((change) => {
+      if (change.path.startsWith("what.workout") || change.path.startsWith("details.workoutSteps")) flags.workout = true;
+      if (change.path.startsWith("what.reset") || change.path.startsWith("details.resetSteps")) flags.reset = true;
+      if (change.path.startsWith("what.nutrition") || change.path.startsWith("details.nutritionPriorities")) flags.nutrition = true;
+      if (change.path.startsWith("details.anchors")) flags.anchors = true;
+    });
+  }
+
+  return {
+    whatChanged: flags,
+    why: {
+      driversTop2: (drivers || []).slice(0, 2),
+      appliedRules: dayPlan?.meta?.appliedRules || [],
+      safetyLevel: dayPlan?.safety?.level || "ok",
+    },
+    nextAction: nextActionForPlan(dayPlan),
+    short: shortChangeSummary(flags).slice(0, 120),
+  };
+}
+
+function buildTrends(state, days, todayISO = domain.isoToday()) {
   const result = [];
   const checkIns = Array.isArray(state.checkIns) ? state.checkIns : [];
   const dayMap = new Map();
@@ -808,6 +1014,9 @@ function buildTrends(state, days) {
     const sleepAvg = items.length
       ? items.reduce((sum, item) => sum + Number(item.sleepQuality || 0), 0) / items.length
       : null;
+    const energyAvg = items.length
+      ? items.reduce((sum, item) => sum + Number(item.energy || 0), 0) / items.length
+      : null;
     const parts = state.partCompletionByDate?.[dateISO] || {};
     const hasCompletion = Object.keys(parts).length > 0;
     const anyPart = hasCompletion ? Boolean(parts.workout || parts.reset || parts.nutrition) : null;
@@ -822,10 +1031,118 @@ function buildTrends(state, days) {
       dateISO,
       stressAvg,
       sleepAvg,
+      energyAvg,
+      anyPart,
       anyPartCompletion: anyPart,
       downshiftMinutes,
     });
   }
+  return result;
+}
+
+function buildContentStatsMap(rows) {
+  const map = new Map();
+  rows.forEach((row) => {
+    map.set(row.itemId, {
+      picked: row.picked || 0,
+      completed: row.completed || 0,
+      notRelevant: row.notRelevant || 0,
+    });
+  });
+  return map;
+}
+
+function enrichContentItems(items, statsMap) {
+  return (items || []).map((item) => {
+    const stat = statsMap.get(item.id) || { picked: 0, completed: 0, notRelevant: 0 };
+    const picked = stat.picked || 0;
+    const completionRate = picked ? stat.completed / picked : 0;
+    const notRelevantRate = picked ? stat.notRelevant / picked : 0;
+    return {
+      item,
+      stats: {
+        picked,
+        completed: stat.completed || 0,
+        notRelevant: stat.notRelevant || 0,
+        completionRate,
+        notRelevantRate,
+      },
+    };
+  });
+}
+
+function sortWorstItems(list) {
+  return list.slice().sort((a, b) => {
+    if (b.stats.notRelevantRate !== a.stats.notRelevantRate) return b.stats.notRelevantRate - a.stats.notRelevantRate;
+    if (a.stats.completionRate !== b.stats.completionRate) return a.stats.completionRate - b.stats.completionRate;
+    return (b.stats.picked || 0) - (a.stats.picked || 0);
+  });
+}
+
+function sortTopItems(list) {
+  return list.slice().sort((a, b) => {
+    if (b.stats.completionRate !== a.stats.completionRate) return b.stats.completionRate - a.stats.completionRate;
+    if (a.stats.notRelevantRate !== b.stats.notRelevantRate) return a.stats.notRelevantRate - b.stats.notRelevantRate;
+    return (b.stats.picked || 0) - (a.stats.picked || 0);
+  });
+}
+
+function buildTagSuggestions(items) {
+  const tagStats = new Map();
+  items.forEach((entry) => {
+    const tags = Array.isArray(entry.item.tags) ? entry.item.tags : [];
+    tags.forEach((tag) => {
+      const current = tagStats.get(tag) || { picked: 0, completed: 0 };
+      tagStats.set(tag, {
+        picked: current.picked + (entry.stats.picked || 0),
+        completed: current.completed + (entry.stats.completed || 0),
+      });
+    });
+  });
+  const scored = Array.from(tagStats.entries()).map(([tag, stats]) => {
+    const rate = stats.picked ? stats.completed / stats.picked : 0;
+    return { tag, picked: stats.picked, completionRate: rate };
+  });
+  return scored
+    .filter((entry) => entry.picked >= 5)
+    .sort((a, b) => b.completionRate - a.completionRate)
+    .slice(0, 5);
+}
+
+function buildPackStats(packWeights, itemsByKind, statsMap) {
+  if (!packWeights || typeof packWeights !== "object") return {};
+  const packs = Object.keys(packWeights);
+  const result = {};
+  packs.forEach((packId) => {
+    const pack = packWeights[packId] || {};
+    let picked = 0;
+    let completed = 0;
+    let notRelevant = 0;
+    const kinds = [
+      { key: "workout", weights: pack.workoutTagWeights },
+      { key: "nutrition", weights: pack.nutritionTagWeights },
+      { key: "reset", weights: pack.resetTagWeights },
+    ];
+    kinds.forEach((kind) => {
+      const items = itemsByKind[kind.key] || [];
+      items.forEach((item) => {
+        const tags = Array.isArray(item.tags) ? item.tags : [];
+        const matches = tags.some((tag) => Number(kind.weights?.[tag] || 0) > 0);
+        if (!matches) return;
+        const stats = statsMap.get(item.id) || { picked: 0, completed: 0, notRelevant: 0 };
+        picked += stats.picked || 0;
+        completed += stats.completed || 0;
+        notRelevant += stats.notRelevant || 0;
+      });
+    });
+    result[packId] = {
+      picked,
+      completed,
+      notRelevant,
+      completionRate: picked ? completed / picked : 0,
+      notRelevantRate: picked ? notRelevant / picked : 0,
+    };
+  });
   return result;
 }
 
@@ -895,7 +1212,7 @@ const server = http.createServer(async (req, res) => {
       ms: Math.round(durationMs),
       errorCode: res.errorCode || undefined,
     };
-    console.log(JSON.stringify(logEntry));
+    logInfo(logEntry);
   });
 
   if (shuttingDown) {
@@ -1052,7 +1369,11 @@ const server = http.createServer(async (req, res) => {
       if (isDevRoutesEnabled) {
         sendJson(res, 200, { ok: true, code }, user.id);
       } else {
-        console.log(`LiveNew auth code for ${email}: ${code}`);
+        logInfo({
+          atISO: new Date().toISOString(),
+          event: "auth_code_issued",
+          userId: user.id,
+        });
         sendJson(res, 200, { ok: true }, user.id);
       }
       return;
@@ -1259,6 +1580,8 @@ const server = http.createServer(async (req, res) => {
     const cached = await loadUserState(userId);
     let state = cached.state;
     let version = cached.version;
+    const requestTodayISO = getTodayISOForProfile(state.userProfile);
+    await ensureDay3Retention(userId, requestTodayISO);
 
     const dispatchForUser = async (event) => {
       let attempts = 0;
@@ -1270,12 +1593,17 @@ const server = http.createServer(async (req, res) => {
       while (attempts < 2) {
         const prevStats = currentState.selectionStats;
         const prevState = currentState;
+        const todayISO = getTodayISOForProfile(currentState.userProfile);
         const flags = await getFeatureFlags();
         const effectiveToggles = resolveRuleToggles(currentState, flags);
-        const paramsState = await getParameters();
+        const remindersEnabled = flagEnabled(flags, "reminders.enabled");
+        const paramsState = await getParameters(userId);
+        const paramsMeta = { cohortId: paramsState.cohortId || null, versions: paramsState.versionsBySource || {} };
         const resEvent = dispatch(currentState, eventWithAt, {
           ruleToggles: effectiveToggles,
           params: paramsState.map,
+          paramsMeta,
+          now: { todayISO, atISO },
         });
         const nextState = resEvent.state;
 
@@ -1299,21 +1627,53 @@ const server = http.createServer(async (req, res) => {
           const changedDates = findChangedDates(prevState, nextState);
           const historyCause = historyCauseForEvent(eventWithAt.type);
           for (const dateISO of changedDates) {
+            const dataMin = nextState.userProfile?.dataMinimization;
+            const allowTraces = !dataMin?.enabled || dataMin?.storeTraces !== false;
             const trace = buildDecisionTrace(nextState, dateISO);
-            if (trace) {
+            if (trace && allowTraces) {
               await upsertDecisionTrace(userId, dateISO, trace);
             }
             const dayContract = toDayContract(nextState, dateISO, domain);
-            await insertDayPlanHistory({
+            const historyInsert = await insertDayPlanHistory({
               userId,
               dateISO,
               cause: historyCause,
               dayContract,
               traceRef: null,
             });
+            const historyList = await listDayPlanHistory(userId, dateISO, 2);
+            const prev = historyList.length > 1 ? historyList[1] : null;
+            const dayPlan = nextState.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
+            const drivers = nextState.lastStressStateByDate?.[dateISO]?.drivers || [];
+            const summary = buildChangeSummary({
+              fromDay: prev?.day || null,
+              toDay: dayContract,
+              dayPlan,
+              drivers,
+            });
+            const summaryCause = summary?.why?.safetyLevel === "block" ? "safety" : historyCause;
+            await insertPlanChangeSummary({
+              userId,
+              dateISO,
+              cause: summaryCause,
+              fromHistoryId: prev?.id || null,
+              toHistoryId: historyInsert.id,
+              summary,
+            });
+            if (remindersEnabled) {
+              await upsertDailyReminders(userId, nextState, dateISO);
+            }
           }
 
-          const todayISO = domain.isoToday();
+          const todayISO = getTodayISOForProfile(nextState.userProfile);
+          if (!prevState.weekPlan && nextState.weekPlan) {
+            const firstPlanDate = await getFirstFlagDate(userId, AnalyticsFlags.firstPlanGenerated);
+            if (!firstPlanDate) {
+              await setDailyFlag(todayISO, userId, AnalyticsFlags.firstPlanGenerated);
+              await trackEvent(userId, AnalyticsFlags.firstPlanGenerated, {}, atISO, todayISO);
+            }
+          }
+
           const analyticsUpdates = {};
           if (eventWithAt.type === "CHECKIN_SAVED") analyticsUpdates.checkins_count = 1;
           if (eventWithAt.type === "BAD_DAY_MODE") analyticsUpdates.bad_day_mode_count = 1;
@@ -1327,7 +1687,16 @@ const server = http.createServer(async (req, res) => {
               const nextParts = nextState.partCompletionByDate?.[dateISO] || {};
               const prevAny = Boolean(prevParts.workout || prevParts.reset || prevParts.nutrition);
               const nextAny = Boolean(nextParts.workout || nextParts.reset || nextParts.nutrition);
-              if (!prevAny && nextAny) analyticsUpdates.any_part_days_count = 1;
+              if (!prevAny && nextAny) {
+                analyticsUpdates.any_part_days_count = 1;
+                await setDailyFlag(dateISO, userId, AnalyticsFlags.anyRegulationCompleted);
+                await trackEvent(userId, AnalyticsFlags.anyRegulationCompleted, { dateISO }, atISO, dateISO);
+                const firstCompletionDate = await getFirstFlagDate(userId, AnalyticsFlags.firstCompletion);
+                if (!firstCompletionDate) {
+                  await setDailyFlag(dateISO, userId, AnalyticsFlags.firstCompletion);
+                  await trackEvent(userId, AnalyticsFlags.firstCompletion, { dateISO }, atISO, dateISO);
+                }
+              }
             }
           }
           if (Object.keys(analyticsUpdates).length) {
@@ -1369,6 +1738,23 @@ const server = http.createServer(async (req, res) => {
       await dispatchForUser({ type: "BASELINE_SAVED", payload: { userProfile } });
       await dispatchForUser({ type: "ENSURE_WEEK", payload: {} });
       send(200, { ok: true, userProfile: state.userProfile, weekPlan: state.weekPlan });
+      return;
+    }
+
+    if (pathname === "/v1/profile/timezone" && req.method === "PATCH") {
+      const body = await parseJson(req);
+      const validation = validateTimezone(body);
+      if (!validation.ok) {
+        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+        return;
+      }
+      if (!state.userProfile) {
+        sendError(res, 400, "profile_required", "Profile required before updating timezone");
+        return;
+      }
+      const userProfile = normalizeUserProfile({ ...state.userProfile, timezone: validation.value.timezone });
+      await dispatchForUser({ type: "BASELINE_SAVED", payload: { userProfile } });
+      send(200, { ok: true, timezone: state.userProfile?.timezone || userProfile.timezone });
       return;
     }
 
@@ -1415,10 +1801,17 @@ const server = http.createServer(async (req, res) => {
       }
 
       const userProfile = normalizeUserProfile(profileValidation.value.userProfile);
-      const checkIn = checkinValidation.value.checkIn;
+      const checkIn = applyDataMinimizationToCheckIn(checkinValidation.value.checkIn, userProfile);
+      const currentCohort = await getUserCohort(userId);
+      if (!currentCohort || !currentCohort.overriddenByAdmin) {
+        await setUserCohort(userId, cohortForCheckIn(checkIn), false);
+      }
       await dispatchForUser({ type: "BASELINE_SAVED", payload: { userProfile } });
       await dispatchForUser({ type: "CHECKIN_SAVED", payload: { checkIn } });
       await dispatchForUser({ type: "ENSURE_WEEK", payload: {} });
+      const onboardDateISO = checkIn?.dateISO || getTodayISOForProfile(userProfile);
+      await setDailyFlag(onboardDateISO, userId, AnalyticsFlags.onboardCompleted);
+      await trackEvent(userId, AnalyticsFlags.onboardCompleted, { dateISO: onboardDateISO }, new Date().toISOString(), onboardDateISO);
       const day = checkIn?.dateISO ? toDayContract(state, checkIn.dateISO, domain) : null;
       const payload = { ok: true, weekPlan: state.weekPlan, day };
       if (issueTokens) {
@@ -1487,6 +1880,30 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/plan/why" && req.method === "GET") {
+      const dateISO = url.searchParams.get("date");
+      if (!dateISO) {
+        sendError(res, 400, "date_required", "date query param is required", "date");
+        return;
+      }
+      const validation = validateDateParam(dateISO, "date");
+      if (!validation.ok) {
+        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+        return;
+      }
+      state = await ensureWeekForDate(state, dateISO, dispatchForUser);
+      const day = toDayContract(state, dateISO, domain);
+      const summaries = await listPlanChangeSummaries(userId, dateISO, 1);
+      const latestSummary = summaries.length ? summaries[0] : null;
+      send(200, {
+        ok: true,
+        dateISO,
+        why: day?.why || null,
+        changeSummary: latestSummary,
+      });
+      return;
+    }
+
     if (pathname === "/v1/plan/history/day" && req.method === "GET") {
       const dateISO = url.searchParams.get("date");
       if (!dateISO) {
@@ -1529,15 +1946,34 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/plan/changes" && req.method === "GET") {
+      const dateISO = url.searchParams.get("date");
+      if (!dateISO) {
+        sendError(res, 400, "date_required", "date query param is required", "date");
+        return;
+      }
+      const validation = validateDateParam(dateISO, "date");
+      if (!validation.ok) {
+        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+        return;
+      }
+      const limitRaw = Number(url.searchParams.get("limit") || 10);
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 10;
+      const items = await listPlanChangeSummaries(userId, dateISO, limit);
+      send(200, { ok: true, items });
+      return;
+    }
+
     if (pathname === "/v1/checkin" && req.method === "POST") {
       const body = await parseJson(req);
-      const paramsState = await getParameters();
+      const paramsState = await getParameters(userId);
       const validation = validateCheckIn(body, { allowedTimes: paramsState.map?.timeBuckets?.allowed });
       if (!validation.ok) {
         sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
         return;
       }
-      const checkIn = validation.value.checkIn;
+      const checkIn = applyDataMinimizationToCheckIn(validation.value.checkIn, state.userProfile);
+      const isBackdated = checkIn.dateISO < requestTodayISO;
       const { result } = await dispatchForUser({ type: "CHECKIN_SAVED", payload: { checkIn } });
       const tomorrowISO = checkIn?.dateISO ? domain.addDaysISO(checkIn.dateISO, 1) : null;
       const day = checkIn?.dateISO ? toDayContract(state, checkIn.dateISO, domain) : null;
@@ -1547,7 +1983,9 @@ const server = http.createServer(async (req, res) => {
         changedDayISO: result?.changedDayISO || checkIn?.dateISO || null,
         notes: result?.notes || [],
         day,
-        tomorrow: checkIn?.stress >= 7 && checkIn?.sleepQuality <= 5 ? tomorrow : null,
+        tomorrow: !isBackdated && checkIn?.stress >= 7 && checkIn?.sleepQuality <= 5 ? tomorrow : null,
+        backdated: isBackdated,
+        rebuiltDates: isBackdated ? [checkIn.dateISO] : [],
       });
       return;
     }
@@ -1673,10 +2111,40 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "days_invalid", "days must be 7, 14, or 30", "days");
         return;
       }
-      const trends = buildTrends(state, daysNum);
+      const trends = buildTrends(state, daysNum, requestTodayISO);
       const payload = { ok: true, days: trends };
       setCachedResponse(userId, pathname, url.search, payload);
       send(200, payload);
+      return;
+    }
+
+    if (pathname === "/v1/reminders" && req.method === "GET") {
+      const dateISO = url.searchParams.get("date");
+      if (!dateISO) {
+        sendError(res, 400, "date_required", "date query param is required", "date");
+        return;
+      }
+      const validation = validateDateParam(dateISO, "date");
+      if (!validation.ok) {
+        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+        return;
+      }
+      const items = await listReminderIntentsByDate(userId, dateISO);
+      send(200, { ok: true, items });
+      return;
+    }
+
+    const reminderActionMatch = pathname.match(/^\/v1\/reminders\/([^/]+)\/(dismiss|complete)$/);
+    if (reminderActionMatch && req.method === "POST") {
+      const reminderId = reminderActionMatch[1];
+      const action = reminderActionMatch[2];
+      const status = action === "dismiss" ? "dismissed" : "completed";
+      const updated = await updateReminderIntentStatus(reminderId, status, userId);
+      if (!updated) {
+        sendError(res, 404, "not_found", "Reminder not found");
+        return;
+      }
+      send(200, { ok: true, id: reminderId, status });
       return;
     }
 
@@ -1692,6 +2160,29 @@ const server = http.createServer(async (req, res) => {
         decisionTraces: traces,
       };
       send(200, { ok: true, export: exportPayload });
+      return;
+    }
+
+    if (pathname === "/v1/account/privacy" && req.method === "PATCH") {
+      const body = await parseJson(req);
+      const dataMin = body?.dataMinimization;
+      if (!dataMin || typeof dataMin !== "object") {
+        sendError(res, 400, "dataMinimization_required", "dataMinimization is required", "dataMinimization");
+        return;
+      }
+      if (!state.userProfile) {
+        sendError(res, 400, "profile_required", "Profile required before setting privacy");
+        return;
+      }
+      const userProfile = normalizeUserProfile({ ...state.userProfile, dataMinimization: dataMin });
+      await dispatchForUser({ type: "BASELINE_SAVED", payload: { userProfile } });
+      send(200, { ok: true, dataMinimization: state.userProfile?.dataMinimization });
+      return;
+    }
+
+    if (pathname === "/v1/account/cohort" && req.method === "GET") {
+      const cohort = await getUserCohort(userId);
+      send(200, { ok: true, cohort: cohort || null });
       return;
     }
 
@@ -1777,18 +2268,19 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/account" && req.method === "DELETE") {
+      if (!token) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
       const confirmHeader = req.headers["x-confirm-delete"];
       if (confirmHeader !== "DELETE") {
         sendError(res, 400, "confirm_required", "x-confirm-delete must be DELETE", "x-confirm-delete");
         return;
       }
-      let body = {};
-      if (config.isAlphaLike) {
-        body = await parseJson(req);
-        if (body?.confirm !== "LiveNew") {
-          sendError(res, 400, "confirm_required", "confirm must be LiveNew", "confirm");
-          return;
-        }
+      const body = await parseJson(req);
+      if (body?.confirm !== "LiveNew") {
+        sendError(res, 400, "confirm_required", "confirm must be LiveNew", "confirm");
+        return;
       }
       await deleteUserData(userId);
       userStates.delete(userId);
@@ -1881,6 +2373,73 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/admin/cohorts" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const cohorts = await listCohorts();
+      send(200, { ok: true, cohorts });
+      return;
+    }
+
+    const cohortParamsMatch = pathname.match(/^\/v1\/admin\/cohorts\/([^/]+)\/parameters$/);
+    if (cohortParamsMatch && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const cohortId = cohortParamsMatch[1];
+      const params = await listCohortParameters(cohortId);
+      send(200, { ok: true, cohortId, parameters: params });
+      return;
+    }
+    if (cohortParamsMatch && req.method === "PATCH") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const cohortId = cohortParamsMatch[1];
+      const body = await parseJson(req);
+      const key = body?.key;
+      if (!key || typeof key !== "string") {
+        sendError(res, 400, "key_required", "key is required", "key");
+        return;
+      }
+      const defaults = getDefaultParameters();
+      if (!(key in defaults)) {
+        sendError(res, 400, "key_invalid", "Unknown parameter key", "key");
+        return;
+      }
+      let value = body?.value;
+      if (value == null && typeof body?.value_json === "string") {
+        try {
+          value = JSON.parse(body.value_json);
+        } catch {
+          sendError(res, 400, "value_invalid", "value_json must be valid JSON", "value_json");
+          return;
+        }
+      }
+      const updated = await upsertCohortParameter(cohortId, key, value);
+      resetParametersCache();
+      send(200, { ok: true, cohortId, key, version: updated.version, updatedAt: updated.updatedAt });
+      return;
+    }
+
+    const userCohortMatch = pathname.match(/^\/v1\/admin\/users\/([^/]+)\/cohort$/);
+    if (userCohortMatch && req.method === "PATCH") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const targetUserId = sanitizeUserId(userCohortMatch[1]);
+      if (targetUserId !== userCohortMatch[1]) {
+        sendError(res, 400, "userId_invalid", "userId is invalid", "userId");
+        return;
+      }
+      const body = await parseJson(req);
+      const cohortId = body?.cohortId;
+      if (!cohortId || typeof cohortId !== "string") {
+        sendError(res, 400, "cohort_required", "cohortId is required", "cohortId");
+        return;
+      }
+      const result = await setUserCohort(targetUserId, cohortId, body?.overridden === true);
+      send(200, { ok: true, ...result });
+      return;
+    }
+
     if (pathname === "/v1/admin/metrics/latency" && req.method === "GET") {
       const email = await requireAdmin();
       if (!email) return;
@@ -1949,6 +2508,10 @@ const server = http.createServer(async (req, res) => {
       if (!email) return;
       const kind = contentDisableMatch[1];
       const id = contentDisableMatch[2];
+      if (REQUIRED_CONTENT_IDS.has(id)) {
+        sendError(res, 400, "required_content", "This item cannot be disabled");
+        return;
+      }
       const updated = await patchContentItem(kind, id, { enabled: false });
       if (!updated) {
         sendError(res, 404, "not_found", "Content item not found");
@@ -1971,6 +2534,10 @@ const server = http.createServer(async (req, res) => {
       allowed.forEach((key) => {
         if (key in body) patch[key] = body[key];
       });
+      if (REQUIRED_CONTENT_IDS.has(id) && patch.enabled === false) {
+        sendError(res, 400, "required_content", "This item cannot be disabled", "enabled");
+        return;
+      }
       if ("enabled" in patch && typeof patch.enabled !== "boolean") {
         sendError(res, 400, "field_invalid", "enabled must be boolean", "enabled");
         return;
@@ -2016,6 +2583,25 @@ const server = http.createServer(async (req, res) => {
       const page = Number(url.searchParams.get("page") || 1);
       const pageSize = Number(url.searchParams.get("pageSize") || 50);
       const items = await listContentItemsPaged(kind || undefined, page, pageSize);
+      send(200, { ok: true, items, page, pageSize });
+      return;
+    }
+
+    if (pathname === "/v1/admin/reminders" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const dateISO = url.searchParams.get("date");
+      if (dateISO) {
+        const validation = validateDateParam(dateISO, "date");
+        if (!validation.ok) {
+          sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+          return;
+        }
+      }
+      const status = url.searchParams.get("status");
+      const page = Number(url.searchParams.get("page") || 1);
+      const pageSize = Number(url.searchParams.get("pageSize") || 50);
+      const items = await listReminderIntentsAdmin({ dateISO, status, page, pageSize });
       send(200, { ok: true, items, page, pageSize });
       return;
     }
@@ -2168,6 +2754,149 @@ const server = http.createServer(async (req, res) => {
       const limit = Number.isFinite(limitRaw) ? Math.min(limitRaw, 100) : 20;
       const items = await getWorstItems(kind, limit);
       send(200, { ok: true, kind, limit, items });
+      return;
+    }
+
+    if (pathname === "/v1/admin/reports/weekly-content" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const statsRows = await getAdminStats();
+      const statsMap = buildContentStatsMap(statsRows);
+      const kinds = ["workout", "nutrition", "reset"];
+      const worstByKind = {};
+      const topByKind = {};
+      const disableCandidates = [];
+      const addNeededTags = [];
+      const itemsByKind = {};
+
+      for (const kind of kinds) {
+        const items = await listContentItems(kind, true);
+        itemsByKind[kind] = items;
+        const enriched = enrichContentItems(items, statsMap);
+        const worstCount = Math.max(1, Math.ceil(enriched.length * 0.1));
+        const worst = sortWorstItems(enriched).slice(0, worstCount);
+        const top = sortTopItems(enriched).slice(0, 10);
+        const summarizedWorst = worst.map((entry) => ({
+          item: {
+            id: entry.item.id,
+            title: entry.item.title,
+            tags: entry.item.tags,
+            priority: entry.item.priority,
+            noveltyGroup: entry.item.noveltyGroup,
+            enabled: entry.item.enabled !== false,
+          },
+          stats: entry.stats,
+        }));
+        const summarizedTop = top.map((entry) => ({
+          item: {
+            id: entry.item.id,
+            title: entry.item.title,
+            tags: entry.item.tags,
+            priority: entry.item.priority,
+            noveltyGroup: entry.item.noveltyGroup,
+            enabled: entry.item.enabled !== false,
+          },
+          stats: entry.stats,
+        }));
+        worstByKind[kind] = summarizedWorst;
+        topByKind[kind] = summarizedTop;
+        summarizedWorst.forEach((entry) => {
+          if (entry.stats.picked >= 5 && entry.stats.notRelevantRate >= 0.35) {
+            disableCandidates.push({
+              kind,
+              id: entry.item.id,
+              reason: "High not-relevant rate",
+            });
+          }
+        });
+        const tagSuggestions = buildTagSuggestions(top);
+        tagSuggestions.forEach((suggestion) => {
+          addNeededTags.push({
+            kind,
+            tag: suggestion.tag,
+            reason: "High completion rate among top performers",
+          });
+        });
+      }
+
+      const paramsState = await getParameters();
+      const packWeights = paramsState.map?.contentPackWeights || getDefaultParameters().contentPackWeights;
+      const packStats = buildPackStats(packWeights, itemsByKind, statsMap);
+
+      send(200, {
+        ok: true,
+        report: {
+          worstByKind,
+          topByKind,
+          packStats,
+          suggestedActions: {
+            disableCandidates,
+            addNeededTags,
+          },
+        },
+      });
+      return;
+    }
+
+    if (pathname === "/v1/admin/actions/disable-items" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const items = Array.isArray(body?.items) ? body.items : [];
+      if (!items.length) {
+        sendError(res, 400, "items_invalid", "items must be a non-empty array", "items");
+        return;
+      }
+      const results = [];
+      for (const entry of items) {
+        const kind = entry?.kind;
+        const id = entry?.id;
+        if (!["workout", "nutrition", "reset"].includes(kind) || !id) {
+          results.push({ kind, id, ok: false, error: "invalid_item" });
+          continue;
+        }
+        if (REQUIRED_CONTENT_IDS.has(id)) {
+          results.push({ kind, id, ok: false, error: "required_content" });
+          continue;
+        }
+        const updated = await patchContentItem(kind, id, { enabled: false });
+        results.push({ kind, id, ok: Boolean(updated) });
+      }
+      await applyLibraryFromDb();
+      send(200, { ok: true, results });
+      return;
+    }
+
+    if (pathname === "/v1/admin/actions/bump-priority" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const items = Array.isArray(body?.items) ? body.items : [];
+      if (!items.length) {
+        sendError(res, 400, "items_invalid", "items must be a non-empty array", "items");
+        return;
+      }
+      const results = [];
+      for (const entry of items) {
+        const kind = entry?.kind;
+        const id = entry?.id;
+        const delta = Number(entry?.delta || 0);
+        if (!["workout", "nutrition", "reset"].includes(kind) || !id || !Number.isFinite(delta)) {
+          results.push({ kind, id, ok: false, error: "invalid_item" });
+          continue;
+        }
+        const itemsList = await listContentItems(kind, true);
+        const current = itemsList.find((item) => item.id === id);
+        if (!current) {
+          results.push({ kind, id, ok: false, error: "not_found" });
+          continue;
+        }
+        const nextPriority = Number(current.priority || 0) + delta;
+        const updated = await patchContentItem(kind, id, { priority: nextPriority });
+        results.push({ kind, id, ok: Boolean(updated), priority: nextPriority });
+      }
+      await applyLibraryFromDb();
+      send(200, { ok: true, results });
       return;
     }
 
@@ -2474,31 +3203,27 @@ const server = http.createServer(async (req, res) => {
     if (err?.code) {
       sendError(res, status, err.code, err.message || "Request error", err.field);
       if (NODE_ENV !== "production") {
-        console.error(
-          JSON.stringify({
-            atISO: new Date().toISOString(),
-            errorCode: err.code,
-            stack: err.stack,
-          })
-        );
+        logError({
+          atISO: new Date().toISOString(),
+          errorCode: err.code,
+          stack: err.stack,
+        });
       }
       return;
     }
     if (NODE_ENV !== "production") {
-      console.error(
-        JSON.stringify({
-          atISO: new Date().toISOString(),
-          errorCode: "server_error",
-          stack: err?.stack,
-        })
-      );
+      logError({
+        atISO: new Date().toISOString(),
+        errorCode: "server_error",
+        stack: err?.stack,
+      });
     }
     sendError(res, status, "server_error", err?.message || "Server error");
   }
 });
 
 server.listen(PORT, () => {
-  console.log(`LiveNew server listening on http://localhost:${PORT}`);
+  logInfo(`LiveNew server listening on http://localhost:${PORT}`);
 });
 
 server.requestTimeout = 15000;
@@ -2507,7 +3232,7 @@ server.timeout = 15000;
 async function handleShutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`LiveNew shutting down (${signal})...`);
+  logInfo(`LiveNew shutting down (${signal})...`);
   taskScheduler.stop();
   server.close(() => {
     process.exit(0);

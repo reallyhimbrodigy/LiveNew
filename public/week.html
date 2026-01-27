@@ -8,34 +8,34 @@
 </head>
 <body data-page="week">
   <header class="topbar">
-    <div class="brand">LiveNew</div>
+    <div class="brand" data-i18n="appName">LiveNew</div>
     <nav class="nav">
-      <a href="/day">Day</a>
-      <a href="/week" class="active">Week</a>
-      <a href="/trends">Trends</a>
-      <a href="/profile">Profile</a>
-      <a class="admin-link" href="/admin">Admin</a>
+      <a href="/day" data-i18n="nav.day">Day</a>
+      <a href="/week" class="active" data-i18n="nav.week">Week</a>
+      <a href="/trends" data-i18n="nav.trends">Trends</a>
+      <a href="/profile" data-i18n="nav.profile">Profile</a>
+      <a class="admin-link" href="/admin" data-i18n="nav.admin">Admin</a>
     </nav>
     <div class="auth" id="auth-panel">
-      <div class="auth-status" id="auth-status">Not signed in</div>
+      <div class="auth-status" id="auth-status" data-i18n="auth.notSignedIn">Not signed in</div>
       <div class="auth-row">
-        <input id="auth-email" type="email" placeholder="email" />
-        <button id="auth-request">Send code</button>
+        <input id="auth-email" type="email" placeholder="email" data-i18n-placeholder="auth.emailPlaceholder" aria-label="email" data-i18n-aria="auth.emailPlaceholder" />
+        <button id="auth-request" data-i18n="auth.sendCode">Send code</button>
       </div>
       <div class="auth-row">
-        <input id="auth-code" type="text" placeholder="code" />
-        <button id="auth-verify">Verify</button>
-        <button id="auth-logout" class="ghost">Logout</button>
+        <input id="auth-code" type="text" placeholder="code" data-i18n-placeholder="auth.codePlaceholder" aria-label="code" data-i18n-aria="auth.codePlaceholder" />
+        <button id="auth-verify" data-i18n="auth.verify">Verify</button>
+        <button id="auth-logout" class="ghost" data-i18n="auth.logout">Logout</button>
       </div>
     </div>
   </header>
 
   <main class="container">
     <section class="card">
-      <h1>Week plan</h1>
+      <h1 data-i18n="week.title">Week</h1>
       <div class="row">
-        <label>Week anchor <input id="week-date" type="date" /></label>
-        <button id="week-load">Load week</button>
+        <label><span data-i18n="week.dateLabel">Week anchor</span> <input id="week-date" type="date" /></label>
+        <button id="week-load" data-i18n="week.load">Load week</button>
       </div>
       <div id="week-list" class="list"></div>
     </section>

@@ -1,7 +1,15 @@
 import { weekStartMonday, addDaysISO } from "../utils/date.js";
 import { buildDayPlan } from "./decision.js";
 
-export function generateWeekPlan({ user, weekAnchorISO, checkInsByDate, qualityRules, params }) {
+export function generateWeekPlan({
+  user,
+  weekAnchorISO,
+  checkInsByDate,
+  completionsByDate,
+  feedback,
+  qualityRules,
+  params,
+}) {
   const startDateISO = weekStartMonday(weekAnchorISO);
   const days = [];
   const rules = {
@@ -21,6 +29,8 @@ export function generateWeekPlan({ user, weekAnchorISO, checkInsByDate, qualityR
       dateISO,
       checkIn,
       checkInsByDate,
+      completionsByDate,
+      feedback,
       weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups },
       overrides: null,
       qualityRules: rules,

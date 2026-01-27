@@ -47,3 +47,32 @@ export function showMessage(container, message, tone = "muted") {
   container.textContent = message;
   container.className = tone;
 }
+
+export function getDictValue(dict, key, fallback = "") {
+  if (!dict || !key) return fallback;
+  const value = key.split(".").reduce((acc, part) => (acc ? acc[part] : undefined), dict);
+  return value == null ? fallback : value;
+}
+
+export function applyI18n(dict, scope = document) {
+  qsa("[data-i18n]", scope).forEach((node) => {
+    const key = node.getAttribute("data-i18n");
+    const value = getDictValue(dict, key, node.textContent);
+    node.textContent = value;
+  });
+  qsa("[data-i18n-placeholder]", scope).forEach((node) => {
+    const key = node.getAttribute("data-i18n-placeholder");
+    const value = getDictValue(dict, key, node.getAttribute("placeholder") || "");
+    node.setAttribute("placeholder", value);
+  });
+  qsa("[data-i18n-aria]", scope).forEach((node) => {
+    const key = node.getAttribute("data-i18n-aria");
+    const value = getDictValue(dict, key, node.getAttribute("aria-label") || "");
+    node.setAttribute("aria-label", value);
+  });
+  qsa("[data-i18n-title]", scope).forEach((node) => {
+    const key = node.getAttribute("data-i18n-title");
+    const value = getDictValue(dict, key, node.getAttribute("title") || "");
+    node.setAttribute("title", value);
+  });
+}

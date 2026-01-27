@@ -8,6 +8,8 @@ export function adaptPlan({
   checkIn,
   signal,
   checkInsByDate,
+  completionsByDate,
+  feedback,
   overridesBase,
   qualityRules,
   weekContextBase,
@@ -32,6 +34,8 @@ export function adaptPlan({
       todayISO,
       checkIn,
       checkInsByDate,
+      completionsByDate,
+      feedback,
       qualityRules: baseQualityRules,
       params,
     });
@@ -41,6 +45,8 @@ export function adaptPlan({
       dateISO: todayISO,
       weekPlan: nextPlan,
       checkInsByDate,
+      completionsByDate,
+      feedback,
       overrides: mergedOverride,
       qualityRules: baseQualityRules,
       weekContextBase: baseContext,
@@ -61,6 +67,8 @@ export function adaptPlan({
       dateISO: tomorrowISO,
       weekPlan: nextPlan,
       checkInsByDate,
+      completionsByDate,
+      feedback,
       overrides: mergedOverride,
       qualityRules: baseQualityRules,
       weekContextBase: baseContext,
@@ -76,7 +84,18 @@ export function adaptPlan({
   return { weekPlan: nextPlan, changedDayISO, notes };
 }
 
-function rebuildDay({ user, dateISO, weekPlan, checkInsByDate, overrides, qualityRules, weekContextBase, params }) {
+function rebuildDay({
+  user,
+  dateISO,
+  weekPlan,
+  checkInsByDate,
+  completionsByDate,
+  feedback,
+  overrides,
+  qualityRules,
+  weekContextBase,
+  params,
+}) {
   const idx = weekPlan.days.findIndex((d) => d.dateISO === dateISO);
   if (idx === -1) return { weekPlan, changed: false };
 
@@ -91,6 +110,8 @@ function rebuildDay({ user, dateISO, weekPlan, checkInsByDate, overrides, qualit
     dateISO,
     checkIn: checkInsByDate ? checkInsByDate[dateISO] : undefined,
     checkInsByDate,
+    completionsByDate,
+    feedback,
     weekContext,
     overrides,
     qualityRules,
@@ -105,7 +126,16 @@ function rebuildDay({ user, dateISO, weekPlan, checkInsByDate, overrides, qualit
   return { weekPlan: { ...weekPlan, days: nextDays }, changed };
 }
 
-function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate, qualityRules, params }) {
+function buildOverrideFromSignal({
+  signal,
+  user,
+  todayISO,
+  checkInsByDate,
+  completionsByDate,
+  feedback,
+  qualityRules,
+  params,
+}) {
   const checkIn = checkInsByDate ? checkInsByDate[todayISO] : undefined;
 
   if (signal === "im_stressed" || signal === "poor_sleep" || signal === "wired" || signal === "anxious") {
@@ -126,6 +156,8 @@ function buildOverrideFromSignal({ signal, user, todayISO, checkInsByDate, quali
       dateISO: todayISO,
       checkIn,
       checkInsByDate,
+      completionsByDate,
+      feedback,
       weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups: [] },
       overrides: null,
       qualityRules,

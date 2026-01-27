@@ -1,6 +1,13 @@
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-export function createTaskScheduler({ config, createBackup, cleanupOldEvents, retentionDays }) {
+export function createTaskScheduler({
+  config,
+  createBackup,
+  cleanupOldEvents,
+  retentionDays,
+  listAllUserStates,
+  cleanupUserRetention,
+}) {
   const running = new Set();
   const timers = [];
 
@@ -14,6 +21,15 @@ export function createTaskScheduler({ config, createBackup, cleanupOldEvents, re
       }
       if (name === "cleanup") {
         await cleanupOldEvents(retentionDays);
+        if (listAllUserStates && cleanupUserRetention) {
+          const users = await listAllUserStates();
+          for (const entry of users) {
+            const policy = entry.state?.userProfile?.dataMinimization;
+            if (policy?.enabled) {
+              await cleanupUserRetention(entry.userId, policy);
+            }
+          }
+        }
         return { ok: true };
       }
       return { ok: false, error: "unknown_task" };

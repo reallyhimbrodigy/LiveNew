@@ -71,6 +71,8 @@ export function reduceEvent(state, event, ctx) {
           user: effectiveUser,
           weekAnchorISO: currentWeekStart,
           checkInsByDate,
+          completionsByDate: nextState.partCompletionByDate || {},
+          feedback: nextState.feedback || [],
           qualityRules,
           params,
         });
@@ -88,6 +90,8 @@ export function reduceEvent(state, event, ctx) {
           user,
           weekPlan: nextState.weekPlan,
           checkInsByDate,
+          completionsByDate: nextState.partCompletionByDate || {},
+          feedback: nextState.feedback || [],
           modifiers,
           domain,
           qualityRules,
@@ -121,6 +125,8 @@ export function reduceEvent(state, event, ctx) {
         user: effectiveUser,
         weekAnchorISO,
         checkInsByDate,
+        completionsByDate: nextState.partCompletionByDate || {},
+        feedback: nextState.feedback || [],
         qualityRules,
         params,
       });
@@ -156,18 +162,29 @@ export function reduceEvent(state, event, ctx) {
       const rawCheckIn = event.payload?.checkIn;
       if (!rawCheckIn) return { nextState, effects, logEvent, result };
 
-      const checkIn = normalizeCheckIn(rawCheckIn);
-      const filtered = checkIns.filter((item) => item.dateISO !== checkIn.dateISO);
-      nextState.checkIns = [checkIn, ...filtered].slice(0, 60);
+      const checkIn = normalizeCheckIn({ ...rawCheckIn, atISO: event.atISO || new Date().toISOString() });
+      const dataMin = user?.dataMinimization;
+      if (dataMin?.enabled) {
+        const filtered = checkIns.filter((item) => item.dateISO !== checkIn.dateISO);
+        nextState.checkIns = [checkIn, ...filtered].slice(0, 60);
+      } else {
+        nextState.checkIns = [checkIn, ...checkIns].slice(0, 120);
+      }
       const checkInsByDate = buildCheckInsByDate(nextState.checkIns);
+      const isBackdated = checkIn.dateISO < todayISO;
 
       let modifiers = cleanupModifiers(nextState.modifiers || {}, checkIn.dateISO);
       if (user) {
         const effectiveUser = effectiveUserForDate(user, modifiers, checkIn.dateISO);
-        const { intensityCap, qualityRules: qualityRulesForDay } = modifiersForDate(modifiers, checkIn.dateISO, ruleToggles);
+        const { intensityCap, qualityRules: qualityRulesForDay } = modifiersForDate(
+          modifiers,
+          checkIn.dateISO,
+          ruleToggles
+        );
 
         let generatedWeek = false;
-        if (!nextState.weekPlan || nextState.weekPlan.startDateISO !== domain.weekStartMonday(checkIn.dateISO)) {
+        const weekAnchorISO = domain.weekStartMonday(checkIn.dateISO);
+        if (!nextState.weekPlan || (!isBackdated && nextState.weekPlan.startDateISO !== weekAnchorISO)) {
           nextState.weekPlan = domain.generateWeekPlan({
             user: effectiveUser,
             weekAnchorISO: checkIn.dateISO,
@@ -179,22 +196,53 @@ export function reduceEvent(state, event, ctx) {
         }
 
         if (nextState.weekPlan) {
-          const adapted = domain.adaptPlan({
-            weekPlan: nextState.weekPlan,
-            user: effectiveUser,
-            todayISO: checkIn.dateISO,
-            checkIn,
-            checkInsByDate,
-            overridesBase: intensityCap != null ? { intensityCap } : null,
-            qualityRules: qualityRulesForDay,
-            weekContextBase: { busyDays: effectiveUser.busyDays || [] },
-            params,
-          });
-          nextState.weekPlan = adapted.weekPlan;
-          result = { changedDayISO: adapted.changedDayISO, notes: adapted.notes || [] };
-          if (adapted.changedDayISO) {
-            const changedDay = findDay(nextState.weekPlan, adapted.changedDayISO);
-            nextState.selectionStats = incrementPickedForDay(nextState.selectionStats, changedDay);
+          if (isBackdated) {
+            const beforeDay = findDay(nextState.weekPlan, checkIn.dateISO);
+            const res = rebuildDayInPlan({
+              domain,
+              user: effectiveUser,
+              weekPlan: nextState.weekPlan,
+              dateISO: checkIn.dateISO,
+              checkInsByDate,
+              completionsByDate: nextState.partCompletionByDate || {},
+              feedback: nextState.feedback || [],
+              overrides: intensityCap != null ? { intensityCap } : null,
+              qualityRules: qualityRulesForDay,
+              params,
+            });
+            nextState.weekPlan = res.weekPlan;
+            if (res.dayPlan) {
+              nextState.selectionStats = incrementPickedForDay(nextState.selectionStats, res.dayPlan);
+              result = { changedDayISO: checkIn.dateISO, notes: ["Backdated check-in updated"] };
+            }
+            if (nextState.history && res.dayPlan) {
+              nextState.history = addHistoryEntry(nextState.history, {
+                reason: "Backdated check-in",
+                dateISO: checkIn.dateISO,
+                beforeDay,
+                afterDay: findDay(nextState.weekPlan, checkIn.dateISO),
+              });
+            }
+          } else {
+            const adapted = domain.adaptPlan({
+              weekPlan: nextState.weekPlan,
+              user: effectiveUser,
+              todayISO: checkIn.dateISO,
+              checkIn,
+              checkInsByDate,
+              completionsByDate: nextState.partCompletionByDate || {},
+              feedback: nextState.feedback || [],
+              overridesBase: intensityCap != null ? { intensityCap } : null,
+              qualityRules: qualityRulesForDay,
+              weekContextBase: { busyDays: effectiveUser.busyDays || [] },
+              params,
+            });
+            nextState.weekPlan = adapted.weekPlan;
+            result = { changedDayISO: adapted.changedDayISO, notes: adapted.notes || [] };
+            if (adapted.changedDayISO) {
+              const changedDay = findDay(nextState.weekPlan, adapted.changedDayISO);
+              nextState.selectionStats = incrementPickedForDay(nextState.selectionStats, changedDay);
+            }
           }
         }
 
@@ -207,7 +255,7 @@ export function reduceEvent(state, event, ctx) {
         }
       }
 
-      if (nextState.weekPlan && nextState.history) {
+      if (nextState.weekPlan && nextState.history && !isBackdated) {
         nextState.history = addHistoryEntry(nextState.history, {
           reason: "Check-in update",
           dateISO: checkIn.dateISO,
@@ -259,6 +307,8 @@ export function reduceEvent(state, event, ctx) {
         todayISO: dateISO,
         signal,
         checkInsByDate,
+        completionsByDate: nextState.partCompletionByDate || {},
+        feedback: nextState.feedback || [],
         overridesBase: intensityCap != null ? { intensityCap } : null,
         qualityRules: qualityRulesForDay,
         weekContextBase: { busyDays: effectiveUser.busyDays || [] },
@@ -313,6 +363,8 @@ export function reduceEvent(state, event, ctx) {
           todayISO: dateISO,
           signal: "im_stressed",
           checkInsByDate,
+          completionsByDate: nextState.partCompletionByDate || {},
+          feedback: nextState.feedback || [],
           overridesBase: intensityCap != null ? { intensityCap } : null,
           qualityRules: qualityRulesForDay,
           weekContextBase: { busyDays: effectiveUser.busyDays || [] },
@@ -362,6 +414,8 @@ export function reduceEvent(state, event, ctx) {
         weekPlan: nextState.weekPlan,
         dateISO,
         checkInsByDate,
+        completionsByDate: nextState.partCompletionByDate || {},
+        feedback: nextState.feedback || [],
         overrides: {
           forceBadDayMode: true,
           intensityCap: intensityCap != null ? intensityCap : 2,
@@ -451,6 +505,8 @@ export function reduceEvent(state, event, ctx) {
           weekPlan: nextPlan,
           dateISO: tomorrowISO,
           checkInsByDate,
+          completionsByDate: nextState.partCompletionByDate || {},
+          feedback: nextState.feedback || [],
           overrides: intensityCap != null ? { intensityCap, source: "feedback" } : { source: "feedback" },
           qualityRules: qualityRulesForDay,
           params,
@@ -613,14 +669,26 @@ function buildQualityRules(ruleToggles) {
 function buildCheckInsByDate(checkIns) {
   const map = {};
   (checkIns || []).forEach((c) => {
-    map[c.dateISO] = c;
+    if (!c?.dateISO) return;
+    const existing = map[c.dateISO];
+    if (!existing) {
+      map[c.dateISO] = c;
+      return;
+    }
+    const existingAt = existing.atISO || "";
+    const candidateAt = c.atISO || "";
+    if (!existingAt || candidateAt >= existingAt) {
+      map[c.dateISO] = c;
+    }
   });
   return map;
 }
 
 function normalizeCheckIn(checkIn) {
+  const atISO = typeof checkIn.atISO === "string" ? checkIn.atISO : new Date().toISOString();
   return {
     ...checkIn,
+    atISO,
     stress: Number.isFinite(Number(checkIn.stress)) ? Number(checkIn.stress) : 6,
     sleepQuality: Number.isFinite(Number(checkIn.sleepQuality)) ? Number(checkIn.sleepQuality) : 6,
     energy: Number.isFinite(Number(checkIn.energy)) ? Number(checkIn.energy) : 6,
@@ -674,7 +742,17 @@ function modifiersForDate(modifiers, dateISO, ruleToggles) {
   };
 }
 
-function normalizePlanPipeline({ user, weekPlan, checkInsByDate, modifiers, domain, qualityRules, params }) {
+function normalizePlanPipeline({
+  user,
+  weekPlan,
+  checkInsByDate,
+  completionsByDate,
+  feedback,
+  modifiers,
+  domain,
+  qualityRules,
+  params,
+}) {
   const nextDays = [];
   let changed = false;
 
@@ -690,6 +768,8 @@ function normalizePlanPipeline({ user, weekPlan, checkInsByDate, modifiers, doma
         dateISO,
         checkIn: checkInsByDate ? checkInsByDate[dateISO] : undefined,
         checkInsByDate,
+        completionsByDate,
+        feedback,
         weekContext: { busyDays: effectiveUser.busyDays || [], recentNoveltyGroups },
         overrides: intensityCap != null ? { intensityCap } : null,
         qualityRules: rulesForDay,
@@ -706,7 +786,18 @@ function normalizePlanPipeline({ user, weekPlan, checkInsByDate, modifiers, doma
   return { weekPlan: { ...weekPlan, days: nextDays }, changed: true };
 }
 
-function rebuildDayInPlan({ domain, user, weekPlan, dateISO, checkInsByDate, overrides, qualityRules, params }) {
+function rebuildDayInPlan({
+  domain,
+  user,
+  weekPlan,
+  dateISO,
+  checkInsByDate,
+  completionsByDate,
+  feedback,
+  overrides,
+  qualityRules,
+  params,
+}) {
   const idx = weekPlan.days.findIndex((d) => d.dateISO === dateISO);
   if (idx === -1) return { weekPlan, dayPlan: null };
 
@@ -716,6 +807,8 @@ function rebuildDayInPlan({ domain, user, weekPlan, dateISO, checkInsByDate, ove
     dateISO,
     checkIn: checkInsByDate ? checkInsByDate[dateISO] : undefined,
     checkInsByDate,
+    completionsByDate,
+    feedback,
     weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups },
     overrides,
     qualityRules,
