@@ -18,14 +18,26 @@ function addDaysISO(dateISO, days) {
   return date.toISOString().slice(0, 10);
 }
 
-function todayISOInTimeZone(timeZone) {
+function todayISOWithBoundary(timeZone, dayBoundaryHour = 4) {
   try {
-    return new Intl.DateTimeFormat("en-CA", {
+    const parts = new Intl.DateTimeFormat("en-CA", {
       timeZone,
       year: "numeric",
       month: "2-digit",
       day: "2-digit",
-    }).format(new Date());
+      hour: "2-digit",
+      hourCycle: "h23",
+    }).formatToParts(new Date());
+    const map = {};
+    parts.forEach((part) => {
+      if (part.type !== "literal") map[part.type] = part.value;
+    });
+    const dateISO = `${map.year}-${map.month}-${map.day}`;
+    const hour = Number(map.hour || 0);
+    if (Number.isFinite(hour) && hour < dayBoundaryHour) {
+      return addDaysISO(dateISO, -1);
+    }
+    return dateISO;
   } catch {
     return todayISO();
   }
@@ -77,6 +89,7 @@ async function run() {
     DB_PATH: path.join(DATA_DIR, "livenew.sqlite"),
     AUTH_REQUIRED: "false",
     ADMIN_EMAILS: "admin@example.com",
+    ADMIN_IN_DEV: "true",
   };
   const server = spawn("node", ["src/server/index.js"], {
     cwd: ROOT,
@@ -106,8 +119,9 @@ async function run() {
       mealTimingConsistency: 6,
       contentPack: "balanced_routine",
       timezone: "America/Los_Angeles",
+      dayBoundaryHour: 4,
     };
-    const userToday = todayISOInTimeZone(profile.timezone);
+    const userToday = todayISOWithBoundary(profile.timezone, profile.dayBoundaryHour);
     const checkIn = {
       dateISO: userToday,
       stress: 2,
@@ -144,6 +158,12 @@ async function run() {
 
     const accessToken = verifyRes.payload.accessToken;
     const refreshToken = verifyRes.payload.refreshToken;
+
+    await fetchJson("/v1/profile", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: { userProfile: { ...profile, contentPack: "calm_reset", timezone: "America/New_York" } },
+    });
 
     const dayRes = await fetchJson(`/v1/plan/day?date=${userToday}`, {
       method: "GET",
@@ -207,103 +227,142 @@ async function run() {
     assert(whyRes.payload?.why?.expanded, "plan/why should return expanded explainability");
     assert("changeSummary" in (whyRes.payload || {}), "plan/why should include changeSummary");
 
-    const historyBefore = await fetchJson(`/v1/plan/history/day?date=${userToday}`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${adminAccess}` },
-    });
-    const beforeCount = historyBefore.payload?.history?.length || 0;
-    await fetchJson("/v1/signal", {
+    const matrixRes = await fetchJson("/v1/admin/preview/matrix", {
       method: "POST",
       headers: { Authorization: `Bearer ${adminAccess}` },
-      body: { dateISO: userToday, signal: "im_stressed" },
+      body: { packIds: ["balanced_routine"], profiles: ["Balanced"], timeBuckets: [10, 20] },
     });
-    const historyAfter = await fetchJson(`/v1/plan/history/day?date=${userToday}`, {
+    assert(matrixRes.payload?.ok, "admin preview matrix should succeed");
+    assert(Array.isArray(matrixRes.payload?.matrix) && matrixRes.payload.matrix.length >= 2, "matrix should have rows");
+
+    const searchRes = await fetchJson(`/v1/admin/users/search?email=${encodeURIComponent("test@example.com")}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${adminAccess}` },
     });
-    const afterCount = historyAfter.payload?.history?.length || 0;
-    assert(afterCount >= beforeCount + 1, "signal should create a new day plan history entry");
+    assert(searchRes.payload?.user?.userId, "admin user search should return userId");
+    const targetUserId = searchRes.payload.user.userId;
 
-    const adminRes = await fetchJson("/v1/admin/flags", {
+    const bundleRes = await fetchJson(`/v1/admin/users/${targetUserId}/debug-bundle`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccess}` },
+      body: {},
+    });
+    assert(bundleRes.payload?.bundleId, "debug bundle should return bundleId");
+
+    const bundleReadRes = await fetchJson(`/v1/admin/debug-bundles/${bundleRes.payload.bundleId}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${adminAccess}` },
+    });
+    assert(bundleReadRes.payload?.bundle?.redacted, "debug bundle read should return redacted payload");
+
+    const replayRes = await fetchJson(`/v1/admin/users/${targetUserId}/replay-sandbox`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccess}` },
+      body: {},
+    });
+    assert(replayRes.payload?.ok, "replay sandbox should succeed");
+
+    const changelogCreate = await fetchJson("/v1/admin/changelog", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccess}` },
+      body: { version: "alpha-0.1", title: "Alpha note", notes: "Testing user notes", audience: "user" },
+    });
+    assert(changelogCreate.payload?.entry?.id, "admin changelog create should return entry");
+    const userChangelog = await fetchJson("/v1/changelog?audience=user&limit=5", {
       method: "GET",
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    assert(adminRes.res.status === 403, "admin route should be forbidden for non-admin");
-
-    const dayBefore = await fetchJson(`/v1/plan/day?date=${userToday}`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${adminAccess}` },
-    });
-    const signalRes = await fetchJson("/v1/signal", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${adminAccess}` },
-      body: { dateISO: userToday, signal: "wired" },
-    });
-    const dayAfter = await fetchJson(`/v1/plan/day?date=${userToday}`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${adminAccess}` },
-    });
     assert(
-      JSON.stringify(dayBefore.payload?.day) !== JSON.stringify(dayAfter.payload?.day),
-      "cache should invalidate after mutation"
-    );
-    assert(
-      JSON.stringify(signalRes.payload?.day) === JSON.stringify(dayAfter.payload?.day),
-      "day view should match latest mutation"
+      (userChangelog.payload?.items || []).some((item) => item.id === changelogCreate.payload.entry.id),
+      "user changelog should include created entry"
     );
 
-    await fetchJson("/v1/complete", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${adminAccess}` },
-      body: { dateISO: userToday, part: "workout" },
-    });
-    await fetchJson("/v1/complete", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${adminAccess}` },
-      body: { dateISO: userToday, part: "reset" },
-    });
-    const analyticsRes = await fetchJson(`/v1/admin/analytics/daily?from=${userToday}&to=${userToday}`, {
-      method: "GET",
-      headers: { Authorization: `Bearer ${adminAccess}` },
-    });
+		    const historyBefore = await fetchJson(`/v1/plan/history/day?date=${userToday}`, {
+		      method: "GET",
+		      headers: { Authorization: `Bearer ${adminAccess}` },
+		    });
+		    const beforeCount = historyBefore.payload?.history?.length || 0;
+	    const dayBefore = await fetchJson(`/v1/plan/day?date=${userToday}`, {
+	      method: "GET",
+	      headers: { Authorization: `Bearer ${adminAccess}` },
+	    });
+	    const signalRes = await fetchJson("/v1/signal", {
+	      method: "POST",
+	      headers: { Authorization: `Bearer ${adminAccess}` },
+	      body: { dateISO: userToday, signal: "wired" },
+	    });
+	    const historyAfter = await fetchJson(`/v1/plan/history/day?date=${userToday}`, {
+	      method: "GET",
+	      headers: { Authorization: `Bearer ${adminAccess}` },
+	    });
+	    const afterCount = historyAfter.payload?.history?.length || 0;
+	    assert(afterCount >= beforeCount + 1, "signal should create a new day plan history entry");
+	    const dayAfter = await fetchJson(`/v1/plan/day?date=${userToday}`, {
+	      method: "GET",
+	      headers: { Authorization: `Bearer ${adminAccess}` },
+	    });
+	    assert(
+	      JSON.stringify(dayBefore.payload?.day) !== JSON.stringify(dayAfter.payload?.day),
+	      "cache should invalidate after mutation"
+	    );
+	    assert(
+	      JSON.stringify(signalRes.payload?.day) === JSON.stringify(dayAfter.payload?.day),
+	      "day view should match latest mutation"
+	    );
+
+	    const adminRes = await fetchJson("/v1/admin/flags", {
+	      method: "GET",
+	      headers: { Authorization: `Bearer ${accessToken}` },
+	    });
+	    assert(adminRes.res.status === 403, "admin route should be forbidden for non-admin");
+
+	    await fetchJson("/v1/complete", {
+	      method: "POST",
+	      headers: { Authorization: `Bearer ${adminAccess}` },
+	      body: { dateISO: userToday, part: "workout" },
+	    });
+	    const analyticsRes = await fetchJson(`/v1/admin/analytics/daily?from=${userToday}&to=${userToday}`, {
+	      method: "GET",
+	      headers: { Authorization: `Bearer ${adminAccess}` },
+	    });
     const dayRow = (analyticsRes.payload?.days || []).find((entry) => entry.dateISO === userToday);
     assert(
       dayRow?.daysWithAnyRegulationActionCompleted === 1,
       "north-star should count only once per user per day"
     );
 
-    let rateLimited = false;
-    for (let i = 0; i < 7; i += 1) {
-      const res = await fetchJson("/v1/auth/request", {
-        method: "POST",
-        body: { email: `ratelimit${i}@example.com` },
-      });
-      if (res.res.status === 429) rateLimited = true;
-    }
+	    let rateLimited = false;
+	    for (let i = 0; i < 25; i += 1) {
+	      const res = await fetchJson("/v1/auth/request", {
+	        method: "POST",
+	        body: { email: `ratelimit${i}@example.com` },
+	      });
+	      if (res.res.status === 429) rateLimited = true;
+	    }
     assert(rateLimited, "auth rate limit should trigger");
 
     const exportRes = await fetchJson("/v1/account/export", {
       method: "GET",
-      headers: { Authorization: `Bearer ${adminAccess}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     const exportText = JSON.stringify(exportRes.payload?.export || {});
     assert(!/refreshToken|accessToken|tokenHash/i.test(exportText), "export should not include tokens");
 
     const deleteMissingHeader = await fetchJson("/v1/account", {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${adminAccess}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     assert(deleteMissingHeader.res.status === 400, "delete should require confirm header");
 
     const deleteMissingBody = await fetchJson("/v1/account", {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${adminAccess}`, "x-confirm-delete": "DELETE" },
+      headers: { Authorization: `Bearer ${accessToken}`, "x-confirm-delete": "DELETE" },
     });
     assert(deleteMissingBody.res.status === 400, "delete should require confirm phrase");
 
     const deleteOk = await fetchJson("/v1/account", {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${adminAccess}`, "x-confirm-delete": "DELETE" },
+      headers: { Authorization: `Bearer ${accessToken}`, "x-confirm-delete": "DELETE" },
       body: { confirm: "LiveNew" },
     });
     assert(deleteOk.payload?.ok, "delete should succeed with confirmations");

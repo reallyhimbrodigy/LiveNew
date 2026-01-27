@@ -8,6 +8,7 @@ import { normalizeAppliedRules } from "./rules.js";
 import { DEFAULT_PARAMETERS } from "../params.js";
 import { evaluateSafety } from "./safety.js";
 import { computeConfidence, computeRelevance } from "./quality.js";
+import { validateDayPlan } from "./validatePlan.js";
 
 export function buildDayPlan({
   user,
@@ -34,12 +35,21 @@ export function buildDayPlan({
   const ov = overrides || {};
   const paramMap = params || {};
   const focusBiasRules = paramMap.focusBiasRules || DEFAULT_PARAMETERS.focusBiasRules;
-  const packWeights = resolveContentPackWeights(user?.contentPack, paramMap);
+  const packResolved = resolveContentPackWeights(user?.contentPack, paramMap);
+  const packWeights = packResolved.weights;
+  const packId = packResolved.packId;
 
   const recoveryDebt = rules.recoveryDebtEnabled ? computeRecoveryDebt(checkInsByDate, dateISO, paramMap) : 0;
-  const stressState = assignStressProfile({ user, dateISO, checkIn, params: paramMap });
+  const stressState = assignStressProfile({
+    user,
+    dateISO,
+    checkIn,
+    params: paramMap,
+    profileOverride: ov.profileOverride,
+  });
   stressState.recoveryDebt = recoveryDebt;
   const appliedRules = [];
+  if (ov.profileOverride) appliedRules.push("profile_override");
   const markOverride = () => {
     if (ov.source === "feedback") {
       appliedRules.push("feedback_modifier");
@@ -57,6 +67,11 @@ export function buildDayPlan({
       focus = ov.focusBias;
     }
     markOverride();
+  }
+
+  if (ov.keepFocus) {
+    focus = ov.keepFocus;
+    appliedRules.push("keep_focus");
   }
 
   if (ov.forceBadDayMode) {
@@ -103,9 +118,36 @@ export function buildDayPlan({
     rules.noveltyEnabled && rules.avoidNoveltyWindowDays > 0 ? ctx.recentNoveltyGroups || [] : [];
   if (avoidGroups.length) appliedRules.push("novelty_avoidance");
 
-  let workout = pickWorkout({ focus, timeMin, checkIn, intensityCap, avoidGroups, packWeights });
-  let nutrition = pickNutrition({ focus, avoidGroups, forceBadDayMode: ov.forceBadDayMode, packWeights });
-  let reset = pickReset({ focus, timeMin, avoidGroups, forceBadDayMode: ov.forceBadDayMode, packWeights });
+  const resetFocus = ov.resetFocus || focus;
+  if (resetFocus !== focus) appliedRules.push("reset_focus_override");
+  const rankedWorkouts = rankWorkouts({
+    focus,
+    timeMin,
+    checkIn,
+    intensityCap,
+    avoidGroups,
+    packWeights,
+    keepSelection: ov.keepSelection,
+  });
+  const rankedNutrition = rankNutrition({
+    focus,
+    avoidGroups,
+    forceBadDayMode: ov.forceBadDayMode,
+    packWeights,
+    keepSelection: ov.keepSelection,
+  });
+  const rankedResets = rankResets({
+    focus: resetFocus,
+    timeMin,
+    avoidGroups,
+    forceBadDayMode: ov.forceBadDayMode,
+    packWeights,
+    keepSelection: ov.keepSelection,
+  });
+
+  let workout = rankedWorkouts[0] || pickWorkout({ focus, timeMin, checkIn, intensityCap, avoidGroups, packWeights });
+  let nutrition = rankedNutrition[0] || pickNutrition({ focus, avoidGroups, forceBadDayMode: ov.forceBadDayMode, packWeights });
+  let reset = rankedResets[0] || pickReset({ focus: resetFocus, timeMin, avoidGroups, forceBadDayMode: ov.forceBadDayMode, packWeights });
   const workoutWindow = pickWorkoutWindow(user);
 
   const rationale = [
@@ -132,9 +174,9 @@ export function buildDayPlan({
     workoutWindow,
     anchors: rules.circadianAnchorsEnabled ? buildAnchors(user) : null,
     selectedNoveltyGroups: {
-      workout: workout.noveltyGroup,
-      nutrition: nutrition.noveltyGroup,
-      reset: reset.noveltyGroup,
+      workout: workout?.noveltyGroup || null,
+      nutrition: nutrition?.noveltyGroup || null,
+      reset: reset?.noveltyGroup || null,
     },
   };
 
@@ -167,17 +209,39 @@ export function buildDayPlan({
 
   if (ov.forceBadDayMode) {
     dayDraft.focus = "downshift";
-    dayDraft.workout = enforceWorkoutCap(dayDraft.workout, { focus: "downshift", timeMin, checkIn, intensityCap: finalIntensityCap, avoidGroups, packWeights });
+    if (dayDraft.workout) {
+      dayDraft.workout = enforceWorkoutCap(dayDraft.workout, {
+        focus: "downshift",
+        timeMin,
+        checkIn,
+        intensityCap: finalIntensityCap,
+        avoidGroups,
+        packWeights,
+      });
+    }
     dayDraft.reset = enforceBadDayReset(dayDraft.reset, packWeights);
     dayDraft.nutrition = enforceBadDayNutrition(dayDraft.nutrition, packWeights);
-  } else if (dayDraft.workout.intensityCost > finalIntensityCap) {
+  } else if (dayDraft.workout && dayDraft.workout.intensityCost > finalIntensityCap) {
     dayDraft.workout = pickWorkout({ focus: dayDraft.focus, timeMin, checkIn, intensityCap: finalIntensityCap, avoidGroups, packWeights });
   }
 
+  const gateResult = applyQualityGate({
+    dayDraft,
+    checkIn,
+    timeMin,
+    rankedWorkouts,
+    safety,
+    packWeights,
+  });
+  dayDraft = gateResult.dayDraft;
+  if (gateResult.qualityGate?.triggered) {
+    appliedRules.push(gateResult.qualityGate.fallbackUsed ? "quality_gate_fallback" : "quality_gate");
+  }
+
   dayDraft.selectedNoveltyGroups = {
-    workout: dayDraft.workout.noveltyGroup,
-    nutrition: dayDraft.nutrition.noveltyGroup,
-    reset: dayDraft.reset.noveltyGroup,
+    workout: dayDraft.workout?.noveltyGroup || null,
+    nutrition: dayDraft.nutrition?.noveltyGroup || null,
+    reset: dayDraft.reset?.noveltyGroup || null,
   };
 
   const finalRationale = dayDraft.rationale ? dayDraft.rationale.slice() : [];
@@ -194,6 +258,7 @@ export function buildDayPlan({
       nutritionId: dayDraft.nutrition?.id || null,
       noveltyGroups: { ...dayDraft.selectedNoveltyGroups },
     },
+    qualityGate: gateResult.qualityGate,
   };
 
   dayDraft.pipelineVersion = meta.pipelineVersion;
@@ -209,6 +274,7 @@ export function buildDayPlan({
   });
   dayDraft.meta.confidence = confidence;
   dayDraft.meta.relevance = relevance;
+  dayDraft.meta.packMatch = computePackMatch(dayDraft, packId, packWeights);
 
   return { dayPlan: dayDraft, stressState, meta };
 }
@@ -220,10 +286,11 @@ function focusFromProfile(profile, capacity, focusBiasRules = DEFAULT_PARAMETERS
   return "stabilize";
 }
 
-function pickWorkout({ focus, timeMin, checkIn, intensityCap, avoidGroups, packWeights }) {
+function rankWorkouts({ focus, timeMin, checkIn, intensityCap, avoidGroups, packWeights, keepSelection }) {
   const index = getLibraryIndex(defaultLibrary);
   const lib = index.byKind.workout;
   const baseFilter = (w) => {
+    if (w.enabled === false) return false;
     if (timeMin != null && w.minutes > timeMin) return false;
     if (checkIn && w.minSleepQuality != null && checkIn.sleepQuality < w.minSleepQuality) return false;
     if (w.intensityCost > intensityCap) return false;
@@ -232,51 +299,70 @@ function pickWorkout({ focus, timeMin, checkIn, intensityCap, avoidGroups, packW
 
   let candidates = getCandidates(index, "workout", focus).filter(baseFilter);
   if (!candidates.length) candidates = lib.filter(baseFilter);
-
   candidates = applyNoveltyFilter(candidates, avoidGroups);
-
-  if (!candidates.length) return lib[0];
-
-  return candidates.sort((a, b) => workoutSort(a, b, { focus, timeMin, packWeights }))[0];
+  if (!candidates.length) candidates = lib.filter((item) => item.enabled !== false);
+  const sorted = candidates.sort((a, b) => workoutSort(a, b, { focus, timeMin, packWeights }));
+  const keepId = keepSelection?.workoutId;
+  if (!keepId) return sorted;
+  const keepItem = lib.find((item) => item.id === keepId);
+  if (!keepItem || !baseFilter(keepItem)) return sorted;
+  return injectKeepSelection(sorted, keepItem);
 }
 
-function pickNutrition({ focus, avoidGroups, forceBadDayMode, packWeights }) {
+function rankNutrition({ focus, avoidGroups, forceBadDayMode, packWeights, keepSelection }) {
   const index = getLibraryIndex(defaultLibrary);
   const lib = index.byKind.nutrition;
   let candidates;
 
   if (forceBadDayMode) {
-    candidates = lib.filter((n) => n.tags.includes("sleep") || n.tags.includes("downshift"));
+    candidates = lib.filter((n) => n.enabled !== false && (n.tags.includes("sleep") || n.tags.includes("downshift")));
   } else {
-    candidates = getCandidates(index, "nutrition", focus);
+    candidates = getCandidates(index, "nutrition", focus).filter((item) => item.enabled !== false);
   }
 
-  if (!candidates.length) candidates = lib.slice();
-
+  if (!candidates.length) candidates = lib.filter((item) => item.enabled !== false);
   candidates = applyNoveltyFilter(candidates, avoidGroups);
-  if (!candidates.length) return lib[0];
-
-  return candidates.sort((a, b) => commonSort(a, b, packWeights?.nutritionTagWeights))[0];
+  if (!candidates.length) candidates = lib.filter((item) => item.enabled !== false);
+  const sorted = candidates.sort((a, b) => commonSort(a, b, packWeights?.nutritionTagWeights));
+  const keepId = keepSelection?.nutritionId;
+  if (!keepId) return sorted;
+  const keepItem = lib.find((item) => item.id === keepId && item.enabled !== false);
+  if (!keepItem) return sorted;
+  return injectKeepSelection(sorted, keepItem);
 }
 
-function pickReset({ focus, timeMin, avoidGroups, forceBadDayMode, packWeights }) {
+function rankResets({ focus, timeMin, avoidGroups, forceBadDayMode, packWeights, keepSelection }) {
   const index = getLibraryIndex(defaultLibrary);
   const lib = index.byKind.reset;
   const tag = focus === "rebuild" ? "stabilize" : focus;
-  const maxMinutes = forceBadDayMode
-    ? 3
-    : Math.min(5, Math.max(2, Math.floor((timeMin || 20) / 10)));
+  const maxMinutes = forceBadDayMode ? 3 : Math.min(5, Math.max(2, Math.floor((timeMin || 20) / 10)));
+  const baseFilter = (r) => r.enabled !== false && r.minutes <= maxMinutes;
 
-  let candidates = lib
-    .filter((r) => r.tags.includes(tag))
-    .filter((r) => r.minutes <= maxMinutes);
-
-  if (!candidates.length) candidates = lib.filter((r) => r.minutes <= maxMinutes);
-
+  let candidates = lib.filter((r) => r.tags.includes(tag)).filter(baseFilter);
+  if (!candidates.length) candidates = lib.filter(baseFilter);
   candidates = applyNoveltyFilter(candidates, avoidGroups);
-  if (!candidates.length) return lib[0];
+  if (!candidates.length) candidates = lib.filter(baseFilter);
+  const sorted = candidates.sort((a, b) => commonSort(a, b, packWeights?.resetTagWeights));
+  const keepId = keepSelection?.resetId;
+  if (!keepId) return sorted;
+  const keepItem = lib.find((item) => item.id === keepId);
+  if (!keepItem || !baseFilter(keepItem)) return sorted;
+  return injectKeepSelection(sorted, keepItem);
+}
 
-  return candidates.sort((a, b) => commonSort(a, b, packWeights?.resetTagWeights))[0];
+function pickWorkout({ focus, timeMin, checkIn, intensityCap, avoidGroups, packWeights }) {
+  const ranked = rankWorkouts({ focus, timeMin, checkIn, intensityCap, avoidGroups, packWeights });
+  return ranked[0] || defaultLibrary.workouts[0];
+}
+
+function pickNutrition({ focus, avoidGroups, forceBadDayMode, packWeights }) {
+  const ranked = rankNutrition({ focus, avoidGroups, forceBadDayMode, packWeights });
+  return ranked[0] || defaultLibrary.nutrition[0];
+}
+
+function pickReset({ focus, timeMin, avoidGroups, forceBadDayMode, packWeights }) {
+  const ranked = rankResets({ focus, timeMin, avoidGroups, forceBadDayMode, packWeights });
+  return ranked[0] || defaultLibrary.resets[0];
 }
 
 function pickWorkoutWindow(user) {
@@ -290,6 +376,91 @@ function applyNoveltyFilter(items, avoidGroups) {
   if (!avoidGroups || !avoidGroups.length) return items;
   const filtered = items.filter((item) => !avoidGroups.includes(item.noveltyGroup));
   return filtered.length ? filtered : items;
+}
+
+function injectKeepSelection(items, keepItem) {
+  if (!keepItem) return items;
+  const rest = items.filter((item) => item.id !== keepItem.id);
+  return [keepItem, ...rest];
+}
+
+function isSafetyBlock(checkIn, safety) {
+  if (safety?.level === "block") return true;
+  return Boolean(checkIn?.panic || checkIn?.illness || checkIn?.fever);
+}
+
+function pickShortestReset(maxMinutes, packWeights) {
+  const cap = maxMinutes != null ? Math.max(1, maxMinutes) : 5;
+  const eligible = defaultLibrary.resets
+    .filter((item) => item.enabled !== false && item.minutes <= cap)
+    .sort((a, b) => commonSort(a, b, packWeights?.resetTagWeights));
+  if (eligible.length) return eligible[0];
+  return defaultLibrary.resets
+    .filter((item) => item.enabled !== false)
+    .sort((a, b) => (a.minutes || 0) - (b.minutes || 0))[0];
+}
+
+function applyQualityGate({ dayDraft, checkIn, timeMin, rankedWorkouts, safety, packWeights }) {
+  const reasons = new Set();
+  const timeAvailableMin = Number(checkIn?.timeAvailableMin ?? timeMin ?? 0) || null;
+  const safetyBlock = isSafetyBlock(checkIn, safety);
+  let current = dayDraft;
+  let triggered = false;
+  let fallbackUsed = false;
+  let attempts = 0;
+
+  if (safetyBlock && current.workout !== null) {
+    triggered = true;
+    reasons.add("safety_block");
+    current = { ...current, workout: null };
+  }
+
+  let validation = validateDayPlan(current, { checkIn, timeAvailableMin });
+  if (validation.ok) {
+    return { dayDraft: current, qualityGate: triggered ? { triggered: true, reasons: Array.from(reasons), fallbackUsed, attempts } : null };
+  }
+
+  while (!validation.ok && attempts < 5) {
+    triggered = true;
+    validation.reasons.forEach((reason) => reasons.add(reason.key));
+    const candidate = rankedWorkouts[attempts + 1];
+    attempts += 1;
+    if (!candidate || safetyBlock) break;
+    current = { ...current, workout: candidate };
+    fallbackUsed = true;
+    validation = validateDayPlan(current, { checkIn, timeAvailableMin });
+  }
+
+  if (!validation.ok) {
+    const emergencyCap = timeAvailableMin ?? timeMin ?? 10;
+    let workout = safetyBlock ? null : pickEmergencyWorkout(emergencyCap, packWeights) || current.workout;
+    let reset = pickShortestReset(emergencyCap, packWeights);
+    if (emergencyCap != null) {
+      const remaining = Math.max(0, emergencyCap - (reset?.minutes || 0));
+      if (workout && workout.minutes > remaining) {
+        workout = rankedWorkouts.find((item) => item.minutes <= remaining) || (safetyBlock ? null : workout);
+      }
+      if ((reset?.minutes || 0) > emergencyCap) {
+        reset = pickShortestReset(emergencyCap, packWeights);
+      }
+    }
+    current = {
+      ...current,
+      focus: safetyBlock ? current.focus : "downshift",
+      workout,
+      reset,
+      nutrition: pickEmergencyNutrition(packWeights),
+      rationale: [...(current.rationale || []), "Quality gate: emergency downshift applied"],
+    };
+    fallbackUsed = true;
+    validation = validateDayPlan(current, { checkIn, timeAvailableMin });
+    validation.reasons.forEach((reason) => reasons.add(reason.key));
+  }
+
+  const qualityGate = triggered
+    ? { triggered: true, reasons: Array.from(reasons), fallbackUsed, attempts }
+    : null;
+  return { dayDraft: current, qualityGate };
 }
 
 function workoutSort(a, b, { focus, timeMin, packWeights }) {
@@ -351,8 +522,10 @@ export { focusFromProfile };
 
 function resolveContentPackWeights(packKey, params) {
   const packs = params?.contentPackWeights || DEFAULT_PARAMETERS.contentPackWeights;
-  if (packKey && packs?.[packKey]) return packs[packKey];
-  return packs?.balanced_routine || DEFAULT_PARAMETERS.contentPackWeights.balanced_routine;
+  const fallbackId = "balanced_routine";
+  const packId = packKey && packs?.[packKey] ? packKey : fallbackId;
+  const weights = packs?.[packId] || DEFAULT_PARAMETERS.contentPackWeights[fallbackId];
+  return { packId, weights };
 }
 
 function scorePack(item, tagWeights) {
@@ -361,11 +534,12 @@ function scorePack(item, tagWeights) {
 }
 
 function pickEmergencyWorkout(timeMin, packWeights) {
+  const cap = timeMin != null ? Math.max(5, timeMin) : 15;
   const candidates = defaultLibrary.workouts
     .filter((w) => w.tags.includes("downshift") || w.tags.includes("gentle"))
-    .filter((w) => timeMin == null || w.minutes <= Math.max(15, timeMin));
+    .filter((w) => w.minutes <= cap);
   if (!candidates.length) return null;
-  return candidates.sort((a, b) => workoutSort(a, b, { focus: "downshift", timeMin, packWeights }))[0];
+  return candidates.sort((a, b) => workoutSort(a, b, { focus: "downshift", timeMin: cap, packWeights }))[0];
 }
 
 function pickEmergencyReset(packWeights) {
@@ -412,6 +586,41 @@ function applySafetyOverrides(dayDraft, safety, { timeMin, focus, packWeights })
     }
   }
   return dayDraft;
+}
+
+function maxWeight(weights) {
+  if (!weights || typeof weights !== "object") return 0;
+  return Object.values(weights).reduce((max, value) => (value > max ? value : max), 0);
+}
+
+function addMatchedTags(tagScores, item, weights) {
+  if (!item?.tags || !weights) return;
+  item.tags.forEach((tag) => {
+    const weight = Number(weights[tag] || 0);
+    if (weight <= 0) return;
+    tagScores.set(tag, (tagScores.get(tag) || 0) + weight);
+  });
+}
+
+function computePackMatch(dayDraft, packId, packWeights) {
+  const workoutWeights = packWeights?.workoutTagWeights || {};
+  const resetWeights = packWeights?.resetTagWeights || {};
+  const nutritionWeights = packWeights?.nutritionTagWeights || {};
+  const totalScore =
+    scorePack(dayDraft.workout, workoutWeights) +
+    scorePack(dayDraft.reset, resetWeights) +
+    scorePack(dayDraft.nutrition, nutritionWeights);
+  const maxPossible = maxWeight(workoutWeights) + maxWeight(resetWeights) + maxWeight(nutritionWeights);
+  const score = maxPossible > 0 ? Math.min(1, totalScore / maxPossible) : 0;
+  const tagScores = new Map();
+  addMatchedTags(tagScores, dayDraft.workout, workoutWeights);
+  addMatchedTags(tagScores, dayDraft.reset, resetWeights);
+  addMatchedTags(tagScores, dayDraft.nutrition, nutritionWeights);
+  const topMatchedTags = Array.from(tagScores.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([tag]) => tag);
+  return { packId, score, topMatchedTags };
 }
 function buildAnchors(user) {
   const sunlightTarget = Number(user.sunlightMinutesPerDay || 0);

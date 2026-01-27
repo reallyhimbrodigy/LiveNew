@@ -42,9 +42,13 @@
         <button class="tab" data-tab="worst" data-i18n="admin.worst">Worst items</button>
         <button class="tab" data-tab="heatmap" data-i18n="admin.heatmap">Heatmap</button>
         <button class="tab" data-tab="weekly" data-i18n="admin.weeklyReport">Weekly report</button>
+        <button class="tab" data-tab="packs" data-i18n="admin.packs">Packs</button>
+        <button class="tab" data-tab="previewMatrix" data-i18n="admin.previewMatrix">Preview matrix</button>
         <button class="tab" data-tab="params" data-i18n="admin.parameters">Parameters</button>
         <button class="tab" data-tab="cohorts" data-i18n="admin.cohorts">Cohorts</button>
         <button class="tab" data-tab="reminders" data-i18n="admin.reminders">Reminders</button>
+        <button class="tab" data-tab="support" data-i18n="admin.support">Support</button>
+        <button class="tab" data-tab="changelog" data-i18n="admin.changelog">Changelog</button>
       </div>
 
       <div class="tab-panel" data-panel="content">
@@ -146,6 +150,61 @@
         <div id="params-list" class="list"></div>
       </div>
 
+      <div class="tab-panel hidden" data-panel="packs">
+        <div class="row">
+          <label><span data-i18n="admin.pack">Pack</span>
+            <select id="packs-select"></select>
+          </label>
+          <button id="packs-load" data-i18n="admin.load">Load</button>
+        </div>
+        <div class="grid-2">
+          <label><span data-i18n="admin.packName">Pack name</span> <input id="packs-name" type="text" /></label>
+          <div></div>
+        </div>
+        <label><span data-i18n="admin.packWeights">Weights (JSON)</span>
+          <textarea id="packs-weights" rows="10"></textarea>
+        </label>
+        <label><span data-i18n="admin.packConstraints">Constraints (JSON)</span>
+          <textarea id="packs-constraints" rows="6"></textarea>
+        </label>
+        <div class="row">
+          <button id="packs-save" data-i18n="admin.save">Save</button>
+          <span id="packs-status" class="muted"></span>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" data-panel="previewMatrix">
+        <div class="row">
+          <label><span data-i18n="admin.packIds">Pack IDs (comma)</span> <input id="matrix-pack-ids" type="text" /></label>
+          <label><span data-i18n="admin.profiles">Profiles (comma)</span> <input id="matrix-profiles" type="text" /></label>
+          <label><span data-i18n="admin.timeBuckets">Time buckets (comma)</span> <input id="matrix-time-buckets" type="text" /></label>
+        </div>
+        <div class="row">
+          <label><span data-i18n="admin.sleepQuality">Sleep</span> <input id="matrix-sleep" type="number" min="1" max="10" value="6" /></label>
+          <label><span data-i18n="admin.stress">Stress</span> <input id="matrix-stress" type="number" min="1" max="10" value="5" /></label>
+          <label><span data-i18n="admin.energy">Energy</span> <input id="matrix-energy" type="number" min="1" max="10" value="6" /></label>
+          <button id="matrix-run" data-i18n="admin.runMatrix">Run matrix</button>
+        </div>
+        <div class="table-wrap">
+          <table class="table" id="matrix-table">
+            <thead>
+              <tr>
+                <th data-i18n="admin.profile">Profile</th>
+                <th data-i18n="admin.minutes">Minutes</th>
+                <th data-i18n="admin.pack">Pack</th>
+                <th data-i18n="admin.workout">Workout</th>
+                <th data-i18n="admin.reset">Reset</th>
+                <th data-i18n="admin.nutrition">Nutrition</th>
+                <th data-i18n="admin.confidence">Confidence</th>
+                <th data-i18n="admin.relevance">Relevance</th>
+                <th data-i18n="admin.rules">Rules</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </div>
+
       <div class="tab-panel hidden" data-panel="cohorts">
         <div class="row">
           <button id="cohorts-load" data-i18n="admin.load">Load cohorts</button>
@@ -173,6 +232,42 @@
           <button id="admin-reminders-load" data-i18n="admin.load">Load</button>
         </div>
         <div id="admin-reminders-list" class="list"></div>
+      </div>
+
+      <div class="tab-panel hidden" data-panel="support">
+        <div class="row">
+          <label><span data-i18n="admin.userEmail">User email</span> <input id="support-email" type="email" /></label>
+          <button id="support-search" data-i18n="admin.search">Search</button>
+        </div>
+        <div id="support-result" class="list"></div>
+        <div class="row">
+          <button id="support-debug-bundle" class="ghost" data-i18n="admin.debugBundle">Create debug bundle</button>
+          <button id="support-replay" class="ghost" data-i18n="admin.replaySandbox">Replay sandbox</button>
+        </div>
+        <label><span data-i18n="admin.bundleId">Bundle ID</span> <input id="support-bundle-id" type="text" /></label>
+        <button id="support-bundle-load" class="ghost" data-i18n="admin.loadBundle">Load bundle</button>
+        <pre id="support-output" class="list-item"></pre>
+      </div>
+
+      <div class="tab-panel hidden" data-panel="changelog">
+        <div class="grid-2">
+          <label><span data-i18n="admin.version">Version</span> <input id="changelog-version" type="text" /></label>
+          <label><span data-i18n="admin.audience">Audience</span>
+            <select id="changelog-audience">
+              <option value="admin" data-i18n="admin.adminAudience">Admin</option>
+              <option value="user" data-i18n="admin.userAudience">User</option>
+            </select>
+          </label>
+        </div>
+        <label><span data-i18n="admin.titleLabel">Title</span> <input id="changelog-title" type="text" /></label>
+        <label><span data-i18n="admin.notes">Notes</span>
+          <textarea id="changelog-notes" rows="6"></textarea>
+        </label>
+        <div class="row">
+          <button id="changelog-create" data-i18n="admin.create">Create</button>
+          <button id="changelog-load" class="ghost" data-i18n="admin.load">Load</button>
+        </div>
+        <div id="changelog-list" class="list"></div>
       </div>
     </section>
   </main>

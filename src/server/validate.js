@@ -1,3 +1,5 @@
+import { validateTimeZone as validateIanaTimeZone } from "../domain/utils/time.js";
+
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
 const SIGNALS = new Set([
@@ -62,14 +64,7 @@ function isTimeZone(value) {
   if (typeof value !== "string") return false;
   const trimmed = value.trim();
   if (!trimmed || trimmed.length > 64) return false;
-  if (typeof Intl?.supportedValuesOf === "function") {
-    try {
-      return Intl.supportedValuesOf("timeZone").includes(trimmed);
-    } catch {
-      return false;
-    }
-  }
-  return true;
+  return validateIanaTimeZone(trimmed);
 }
 
 export function validateProfile(body) {
@@ -111,6 +106,9 @@ export function validateProfile(body) {
   if (userProfile.timezone != null && !isTimeZone(userProfile.timezone)) {
     return fail("profile_invalid", "timezone is invalid", "timezone");
   }
+  if (userProfile.dayBoundaryHour != null && !isIntegerInRange(userProfile.dayBoundaryHour, 0, 6)) {
+    return fail("profile_invalid", "dayBoundaryHour must be 0..6", "dayBoundaryHour");
+  }
 
   if (userProfile.dataMinimization != null) {
     const dm = userProfile.dataMinimization;
@@ -136,13 +134,17 @@ export function validateProfile(body) {
 
 export function validateTimezone(body) {
   const timezone = body?.timezone;
+  const dayBoundaryHour = body?.dayBoundaryHour;
   if (!timezone || typeof timezone !== "string") {
     return fail("timezone_required", "timezone is required", "timezone");
   }
   if (!isTimeZone(timezone)) {
     return fail("timezone_invalid", "timezone is invalid", "timezone");
   }
-  return ok({ timezone: timezone.trim() });
+  if (dayBoundaryHour != null && !isIntegerInRange(dayBoundaryHour, 0, 6)) {
+    return fail("timezone_invalid", "dayBoundaryHour must be 0..6", "dayBoundaryHour");
+  }
+  return ok({ timezone: timezone.trim(), dayBoundaryHour: dayBoundaryHour == null ? null : Number(dayBoundaryHour) });
 }
 
 export function validateCheckIn(body, options = {}) {

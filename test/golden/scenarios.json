@@ -1,0 +1,532 @@
+[
+  {
+    "id": "balanced_baseline_la",
+    "tz": "America/Los_Angeles",
+    "dateISO": "2026-01-15",
+    "packId": "balanced_routine",
+    "userProfile": {
+      "timezone": "America/Los_Angeles",
+      "dayBoundaryHour": 4
+    },
+    "checkIn": {
+      "stress": 4,
+      "sleepQuality": 7,
+      "energy": 6,
+      "timeAvailableMin": 20
+    },
+    "expected": {
+      "dayContractHash": "418c9bd8543492ede51c10e13248902beb9f80d24d6300e0ab7941ddb10e14ea",
+      "keyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_15",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 17
+      }
+    }
+  },
+  {
+    "id": "high_stress_calm_pack",
+    "tz": "America/Los_Angeles",
+    "dateISO": "2026-01-15",
+    "packId": "calm_reset",
+    "userProfile": {
+      "timezone": "America/Los_Angeles"
+    },
+    "checkIn": {
+      "stress": 9,
+      "sleepQuality": 5,
+      "energy": 4,
+      "timeAvailableMin": 15
+    },
+    "expected": {
+      "dayContractHash": "04d61224d66fb25cb33bc62732917e75cc59155a69444b99b5d48771a147b306",
+      "keyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      }
+    }
+  },
+  {
+    "id": "rebuild_strength_high_energy",
+    "tz": "America/New_York",
+    "dateISO": "2026-02-03",
+    "packId": "rebuild_strength",
+    "userProfile": {
+      "timezone": "America/New_York"
+    },
+    "checkIn": {
+      "stress": 3,
+      "sleepQuality": 8,
+      "energy": 9,
+      "timeAvailableMin": 45
+    },
+    "expected": {
+      "dayContractHash": "c75fb1e025d0fd28f88aa2651e2aed3a06bae3eb8fbd0eb1d044afee69b81eff",
+      "keyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      }
+    }
+  },
+  {
+    "id": "poor_sleep_short_time",
+    "tz": "America/Chicago",
+    "dateISO": "2026-02-04",
+    "packId": "balanced_routine",
+    "userProfile": {
+      "timezone": "America/Chicago"
+    },
+    "checkIn": {
+      "stress": 6,
+      "sleepQuality": 3,
+      "energy": 5,
+      "timeAvailableMin": 10
+    },
+    "expected": {
+      "dayContractHash": "84f99f010049645ced6799ee12e90175df1d95921aabceab1d7877777c85f2f6",
+      "keyFields": {
+        "profile": "PoorSleep",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      }
+    }
+  },
+  {
+    "id": "wired_overstimulated_evening",
+    "tz": "America/Denver",
+    "dateISO": "2026-02-05",
+    "packId": "calm_reset",
+    "userProfile": {
+      "timezone": "America/Denver",
+      "preferredWorkoutWindows": [
+        "PM"
+      ]
+    },
+    "checkIn": {
+      "stress": 8,
+      "sleepQuality": 6,
+      "energy": 7,
+      "timeAvailableMin": 30
+    },
+    "expected": {
+      "dayContractHash": "90969b97077494edb97f55b2fbfeacfd3653f66ab564d7bc80da9af03f615626",
+      "keyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      }
+    }
+  },
+  {
+    "id": "depleted_burned_out_mid",
+    "tz": "America/Los_Angeles",
+    "dateISO": "2026-02-06",
+    "packId": "balanced_routine",
+    "userProfile": {
+      "timezone": "America/Los_Angeles"
+    },
+    "checkIn": {
+      "stress": 7,
+      "sleepQuality": 5,
+      "energy": 2,
+      "timeAvailableMin": 20
+    },
+    "expected": {
+      "dayContractHash": "ab4097c0bce3c6d33e3b9638973632ab2e1bf85dcf3000fc177ce5d9a9164b03",
+      "keyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "stabilize",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 7
+      }
+    }
+  },
+  {
+    "id": "restless_anxious_short",
+    "tz": "America/New_York",
+    "dateISO": "2026-02-07",
+    "packId": "calm_reset",
+    "userProfile": {
+      "timezone": "America/New_York"
+    },
+    "checkIn": {
+      "stress": 8,
+      "sleepQuality": 6,
+      "energy": 4,
+      "timeAvailableMin": 5
+    },
+    "expected": {
+      "dayContractHash": "5d35b2c5b706cbeeba365ffbbaaf033660761de2db94b4854dae6301e81d202e",
+      "keyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 8
+      }
+    }
+  },
+  {
+    "id": "time_rich_balanced",
+    "tz": "America/Chicago",
+    "dateISO": "2026-02-08",
+    "packId": "balanced_routine",
+    "userProfile": {
+      "timezone": "America/Chicago"
+    },
+    "checkIn": {
+      "stress": 4,
+      "sleepQuality": 7,
+      "energy": 7,
+      "timeAvailableMin": 60
+    },
+    "expected": {
+      "dayContractHash": "f4590e110e954a2ce1e716cf13945b8b94611d42992e5ca1f5bd191f0493a460",
+      "keyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      }
+    }
+  },
+  {
+    "id": "low_sleep_high_stress_rebuild_pack",
+    "tz": "America/Los_Angeles",
+    "dateISO": "2026-02-09",
+    "packId": "rebuild_strength",
+    "userProfile": {
+      "timezone": "America/Los_Angeles"
+    },
+    "checkIn": {
+      "stress": 9,
+      "sleepQuality": 2,
+      "energy": 5,
+      "timeAvailableMin": 20
+    },
+    "expected": {
+      "dayContractHash": "dd7acd15f4a3c26af05e00c0d7d8fd6034d6a604f11141cb0becbfc1ebdd6643",
+      "keyFields": {
+        "profile": "PoorSleep",
+        "focus": "downshift",
+        "workoutId": null,
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 3
+      }
+    }
+  },
+  {
+    "id": "calm_pack_morning_boundary",
+    "tz": "America/New_York",
+    "dateISO": "2026-02-10",
+    "packId": "calm_reset",
+    "userProfile": {
+      "timezone": "America/New_York",
+      "dayBoundaryHour": 5
+    },
+    "checkIn": {
+      "stress": 6,
+      "sleepQuality": 6,
+      "energy": 5,
+      "timeAvailableMin": 15
+    },
+    "expected": {
+      "dayContractHash": "4f551a5032bdc50d6b86be8d63733c71676dd7e2ad9251b2e9426fc253590595",
+      "keyFields": {
+        "profile": "Balanced",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 8
+      }
+    }
+  },
+  {
+    "id": "balanced_pack_busy_day",
+    "tz": "America/Los_Angeles",
+    "dateISO": "2026-02-11",
+    "packId": "balanced_routine",
+    "userProfile": {
+      "timezone": "America/Los_Angeles",
+      "busyDays": [
+        "2026-02-11"
+      ]
+    },
+    "checkIn": {
+      "stress": 5,
+      "sleepQuality": 7,
+      "energy": 6,
+      "timeAvailableMin": 30
+    },
+    "expected": {
+      "dayContractHash": "6cfdf407b44791a58c00b694e663cad162044aeff94ac3bba7a3ec34d0bde3f2",
+      "keyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_15",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 17
+      }
+    }
+  },
+  {
+    "id": "rebuild_pack_low_time",
+    "tz": "America/Chicago",
+    "dateISO": "2026-02-12",
+    "packId": "rebuild_strength",
+    "userProfile": {
+      "timezone": "America/Chicago"
+    },
+    "checkIn": {
+      "stress": 3,
+      "sleepQuality": 8,
+      "energy": 8,
+      "timeAvailableMin": 10
+    },
+    "expected": {
+      "dayContractHash": "f88cb76c4890c66963d25bd6eeb3d6a4c1bf44788e394206ce01a28bc3ef218f",
+      "keyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 7
+      }
+    }
+  },
+  {
+    "id": "safety_panic_mode",
+    "tz": "America/Los_Angeles",
+    "dateISO": "2026-02-13",
+    "packId": "calm_reset",
+    "userProfile": {
+      "timezone": "America/Los_Angeles"
+    },
+    "checkIn": {
+      "stress": 9,
+      "sleepQuality": 4,
+      "energy": 4,
+      "timeAvailableMin": 10,
+      "panic": true
+    },
+    "expected": {
+      "dayContractHash": "c147b17072117e3e2867f2221ba0888fb72a632180056fa6467ab09b07cb1d9d",
+      "keyFields": {
+        "profile": "PoorSleep",
+        "focus": "downshift",
+        "workoutId": null,
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 3
+      }
+    }
+  },
+  {
+    "id": "safety_illness",
+    "tz": "America/New_York",
+    "dateISO": "2026-02-14",
+    "packId": "balanced_routine",
+    "userProfile": {
+      "timezone": "America/New_York"
+    },
+    "checkIn": {
+      "stress": 6,
+      "sleepQuality": 6,
+      "energy": 3,
+      "timeAvailableMin": 20,
+      "illness": true
+    },
+    "expected": {
+      "dayContractHash": "c710f899caa5b935b66696e6be925e42c99baa8e3b4d830d7ce7f7cc33c0e108",
+      "keyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "stabilize",
+        "workoutId": null,
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 3
+      }
+    }
+  },
+  {
+    "id": "high_energy_low_stress_calm_pack",
+    "tz": "America/Denver",
+    "dateISO": "2026-02-15",
+    "packId": "calm_reset",
+    "userProfile": {
+      "timezone": "America/Denver"
+    },
+    "checkIn": {
+      "stress": 2,
+      "sleepQuality": 8,
+      "energy": 9,
+      "timeAvailableMin": 30
+    },
+    "expected": {
+      "dayContractHash": "ddac86d6b715b043560bd3704752da03550766915b9dfaa7d89ad3d4ce4d800a",
+      "keyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      }
+    }
+  },
+  {
+    "id": "moderate_sleep_high_stress",
+    "tz": "America/Chicago",
+    "dateISO": "2026-02-16",
+    "packId": "balanced_routine",
+    "userProfile": {
+      "timezone": "America/Chicago"
+    },
+    "checkIn": {
+      "stress": 8,
+      "sleepQuality": 6,
+      "energy": 5,
+      "timeAvailableMin": 20
+    },
+    "expected": {
+      "dayContractHash": "f117389147dc5137504fde4aa38425dfa99233b73a7f1289da307b8b9d4e0629",
+      "keyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      }
+    }
+  },
+  {
+    "id": "low_energy_rebuild_pack",
+    "tz": "America/Los_Angeles",
+    "dateISO": "2026-02-17",
+    "packId": "rebuild_strength",
+    "userProfile": {
+      "timezone": "America/Los_Angeles"
+    },
+    "checkIn": {
+      "stress": 5,
+      "sleepQuality": 7,
+      "energy": 3,
+      "timeAvailableMin": 30
+    },
+    "expected": {
+      "dayContractHash": "6cfc6a7632737eb997f850a1b62fb1070910bfcd3d545b884aa5c6e3e6150ab3",
+      "keyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "stabilize",
+        "workoutId": "w_walk_5",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 8
+      }
+    }
+  },
+  {
+    "id": "short_time_calm_pack",
+    "tz": "America/New_York",
+    "dateISO": "2026-02-18",
+    "packId": "calm_reset",
+    "userProfile": {
+      "timezone": "America/New_York"
+    },
+    "checkIn": {
+      "stress": 7,
+      "sleepQuality": 5,
+      "energy": 4,
+      "timeAvailableMin": 5
+    },
+    "expected": {
+      "dayContractHash": "5bf45ec4a9ba20fd244a809958537b95006dab899f5da4c64e8b4665cc3d1b35",
+      "keyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 8
+      }
+    }
+  },
+  {
+    "id": "time_rich_rebuild_pack",
+    "tz": "America/Chicago",
+    "dateISO": "2026-02-19",
+    "packId": "rebuild_strength",
+    "userProfile": {
+      "timezone": "America/Chicago"
+    },
+    "checkIn": {
+      "stress": 3,
+      "sleepQuality": 8,
+      "energy": 8,
+      "timeAvailableMin": 60
+    },
+    "expected": {
+      "dayContractHash": "b8ce72a8876bcbb04235a0f2ccfe84307abe64f774fe618d14b94833cf7ee156",
+      "keyFields": {
+        "profile": "Balanced",
+        "focus": "rebuild",
+        "workoutId": "w_strength_30",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_rebuild_consistency",
+        "totalMinutes": 33
+      }
+    }
+  },
+  {
+    "id": "balanced_pack_high_sleep",
+    "tz": "America/Los_Angeles",
+    "dateISO": "2026-02-20",
+    "packId": "balanced_routine",
+    "userProfile": {
+      "timezone": "America/Los_Angeles"
+    },
+    "checkIn": {
+      "stress": 2,
+      "sleepQuality": 9,
+      "energy": 7,
+      "timeAvailableMin": 30
+    },
+    "expected": {
+      "dayContractHash": "9d2a466572538b968a415d3a7356a43919c2d252e141f26c637c3a8d4a3c1c30",
+      "keyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      }
+    }
+  }
+]

@@ -325,6 +325,8 @@ function initProfile() {
   const changesDate = qs("#changes-date");
   const changesLoad = qs("#changes-load");
   const changesList = qs("#changes-list");
+  const changelogLoad = qs("#profile-changelog-load");
+  const changelogList = qs("#profile-changelog-list");
 
   const loadProfile = async () => {
     try {
@@ -449,6 +451,23 @@ function initProfile() {
   changesLoad?.addEventListener("click", loadChanges);
   if (changesDate) changesDate.value = todayISO();
 
+  const loadUserChangelog = async () => {
+    const res = await apiGet("/v1/changelog?audience=user&limit=5");
+    if (!changelogList) return;
+    clear(changelogList);
+    (res.items || []).forEach((item) => {
+      changelogList.appendChild(
+        el("div", { class: "list-item" }, [
+          el("div", { text: `${item.version} • ${item.title}` }),
+          el("div", { class: "muted", text: item.createdAt }),
+          el("div", { text: item.notes }),
+        ])
+      );
+    });
+  };
+
+  changelogLoad?.addEventListener("click", loadUserChangelog);
+
   deviceSave?.addEventListener("click", async () => {
     const name = deviceInput?.value?.trim();
     if (!name) return;
@@ -462,6 +481,7 @@ function initProfile() {
   loadSessions();
   loadReminders();
   loadChanges();
+  loadUserChangelog();
 }
 
 function initAdmin() {
@@ -508,6 +528,12 @@ function initAdmin() {
       });
     });
   };
+
+  const parseCommaList = (value) =>
+    String(value || "")
+      .split(",")
+      .map((v) => v.trim())
+      .filter(Boolean);
 
   const loadContentList = async () => {
     const kind = qs("#admin-kind")?.value || "workout";
@@ -675,6 +701,179 @@ function initAdmin() {
     });
   };
 
+  let packsCache = [];
+  let currentPackId = null;
+  const setPacksStatus = (messageKey) => {
+    const elStatus = qs("#packs-status");
+    if (!elStatus) return;
+    elStatus.textContent = messageKey ? t(messageKey) : "";
+  };
+
+  const loadPackDetail = async (packId) => {
+    if (!packId) return;
+    const res = await apiGet(`/v1/admin/packs/${encodeURIComponent(packId)}`);
+    const pack = res.pack;
+    currentPackId = pack?.id || packId;
+    if (qs("#packs-name")) qs("#packs-name").value = pack?.name || currentPackId;
+    if (qs("#packs-weights")) qs("#packs-weights").value = JSON.stringify(pack?.weights || {}, null, 2);
+    if (qs("#packs-constraints")) qs("#packs-constraints").value = JSON.stringify(pack?.constraints || {}, null, 2);
+    setPacksStatus("admin.packLoaded");
+  };
+
+  const loadPacksList = async () => {
+    const res = await apiGet("/v1/admin/packs");
+    packsCache = res.packs || [];
+    const select = qs("#packs-select");
+    if (!select) return;
+    clear(select);
+    packsCache.forEach((pack) => {
+      const opt = el("option", { text: `${pack.name || pack.id} (${pack.id})` });
+      opt.value = pack.id;
+      select.appendChild(opt);
+    });
+    currentPackId = select.value || packsCache[0]?.id || null;
+    if (currentPackId) {
+      select.value = currentPackId;
+      await loadPackDetail(currentPackId);
+    }
+  };
+
+  const savePack = async () => {
+    const packId = qs("#packs-select")?.value || currentPackId;
+    if (!packId) return;
+    try {
+      const weights = JSON.parse(qs("#packs-weights")?.value || "{}");
+      const constraints = JSON.parse(qs("#packs-constraints")?.value || "{}");
+      const name = qs("#packs-name")?.value?.trim() || packId;
+      await apiPatch(`/v1/admin/packs/${encodeURIComponent(packId)}`, {
+        name,
+        weights_json: weights,
+        constraints_json: constraints,
+      });
+      await loadPacksList();
+      setPacksStatus("admin.packSaved");
+    } catch {
+      setPacksStatus("admin.invalidJson");
+    }
+  };
+
+  const renderMatrix = (rows) => {
+    const tbody = qs("#matrix-table tbody");
+    if (!tbody) return;
+    clear(tbody);
+    rows.forEach((row) => {
+      const picked = row.picked || {};
+      const meta = row.meta || {};
+      tbody.appendChild(
+        el("tr", {}, [
+          el("td", { text: row.profile || "" }),
+          el("td", { text: String(row.timeAvailableMin ?? "") }),
+          el("td", { text: row.packId || "" }),
+          el("td", { text: picked.workoutId || "—" }),
+          el("td", { text: picked.resetId || "—" }),
+          el("td", { text: picked.nutritionId || "—" }),
+          el("td", { text: meta.confidence != null ? meta.confidence.toFixed(2) : "" }),
+          el("td", { text: meta.relevance != null ? meta.relevance.toFixed(2) : "" }),
+          el("td", { text: (meta.appliedRulesTop || []).slice(0, 3).join(", ") }),
+        ])
+      );
+    });
+  };
+
+  const runPreviewMatrix = async () => {
+    const packIds = parseCommaList(qs("#matrix-pack-ids")?.value);
+    const profiles = parseCommaList(qs("#matrix-profiles")?.value);
+    const timeBuckets = parseCommaList(qs("#matrix-time-buckets")?.value)
+      .map((v) => Number(v))
+      .filter((n) => Number.isFinite(n));
+    const baseInputs = {
+      sleepQuality: Number(qs("#matrix-sleep")?.value || 6),
+      stress: Number(qs("#matrix-stress")?.value || 5),
+      energy: Number(qs("#matrix-energy")?.value || 6),
+    };
+    const res = await apiPost("/v1/admin/preview/matrix", {
+      packIds,
+      profiles,
+      timeBuckets,
+      baseInputs,
+    });
+    renderMatrix(res.matrix || []);
+  };
+
+  let supportUserId = null;
+  const renderSupportResult = (user) => {
+    const list = qs("#support-result");
+    if (!list) return;
+    clear(list);
+    supportUserId = user?.userId || null;
+    if (!user) {
+      list.appendChild(el("div", { class: "list-item muted", text: t("admin.noUser") }));
+      return;
+    }
+    list.appendChild(
+      el("div", { class: "list-item" }, [
+        el("div", { text: `${user.email || ""} • ${user.userId}` }),
+        el("div", { class: "muted", text: `${user.packId || ""} • ${user.lastSeenAt || ""}` }),
+      ])
+    );
+  };
+
+  const searchSupportUser = async () => {
+    const email = qs("#support-email")?.value?.trim();
+    if (!email) {
+      renderSupportResult(null);
+      return;
+    }
+    const res = await apiGet(`/v1/admin/users/search?email=${encodeURIComponent(email)}`);
+    renderSupportResult(res.user || null);
+  };
+
+  const loadSupportBundle = async (bundleIdOverride = null) => {
+    const bundleId = bundleIdOverride || qs("#support-bundle-id")?.value?.trim();
+    if (!bundleId) return;
+    const res = await apiGet(`/v1/admin/debug-bundles/${encodeURIComponent(bundleId)}`);
+    if (qs("#support-output")) qs("#support-output").textContent = JSON.stringify(res.bundle || {}, null, 2);
+  };
+
+  const createSupportDebugBundle = async () => {
+    if (!supportUserId) return;
+    const res = await apiPost(`/v1/admin/users/${encodeURIComponent(supportUserId)}/debug-bundle`, {});
+    if (qs("#support-bundle-id")) qs("#support-bundle-id").value = res.bundleId || "";
+    await loadSupportBundle(res.bundleId);
+  };
+
+  const replaySupportSandbox = async () => {
+    if (!supportUserId) return;
+    const res = await apiPost(`/v1/admin/users/${encodeURIComponent(supportUserId)}/replay-sandbox`, {});
+    if (qs("#support-output")) qs("#support-output").textContent = JSON.stringify(res, null, 2);
+  };
+
+  const loadChangelog = async () => {
+    const res = await apiGet("/v1/admin/changelog?page=1&pageSize=20");
+    const list = qs("#changelog-list");
+    if (!list) return;
+    clear(list);
+    (res.items || []).forEach((item) => {
+      list.appendChild(
+        el("div", { class: "list-item" }, [
+          el("div", { text: `${item.version} • ${item.title}` }),
+          el("div", { class: "muted", text: `${item.audience} • ${item.createdAt}` }),
+          el("div", { text: item.notes }),
+        ])
+      );
+    });
+  };
+
+  const createChangelog = async () => {
+    const version = qs("#changelog-version")?.value?.trim();
+    const title = qs("#changelog-title")?.value?.trim();
+    const notes = qs("#changelog-notes")?.value?.trim();
+    const audience = qs("#changelog-audience")?.value || "admin";
+    if (!version || !title || !notes) return;
+    await apiPost("/v1/admin/changelog", { version, title, notes, audience });
+    await loadChangelog();
+  };
+
   const loadCohorts = async () => {
     const res = await apiGet("/v1/admin/cohorts");
     const list = qs("#cohorts-list");
@@ -741,6 +940,10 @@ function initAdmin() {
     qs("#content-disable")?.addEventListener("click", disableItem);
     qs("#worst-load")?.addEventListener("click", loadWorst);
     qs("#heatmap-load")?.addEventListener("click", loadHeatmap);
+    qs("#packs-load")?.addEventListener("click", () => loadPackDetail(qs("#packs-select")?.value));
+    qs("#packs-save")?.addEventListener("click", savePack);
+    qs("#packs-select")?.addEventListener("change", (e) => loadPackDetail(e.target.value));
+    qs("#matrix-run")?.addEventListener("click", runPreviewMatrix);
     qs("#cohorts-load")?.addEventListener("click", loadCohorts);
     qs("#cohort-assign")?.addEventListener("click", assignCohort);
     qs("#admin-reminders-load")?.addEventListener("click", loadAdminReminders);
@@ -748,6 +951,12 @@ function initAdmin() {
     qs("#weekly-download")?.addEventListener("click", downloadWeeklyReport);
     qs("#weekly-disable-all")?.addEventListener("click", disableWeeklyCandidates);
     qs("#weekly-bump")?.addEventListener("click", bumpWeeklyPriority);
+    qs("#support-search")?.addEventListener("click", searchSupportUser);
+    qs("#support-debug-bundle")?.addEventListener("click", createSupportDebugBundle);
+    qs("#support-replay")?.addEventListener("click", replaySupportSandbox);
+    qs("#support-bundle-load")?.addEventListener("click", () => loadSupportBundle());
+    qs("#changelog-create")?.addEventListener("click", createChangelog);
+    qs("#changelog-load")?.addEventListener("click", loadChangelog);
   };
 
   checkAdmin().then((ok) => {
@@ -758,11 +967,14 @@ function initAdmin() {
     loadWorst();
     loadHeatmap();
     loadParameters();
+    loadPacksList();
+    runPreviewMatrix();
     const adminRemindersDate = qs("#admin-reminders-date");
     if (adminRemindersDate) adminRemindersDate.value = todayISO();
     loadCohorts();
     loadAdminReminders();
     loadWeeklyReport();
+    loadChangelog();
   });
 }
 

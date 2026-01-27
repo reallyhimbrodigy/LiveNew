@@ -979,6 +979,69 @@ export async function seedContentItems(library) {
   }
 }
 
+export async function seedContentPacks(packs) {
+  if (!packs || typeof packs !== "object") return false;
+  const count = getDb().prepare("SELECT COUNT(*) as count FROM content_packs").get();
+  if (count?.count > 0) return false;
+  const now = new Date().toISOString();
+  const stmt = getDb().prepare(
+    "INSERT INTO content_packs (id, name, weights_json, constraints_json, updated_at) VALUES (?, ?, ?, ?, ?)"
+  );
+  getDb().exec("BEGIN;");
+  try {
+    Object.entries(packs).forEach(([id, pack]) => {
+      const name = pack?.name || id;
+      const weights = JSON.stringify(pack?.weights || {});
+      const constraints = JSON.stringify(pack?.constraints || {});
+      stmt.run(id, name, weights, constraints, now);
+    });
+    getDb().exec("COMMIT;");
+    return true;
+  } catch (err) {
+    getDb().exec("ROLLBACK;");
+    throw err;
+  }
+}
+
+export async function listContentPacks() {
+  const rows = getDb()
+    .prepare("SELECT id, name, weights_json, constraints_json, updated_at FROM content_packs ORDER BY id")
+    .all();
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    weights: JSON.parse(row.weights_json || "{}"),
+    constraints: JSON.parse(row.constraints_json || "{}"),
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function getContentPack(id) {
+  const row = getDb()
+    .prepare("SELECT id, name, weights_json, constraints_json, updated_at FROM content_packs WHERE id = ?")
+    .get(id);
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    weights: JSON.parse(row.weights_json || "{}"),
+    constraints: JSON.parse(row.constraints_json || "{}"),
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function upsertContentPack({ id, name, weights, constraints }) {
+  const now = new Date().toISOString();
+  const weightsJson = JSON.stringify(weights || {});
+  const constraintsJson = JSON.stringify(constraints || {});
+  getDb()
+    .prepare(
+      "INSERT INTO content_packs (id, name, weights_json, constraints_json, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET name=excluded.name, weights_json=excluded.weights_json, constraints_json=excluded.constraints_json, updated_at=excluded.updated_at"
+    )
+    .run(id, name || id, weightsJson, constraintsJson, now);
+  return { id, name: name || id, weights: weights || {}, constraints: constraints || {}, updatedAt: now };
+}
+
 export async function bumpContentStats(userId, itemId, field, delta = 1) {
   if (!userId || !itemId) return;
   const column = field === "completed" ? "completed" : field === "not_relevant" ? "not_relevant" : "picked";
@@ -1285,8 +1348,176 @@ export async function setFeatureFlag(key, value) {
   return { key, value: String(value), updatedAt: now };
 }
 
+export async function insertChangelogEntry({ version, title, notes, audience }) {
+  const id = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  getDb()
+    .prepare("INSERT INTO changelog (id, version, title, notes, audience, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, version, title, notes, audience, createdAt);
+  return { id, version, title, notes, audience, createdAt };
+}
+
+export async function listChangelogEntries({ audience = null, page = 1, pageSize = 20, limit = null } = {}) {
+  const size = Math.min(Math.max(pageSize, 1), 200);
+  const offset = (Math.max(page, 1) - 1) * size;
+  let rows = [];
+  if (limit != null) {
+    const lim = Math.min(Math.max(Number(limit) || 1, 1), 50);
+    rows = audience
+      ? getDb()
+          .prepare("SELECT id, version, title, notes, audience, created_at FROM changelog WHERE audience = ? ORDER BY created_at DESC LIMIT ?")
+          .all(audience, lim)
+      : getDb()
+          .prepare("SELECT id, version, title, notes, audience, created_at FROM changelog ORDER BY created_at DESC LIMIT ?")
+          .all(lim);
+  } else {
+    rows = audience
+      ? getDb()
+          .prepare("SELECT id, version, title, notes, audience, created_at FROM changelog WHERE audience = ? ORDER BY created_at DESC LIMIT ? OFFSET ?")
+          .all(audience, size, offset)
+      : getDb()
+          .prepare("SELECT id, version, title, notes, audience, created_at FROM changelog ORDER BY created_at DESC LIMIT ? OFFSET ?")
+          .all(size, offset);
+  }
+  return rows.map((row) => ({
+    id: row.id,
+    version: row.version,
+    title: row.title,
+    notes: row.notes,
+    audience: row.audience,
+    createdAt: row.created_at,
+  }));
+}
+
+function normalizeAttemptEmail(email) {
+  return normalizeEmail(email || "");
+}
+
+function addMinutesISO(iso, minutes) {
+  const base = iso ? new Date(iso) : new Date();
+  const next = new Date(base.getTime() + minutes * 60 * 1000);
+  return next.toISOString();
+}
+
+export async function getAuthAttempt(email) {
+  const key = normalizeAttemptEmail(email);
+  if (!key) return null;
+  const row = getDb()
+    .prepare("SELECT email, ip, failures, first_failure_at, locked_until FROM auth_attempts WHERE email = ?")
+    .get(key);
+  if (!row) return null;
+  return {
+    email: row.email,
+    ip: row.ip,
+    failures: row.failures || 0,
+    firstFailureAt: row.first_failure_at || null,
+    lockedUntil: row.locked_until || null,
+  };
+}
+
+export async function recordAuthFailure(email, ip, options = {}) {
+  const key = normalizeAttemptEmail(email);
+  if (!key) return { failures: 0, lockedUntil: null };
+  const nowISO = options.nowISO || new Date().toISOString();
+  const windowMinutes = options.windowMinutes || 15;
+  const lockMinutes = options.lockMinutes || 15;
+  const maxFailures = options.maxFailures || 5;
+  const windowCutoff = new Date(Date.parse(nowISO) - windowMinutes * 60 * 1000).toISOString();
+
+  const current = await getAuthAttempt(key);
+  const withinWindow = current?.firstFailureAt && current.firstFailureAt >= windowCutoff;
+  const firstFailureAt = withinWindow ? current.firstFailureAt : nowISO;
+  const failures = (withinWindow ? current.failures : 0) + 1;
+  const lockedUntil = failures >= maxFailures ? addMinutesISO(nowISO, lockMinutes) : current?.lockedUntil || null;
+
+  getDb()
+    .prepare(
+      "INSERT INTO auth_attempts (email, ip, failures, first_failure_at, locked_until) VALUES (?, ?, ?, ?, ?) ON CONFLICT(email) DO UPDATE SET ip=excluded.ip, failures=excluded.failures, first_failure_at=excluded.first_failure_at, locked_until=excluded.locked_until"
+    )
+    .run(key, ip || null, failures, firstFailureAt, lockedUntil);
+
+  return { failures, lockedUntil };
+}
+
+export async function resetAuthAttempts(email) {
+  const key = normalizeAttemptEmail(email);
+  if (!key) return false;
+  const now = new Date().toISOString();
+  getDb()
+    .prepare("INSERT INTO auth_attempts (email, failures, first_failure_at, locked_until) VALUES (?, 0, NULL, NULL) ON CONFLICT(email) DO UPDATE SET failures = 0, first_failure_at = NULL, locked_until = NULL, ip = NULL")
+    .run(key);
+  getDb().prepare("UPDATE auth_attempts SET locked_until = NULL WHERE email = ? AND locked_until < ?").run(key, now);
+  return true;
+}
+
+export async function isAuthLocked(email, nowISO = new Date().toISOString()) {
+  const attempt = await getAuthAttempt(email);
+  if (!attempt?.lockedUntil) return { locked: false, lockedUntil: null, failures: attempt?.failures || 0 };
+  if (attempt.lockedUntil <= nowISO) return { locked: false, lockedUntil: null, failures: attempt.failures || 0 };
+  return { locked: true, lockedUntil: attempt.lockedUntil, failures: attempt.failures || 0 };
+}
+
+export async function insertAdminAudit({ adminUserId, action, target = null, props = {}, atISO = null }) {
+  const id = crypto.randomUUID();
+  const atIso = atISO || new Date().toISOString();
+  getDb()
+    .prepare("INSERT INTO admin_audit (id, at_iso, admin_user_id, action, target, props_json) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, atIso, adminUserId, action, target, JSON.stringify(props || {}));
+  return { id, atISO: atIso };
+}
+
+export async function insertDebugBundle({ userId, expiresAt, redacted }) {
+  const id = crypto.randomUUID();
+  const createdAt = new Date().toISOString();
+  getDb()
+    .prepare("INSERT INTO debug_bundles (id, user_id, created_at, expires_at, redacted_json) VALUES (?, ?, ?, ?, ?)")
+    .run(id, userId, createdAt, expiresAt, JSON.stringify(redacted || {}));
+  return { id, userId, createdAt, expiresAt };
+}
+
+export async function getDebugBundle(id, nowISO = new Date().toISOString()) {
+  const row = getDb()
+    .prepare("SELECT id, user_id, created_at, expires_at, redacted_json FROM debug_bundles WHERE id = ?")
+    .get(id);
+  if (!row) return null;
+  if (row.expires_at && row.expires_at < nowISO) return null;
+  return {
+    id: row.id,
+    userId: row.user_id,
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    redacted: JSON.parse(row.redacted_json || "{}"),
+  };
+}
+
+export async function searchUserByEmail(email) {
+  const user = await getUserByEmail(email);
+  if (!user) return null;
+  const userId = user.id;
+  const base = await getUserById(userId);
+  const cohort = await getUserCohort(userId);
+  const state = await getUserState(userId);
+  const packId = state?.state?.userProfile?.contentPack || null;
+  const lastSeenRow = getDb()
+    .prepare(
+      "SELECT MAX(ts) as last_seen FROM (SELECT COALESCE(last_seen_at, created_at) as ts FROM sessions WHERE user_id = ? UNION ALL SELECT created_at as ts FROM refresh_tokens WHERE user_id = ?)"
+    )
+    .get(userId, userId);
+  return {
+    userId,
+    email: base?.email || user.email,
+    createdAt: base?.createdAt || null,
+    cohortId: cohort?.cohortId || null,
+    packId,
+    lastSeenAt: lastSeenRow?.last_seen || null,
+  };
+}
+
 export async function deleteUserData(userId) {
   const instance = getDb();
+  const userRow = instance.prepare("SELECT email FROM users WHERE id = ?").get(userId);
+  const email = userRow?.email ? decryptString(userRow.email) : null;
+  const normalizedEmail = email ? normalizeEmail(email) : null;
   instance.exec("BEGIN;");
   try {
     instance.prepare("DELETE FROM sessions WHERE user_id = ?").run(userId);
@@ -1305,6 +1536,11 @@ export async function deleteUserData(userId) {
     instance.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM reminder_intents WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM user_cohorts WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM debug_bundles WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM admin_audit WHERE admin_user_id = ?").run(userId);
+    if (normalizedEmail) {
+      instance.prepare("DELETE FROM auth_attempts WHERE email = ?").run(normalizedEmail);
+    }
     instance.prepare("DELETE FROM users WHERE id = ?").run(userId);
     instance.exec("COMMIT;");
     return { ok: true };

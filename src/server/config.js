@@ -62,11 +62,23 @@ export function getConfig() {
   const csrfOverride = parseBool(process.env.CSRF_ENABLED);
   const csrfEnabled = isAlphaLike || isProdLike ? true : csrfOverride !== undefined ? csrfOverride : true;
 
-  const rateLimits = isAlphaLike || isProdLike
-    ? { general: 40, mutating: 8, auth: 5 }
-    : { general: 60, mutating: 10, auth: 5 };
+  const rateLimits = {
+    userGeneral: 60,
+    userMutating: 10,
+    ipGeneral: 120,
+    authIp: 20,
+    authEmail: 5,
+    // Back-compat for existing call sites.
+    general: 60,
+    mutating: 10,
+    auth: 5,
+  };
 
   const cacheTTLSeconds = isAlphaLike || isProdLike ? 20 : 10;
+  const featureFreeze = process.env.FEATURE_FREEZE === "true";
+  const incidentModeDefault = process.env.INCIDENT_MODE === "true";
+  const regenThrottleMs = Number(process.env.REGEN_THROTTLE_MS || 2 * 60 * 60 * 1000);
+  const adminInDevEnabled = process.env.ADMIN_IN_DEV === "true";
 
   const config = {
     envMode,
@@ -83,6 +95,10 @@ export function getConfig() {
     cacheTTLSeconds,
     csrfEnabled,
     adminEmails,
+    featureFreeze,
+    incidentModeDefault,
+    regenThrottleMs,
+    adminInDevEnabled,
     port: Number(process.env.PORT || 3000),
     dataDir,
     dbStatusRequired: true,

@@ -15,7 +15,7 @@ export function bandCapacity(x, thresholds = DEFAULT_PARAMETERS.profileThreshold
   return "low";
 }
 
-export function assignStressProfile({ user, dateISO, checkIn, params }) {
+export function assignStressProfile({ user, dateISO, checkIn, params, profileOverride }) {
   const thresholds = params?.profileThresholds || DEFAULT_PARAMETERS.profileThresholds;
   const load = computeStressLoad(user, checkIn);
   const cap = computeCapacity(user, checkIn);
@@ -42,6 +42,10 @@ export function assignStressProfile({ user, dateISO, checkIn, params }) {
     profile = "RestlessAnxious";
   }
   else profile = "Balanced";
+
+  if (typeof profileOverride === "string" && profileOverride.trim()) {
+    profile = profileOverride.trim();
+  }
 
   return {
     dateISO,

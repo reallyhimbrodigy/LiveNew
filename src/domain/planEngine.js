@@ -133,7 +133,7 @@ function generateDayPlan(b, dateISO, band) {
 }
 
 function addDaysISO(startISO, days) {
-  const d = new Date(startISO + "T00:00:00");
-  d.setDate(d.getDate() + days);
+  const d = new Date(`${startISO}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + days);
   return d.toISOString().slice(0, 10);
 }

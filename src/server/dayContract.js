@@ -77,6 +77,32 @@ function focusStatementFor(dayPlan) {
   return `Today focuses on ${focus}.`;
 }
 
+function buildWhatWouldChange({ dayPlan, checkIn, drivers, appliedRules }) {
+  const bullets = [];
+  const sleep = Number(checkIn?.sleepQuality || 0);
+  const stress = Number(checkIn?.stress || 0);
+  const timeMin = Number(checkIn?.timeAvailableMin || 0);
+  const focus = dayPlan?.focus || "stabilize";
+  const rules = new Set(appliedRules || []);
+
+  if (sleep > 0 && sleep <= 6) {
+    bullets.push("Higher sleep quality would allow longer movement.");
+  }
+  if (timeMin > 0 && timeMin <= 20) {
+    bullets.push("More time available would increase the workout dose.");
+  }
+  if (stress >= 7 || rules.has("recovery_debt_bias")) {
+    bullets.push("Lower stress would shift focus toward stabilize or rebuild.");
+  }
+  if (focus === "downshift" && sleep >= 7 && stress <= 5) {
+    bullets.push("Lower stress plus steady sleep would move today toward rebuild.");
+  }
+  if (!bullets.length && drivers?.length) {
+    bullets.push("A steadier day would reduce the need for downshift signals.");
+  }
+  return bullets.slice(0, 4);
+}
+
 export function toDayContract(state, dateISO, domain) {
   void domain;
   const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
@@ -95,6 +121,11 @@ export function toDayContract(state, dateISO, domain) {
   const driversTop2 = drivers.slice(0, 2);
   const shortRationale = shortRationaleFor({ focus: dayPlan?.focus, driver: driversTop2[0] }).slice(0, 160);
   const whyNot = buildWhyNot({ dayPlan, checkIn, safety });
+  const packMatch = dayPlan?.meta?.packMatch || { packId: null, score: 0, topMatchedTags: [] };
+  const confidence = dayPlan?.meta?.confidence ?? null;
+  const relevance = dayPlan?.meta?.relevance ?? null;
+  const appliedRules = dayPlan?.meta?.appliedRules || [];
+  const whatWouldChange = buildWhatWouldChange({ dayPlan, checkIn, drivers, appliedRules });
 
   return {
     dateISO,
@@ -122,10 +153,14 @@ export function toDayContract(state, dateISO, domain) {
       focus: dayPlan?.focus || null,
       driversTop2,
       shortRationale,
+      packMatch,
+      confidence,
+      relevance,
+      whatWouldChange,
       whyNot,
       expanded: {
         drivers,
-        appliedRules: dayPlan?.meta?.appliedRules || [],
+        appliedRules,
         anchors: dayPlan?.anchors || null,
         safety,
         rationale: (dayPlan?.rationale || []).slice(0, 4),
@@ -134,8 +169,6 @@ export function toDayContract(state, dateISO, domain) {
       rationale: (dayPlan?.rationale || []).slice(0, 2),
       meta: dayPlan?.meta || null,
       safety,
-      confidence: dayPlan?.meta?.confidence ?? null,
-      relevance: dayPlan?.meta?.relevance ?? null,
       checkInPrompt: prompt,
     },
     howLong: {
@@ -143,9 +176,9 @@ export function toDayContract(state, dateISO, domain) {
       timeAvailableMin: checkIn?.timeAvailableMin ?? null,
     },
     details: {
-      workoutSteps: Array.isArray(workout.steps) ? workout.steps : [],
-      resetSteps: Array.isArray(reset.steps) ? reset.steps : [],
-      nutritionPriorities: Array.isArray(nutrition.priorities) ? nutrition.priorities : [],
+      workoutSteps: Array.isArray(workout?.steps) ? workout.steps : [],
+      resetSteps: Array.isArray(reset?.steps) ? reset.steps : [],
+      nutritionPriorities: Array.isArray(nutrition?.priorities) ? nutrition.priorities : [],
       anchors: dayPlan?.anchors || null,
     },
   };

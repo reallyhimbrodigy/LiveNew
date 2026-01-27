@@ -25,6 +25,7 @@ export function reduceEvent(state, event, ctx) {
   const ruleToggles = ctx.ruleToggles || initialStatePatch().ruleToggles;
   const qualityRules = buildQualityRules(ruleToggles);
   const params = ctx.params || {};
+  const regenPolicy = ctx.regenPolicy || {};
 
   let nextState = { ...state };
   let effects = { persist: false };
@@ -64,6 +65,7 @@ export function reduceEvent(state, event, ctx) {
       const currentWeekStart = domain.weekStartMonday(todayISO);
       const checkInsByDate = buildCheckInsByDate(checkIns);
       const modifiers = cleanupModifiers(nextState.modifiers || {}, todayISO);
+      const prevWeekPlan = nextState.weekPlan;
 
       if (!nextState.weekPlan || nextState.weekPlan.startDateISO !== currentWeekStart) {
         const effectiveUser = effectiveUserForDate(user, modifiers, currentWeekStart);
@@ -76,6 +78,7 @@ export function reduceEvent(state, event, ctx) {
           qualityRules,
           params,
         });
+        nextState.weekPlan = freezePastDays(prevWeekPlan, nextState.weekPlan, todayISO);
         nextState.selectionStats = incrementPickedForWeek(nextState.selectionStats, nextState.weekPlan);
         effects.persist = true;
         logEvent = {
@@ -96,6 +99,7 @@ export function reduceEvent(state, event, ctx) {
           domain,
           qualityRules,
           params,
+          todayISO,
         });
         nextState.weekPlan = normalized.weekPlan;
         if (normalized.changed) {
@@ -120,6 +124,7 @@ export function reduceEvent(state, event, ctx) {
       const checkInsByDate = buildCheckInsByDate(checkIns);
       const modifiers = cleanupModifiers(nextState.modifiers || {}, weekAnchorISO);
       const effectiveUser = effectiveUserForDate(user, modifiers, weekAnchorISO);
+      const prevWeekPlan = nextState.weekPlan;
 
       nextState.weekPlan = domain.generateWeekPlan({
         user: effectiveUser,
@@ -130,6 +135,7 @@ export function reduceEvent(state, event, ctx) {
         qualityRules,
         params,
       });
+      nextState.weekPlan = freezePastDays(prevWeekPlan, nextState.weekPlan, todayISO);
       nextState.selectionStats = incrementPickedForWeek(nextState.selectionStats, nextState.weekPlan);
 
       nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain, params);
@@ -352,11 +358,18 @@ export function reduceEvent(state, event, ctx) {
       }
 
       if (user && nextState.weekPlan) {
+        const lockSelection = shouldLockSelection(regenPolicy, dateISO);
+        const keepSelection = lockSelection ? keepSelectionForDate(state, dateISO) : null;
+        const keepFocus = lockSelection ? findDay(state.weekPlan, dateISO)?.focus : null;
         const checkInsByDate = buildCheckInsByDate(checkIns);
         const modifiers = cleanupModifiers(nextState.modifiers || {}, dateISO);
         const effectiveUser = effectiveUserForDate(user, modifiers, dateISO);
         const { intensityCap, qualityRules: qualityRulesForDay } = modifiersForDate(modifiers, dateISO, ruleToggles);
 
+        const overridesBase = {
+          ...(intensityCap != null ? { intensityCap } : {}),
+          ...(keepSelection ? { keepSelection, keepFocus } : {}),
+        };
         const adapted = domain.adaptPlan({
           weekPlan: nextState.weekPlan,
           user: effectiveUser,
@@ -365,15 +378,20 @@ export function reduceEvent(state, event, ctx) {
           checkInsByDate,
           completionsByDate: nextState.partCompletionByDate || {},
           feedback: nextState.feedback || [],
-          overridesBase: intensityCap != null ? { intensityCap } : null,
+          overridesBase,
           qualityRules: qualityRulesForDay,
           weekContextBase: { busyDays: effectiveUser.busyDays || [] },
           params,
+          regenPolicy,
         });
 
         nextState.weekPlan = adapted.weekPlan;
         nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain, params);
         nextState.modifiers = modifiers;
+
+        if (selectionChangedForDate(state, nextState, dateISO)) {
+          recordRegen(nextState, dateISO, event.atISO);
+        }
 
         if (nextState.history) {
           nextState.history = addHistoryEntry(nextState.history, {
@@ -395,6 +413,12 @@ export function reduceEvent(state, event, ctx) {
       if (!user || !nextState.weekPlan) return { nextState, effects, logEvent, result };
       const dateISO = event.payload?.dateISO;
       if (!dateISO) return { nextState, effects, logEvent, result };
+      if (ctx?.incidentMode) {
+        effects.persist = true;
+        logEvent = { type: "bad_day_mode", payload: { dateISO, incidentMode: true }, atISO: event.atISO };
+        result = { changedDayISO: null, notes: ["Incident mode: plan frozen"] };
+        return { nextState, effects, logEvent, result };
+      }
 
       if (!ruleToggles.badDayEnabled) {
         effects.persist = true;
@@ -406,6 +430,9 @@ export function reduceEvent(state, event, ctx) {
       const modifiers = cleanupModifiers(nextState.modifiers || {}, dateISO);
       const effectiveUser = effectiveUserForDate(user, modifiers, dateISO);
       const { intensityCap, qualityRules: qualityRulesForDay } = modifiersForDate(modifiers, dateISO, ruleToggles);
+      const lockSelection = shouldLockSelection(regenPolicy, dateISO);
+      const keepSelection = lockSelection ? keepSelectionForDate(state, dateISO) : null;
+      const keepFocus = lockSelection ? findDay(state.weekPlan, dateISO)?.focus : null;
 
       const beforeDay = findDay(nextState.weekPlan, dateISO);
       const res = rebuildDayInPlan({
@@ -419,13 +446,19 @@ export function reduceEvent(state, event, ctx) {
         overrides: {
           forceBadDayMode: true,
           intensityCap: intensityCap != null ? intensityCap : 2,
+          ...(keepSelection ? { keepSelection, keepFocus } : {}),
         },
         qualityRules: qualityRulesForDay,
         params,
+        priorDayPlan: beforeDay,
       });
       nextState.weekPlan = res.weekPlan;
       nextState.selectionStats = incrementPickedForDay(nextState.selectionStats, res.dayPlan);
       nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain, params);
+
+      if (selectionChangedForDate(state, nextState, dateISO)) {
+        recordRegen(nextState, dateISO, event.atISO);
+      }
 
       if (nextState.history) {
         nextState.history = addHistoryEntry(nextState.history, {
@@ -453,6 +486,73 @@ export function reduceEvent(state, event, ctx) {
         { type: "bad_day_mode", payload: { dateISO }, atISO: event.atISO },
         autoEvent,
       ].filter(Boolean);
+      return { nextState, effects, logEvent, result };
+    }
+
+    case "FORCE_REFRESH": {
+      const user = ensureUser();
+      const dateISO = event.payload?.dateISO;
+      if (!user || !dateISO) return { nextState, effects, logEvent, result };
+      if (ctx?.incidentMode) {
+        effects.persist = true;
+        logEvent = { type: "force_refresh", payload: { dateISO, incidentMode: true }, atISO: event.atISO };
+        result = { changedDayISO: null, notes: ["Incident mode: plan frozen"] };
+        return { nextState, effects, logEvent, result };
+      }
+
+      const checkInsByDate = buildCheckInsByDate(checkIns);
+      const modifiers = cleanupModifiers(nextState.modifiers || {}, dateISO);
+      const effectiveUser = effectiveUserForDate(user, modifiers, dateISO);
+      const { intensityCap, qualityRules: qualityRulesForDay } = modifiersForDate(modifiers, dateISO, ruleToggles);
+
+      const weekAnchorISO = domain.weekStartMonday(dateISO);
+      let weekPlan = nextState.weekPlan;
+      if (!weekPlan || weekPlan.startDateISO !== weekAnchorISO || !weekPlan.days.some((d) => d.dateISO === dateISO)) {
+        weekPlan = domain.generateWeekPlan({
+          user: effectiveUser,
+          weekAnchorISO: dateISO,
+          checkInsByDate,
+          qualityRules: qualityRulesForDay,
+          params,
+        });
+        nextState.selectionStats = incrementPickedForWeek(nextState.selectionStats, weekPlan);
+      }
+
+      const beforeDay = findDay(weekPlan, dateISO);
+      const res = rebuildDayInPlan({
+        domain,
+        user: effectiveUser,
+        weekPlan,
+        dateISO,
+        checkInsByDate,
+        completionsByDate: nextState.partCompletionByDate || {},
+        feedback: nextState.feedback || [],
+        overrides: intensityCap != null ? { intensityCap } : {},
+        qualityRules: qualityRulesForDay,
+        params,
+        priorDayPlan: beforeDay,
+      });
+      nextState.weekPlan = res.weekPlan;
+      nextState.selectionStats = incrementPickedForDay(nextState.selectionStats, res.dayPlan);
+      nextState.lastStressStateByDate = buildStressStateMap(effectiveUser, nextState.weekPlan, checkInsByDate, domain, params);
+      nextState.modifiers = modifiers;
+
+      if (selectionChangedForDate(state, nextState, dateISO)) {
+        recordRegen(nextState, dateISO, event.atISO);
+      }
+
+      if (nextState.history) {
+        nextState.history = addHistoryEntry(nextState.history, {
+          reason: "Force refresh",
+          dateISO,
+          beforeDay,
+          afterDay: findDay(nextState.weekPlan, dateISO),
+        });
+      }
+
+      effects.persist = true;
+      logEvent = { type: "force_refresh", payload: { dateISO }, atISO: event.atISO };
+      result = { changedDayISO: dateISO, notes: ["Force refresh applied"] };
       return { nextState, effects, logEvent, result };
     }
 
@@ -752,12 +852,17 @@ function normalizePlanPipeline({
   domain,
   qualityRules,
   params,
+  todayISO,
 }) {
   const nextDays = [];
   let changed = false;
 
   for (let i = 0; i < weekPlan.days.length; i += 1) {
     const day = weekPlan.days[i];
+    if (todayISO && day.dateISO < todayISO) {
+      nextDays.push(day);
+      continue;
+    }
     if (day.pipelineVersion !== DECISION_PIPELINE_VERSION) {
       const dateISO = day.dateISO;
       const effectiveUser = effectiveUserForDate(user, modifiers, dateISO);
@@ -797,6 +902,7 @@ function rebuildDayInPlan({
   overrides,
   qualityRules,
   params,
+  priorDayPlan,
 }) {
   const idx = weekPlan.days.findIndex((d) => d.dateISO === dateISO);
   if (idx === -1) return { weekPlan, dayPlan: null };
@@ -813,6 +919,7 @@ function rebuildDayInPlan({
     overrides,
     qualityRules,
     params,
+    priorDayPlan: priorDayPlan || weekPlan.days[idx],
   });
 
   const nextDays = weekPlan.days.slice();
@@ -840,6 +947,73 @@ function deepClone(value) {
 
 function findDay(plan, dateISO) {
   return plan?.days?.find((d) => d.dateISO === dateISO) || null;
+}
+
+function freezePastDays(prevWeekPlan, nextWeekPlan, todayISO) {
+  if (!prevWeekPlan || !nextWeekPlan || !todayISO) return nextWeekPlan;
+  const prevByDate = new Map((prevWeekPlan.days || []).map((day) => [day.dateISO, day]));
+  const nextDays = (nextWeekPlan.days || []).map((day) => {
+    if (day.dateISO >= todayISO) return day;
+    return prevByDate.get(day.dateISO) || day;
+  });
+  return { ...nextWeekPlan, days: nextDays };
+}
+
+function shouldLockSelection(regenPolicy, dateISO) {
+  if (!regenPolicy || !dateISO) return false;
+  return regenPolicy.lockSelectionsByDate?.[dateISO] === true;
+}
+
+function keepSelectionForDate(state, dateISO) {
+  const day = findDay(state.weekPlan, dateISO);
+  const selected = day?.meta?.selected;
+  if (selected) {
+    return {
+      workoutId: selected.workoutId || null,
+      resetId: selected.resetId || null,
+      nutritionId: selected.nutritionId || null,
+      noveltyGroups: { ...(selected.noveltyGroups || {}) },
+    };
+  }
+  if (!day) return null;
+  return {
+    workoutId: day.workout?.id || null,
+    resetId: day.reset?.id || null,
+    nutritionId: day.nutrition?.id || null,
+    noveltyGroups: day.selectedNoveltyGroups || {
+      workout: day.workout?.noveltyGroup,
+      reset: day.reset?.noveltyGroup,
+      nutrition: day.nutrition?.noveltyGroup,
+    },
+  };
+}
+
+function selectionSignature(dayPlan) {
+  if (!dayPlan) return "";
+  const selected = dayPlan.meta?.selected || {};
+  const workoutId = selected.workoutId || dayPlan.workout?.id || "";
+  const resetId = selected.resetId || dayPlan.reset?.id || "";
+  const nutritionId = selected.nutritionId || dayPlan.nutrition?.id || "";
+  return `${workoutId}|${resetId}|${nutritionId}`;
+}
+
+function selectionChangedForDate(prevState, nextState, dateISO) {
+  if (!dateISO) return false;
+  const prevDay = findDay(prevState.weekPlan, dateISO);
+  const nextDay = findDay(nextState.weekPlan, dateISO);
+  return selectionSignature(prevDay) !== selectionSignature(nextDay);
+}
+
+function recordRegen(nextState, dateISO, atISO) {
+  if (!dateISO) return;
+  const stamp = typeof atISO === "string" && atISO ? atISO : new Date().toISOString();
+  const current = nextState.regenWindow?.lastRegenAtISOByDate || {};
+  nextState.regenWindow = {
+    lastRegenAtISOByDate: {
+      ...current,
+      [dateISO]: stamp,
+    },
+  };
 }
 
 function buildStressStateMap(user, plan, checkInsByDate, domain, params) {

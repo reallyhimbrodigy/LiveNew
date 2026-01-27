@@ -1,6 +1,8 @@
 export { defaultLibrary } from "./content/library.js";
 export { getLibraryIndex, setLibraryIndex } from "./content/indexer.js";
 export { weekStartMonday, addDaysISO, isoToday } from "./utils/date.js";
+export { nowDateISO, toDateISOInTz, validateDateISO } from "./utils/dateISO.js";
+export { nowInTz, toDateISOWithBoundary, parseDateISO, validateTimeZone } from "./utils/time.js";
 
 export { computeStressLoad } from "./scoring/stressLoad.js";
 export { computeCapacity } from "./scoring/capacity.js";

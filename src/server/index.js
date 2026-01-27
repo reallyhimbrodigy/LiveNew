@@ -9,8 +9,10 @@ import { getScenarioById } from "../dev/scenarios.js";
 import { runSnapshotCheck, SNAPSHOT_IDS } from "../dev/snapshot.js";
 import { toDayContract } from "./dayContract.js";
 import { getUserId, sanitizeUserId } from "./userId.js";
-import { sendError } from "./errors.js";
+import { AppError, badRequest, internal, sendError } from "./errors.js";
 import { logInfo, logError } from "./logger.js";
+import { assertDayContract, assertWeekPlan } from "./invariants.js";
+import { validateWorkoutItem, validateResetItem, validateNutritionItem } from "../domain/content/validateContent.js";
 import {
   validateProfile,
   validateCheckIn,
@@ -68,11 +70,20 @@ import {
   listAppliedMigrations,
   listRefreshTokensByUser,
   getUserById,
+  recordAuthFailure,
+  resetAuthAttempts,
+  isAuthLocked,
+  insertAdminAudit,
+  insertDebugBundle,
+  getDebugBundle,
+  searchUserByEmail,
   insertDayPlanHistory,
   listDayPlanHistory,
   getDayPlanHistoryById,
   insertPlanChangeSummary,
   listPlanChangeSummaries,
+  insertChangelogEntry,
+  listChangelogEntries,
   upsertReminderIntent,
   listReminderIntentsByDate,
   updateReminderIntentStatus,
@@ -83,6 +94,10 @@ import {
   upsertCohortParameter,
   getUserCohort,
   setUserCohort,
+  seedContentPacks,
+  listContentPacks,
+  getContentPack,
+  upsertContentPack,
   listAllUserStates,
   cleanupUserRetention,
   deleteUserData,
@@ -96,7 +111,7 @@ import { getParameters, getDefaultParameters, resetParametersCache } from "./par
 import { createTaskScheduler } from "./tasks.js";
 import { signAccessToken, verifyAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshToken } from "../security/tokens.js";
 import { diffDayContracts } from "./diff.js";
-import { nowDateISO } from "../domain/utils/dateISO.js";
+import { toDateISOWithBoundary, validateTimeZone } from "../domain/utils/time.js";
 import { trackEvent, setDailyFlag, ensureDay3Retention, AnalyticsFlags, getFirstFlagDate } from "./analytics.js";
 
 const NODE_ENV = process.env.NODE_ENV || "development";
@@ -114,13 +129,22 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
 const PUBLIC_DIR = path.join(process.cwd(), "public");
 const REQUIRED_CONTENT_IDS = new Set(["r_panic_mode"]);
 const DEFAULT_TIMEZONE = "America/Los_Angeles";
+const ALL_PROFILES = [
+  "Balanced",
+  "PoorSleep",
+  "WiredOverstimulated",
+  "DepletedBurnedOut",
+  "RestlessAnxious",
+];
 
 const userStates = new Map();
 const MAX_USERS = 50;
 const lastSignalByUser = new Map();
-const rateLimiters = new Map();
+const userRateLimiters = new Map();
+const ipRateLimiters = new Map();
 let shuttingDown = false;
-const authRateLimiters = new Map();
+const authEmailRateLimiters = new Map();
+const authIpRateLimiters = new Map();
 const readCache = new Map();
 const latencySamples = new Map();
 const featureFlagsCache = { data: null, loadedAt: 0 };
@@ -134,6 +158,8 @@ const DEFAULT_FLAGS = {
   "rules.circadianAnchors.enabled": "true",
   "rules.safety.enabled": "true",
   "reminders.enabled": "true",
+  "feature.freeze.enabled": "false",
+  "incident.mode.enabled": "false",
 };
 const DEFAULT_COHORTS = [
   { id: "new_users", name: "New Users" },
@@ -147,7 +173,9 @@ const secretState = ensureSecretKey(config);
 
 await ensureDataDirWritable(config);
 await initDb();
+validateLibraryContent(domain.defaultLibrary);
 await seedContentItems(domain.defaultLibrary);
+await seedContentPacks(defaultPackSeeds());
 await ensureRequiredContentItems();
 await seedFeatureFlags(DEFAULT_FLAGS);
 await seedParameters(getDefaultParameters());
@@ -204,11 +232,23 @@ async function applyLibraryFromDb() {
   const workouts = [];
   const nutrition = [];
   const resets = [];
+  const invalid = [];
   items.forEach((item) => {
+    const validation = validateContentItem(item.kind, item);
+    if (!validation.ok) {
+      invalid.push({ id: item.id, kind: item.kind, field: validation.field, message: validation.message });
+      return;
+    }
     if (item.kind === "workout") workouts.push(item);
     if (item.kind === "nutrition") nutrition.push(item);
     if (item.kind === "reset") resets.push(item);
   });
+  if (invalid.length) {
+    logError({ event: "invalid_content_items", count: invalid.length, invalid });
+    if (config.isAlphaLike || config.isProdLike) {
+      throw internal("invalid_content_item", "Invalid content items present");
+    }
+  }
   if (workouts.length) domain.defaultLibrary.workouts = workouts;
   if (nutrition.length) domain.defaultLibrary.nutrition = nutrition;
   if (resets.length) domain.defaultLibrary.resets = resets;
@@ -229,21 +269,76 @@ async function ensureRequiredContentItems() {
   }
 }
 
+function validateContentItem(kind, item) {
+  if (kind === "workout") return validateWorkoutItem(item);
+  if (kind === "reset") return validateResetItem(item);
+  if (kind === "nutrition") return validateNutritionItem(item);
+  return { ok: false, field: "kind", message: "kind must be workout, reset, or nutrition" };
+}
+
+function validateContentItemOrThrow(kind, item) {
+  const validation = validateContentItem(kind, item);
+  if (!validation.ok) {
+    throw badRequest("invalid_content_item", validation.message, validation.field);
+  }
+}
+
+function validateLibraryContent(library) {
+  const kinds = [
+    { key: "workout", items: library?.workouts || [] },
+    { key: "nutrition", items: library?.nutrition || [] },
+    { key: "reset", items: library?.resets || [] },
+  ];
+  const invalid = [];
+  kinds.forEach(({ key, items }) => {
+    items.forEach((item) => {
+      const validation = validateContentItem(key, item);
+      if (!validation.ok) invalid.push({ kind: key, id: item?.id, field: validation.field, message: validation.message });
+    });
+  });
+  if (invalid.length) {
+    logError({ event: "invalid_seed_content", invalid });
+    throw internal("invalid_content_item", "Invalid seed content detected");
+  }
+}
+
+function defaultPackSeeds() {
+  const defaults = getDefaultParameters();
+  const weights = defaults.contentPackWeights || {};
+  const names = {
+    calm_reset: "Calm reset",
+    balanced_routine: "Balanced routine",
+    rebuild_strength: "Rebuild strength",
+  };
+  const packs = {};
+  Object.keys(names).forEach((id) => {
+    packs[id] = {
+      name: names[id],
+      weights: weights[id] || {},
+      constraints: defaults.contentPackConstraints?.[id] || {},
+    };
+  });
+  return packs;
+}
+
 function getUserTimezone(profile) {
   const tz = profile?.timezone;
   if (typeof tz !== "string" || !tz.trim()) return DEFAULT_TIMEZONE;
-  if (typeof Intl?.supportedValuesOf === "function") {
-    try {
-      if (!Intl.supportedValuesOf("timeZone").includes(tz)) return DEFAULT_TIMEZONE;
-    } catch {
-      return DEFAULT_TIMEZONE;
-    }
-  }
-  return tz;
+  if (!validateTimeZone(tz)) return DEFAULT_TIMEZONE;
+  return tz.trim();
+}
+
+function getDayBoundaryHour(profile) {
+  const hour = Number(profile?.dayBoundaryHour);
+  if (!Number.isFinite(hour)) return 4;
+  const clamped = Math.max(0, Math.min(6, Math.floor(hour)));
+  return clamped;
 }
 
 function getTodayISOForProfile(profile) {
-  return nowDateISO(getUserTimezone(profile));
+  const tz = getUserTimezone(profile);
+  const boundary = getDayBoundaryHour(profile);
+  return toDateISOWithBoundary(new Date(), tz, boundary) || domain.isoToday();
 }
 
 async function getFeatureFlags() {
@@ -262,6 +357,22 @@ function flagEnabled(flags, key) {
   const value = flags?.[key];
   if (value == null) return true;
   return String(value) !== "false";
+}
+
+function flagEnabledDefault(flags, key, defaultValue = false) {
+  const value = flags?.[key];
+  if (value == null) return defaultValue;
+  return String(value) === "true";
+}
+
+function resolveFeatureFreeze(flags) {
+  const flagValue = flags?.["feature.freeze.enabled"];
+  if (flagValue != null) return String(flagValue) === "true";
+  return config.featureFreeze === true;
+}
+
+function resolveIncidentMode(flags) {
+  return flagEnabledDefault(flags, "incident.mode.enabled", false);
 }
 
 function resolveRuleToggles(state, flags) {
@@ -336,7 +447,11 @@ function cohortForCheckIn(checkIn) {
   return "new_users";
 }
 
-async function repairUserState(userId, reason) {
+function logRepair(requestId, userId, repaired, method, reason) {
+  logInfo({ requestId, userId, event: "repair", repaired, method, reason: reason || null });
+}
+
+async function repairUserState(userId, reason, requestId = null) {
   const baseNow = new Date().toISOString();
   const events = await getUserEvents(userId, 1, 5000);
   if (events.length) {
@@ -345,9 +460,10 @@ async function repairUserState(userId, reason) {
     const paramsMeta = { cohortId: paramsState.cohortId || null, versions: paramsState.versionsBySource || {} };
     let rebuilt = normalizeState({});
     for (const evt of events) {
+      const todayISO = getTodayISOForProfile(rebuilt.userProfile);
       const ctx = {
         domain,
-        now: { todayISO: domain.isoToday(), atISO: evt.atISO || baseNow },
+        now: { todayISO, atISO: evt.atISO || baseNow },
         ruleToggles: resolveRuleToggles(rebuilt, flags),
         scenarios: { getScenarioById },
         isDev: isDevRoutesEnabled,
@@ -363,8 +479,8 @@ async function repairUserState(userId, reason) {
       const saveRes = await saveUserState(userId, latest?.version || 0, rebuilt);
       if (saveRes.ok) {
         updateUserCache(userId, rebuilt, saveRes.version);
-        logInfo({ atISO: baseNow, event: "auto_repair", userId, reason: reason || "events_replay" });
-        return { ok: true, state: rebuilt };
+        logRepair(requestId, userId, true, "replay", reason || "events_replay");
+        return { repaired: true, method: "replay", state: rebuilt };
       }
     } catch {
       // fallthrough to history
@@ -379,15 +495,52 @@ async function repairUserState(userId, reason) {
       const saveRes = await saveUserState(userId, latest?.version || 0, entry.state);
       if (saveRes.ok) {
         updateUserCache(userId, entry.state, saveRes.version);
-        logInfo({ atISO: baseNow, event: "auto_repair", userId, reason: reason || "history_fallback" });
-        return { ok: true, state: entry.state };
+        logRepair(requestId, userId, true, "history", reason || "history_fallback");
+        return { repaired: true, method: "history", state: entry.state };
       }
     } catch {
       // continue
     }
   }
 
-  return { ok: false };
+  const latest = await getUserState(userId);
+  const base = normalizeState(latest?.state || {});
+  if (base.userProfile) {
+    const flags = await getFeatureFlags();
+    const paramsState = await getParameters(userId);
+    const paramsMeta = { cohortId: paramsState.cohortId || null, versions: paramsState.versionsBySource || {} };
+    const resetState = normalizeState({
+      ...base,
+      weekPlan: null,
+      lastStressStateByDate: {},
+      selectionStats: { workouts: {}, nutrition: {}, resets: {} },
+    });
+    const ctx = {
+      domain,
+      now: { todayISO: getTodayISOForProfile(resetState.userProfile), atISO: baseNow },
+      ruleToggles: resolveRuleToggles(resetState, flags),
+      scenarios: { getScenarioById },
+      isDev: isDevRoutesEnabled,
+      params: paramsState.map,
+      paramsMeta,
+    };
+    try {
+      const ensured = reduceEvent(resetState, { type: "ENSURE_WEEK", payload: {}, atISO: baseNow }, ctx);
+      const next = appendLogEvent(ensured.nextState, ensured.logEvent);
+      validateState(next);
+      const saveRes = await saveUserState(userId, latest?.version || 0, next);
+      if (saveRes.ok) {
+        updateUserCache(userId, next, saveRes.version);
+        logRepair(requestId, userId, true, "reset", reason || "reset");
+        return { repaired: true, method: "reset", state: next };
+      }
+    } catch {
+      // fallthrough
+    }
+  }
+
+  logRepair(requestId, userId, false, null, reason || "repair_failed");
+  return { repaired: false, method: null, state: null };
 }
 
 function evictIfNeeded() {
@@ -415,7 +568,7 @@ async function loadUserState(userId) {
     validateState(state);
   } catch (err) {
     const repaired = await repairUserState(userId, "invalid_snapshot");
-    if (repaired.ok) {
+    if (repaired.repaired) {
       const latest = await getUserState(userId);
       const entry = { state: repaired.state, version: latest?.version || 0, lastAccessAt: Date.now() };
       userStates.set(userId, entry);
@@ -436,6 +589,116 @@ function updateUserCache(userId, state, version) {
   evictIfNeeded();
 }
 
+async function repairAndReload(userId, reason, requestId) {
+  const repaired = await repairUserState(userId, reason, requestId);
+  if (!repaired.repaired) return null;
+  return loadUserState(userId);
+}
+
+async function ensureValidDayContract(userId, state, dateISO, reason, requestId) {
+  try {
+    const day = toDayContract(state, dateISO, domain);
+    assertDayContract(day);
+    return { state, day };
+  } catch (err) {
+    const repairedEntry = await repairAndReload(userId, reason, requestId);
+    if (repairedEntry) {
+      const day = toDayContract(repairedEntry.state, dateISO, domain);
+      assertDayContract(day);
+      return { state: repairedEntry.state, day };
+    }
+    throw internal("invalid_day_contract", "Unable to produce a valid day plan", "day");
+  }
+}
+
+async function ensureValidWeekPlan(userId, state, reason, requestId) {
+  try {
+    assertWeekPlan(state.weekPlan);
+    return { state, weekPlan: state.weekPlan };
+  } catch (err) {
+    const repairedEntry = await repairAndReload(userId, reason, requestId);
+    if (repairedEntry) {
+      assertWeekPlan(repairedEntry.state.weekPlan);
+      return { state: repairedEntry.state, weekPlan: repairedEntry.state.weekPlan };
+    }
+    throw internal("invalid_week_plan", "Unable to produce a valid week plan", "weekPlan");
+  }
+}
+
+function selectionSignature(dayPlan) {
+  if (!dayPlan) return "";
+  const selected = dayPlan.meta?.selected || {};
+  const workoutId = selected.workoutId || dayPlan.workout?.id || "";
+  const resetId = selected.resetId || dayPlan.reset?.id || "";
+  const nutritionId = selected.nutritionId || dayPlan.nutrition?.id || "";
+  return `${workoutId}|${resetId}|${nutritionId}`;
+}
+
+function selectionChangedForDate(prevState, nextState, dateISO) {
+  if (!dateISO) return false;
+  const prevDay = prevState.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
+  const nextDay = nextState.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
+  return selectionSignature(prevDay) !== selectionSignature(nextDay);
+}
+
+function getEventDatesForThrottle(prevState, eventWithAt) {
+  const dates = new Set();
+  const type = eventWithAt.type;
+  if (type === "CHECKIN_SAVED") {
+    const dateISO = eventWithAt.payload?.checkIn?.dateISO;
+    if (dateISO) dates.add(dateISO);
+    const checkIn = eventWithAt.payload?.checkIn;
+    if (checkIn?.dateISO && checkIn.stress >= 7 && checkIn.sleepQuality <= 5) {
+      dates.add(domain.addDaysISO(checkIn.dateISO, 1));
+    }
+  } else if (type === "QUICK_SIGNAL" || type === "BAD_DAY_MODE" || type === "FORCE_REFRESH") {
+    const dateISO = eventWithAt.payload?.dateISO;
+    if (dateISO) dates.add(dateISO);
+  }
+  return dates;
+}
+
+function isWithinThrottleWindow(lastAtISO, atISO) {
+  if (!lastAtISO || !atISO) return false;
+  const lastMs = Date.parse(lastAtISO);
+  const nowMs = Date.parse(atISO);
+  if (!Number.isFinite(lastMs) || !Number.isFinite(nowMs)) return false;
+  return nowMs - lastMs < config.regenThrottleMs;
+}
+
+function buildRegenPolicy(prevState, eventWithAt, nextState) {
+  const forced = eventWithAt.payload?.forced === true;
+  if (forced) return null;
+  const dates = getEventDatesForThrottle(prevState, eventWithAt);
+  if (!dates.size) return null;
+  const lastRegen = prevState.regenWindow?.lastRegenAtISOByDate || {};
+  const lockSelectionsByDate = {};
+  dates.forEach((dateISO) => {
+    if (!dateISO) return;
+    if (!selectionChangedForDate(prevState, nextState, dateISO)) return;
+    const lastAt = lastRegen[dateISO];
+    if (isWithinThrottleWindow(lastAt, eventWithAt.atISO)) {
+      lockSelectionsByDate[dateISO] = true;
+    }
+  });
+  if (!Object.keys(lockSelectionsByDate).length) return null;
+  return { lockSelectionsByDate, reason: "regen_throttle" };
+}
+
+const INCIDENT_PLAN_EVENTS = new Set(["CHECKIN_SAVED", "QUICK_SIGNAL", "FORCE_REFRESH", "WEEK_REBUILD"]);
+
+function applyIncidentMode(prevState, nextState, eventType, incidentModeEnabled) {
+  if (!incidentModeEnabled) return nextState;
+  if (!INCIDENT_PLAN_EVENTS.has(eventType)) return nextState;
+  return {
+    ...nextState,
+    weekPlan: prevState.weekPlan,
+    lastStressStateByDate: prevState.lastStressStateByDate,
+    selectionStats: prevState.selectionStats,
+    history: prevState.history,
+  };
+}
+
 function toNumber(value, fallback) {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -444,10 +707,13 @@ function toNumber(value, fallback) {
 function normalizeUserProfile(profile) {
   if (!profile) return null;
   const dataMin = profile.dataMinimization || {};
+  const timezone = getUserTimezone(profile);
+  const dayBoundaryHour = getDayBoundaryHour(profile);
+  const createdAtISO = profile.createdAtISO || toDateISOWithBoundary(new Date(), timezone, dayBoundaryHour) || domain.isoToday();
   return {
     ...profile,
     id: profile.id || Math.random().toString(36).slice(2),
-    createdAtISO: profile.createdAtISO || domain.isoToday(),
+    createdAtISO,
     wakeTime: profile.wakeTime || "07:00",
     bedTime: profile.bedTime || "23:00",
     sleepRegularity: toNumber(profile.sleepRegularity, 5),
@@ -460,7 +726,8 @@ function normalizeUserProfile(profile) {
     preferredWorkoutWindows: Array.isArray(profile.preferredWorkoutWindows) ? profile.preferredWorkoutWindows : ["PM"],
     busyDays: Array.isArray(profile.busyDays) ? profile.busyDays : [],
     contentPack: profile.contentPack || "balanced_routine",
-    timezone: profile.timezone || "America/Los_Angeles",
+    timezone,
+    dayBoundaryHour,
     dataMinimization: (() => {
       const enabled = Boolean(dataMin.enabled);
       const eventDays = Number.isFinite(Number(dataMin.eventRetentionDays)) ? Number(dataMin.eventRetentionDays) : 90;
@@ -557,10 +824,11 @@ function appendLogEvent(current, logEvent) {
 }
 
 function dispatch(state, event, ctxOverrides = {}) {
+  const todayISO = getTodayISOForProfile(state.userProfile);
   const ctx = {
     domain,
     ruleToggles: ctxOverrides.ruleToggles || state.ruleToggles,
-    now: { todayISO: domain.isoToday(), atISO: new Date().toISOString() },
+    now: { todayISO, atISO: new Date().toISOString() },
     scenarios: { getScenarioById },
     isDev: isDevRoutesEnabled,
     params: ctxOverrides.params,
@@ -591,22 +859,108 @@ async function parseJson(req) {
     total += chunk.length;
   });
   if (total > 200 * 1024) {
-    const err = new Error("Payload too large");
-    err.status = 413;
-    err.code = "payload_too_large";
-    err.field = "body";
-    throw err;
+    throw new AppError("payload_too_large", "Payload too large", 413, "body");
   }
   const raw = Buffer.concat(chunks).toString("utf8");
   try {
     return JSON.parse(raw);
   } catch {
-    const err = new Error("Invalid JSON body");
-    err.status = 400;
-    err.code = "bad_json";
-    err.field = "body";
-    throw err;
+    throw badRequest("bad_json", "Invalid JSON body", "body");
   }
+}
+
+function deepClone(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value));
+}
+
+function isWeightMap(value) {
+  if (!value || typeof value !== "object") return false;
+  return Object.entries(value).every(([key, weight]) => typeof key === "string" && Number.isFinite(Number(weight)));
+}
+
+function validatePackWeightsShape(weights) {
+  if (!weights || typeof weights !== "object") return false;
+  const fields = ["workoutTagWeights", "resetTagWeights", "nutritionTagWeights"];
+  return fields.every((field) => isWeightMap(weights[field] || {}));
+}
+
+function parseMaybeJson(value, fieldName) {
+  if (value == null) return {};
+  if (typeof value === "object") return value;
+  if (typeof value !== "string") {
+    throw badRequest("field_invalid", `${fieldName} must be object or JSON string`, fieldName);
+  }
+  try {
+    const parsed = JSON.parse(value);
+    if (!parsed || typeof parsed !== "object") {
+      throw new Error("invalid");
+    }
+    return parsed;
+  } catch {
+    throw badRequest("field_invalid", `${fieldName} must be valid JSON`, fieldName);
+  }
+}
+
+function redactSensitive(value, depth = 0) {
+  if (depth > 6) return value;
+  if (value == null) return value;
+  if (Array.isArray(value)) return value.map((entry) => redactSensitive(entry, depth + 1));
+  if (typeof value !== "object") return value;
+  const blockedKeys = ["email", "token", "refresh", "authorization", "notes", "headers"];
+  const next = {};
+  Object.entries(value).forEach(([key, entry]) => {
+    const lower = String(key).toLowerCase();
+    if (blockedKeys.some((blocked) => lower.includes(blocked))) return;
+    next[key] = redactSensitive(entry, depth + 1);
+  });
+  return next;
+}
+
+function numericCheckIn(checkIn) {
+  if (!checkIn) return null;
+  const fields = ["stress", "sleepQuality", "energy", "timeAvailableMin", "illness", "injury", "panic", "fever"];
+  const result = {
+    dateISO: checkIn.dateISO || null,
+    atISO: checkIn.atISO || null,
+  };
+  fields.forEach((field) => {
+    if (field in checkIn) result[field] = checkIn[field];
+  });
+  return result;
+}
+
+function summarizeDayContract(day) {
+  if (!day) return null;
+  return {
+    dateISO: day.dateISO,
+    profile: day.why?.profile || null,
+    focus: day.why?.focus || null,
+    workoutId: day.what?.workout?.id || null,
+    resetId: day.what?.reset?.id || null,
+    nutritionId: day.what?.nutrition?.id || null,
+    totalMinutes: day.howLong?.totalMinutes ?? null,
+    appliedRules: (day.why?.expanded?.appliedRules || []).slice(0, 5),
+    driversTop2: day.why?.driversTop2 || [],
+  };
+}
+
+function dateISOForAt(profile, atISO) {
+  const tz = getUserTimezone(profile);
+  const boundary = getDayBoundaryHour(profile);
+  const date = atISO ? new Date(atISO) : new Date();
+  return toDateISOWithBoundary(date, tz, boundary) || domain.isoToday();
+}
+
+function qualityRulesFromToggles(toggles) {
+  const rules = toggles || {};
+  return {
+    avoidNoveltyWindowDays: rules.noveltyEnabled === false ? 0 : 2,
+    noveltyEnabled: rules.noveltyEnabled !== false,
+    constraintsEnabled: rules.constraintsEnabled !== false,
+    recoveryDebtEnabled: rules.recoveryDebtEnabled !== false,
+    circadianAnchorsEnabled: rules.circadianAnchorsEnabled !== false,
+    safetyEnabled: rules.safetyEnabled !== false,
+  };
 }
 
 async function ensureWeekForDate(state, dateISO, dispatchFn) {
@@ -698,15 +1052,11 @@ function isAdminConfigured() {
   return runtimeAdminEmails.size > 0;
 }
 
-function getLimiter(userId) {
-  if (!rateLimiters.has(userId)) {
-    const { general, mutating } = config.rateLimits;
-    rateLimiters.set(userId, {
-      general: { tokens: general, last: Date.now() },
-      mutating: { tokens: mutating, last: Date.now() },
-    });
+function getBucket(map, key, capacity) {
+  if (!map.has(key)) {
+    map.set(key, { tokens: capacity, last: Date.now() });
   }
-  return rateLimiters.get(userId);
+  return map.get(key);
 }
 
 function takeToken(bucket, capacity, refillPerMs) {
@@ -719,13 +1069,34 @@ function takeToken(bucket, capacity, refillPerMs) {
   return true;
 }
 
-function checkRateLimit(userId, isMutating) {
-  const limiter = getLimiter(userId);
-  const okGeneral = takeToken(limiter.general, config.rateLimits.general, config.rateLimits.general / 60000);
-  if (!okGeneral) return { ok: false, kind: "general" };
+function checkIpRateLimit(ip) {
+  const capacity = config.rateLimits.ipGeneral;
+  const bucket = getBucket(ipRateLimiters, ip || "unknown", capacity);
+  const ok = takeToken(bucket, capacity, capacity / 60000);
+  return { ok, kind: "ip" };
+}
+
+function getUserLimiter(userId) {
+  if (!userRateLimiters.has(userId)) {
+    const general = config.rateLimits.userGeneral;
+    const mutating = config.rateLimits.userMutating;
+    userRateLimiters.set(userId, {
+      general: { tokens: general, last: Date.now() },
+      mutating: { tokens: mutating, last: Date.now() },
+    });
+  }
+  return userRateLimiters.get(userId);
+}
+
+function checkUserRateLimit(userId, isMutating) {
+  const limiter = getUserLimiter(userId);
+  const generalCap = config.rateLimits.userGeneral;
+  const mutatingCap = config.rateLimits.userMutating;
+  const okGeneral = takeToken(limiter.general, generalCap, generalCap / 60000);
+  if (!okGeneral) return { ok: false, kind: "user_general" };
   if (isMutating) {
-    const okMutating = takeToken(limiter.mutating, config.rateLimits.mutating, config.rateLimits.mutating / 60000);
-    if (!okMutating) return { ok: false, kind: "mutating" };
+    const okMutating = takeToken(limiter.mutating, mutatingCap, mutatingCap / 60000);
+    if (!okMutating) return { ok: false, kind: "user_mutating" };
   }
   return { ok: true };
 }
@@ -792,8 +1163,10 @@ function parseCookies(req) {
 
 function issueCsrfToken(res) {
   const token = crypto.randomBytes(16).toString("hex");
-  const cookie = `csrf=${token}; HttpOnly; SameSite=Strict; Path=/`;
-  res.setHeader("Set-Cookie", cookie);
+  if (isDevRoutesEnabled) {
+    const cookie = `csrf=${token}; HttpOnly; SameSite=Strict; Path=/`;
+    res.setHeader("Set-Cookie", cookie);
+  }
   return token;
 }
 
@@ -814,6 +1187,8 @@ function requireCsrf(req, res) {
   const authHeader = parseAuthToken(req);
   if (authHeader) return true;
   if (isApiBypassAllowed(req)) return true;
+  const hasCookieHeader = Boolean(req.headers.cookie);
+  if (!hasCookieHeader) return true;
   const csrfCookie = getCsrfToken(req);
   const csrfHeader = req.headers["x-csrf-token"];
   if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
@@ -827,17 +1202,27 @@ function authLimiterKey(type, value) {
   return `${type}:${value || "unknown"}`;
 }
 
-function getAuthLimiter(key) {
-  if (!authRateLimiters.has(key)) {
-    authRateLimiters.set(key, { tokens: config.rateLimits.auth, last: Date.now() });
-  }
-  return authRateLimiters.get(key);
+function getAuthEmailLimiter(key) {
+  const capacity = config.rateLimits.authEmail;
+  return getBucket(authEmailRateLimiters, key, capacity);
 }
 
-function checkAuthRateLimit(key) {
-  const limiter = getAuthLimiter(key);
-  const ok = takeToken(limiter, config.rateLimits.auth, config.rateLimits.auth / 60000);
+function checkAuthEmailRateLimit(key) {
+  const capacity = config.rateLimits.authEmail;
+  const limiter = getAuthEmailLimiter(key);
+  const ok = takeToken(limiter, capacity, capacity / 60000);
   return ok;
+}
+
+function getAuthIpLimiter(key) {
+  const capacity = config.rateLimits.authIp;
+  return getBucket(authIpRateLimiters, key, capacity);
+}
+
+function checkAuthIpRateLimit(key) {
+  const capacity = config.rateLimits.authIp;
+  const limiter = getAuthIpLimiter(key);
+  return takeToken(limiter, capacity, capacity / 60000);
 }
 
 function readCacheKey(userId, reqPath, query) {
@@ -1154,6 +1539,8 @@ function assessReadiness(runtimeConfig, summary, checks = {}) {
   if (checks.migrationsOk === false) failures.push("migrations");
   if (checks.flagsOk === false) failures.push("featureFlags");
   if (checks.paramsOk === false) failures.push("parameters");
+  if (checks.packsOk === false) failures.push("packs");
+  if (checks.contentOk === false) failures.push("content");
   if (checks.dbReadyOk === false) failures.push("dbReady");
   if (runtimeConfig.isAlphaLike || runtimeConfig.isProdLike) {
     if (!summary.admin.configured) failures.push("adminEmails");
@@ -1185,7 +1572,9 @@ const server = http.createServer(async (req, res) => {
   const pathname = url.pathname;
   const requestId = getRequestId(req);
   const started = process.hrtime.bigint();
+  const clientIp = getClientIp(req);
   res.livenewRequestId = requestId;
+  res.livenewClientIp = clientIp;
   if (pathname.startsWith("/v1")) {
     res.livenewApiVersion = "1";
   }
@@ -1266,6 +1655,14 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (pathname.startsWith("/v1") && pathname !== "/healthz" && pathname !== "/readyz") {
+    const ipCheck = checkIpRateLimit(clientIp);
+    if (!ipCheck.ok) {
+      sendError(res, 429, "rate_limited_ip", "Too many requests");
+      return;
+    }
+  }
+
   try {
     const handledSetup = await handleSetupRoutes(req, res, config, {
       url,
@@ -1296,6 +1693,8 @@ const server = http.createServer(async (req, res) => {
       let paramsOk = true;
       let migrationsOk = true;
       let dbReadyOk = true;
+      let packsOk = true;
+      let contentOk = true;
       let migrationsCount = 0;
       try {
         await checkReady();
@@ -1315,6 +1714,24 @@ const server = http.createServer(async (req, res) => {
         paramsOk = false;
       }
       try {
+        const packs = await listContentPacks();
+        packsOk = packs.length > 0;
+      } catch {
+        packsOk = false;
+      }
+      try {
+        const [workouts, nutrition, resets] = await Promise.all([
+          listContentItems("workout"),
+          listContentItems("nutrition"),
+          listContentItems("reset"),
+        ]);
+        workouts.forEach((item) => validateContentItemOrThrow("workout", item));
+        nutrition.forEach((item) => validateContentItemOrThrow("nutrition", item));
+        resets.forEach((item) => validateContentItemOrThrow("reset", item));
+      } catch {
+        contentOk = false;
+      }
+      try {
         const migrations = await listAppliedMigrations();
         migrationsCount = migrations.length;
         migrationsOk = migrations.length > 0;
@@ -1322,7 +1739,14 @@ const server = http.createServer(async (req, res) => {
         migrationsOk = false;
       }
       const summary = await computeBootSummary(config);
-      const readiness = assessReadiness(config, summary, { flagsOk, paramsOk, migrationsOk, dbReadyOk });
+      const readiness = assessReadiness(config, summary, {
+        flagsOk,
+        paramsOk,
+        migrationsOk,
+        dbReadyOk,
+        packsOk,
+        contentOk,
+      });
       sendJson(res, 200, {
         ok: readiness.ok,
         summary,
@@ -1332,6 +1756,8 @@ const server = http.createServer(async (req, res) => {
           paramsOk,
           migrationsOk,
           dbReadyOk,
+          packsOk,
+          contentOk,
           migrationsCount,
         },
       });
@@ -1339,6 +1765,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/csrf" && req.method === "GET") {
+      if (!isDevRoutesEnabled) {
+        sendError(res, 404, "not_found", "Not found");
+        return;
+      }
       const token = issueCsrfToken(res);
       sendJson(res, 200, { ok: true, token });
       return;
@@ -1352,16 +1782,16 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "email_required", "email is required", "email");
         return;
       }
-      const ip = getClientIp(req);
-      if (!checkAuthRateLimit(authLimiterKey("ip", ip))) {
-        sendError(res, 429, "rate_limited", "Too many auth attempts");
+      const emailKey = email.toLowerCase();
+      if (!checkAuthIpRateLimit(authLimiterKey("ip", clientIp))) {
+        sendError(res, 429, "rate_limited_auth", "Too many auth attempts");
         return;
       }
-      if (!checkAuthRateLimit(authLimiterKey("email", email.toLowerCase()))) {
-        sendError(res, 429, "rate_limited", "Too many auth attempts");
+      if (!checkAuthEmailRateLimit(authLimiterKey("email", emailKey))) {
+        sendError(res, 429, "rate_limited_auth", "Too many auth attempts");
         return;
       }
-      const user = await getOrCreateUser(email.toLowerCase());
+      const user = await getOrCreateUser(emailKey);
       const code = String(Math.floor(100000 + Math.random() * 900000));
       const expiresAt = new Date(Date.now() + 10 * 60 * 1000).toISOString();
       await createAuthCode(user.id, user.email, code, expiresAt);
@@ -1392,20 +1822,27 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "code_required", "code is required", "code");
         return;
       }
-      const ip = getClientIp(req);
-      if (!checkAuthRateLimit(authLimiterKey("ip", ip))) {
-        sendError(res, 429, "rate_limited", "Too many auth attempts");
+      const emailKey = email.toLowerCase();
+      if (!checkAuthIpRateLimit(authLimiterKey("ip", clientIp))) {
+        sendError(res, 429, "rate_limited_auth", "Too many auth attempts");
         return;
       }
-      if (!checkAuthRateLimit(authLimiterKey("email", email.toLowerCase()))) {
-        sendError(res, 429, "rate_limited", "Too many auth attempts");
+      if (!checkAuthEmailRateLimit(authLimiterKey("email", emailKey))) {
+        sendError(res, 429, "rate_limited_auth", "Too many auth attempts");
         return;
       }
-      const verified = await verifyAuthCode(email.toLowerCase(), code);
+      const lockStatus = await isAuthLocked(emailKey);
+      if (lockStatus.locked) {
+        sendError(res, 429, "auth_locked", "Too many attempts. Try again later.");
+        return;
+      }
+      const verified = await verifyAuthCode(emailKey, code);
       if (!verified) {
+        await recordAuthFailure(emailKey, clientIp);
         sendError(res, 401, "code_invalid", "code is invalid or expired", "code");
         return;
       }
+      await resetAuthAttempts(emailKey);
       const deviceName = getDeviceName(req);
       const refresh = await issueRefreshToken({ userId: verified.userId, deviceName });
       const accessToken = signAccessToken({
@@ -1560,28 +1997,47 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 401, "auth_required", "Authorization required");
         return null;
       }
+      if (!isAdminConfigured()) {
+        sendError(res, 403, "admin_unconfigured", "Admin access not configured");
+        return null;
+      }
+      if (config.isDevLike && !config.adminInDevEnabled) {
+        sendError(res, 403, "admin_disabled_in_dev", "Admin access disabled in dev");
+        return null;
+      }
       if (!isAdmin(email)) {
         sendError(res, 403, "forbidden", "Admin access required");
         return null;
       }
       return email;
     };
+    const auditAdmin = async (action, target = null, props = {}) => {
+      if (!userId || !action) return;
+      try {
+        await insertAdminAudit({ adminUserId: userId, action, target, props });
+      } catch (err) {
+        logError({ event: "admin_audit_failed", action, target, error: err?.message || String(err) });
+      }
+    };
 
     if (!requireCsrf(req, res)) return;
 
-    const rateKey = userId || "anon";
     const isMutating = !["GET", "HEAD"].includes(req.method);
-    const rateCheck = checkRateLimit(rateKey, isMutating);
-    if (!rateCheck.ok) {
-      sendError(res, 429, "rate_limited", "Too many requests");
-      return;
+    if (userId) {
+      const userCheck = checkUserRateLimit(userId, isMutating);
+      if (!userCheck.ok) {
+        sendError(res, 429, "rate_limited_user", "Too many requests");
+        return;
+      }
     }
-
     const cached = await loadUserState(userId);
     let state = cached.state;
     let version = cached.version;
     const requestTodayISO = getTodayISOForProfile(state.userProfile);
     await ensureDay3Retention(userId, requestTodayISO);
+    let requestFlags = await getFeatureFlags();
+    let featureFreezeEnabled = resolveFeatureFreeze(requestFlags);
+    let incidentModeEnabled = resolveIncidentMode(requestFlags);
 
     const dispatchForUser = async (event) => {
       let attempts = 0;
@@ -1595,17 +2051,32 @@ const server = http.createServer(async (req, res) => {
         const prevState = currentState;
         const todayISO = getTodayISOForProfile(currentState.userProfile);
         const flags = await getFeatureFlags();
+        requestFlags = flags;
+        featureFreezeEnabled = resolveFeatureFreeze(flags);
+        incidentModeEnabled = resolveIncidentMode(flags);
         const effectiveToggles = resolveRuleToggles(currentState, flags);
         const remindersEnabled = flagEnabled(flags, "reminders.enabled");
         const paramsState = await getParameters(userId);
         const paramsMeta = { cohortId: paramsState.cohortId || null, versions: paramsState.versionsBySource || {} };
-        const resEvent = dispatch(currentState, eventWithAt, {
+        const ctxBase = {
           ruleToggles: effectiveToggles,
           params: paramsState.map,
           paramsMeta,
           now: { todayISO, atISO },
-        });
-        const nextState = resEvent.state;
+          incidentMode: incidentModeEnabled,
+        };
+        let resEvent = dispatch(currentState, eventWithAt, ctxBase);
+        let nextState = resEvent.state;
+        const regenPolicy = buildRegenPolicy(currentState, eventWithAt, nextState);
+        if (regenPolicy) {
+          resEvent = dispatch(currentState, eventWithAt, { ...ctxBase, regenPolicy });
+          nextState = resEvent.state;
+        }
+        const incidentApplied = applyIncidentMode(prevState, nextState, eventWithAt.type, incidentModeEnabled);
+        if (incidentApplied !== nextState) {
+          nextState = incidentApplied;
+          resEvent = { ...resEvent, state: nextState };
+        }
 
         if (!resEvent.effects.persist && !resEvent.logEvent) {
           state = nextState;
@@ -1752,9 +2223,19 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "profile_required", "Profile required before updating timezone");
         return;
       }
-      const userProfile = normalizeUserProfile({ ...state.userProfile, timezone: validation.value.timezone });
+      const nextProfile = {
+        ...state.userProfile,
+        timezone: validation.value.timezone,
+        dayBoundaryHour:
+          validation.value.dayBoundaryHour == null ? state.userProfile.dayBoundaryHour : validation.value.dayBoundaryHour,
+      };
+      const userProfile = normalizeUserProfile(nextProfile);
       await dispatchForUser({ type: "BASELINE_SAVED", payload: { userProfile } });
-      send(200, { ok: true, timezone: state.userProfile?.timezone || userProfile.timezone });
+      send(200, {
+        ok: true,
+        timezone: state.userProfile?.timezone || userProfile.timezone,
+        dayBoundaryHour: state.userProfile?.dayBoundaryHour ?? userProfile.dayBoundaryHour,
+      });
       return;
     }
 
@@ -1838,19 +2319,23 @@ const server = http.createServer(async (req, res) => {
         send(200, cached);
         return;
       }
-      const date = url.searchParams.get("date");
-      if (date) {
-        const validation = validateDateParam(date, "date");
+      const dateParam = url.searchParams.get("date");
+      const todayISO = getTodayISOForProfile(state.userProfile);
+      const weekAnchorISO = dateParam || todayISO;
+      if (dateParam) {
+        const validation = validateDateParam(dateParam, "date");
         if (!validation.ok) {
           sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
           return;
         }
       }
       await dispatchForUser({ type: "ENSURE_WEEK", payload: {} });
-      if (date) {
-        await dispatchForUser({ type: "WEEK_REBUILD", payload: { weekAnchorISO: date } });
+      if (weekAnchorISO && weekAnchorISO !== state.weekPlan?.startDateISO) {
+        await dispatchForUser({ type: "WEEK_REBUILD", payload: { weekAnchorISO } });
       }
-      const payload = { ok: true, weekPlan: state.weekPlan };
+      const validWeek = await ensureValidWeekPlan(userId, state, "plan_week_invariant", requestId);
+      state = validWeek.state;
+      const payload = { ok: true, weekPlan: validWeek.weekPlan };
       setCachedResponse(userId, pathname, url.search, payload);
       send(200, payload);
       return;
@@ -1862,43 +2347,39 @@ const server = http.createServer(async (req, res) => {
         send(200, cached);
         return;
       }
-      const dateISO = url.searchParams.get("date");
-      if (!dateISO) {
-        sendError(res, 400, "date_required", "date query param is required", "date");
-        return;
-      }
+      const dateParam = url.searchParams.get("date");
+      const dateISO = dateParam || getTodayISOForProfile(state.userProfile);
       const validation = validateDateParam(dateISO, "date");
       if (!validation.ok) {
         sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
         return;
       }
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
-      const day = toDayContract(state, dateISO, domain);
-      const payload = { ok: true, day };
+      const ensured = await ensureValidDayContract(userId, state, dateISO, "plan_day_invariant", requestId);
+      state = ensured.state;
+      const payload = { ok: true, day: ensured.day };
       setCachedResponse(userId, pathname, url.search, payload);
       send(200, payload);
       return;
     }
 
     if (pathname === "/v1/plan/why" && req.method === "GET") {
-      const dateISO = url.searchParams.get("date");
-      if (!dateISO) {
-        sendError(res, 400, "date_required", "date query param is required", "date");
-        return;
-      }
+      const dateParam = url.searchParams.get("date");
+      const dateISO = dateParam || getTodayISOForProfile(state.userProfile);
       const validation = validateDateParam(dateISO, "date");
       if (!validation.ok) {
         sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
         return;
       }
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
-      const day = toDayContract(state, dateISO, domain);
+      const ensured = await ensureValidDayContract(userId, state, dateISO, "plan_why_invariant", requestId);
+      state = ensured.state;
       const summaries = await listPlanChangeSummaries(userId, dateISO, 1);
       const latestSummary = summaries.length ? summaries[0] : null;
       send(200, {
         ok: true,
         dateISO,
-        why: day?.why || null,
+        why: ensured.day?.why || null,
         changeSummary: latestSummary,
       });
       return;
@@ -1960,6 +2441,20 @@ const server = http.createServer(async (req, res) => {
       const limitRaw = Number(url.searchParams.get("limit") || 10);
       const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 50) : 10;
       const items = await listPlanChangeSummaries(userId, dateISO, limit);
+      send(200, { ok: true, items });
+      return;
+    }
+
+    if (pathname === "/v1/changelog" && req.method === "GET") {
+      const audienceParam = String(url.searchParams.get("audience") || "user").toLowerCase();
+      const audience = audienceParam === "admin" ? "admin" : "user";
+      if (audience !== "user") {
+        sendError(res, 403, "forbidden", "User changelog only");
+        return;
+      }
+      const limitRaw = Number(url.searchParams.get("limit") || 5);
+      const limit = Number.isFinite(limitRaw) ? Math.min(Math.max(limitRaw, 1), 20) : 5;
+      const items = await listChangelogEntries({ audience: "user", limit });
       send(200, { ok: true, items });
       return;
     }
@@ -2299,6 +2794,47 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/admin/changelog" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const version = typeof body?.version === "string" ? body.version.trim() : "";
+      const title = typeof body?.title === "string" ? body.title.trim() : "";
+      const notes = typeof body?.notes === "string" ? body.notes.trim() : "";
+      const audienceRaw = typeof body?.audience === "string" ? body.audience.trim().toLowerCase() : "admin";
+      const audience = audienceRaw === "user" ? "user" : "admin";
+      if (!version) {
+        sendError(res, 400, "version_required", "version is required", "version");
+        return;
+      }
+      if (!title) {
+        sendError(res, 400, "title_required", "title is required", "title");
+        return;
+      }
+      if (!notes) {
+        sendError(res, 400, "notes_required", "notes is required", "notes");
+        return;
+      }
+      const entry = await insertChangelogEntry({ version, title, notes, audience });
+      await auditAdmin("changelog.create", entry.id, { version, audience });
+      send(200, { ok: true, entry });
+      return;
+    }
+
+    if (pathname === "/v1/admin/changelog" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const pageRaw = Number(url.searchParams.get("page") || 1);
+      const pageSizeRaw = Number(url.searchParams.get("pageSize") || 20);
+      const page = Number.isFinite(pageRaw) ? Math.max(pageRaw, 1) : 1;
+      const pageSize = Number.isFinite(pageSizeRaw) ? Math.min(Math.max(pageSizeRaw, 1), 100) : 20;
+      const audienceParam = url.searchParams.get("audience");
+      const audience = audienceParam === "user" || audienceParam === "admin" ? audienceParam : null;
+      const items = await listChangelogEntries({ audience, page, pageSize });
+      send(200, { ok: true, items, page, pageSize, audience });
+      return;
+    }
+
     if (pathname === "/v1/admin/flags" && req.method === "GET") {
       const email = await requireAdmin();
       if (!email) return;
@@ -2323,6 +2859,7 @@ const server = http.createServer(async (req, res) => {
       }
       const updated = await setFeatureFlag(key, value);
       featureFlagsCache.data = null;
+      await auditAdmin("flags.patch", key, { key, value: String(value) });
       send(200, { ok: true, flag: updated });
       return;
     }
@@ -2369,7 +2906,127 @@ const server = http.createServer(async (req, res) => {
       }
       const updated = await upsertParameter(key, value);
       resetParametersCache();
+      await auditAdmin("parameters.patch", key, { key });
       send(200, { ok: true, key, version: updated.version, updatedAt: updated.updatedAt });
+      return;
+    }
+
+    if (pathname === "/v1/admin/packs" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const packs = await listContentPacks();
+      send(200, { ok: true, packs });
+      return;
+    }
+
+    const packMatch = pathname.match(/^\/v1\/admin\/packs\/([^/]+)$/);
+    if (packMatch && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const packId = packMatch[1];
+      const pack = await getContentPack(packId);
+      if (!pack) {
+        sendError(res, 404, "not_found", "Pack not found");
+        return;
+      }
+      send(200, { ok: true, pack });
+      return;
+    }
+    if (packMatch && req.method === "PATCH") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const packId = packMatch[1];
+      const body = await parseJson(req);
+      const weights = parseMaybeJson(body.weights_json ?? body.weights, "weights");
+      const constraints = parseMaybeJson(body.constraints_json ?? body.constraints, "constraints");
+      if (!validatePackWeightsShape(weights)) {
+        sendError(res, 400, "weights_invalid", "weights must include tag weight maps", "weights");
+        return;
+      }
+      const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : packId;
+      const updated = await upsertContentPack({ id: packId, name, weights, constraints });
+      resetParametersCache();
+      await auditAdmin("packs.patch", packId, { packId });
+      send(200, { ok: true, pack: updated });
+      return;
+    }
+
+    if (pathname === "/v1/admin/preview/matrix" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const flags = await getFeatureFlags();
+      const paramsState = await getParameters();
+      const packs = await listContentPacks();
+      const packIds = Array.isArray(body.packIds) && body.packIds.length
+        ? body.packIds.filter((id) => typeof id === "string")
+        : packs.map((pack) => pack.id);
+      const profiles = Array.isArray(body.profiles) && body.profiles.length
+        ? body.profiles.filter((id) => typeof id === "string")
+        : ALL_PROFILES.slice();
+      const defaultBuckets = paramsState.map?.timeBuckets?.allowed || [5, 10, 15, 20, 30, 45, 60];
+      const timeBuckets = Array.isArray(body.timeBuckets) && body.timeBuckets.length ? body.timeBuckets : defaultBuckets;
+      const baseInputs = body.baseInputs || {};
+      const baseSleep = Number(baseInputs.sleepQuality ?? 6);
+      const baseStress = Number(baseInputs.stress ?? 5);
+      const baseEnergy = Number(baseInputs.energy ?? 6);
+      const matrix = [];
+      const sortedProfiles = profiles.slice().sort();
+      const sortedPacks = packIds.slice().sort();
+      const sortedBuckets = timeBuckets.slice().map((n) => Number(n)).filter((n) => Number.isFinite(n)).sort((a, b) => a - b);
+
+      for (const profile of sortedProfiles) {
+        for (const packId of sortedPacks) {
+          for (const timeAvailableMin of sortedBuckets) {
+            const simulatedUser = normalizeUserProfile({
+              contentPack: packId,
+              timezone: DEFAULT_TIMEZONE,
+              dayBoundaryHour: 4,
+              preferredWorkoutWindows: ["PM"],
+              busyDays: [],
+            });
+            const dateISO = getTodayISOForProfile(simulatedUser);
+            const checkIn = {
+              dateISO,
+              stress: baseStress,
+              sleepQuality: baseSleep,
+              energy: baseEnergy,
+              timeAvailableMin,
+            };
+            const toggles = resolveRuleToggles(normalizeState({ userProfile: simulatedUser }), flags);
+            const qualityRules = qualityRulesFromToggles(toggles);
+            const { dayPlan } = domain.buildDayPlan({
+              user: simulatedUser,
+              dateISO,
+              checkIn,
+              checkInsByDate: { [dateISO]: checkIn },
+              completionsByDate: {},
+              feedback: [],
+              weekContext: { busyDays: simulatedUser.busyDays || [], recentNoveltyGroups: [] },
+              overrides: { profileOverride: profile },
+              qualityRules,
+              params: paramsState.map,
+            });
+            matrix.push({
+              profile,
+              timeAvailableMin,
+              packId,
+              picked: {
+                workoutId: dayPlan?.workout?.id || null,
+                resetId: dayPlan?.reset?.id || null,
+                nutritionId: dayPlan?.nutrition?.id || null,
+              },
+              meta: {
+                confidence: dayPlan?.meta?.confidence ?? null,
+                relevance: dayPlan?.meta?.relevance ?? null,
+                appliedRulesTop: (dayPlan?.meta?.appliedRules || []).slice(0, 3),
+              },
+            });
+          }
+        }
+      }
+
+      send(200, { ok: true, matrix });
       return;
     }
 
@@ -2416,6 +3073,7 @@ const server = http.createServer(async (req, res) => {
       }
       const updated = await upsertCohortParameter(cohortId, key, value);
       resetParametersCache();
+      await auditAdmin("cohorts.parameters.patch", cohortId, { cohortId, key });
       send(200, { ok: true, cohortId, key, version: updated.version, updatedAt: updated.updatedAt });
       return;
     }
@@ -2436,7 +3094,205 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const result = await setUserCohort(targetUserId, cohortId, body?.overridden === true);
+      await auditAdmin("users.cohort.patch", targetUserId, { cohortId });
       send(200, { ok: true, ...result });
+      return;
+    }
+
+    if (pathname === "/v1/admin/users/search" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const emailQuery = url.searchParams.get("email");
+      if (!emailQuery) {
+        sendError(res, 400, "email_required", "email is required", "email");
+        return;
+      }
+      const result = await searchUserByEmail(emailQuery);
+      if (!result) {
+        sendError(res, 404, "not_found", "User not found");
+        return;
+      }
+      send(200, { ok: true, user: result });
+      return;
+    }
+
+    const debugBundleMatch = pathname.match(/^\/v1\/admin\/users\/([^/]+)\/debug-bundle$/);
+    if (debugBundleMatch && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const targetUserId = sanitizeUserId(debugBundleMatch[1]);
+      if (targetUserId !== debugBundleMatch[1]) {
+        sendError(res, 400, "userId_invalid", "userId is invalid", "userId");
+        return;
+      }
+      const snapshot = await getUserState(targetUserId);
+      if (!snapshot?.state) {
+        sendError(res, 404, "not_found", "User state not found");
+        return;
+      }
+      let baseState = normalizeState(deepClone(snapshot.state));
+      try {
+        validateState(baseState);
+      } catch {
+        baseState = normalizeState({});
+      }
+      const events = await getUserEventsRecent(targetUserId, 30);
+      const todayISO = getTodayISOForProfile(baseState.userProfile);
+      const daySummaries = [];
+      for (let i = 0; i < 7; i += 1) {
+        const dateISO = domain.addDaysISO(todayISO, -i);
+        const history = await listDayPlanHistory(targetUserId, dateISO, 1);
+        if (history?.length) {
+          daySummaries.push(summarizeDayContract(history[0].day));
+        }
+      }
+      const stressKeys = Object.keys(baseState.lastStressStateByDate || {})
+        .sort()
+        .slice(-7);
+      const stress = stressKeys.map((key) => ({
+        dateISO: key,
+        drivers: (baseState.lastStressStateByDate[key]?.drivers || []).slice(0, 4),
+        recoveryDebt: baseState.lastStressStateByDate[key]?.recoveryDebt ?? null,
+      }));
+      const redacted = {
+        userId: targetUserId,
+        profile: redactSensitive(baseState.userProfile),
+        checkIns: (baseState.checkIns || []).slice(0, 14).map(numericCheckIn),
+        daySummaries,
+        events: events
+          .slice()
+          .reverse()
+          .map((evt) => ({ type: evt.type, atISO: evt.atISO, payload: redactSensitive(evt.payload) })),
+        stress,
+      };
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const bundle = await insertDebugBundle({ userId: targetUserId, expiresAt, redacted });
+      await auditAdmin("users.debug_bundle.create", targetUserId, { bundleId: bundle.id });
+      send(200, { ok: true, bundleId: bundle.id, expiresAt: bundle.expiresAt });
+      return;
+    }
+
+    const debugBundleReadMatch = pathname.match(/^\/v1\/admin\/debug-bundles\/([^/]+)$/);
+    if (debugBundleReadMatch && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const bundleId = debugBundleReadMatch[1];
+      const bundle = await getDebugBundle(bundleId);
+      if (!bundle) {
+        sendError(res, 404, "not_found", "Debug bundle not found");
+        return;
+      }
+      send(200, { ok: true, bundle });
+      return;
+    }
+
+    const replayMatch = pathname.match(/^\/v1\/admin\/users\/([^/]+)\/replay-sandbox$/);
+    if (replayMatch && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const targetUserId = sanitizeUserId(replayMatch[1]);
+      if (targetUserId !== replayMatch[1]) {
+        sendError(res, 400, "userId_invalid", "userId is invalid", "userId");
+        return;
+      }
+      const snapshot = await getUserState(targetUserId);
+      let sandboxState = normalizeState(deepClone(snapshot?.state || {}));
+      try {
+        validateState(sandboxState);
+      } catch {
+        sandboxState = normalizeState({});
+      }
+      const flags = await getFeatureFlags();
+      const paramsState = await getParameters(targetUserId);
+      const paramsMeta = { cohortId: paramsState.cohortId || null, versions: paramsState.versionsBySource || {} };
+      const events = (await getUserEventsRecent(targetUserId, 30))
+        .slice()
+        .sort((a, b) => (a.atISO || "").localeCompare(b.atISO || ""));
+
+      for (const evt of events) {
+        const todayISO = dateISOForAt(sandboxState.userProfile, evt.atISO);
+        const ctx = {
+          domain,
+          now: { todayISO, atISO: evt.atISO },
+          ruleToggles: resolveRuleToggles(sandboxState, flags),
+          scenarios: { getScenarioById },
+          isDev: isDevRoutesEnabled,
+          params: paramsState.map,
+          paramsMeta,
+        };
+        const resEvent = reduceEvent(sandboxState, { type: evt.type, payload: evt.payload, atISO: evt.atISO }, ctx);
+        sandboxState = appendLogEvent(resEvent.nextState, resEvent.logEvent);
+      }
+
+      const sandboxTodayISO = getTodayISOForProfile(sandboxState.userProfile);
+      const ensureCtx = {
+        domain,
+        now: { todayISO: sandboxTodayISO, atISO: new Date().toISOString() },
+        ruleToggles: resolveRuleToggles(sandboxState, flags),
+        scenarios: { getScenarioById },
+        isDev: isDevRoutesEnabled,
+        params: paramsState.map,
+        paramsMeta,
+      };
+      const ensured = reduceEvent(sandboxState, { type: "ENSURE_WEEK", payload: {}, atISO: ensureCtx.now.atISO }, ensureCtx);
+      sandboxState = appendLogEvent(ensured.nextState, ensured.logEvent);
+
+      const affectedDates = new Set([sandboxTodayISO]);
+      events.forEach((evt) => {
+        const dateISO = evt.payload?.dateISO || evt.payload?.checkIn?.dateISO;
+        if (dateISO) affectedDates.add(dateISO);
+      });
+
+      const diffs = [];
+      const dates = Array.from(affectedDates).sort();
+      for (const dateISO of dates) {
+        if (!sandboxState.weekPlan || !sandboxState.weekPlan.days?.some((day) => day.dateISO === dateISO)) {
+          const rebuildCtx = {
+            ...ensureCtx,
+            now: { todayISO: dateISO, atISO: ensureCtx.now.atISO },
+          };
+          const rebuilt = reduceEvent(
+            sandboxState,
+            { type: "WEEK_REBUILD", payload: { weekAnchorISO: dateISO }, atISO: rebuildCtx.now.atISO },
+            rebuildCtx
+          );
+          sandboxState = appendLogEvent(rebuilt.nextState, rebuilt.logEvent);
+        }
+        const history = await listDayPlanHistory(targetUserId, dateISO, 1);
+        const storedDay = history?.[0]?.day || null;
+        const sandboxDay = toDayContract(sandboxState, dateISO, domain);
+        if (!storedDay || !sandboxDay) continue;
+        const diff = diffDayContracts(storedDay, sandboxDay);
+        if (diff.changes?.length) {
+          diffs.push({
+            dateISO,
+            changeCount: diff.changes.length,
+            changes: diff.changes.slice(0, 20),
+          });
+        }
+      }
+
+      let sandboxDay = null;
+      try {
+        sandboxDay = toDayContract(sandboxState, sandboxTodayISO, domain);
+        assertDayContract(sandboxDay);
+      } catch {
+        sandboxDay = null;
+      }
+
+      await auditAdmin("users.replay_sandbox", targetUserId, { eventsReplayed: events.length });
+      send(200, {
+        ok: true,
+        diffs,
+        sandbox: {
+          day: sandboxDay,
+          summary: {
+            eventsReplayed: events.length,
+            affectedDates: dates,
+            todayISO: sandboxTodayISO,
+          },
+        },
+      });
       return;
     }
 
@@ -2518,6 +3374,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       await applyLibraryFromDb();
+      await auditAdmin("content.disable", `${kind}:${id}`, { kind, id });
       send(200, { ok: true, item: updated });
       return;
     }
@@ -2566,12 +3423,21 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "field_invalid", "minutes must be number", "minutes");
         return;
       }
+      const existingItems = await listContentItems(kind, true);
+      const existing = existingItems.find((item) => item.id === id);
+      if (!existing) {
+        sendError(res, 404, "not_found", "Content item not found");
+        return;
+      }
+      const merged = { ...existing, ...patch, id, kind };
+      validateContentItemOrThrow(kind, merged);
       const updated = await patchContentItem(kind, id, patch);
       if (!updated) {
         sendError(res, 404, "not_found", "Content item not found");
         return;
       }
       await applyLibraryFromDb();
+      await auditAdmin("content.patch", `${kind}:${id}`, { kind, id, fields: Object.keys(patch) });
       send(200, { ok: true, item: updated });
       return;
     }
@@ -2620,8 +3486,12 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "item_invalid", "item is required", "item");
         return;
       }
-      const saved = await upsertContentItem(kind, item);
+      const id = item.id || crypto.randomUUID();
+      const candidate = { ...item, id, kind };
+      validateContentItemOrThrow(kind, candidate);
+      const saved = await upsertContentItem(kind, candidate);
       await applyLibraryFromDb();
+      await auditAdmin("content.create", `${kind}:${saved.id}`, { kind, id: saved.id });
       send(200, { ok: true, item: saved });
       return;
     }
@@ -2635,15 +3505,26 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "items_invalid", "items must be a non-empty array", "items");
         return;
       }
-      const saved = [];
+      const candidates = [];
       for (const entry of items) {
         const kind = entry?.kind;
         const item = entry?.item;
-        if (!["workout", "nutrition", "reset"].includes(kind) || !item) continue;
-        const record = await upsertContentItem(kind, item);
+        if (!["workout", "nutrition", "reset"].includes(kind) || !item) {
+          sendError(res, 400, "items_invalid", "Each item must include kind and item");
+          return;
+        }
+        const id = item.id || crypto.randomUUID();
+        const candidate = { ...item, id, kind };
+        validateContentItemOrThrow(kind, candidate);
+        candidates.push({ kind, candidate });
+      }
+      const saved = [];
+      for (const { kind, candidate } of candidates) {
+        const record = await upsertContentItem(kind, candidate);
         saved.push(record);
       }
       await applyLibraryFromDb();
+      await auditAdmin("content.bulk", "content", { count: saved.length });
       send(200, { ok: true, items: saved });
       return;
     }
@@ -2863,6 +3744,7 @@ const server = http.createServer(async (req, res) => {
         results.push({ kind, id, ok: Boolean(updated) });
       }
       await applyLibraryFromDb();
+      await auditAdmin("actions.disable_items", "content", { count: results.length });
       send(200, { ok: true, results });
       return;
     }
@@ -2896,6 +3778,7 @@ const server = http.createServer(async (req, res) => {
         results.push({ kind, id, ok: Boolean(updated), priority: nextPriority });
       }
       await applyLibraryFromDb();
+      await auditAdmin("actions.bump_priority", "content", { count: results.length });
       send(200, { ok: true, results });
       return;
     }
@@ -2904,6 +3787,7 @@ const server = http.createServer(async (req, res) => {
       const email = await requireAdmin();
       if (!email) return;
       const backup = await createBackup();
+      await auditAdmin("db.backup", backup?.id || "backup", {});
       send(200, { ok: true, backup });
       return;
     }
@@ -2923,6 +3807,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const restored = await restoreBackup(backupId);
+      await auditAdmin("db.restore", backupId, {});
       send(200, { ok: true, backupId: restored.backupId });
       return;
     }
@@ -2937,6 +3822,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const result = await taskScheduler.runTask(task);
+      await auditAdmin("tasks.run", task, {});
       send(200, { ok: true, task, result });
       return;
     }
@@ -2955,10 +3841,11 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const repaired = await repairUserState(userIdParam, "manual_admin");
-      if (!repaired.ok) {
+      if (!repaired.repaired) {
         sendError(res, 500, "repair_failed", "Unable to repair user state");
         return;
       }
+      await auditAdmin("repair.user", userIdParam, { method: repaired.method });
       send(200, { ok: true, repaired: true, userId: userIdParam });
       return;
     }
@@ -2975,15 +3862,17 @@ const server = http.createServer(async (req, res) => {
         res.livenewUserId = replayUserId;
 
         let replayState = normalizeState(validation.value.initialState || {});
-        const now = { todayISO: domain.isoToday(), atISO: new Date().toISOString() };
+        const nowAtISO = new Date().toISOString();
+        const now = { atISO: nowAtISO, todayISO: dateISOForAt(replayState.userProfile, nowAtISO) };
         const flags = await getFeatureFlags();
         const paramsState = await getParameters();
 
         for (const evt of validation.value.events) {
           const atISO = evt.atISO || now.atISO;
+          const todayISO = dateISOForAt(replayState.userProfile, atISO);
           const ctx = {
             domain,
-            now: { todayISO: now.todayISO, atISO },
+            now: { todayISO, atISO },
             ruleToggles: resolveRuleToggles(replayState, flags),
             scenarios: { getScenarioById },
             isDev: true,
@@ -2993,7 +3882,8 @@ const server = http.createServer(async (req, res) => {
           replayState = appendLogEvent(result.nextState, result.logEvent);
         }
 
-        const day = toDayContract(replayState, now.todayISO, domain);
+        const finalTodayISO = dateISOForAt(replayState.userProfile, now.atISO);
+        const day = toDayContract(replayState, finalTodayISO, domain);
         const progress = domain.computeProgress({
           checkIns: replayState.checkIns || [],
           weekPlan: replayState.weekPlan,
@@ -3057,9 +3947,10 @@ const server = http.createServer(async (req, res) => {
         const flags = await getFeatureFlags();
         const paramsState = await getParameters();
         for (const evt of events) {
+          const todayISO = dateISOForAt(rebuilt.userProfile, evt.atISO);
           const ctx = {
             domain,
-            now: { todayISO: domain.isoToday(), atISO: evt.atISO },
+            now: { todayISO, atISO: evt.atISO },
             ruleToggles: resolveRuleToggles(rebuilt, flags),
             scenarios: { getScenarioById },
             isDev: true,
@@ -3081,7 +3972,7 @@ const server = http.createServer(async (req, res) => {
 
       if (pathname === "/v1/dev/repair" && req.method === "POST") {
         const repaired = await repairUserState(userId, "manual_dev");
-        if (!repaired.ok) {
+        if (!repaired.repaired) {
           sendError(res, 500, "repair_failed", "Unable to repair user state");
           return;
         }
@@ -3168,7 +4059,7 @@ const server = http.createServer(async (req, res) => {
         const body = await parseJson(req);
         const scenarioId = body.scenarioId;
         await dispatchForUser({ type: "APPLY_SCENARIO", payload: { scenarioId } });
-        const todayISO = domain.isoToday();
+        const todayISO = getTodayISOForProfile(state.userProfile);
         const day = toDayContract(state, todayISO, domain);
         send(200, { ok: true, scenarioId, day });
         return;
@@ -3184,7 +4075,7 @@ const server = http.createServer(async (req, res) => {
         const paramsState = await getParameters();
         for (const id of ids) {
           const resCheck = await runSnapshotCheck(id, state, {
-            now: { todayISO: domain.isoToday(), atISO: new Date().toISOString() },
+            now: { todayISO: getTodayISOForProfile(state.userProfile), atISO: new Date().toISOString() },
             ruleToggles: resolveRuleToggles(state, flags),
             paramsVersion: paramsState.versions,
             params: paramsState.map,

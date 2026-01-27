@@ -11,7 +11,9 @@
     "web": "expo start --web",
     "push": "git add -A && git commit -m 'Update' && git push origin main",
     "deploy": "npm run push",
-    "test:integration": "node scripts/integration.test.js"
+    "test:integration": "node scripts/integration.test.js",
+    "test:golden": "node scripts/golden.snapshots.js",
+    "test": "npm run test:integration && npm run test:golden"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",

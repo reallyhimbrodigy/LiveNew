@@ -1,4 +1,4 @@
-import { listParameters, getUserCohort, listCohortParameters } from "../state/db.js";
+import { listParameters, getUserCohort, listCohortParameters, listContentPacks } from "../state/db.js";
 import { DEFAULT_PARAMETERS } from "../domain/params.js";
 
 let cache = { map: DEFAULT_PARAMETERS, versions: {}, ok: true, errors: [], loadedAt: 0, versionsBySource: { base: {}, cohort: {} } };
@@ -133,6 +133,28 @@ export async function getParameters(userId = null) {
       baseVersions[key] = baseVersions[key] || 0;
     }
   });
+
+  try {
+    const packs = await listContentPacks();
+    if (packs.length) {
+      const weights = {};
+      const constraints = {};
+      packs.forEach((pack) => {
+        weights[pack.id] = pack.weights || {};
+        constraints[pack.id] = pack.constraints || {};
+      });
+      if (validateContentPackWeights(weights)) {
+        map.contentPackWeights = weights;
+      } else {
+        errors.push("Invalid content packs: weights");
+      }
+      map.contentPackConstraints = constraints;
+      versions.contentPackWeights = versions.contentPackWeights || 0;
+      baseVersions.contentPackWeights = baseVersions.contentPackWeights || 0;
+    }
+  } catch {
+    errors.push("Failed to load content packs");
+  }
 
   let cohortId = null;
   if (userId) {
