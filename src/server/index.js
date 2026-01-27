@@ -196,6 +196,33 @@ const ALL_PROFILES = [
   "DepletedBurnedOut",
   "RestlessAnxious",
 ];
+const ROUTE_REGEX_PATTERNS = [
+  "^/v1/content/prefs/([^/]+)$",
+  "^/v1/community/resets/([^/]+)/respond$",
+  "^/v1/community/resets/([^/]+)$",
+  "^/v1/reminders/([^/]+)/(dismiss|complete)$",
+  "^/v1/admin/validator/runs/([^/]+)$",
+  "^/v1/admin/snapshots/([^/]+)/release$",
+  "^/v1/admin/snapshots/([^/]+)/rollback$",
+  "^/v1/admin/snapshots/([^/]+)$",
+  "^/v1/admin/community/([^/]+)/(approve|reject)$",
+  "^/v1/admin/packs/([^/]+)$",
+  "^/v1/admin/experiments/([^/]+)$",
+  "^/v1/admin/experiments/([^/]+)/start$",
+  "^/v1/admin/experiments/([^/]+)/stop$",
+  "^/v1/admin/experiments/([^/]+)/assignments$",
+  "^/v1/admin/cohorts/([^/]+)/parameters$",
+  "^/v1/admin/users/([^/]+)/cohort$",
+  "^/v1/admin/users/([^/]+)/repin-snapshot$",
+  "^/v1/admin/users/([^/]+)/debug-bundle$",
+  "^/v1/admin/debug-bundles/([^/]+)$",
+  "^/v1/admin/users/([^/]+)/replay-sandbox$",
+  "^/v1/admin/content/stage/(workout|nutrition|reset)/([^/]+)$",
+  "^/v1/admin/content/enable/(workout|nutrition|reset)/([^/]+)$",
+  "^/v1/admin/content/disable/(workout|nutrition|reset)/([^/]+)$",
+  "^/v1/admin/content/(workout|nutrition|reset)/([^/]+)/disable$",
+  "^/v1/admin/content/(workout|nutrition|reset)/([^/]+)$",
+];
 
 let citationsCache = null;
 async function loadCitations() {
@@ -208,6 +235,16 @@ async function loadCitations() {
     citationsCache = [];
   }
   return citationsCache;
+}
+
+function validateRouteRegexPatterns() {
+  ROUTE_REGEX_PATTERNS.forEach((pattern) => {
+    try {
+      new RegExp(pattern);
+    } catch (err) {
+      throw new Error(`Invalid route regex pattern: ${pattern}`);
+    }
+  });
 }
 
 const userStates = new Map();
@@ -263,6 +300,10 @@ const CACHE_TTLS = {
 };
 const LATENCY_ROUTES = new Set(["GET /v1/plan/day", "GET /v1/rail/today", "POST /v1/checkin", "POST /v1/signal"]);
 const ACCESS_TOKEN_TTL_SEC = 15 * 60;
+
+if (config.isDevLike) {
+  validateRouteRegexPatterns();
+}
 
 const secretState = ensureSecretKey(config);
 
@@ -3933,7 +3974,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    const prefsDeleteMatch = pathname.match(/^\\/v1\\/content\\/prefs\\/([^/]+)$/);
+    const prefsDeleteMatch = pathname.match(/^\/v1\/content\/prefs\/([^/]+)$/);
     if (prefsDeleteMatch && req.method === "DELETE") {
       const itemId = prefsDeleteMatch[1];
       if (!itemId) {
