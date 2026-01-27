@@ -39,7 +39,9 @@
     <section class="card hidden" id="admin-panel">
       <div id="admin-validator-banner" class="banner hidden"></div>
       <div class="tabs">
-        <button class="tab active" data-tab="content" data-i18n="admin.content">Content</button>
+        <button class="tab active" data-tab="ops" data-i18n="admin.ops">Ops</button>
+        <button class="tab" data-tab="snapshots" data-i18n="admin.snapshots">Snapshots</button>
+        <button class="tab" data-tab="content" data-i18n="admin.content">Content</button>
         <button class="tab" data-tab="supplyChain" data-i18n="admin.supplyChain">Supply chain</button>
         <button class="tab" data-tab="worst" data-i18n="admin.worst">Worst items</button>
         <button class="tab" data-tab="heatmap" data-i18n="admin.heatmap">Heatmap</button>
@@ -55,7 +57,94 @@
         <button class="tab" data-tab="changelog" data-i18n="admin.changelog">Changelog</button>
       </div>
 
-      <div class="tab-panel" data-panel="content">
+      <div class="tab-panel" data-panel="ops">
+        <div class="row">
+          <button id="ops-refresh" data-i18n="admin.refresh">Refresh</button>
+          <span id="ops-status" class="muted"></span>
+        </div>
+        <div class="grid-2">
+          <div class="card">
+            <h3 data-i18n="admin.validatorFailures">Validator failures</h3>
+            <div id="ops-validator-list" class="list"></div>
+          </div>
+          <div class="card">
+            <h3 data-i18n="admin.worst">Worst items</h3>
+            <div id="ops-worst-list" class="list"></div>
+          </div>
+          <div class="card">
+            <h3 data-i18n="admin.topErrors">Top errors</h3>
+            <div id="ops-errors-list" class="list"></div>
+          </div>
+          <div class="card">
+            <h3 data-i18n="admin.p95Latency">p95 latency</h3>
+            <table class="table" id="ops-latency-table">
+              <thead>
+                <tr>
+                  <th data-i18n="admin.route">Route</th>
+                  <th data-i18n="admin.p95">p95</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="admin.releaseChecklist">Release checklist</h3>
+          <div id="ops-release-checklist" class="list"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="admin.snapshots">Snapshots</h3>
+          <div id="ops-snapshot-summary" class="list"></div>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" data-panel="snapshots">
+        <div class="row">
+          <label><span data-i18n="admin.note">Note</span> <input id="snapshot-note" type="text" /></label>
+          <button id="snapshot-create" data-i18n="admin.snapshotCreate">Create snapshot</button>
+          <button id="snapshot-load" class="ghost" data-i18n="admin.load">Load</button>
+          <span id="snapshot-status" class="muted"></span>
+        </div>
+        <div class="split">
+          <div class="list" id="snapshot-list"></div>
+          <div class="editor" id="snapshot-detail-panel">
+            <h3 data-i18n="admin.snapshotDetails">Snapshot details</h3>
+            <pre id="snapshot-detail" class="list-item"></pre>
+            <div class="row">
+              <button id="snapshot-release" data-i18n="admin.snapshotRelease">Release</button>
+              <button id="snapshot-rollback" class="danger" data-i18n="admin.snapshotRollback">Rollback</button>
+            </div>
+            <div class="row">
+              <label><span data-i18n="admin.snapshotId">Snapshot id</span> <input id="snapshot-rollback-id" type="text" /></label>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="admin.snapshotDiff">Diff</h3>
+          <div class="row">
+            <label><span data-i18n="admin.snapshotFrom">From</span>
+              <select id="snapshot-diff-from"></select>
+            </label>
+            <label><span data-i18n="admin.snapshotTo">To</span>
+              <select id="snapshot-diff-to"></select>
+            </label>
+            <button id="snapshot-diff-run" class="ghost" data-i18n="admin.runDiff">Run diff</button>
+          </div>
+          <pre id="snapshot-diff-output" class="list-item"></pre>
+        </div>
+        <div class="card">
+          <h3 data-i18n="admin.repinSnapshot">Repin user</h3>
+          <div class="row">
+            <label><span data-i18n="admin.userId">user id</span> <input id="snapshot-repin-user" type="text" /></label>
+            <label><span data-i18n="admin.snapshotId">Snapshot id</span> <input id="snapshot-repin-id" type="text" /></label>
+            <label><span data-i18n="admin.reason">Reason</span> <input id="snapshot-repin-reason" type="text" /></label>
+            <button id="snapshot-repin" class="ghost" data-i18n="admin.assign">Assign</button>
+          </div>
+          <pre id="snapshot-repin-output" class="list-item"></pre>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" data-panel="content">
         <div class="row">
           <label><span data-i18n="admin.kind">Kind</span>
             <select id="admin-kind">

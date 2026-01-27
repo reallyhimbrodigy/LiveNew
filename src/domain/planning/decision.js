@@ -124,6 +124,7 @@ export function buildDayPlan({
   completionsByDate,
   feedback,
   preferences,
+  modelStamp,
   weekContext,
   overrides,
   qualityRules,
@@ -458,6 +459,7 @@ export function buildDayPlan({
     },
     qualityGate: gateResult.qualityGate,
     safetyLevel: safety.level,
+    modelStamp: modelStamp || null,
   };
 
   dayDraft.pipelineVersion = meta.pipelineVersion;

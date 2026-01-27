@@ -853,6 +853,7 @@ export async function cleanupOldEvents(retentionDays = 90) {
 
 export async function upsertDecisionTrace(userId, dateISO, trace) {
   const now = new Date().toISOString();
+  const hasModelStamp = hasColumn("decision_traces", "model_stamp_json");
   const payload = {
     pipeline_version: trace.pipelineVersion,
     inputs_json: JSON.stringify(trace.inputs),
@@ -860,29 +861,51 @@ export async function upsertDecisionTrace(userId, dateISO, trace) {
     selected_json: JSON.stringify(trace.selected),
     applied_rules_json: JSON.stringify(trace.appliedRules),
     rationale_json: JSON.stringify(trace.rationale),
+    model_stamp_json: JSON.stringify(trace.modelStamp || null),
   };
-  getDb()
-    .prepare(
-      "INSERT INTO decision_traces (user_id, date_iso, pipeline_version, inputs_json, stress_state_json, selected_json, applied_rules_json, rationale_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, date_iso) DO UPDATE SET pipeline_version=excluded.pipeline_version, inputs_json=excluded.inputs_json, stress_state_json=excluded.stress_state_json, selected_json=excluded.selected_json, applied_rules_json=excluded.applied_rules_json, rationale_json=excluded.rationale_json, updated_at=excluded.updated_at"
-    )
-    .run(
-      userId,
-      dateISO,
-      payload.pipeline_version,
-      payload.inputs_json,
-      payload.stress_state_json,
-      payload.selected_json,
-      payload.applied_rules_json,
-      payload.rationale_json,
-      now,
-      now
-    );
+  if (hasModelStamp) {
+    getDb()
+      .prepare(
+        "INSERT INTO decision_traces (user_id, date_iso, pipeline_version, inputs_json, stress_state_json, selected_json, applied_rules_json, rationale_json, model_stamp_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, date_iso) DO UPDATE SET pipeline_version=excluded.pipeline_version, inputs_json=excluded.inputs_json, stress_state_json=excluded.stress_state_json, selected_json=excluded.selected_json, applied_rules_json=excluded.applied_rules_json, rationale_json=excluded.rationale_json, model_stamp_json=excluded.model_stamp_json, updated_at=excluded.updated_at"
+      )
+      .run(
+        userId,
+        dateISO,
+        payload.pipeline_version,
+        payload.inputs_json,
+        payload.stress_state_json,
+        payload.selected_json,
+        payload.applied_rules_json,
+        payload.rationale_json,
+        payload.model_stamp_json,
+        now,
+        now
+      );
+  } else {
+    getDb()
+      .prepare(
+        "INSERT INTO decision_traces (user_id, date_iso, pipeline_version, inputs_json, stress_state_json, selected_json, applied_rules_json, rationale_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, date_iso) DO UPDATE SET pipeline_version=excluded.pipeline_version, inputs_json=excluded.inputs_json, stress_state_json=excluded.stress_state_json, selected_json=excluded.selected_json, applied_rules_json=excluded.applied_rules_json, rationale_json=excluded.rationale_json, updated_at=excluded.updated_at"
+      )
+      .run(
+        userId,
+        dateISO,
+        payload.pipeline_version,
+        payload.inputs_json,
+        payload.stress_state_json,
+        payload.selected_json,
+        payload.applied_rules_json,
+        payload.rationale_json,
+        now,
+        now
+      );
+  }
 }
 
 export async function getDecisionTrace(userId, dateISO) {
+  const hasModelStamp = hasColumn("decision_traces", "model_stamp_json");
   const row = getDb()
     .prepare(
-      "SELECT date_iso, pipeline_version, inputs_json, stress_state_json, selected_json, applied_rules_json, rationale_json, created_at, updated_at FROM decision_traces WHERE user_id = ? AND date_iso = ?"
+      `SELECT date_iso, pipeline_version, inputs_json, stress_state_json, selected_json, applied_rules_json, rationale_json${hasModelStamp ? ", model_stamp_json" : ""}, created_at, updated_at FROM decision_traces WHERE user_id = ? AND date_iso = ?`
     )
     .get(userId, dateISO);
   if (!row) return null;
@@ -895,6 +918,7 @@ export async function getDecisionTrace(userId, dateISO) {
     selected: JSON.parse(row.selected_json),
     appliedRules: JSON.parse(row.applied_rules_json),
     rationale: JSON.parse(row.rationale_json),
+    modelStamp: row.model_stamp_json ? JSON.parse(row.model_stamp_json) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -903,9 +927,10 @@ export async function getDecisionTrace(userId, dateISO) {
 export async function listDecisionTraces(userId, fromISO, toISO, page = 1, pageSize = 50) {
   const size = Math.min(Math.max(pageSize, 1), 200);
   const offset = (Math.max(page, 1) - 1) * size;
+  const hasModelStamp = hasColumn("decision_traces", "model_stamp_json");
   const rows = getDb()
     .prepare(
-      "SELECT date_iso, pipeline_version, inputs_json, stress_state_json, selected_json, applied_rules_json, rationale_json, created_at, updated_at FROM decision_traces WHERE user_id = ? AND date_iso >= ? AND date_iso <= ? ORDER BY date_iso DESC LIMIT ? OFFSET ?"
+      `SELECT date_iso, pipeline_version, inputs_json, stress_state_json, selected_json, applied_rules_json, rationale_json${hasModelStamp ? ", model_stamp_json" : ""}, created_at, updated_at FROM decision_traces WHERE user_id = ? AND date_iso >= ? AND date_iso <= ? ORDER BY date_iso DESC LIMIT ? OFFSET ?`
     )
     .all(userId, fromISO, toISO, size, offset);
   return rows.map((row) => ({
@@ -917,15 +942,17 @@ export async function listDecisionTraces(userId, fromISO, toISO, page = 1, pageS
     selected: JSON.parse(row.selected_json),
     appliedRules: JSON.parse(row.applied_rules_json),
     rationale: JSON.parse(row.rationale_json),
+    modelStamp: row.model_stamp_json ? JSON.parse(row.model_stamp_json) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
 }
 
 export async function listDecisionTracesRecent(userId, limit = 30) {
+  const hasModelStamp = hasColumn("decision_traces", "model_stamp_json");
   const rows = getDb()
     .prepare(
-      "SELECT date_iso, pipeline_version, inputs_json, stress_state_json, selected_json, applied_rules_json, rationale_json, created_at, updated_at FROM decision_traces WHERE user_id = ? ORDER BY date_iso DESC LIMIT ?"
+      `SELECT date_iso, pipeline_version, inputs_json, stress_state_json, selected_json, applied_rules_json, rationale_json${hasModelStamp ? ", model_stamp_json" : ""}, created_at, updated_at FROM decision_traces WHERE user_id = ? ORDER BY date_iso DESC LIMIT ?`
     )
     .all(userId, Math.min(limit, 200));
   return rows.map((row) => ({
@@ -936,27 +963,38 @@ export async function listDecisionTracesRecent(userId, limit = 30) {
     selected: JSON.parse(row.selected_json),
     appliedRules: JSON.parse(row.applied_rules_json),
     rationale: JSON.parse(row.rationale_json),
+    modelStamp: row.model_stamp_json ? JSON.parse(row.model_stamp_json) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }));
 }
 
-export async function insertDayPlanHistory({ userId, dateISO, cause, dayContract, traceRef }) {
+export async function insertDayPlanHistory({ userId, dateISO, cause, dayContract, traceRef, modelStamp = null }) {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
-  getDb()
-    .prepare(
-      "INSERT INTO day_plan_history (id, user_id, date_iso, created_at, cause, day_contract_json, trace_ref) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    )
-    .run(id, userId, dateISO, now, cause, JSON.stringify(dayContract), traceRef || null);
+  const hasModelStamp = hasColumn("day_plan_history", "model_stamp_json");
+  if (hasModelStamp) {
+    getDb()
+      .prepare(
+        "INSERT INTO day_plan_history (id, user_id, date_iso, created_at, cause, day_contract_json, trace_ref, model_stamp_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+      )
+      .run(id, userId, dateISO, now, cause, JSON.stringify(dayContract), traceRef || null, JSON.stringify(modelStamp || null));
+  } else {
+    getDb()
+      .prepare(
+        "INSERT INTO day_plan_history (id, user_id, date_iso, created_at, cause, day_contract_json, trace_ref) VALUES (?, ?, ?, ?, ?, ?, ?)"
+      )
+      .run(id, userId, dateISO, now, cause, JSON.stringify(dayContract), traceRef || null);
+  }
   return { id, createdAt: now };
 }
 
 export async function listDayPlanHistory(userId, dateISO, limit = 10) {
   const size = Math.min(Math.max(limit, 1), 50);
+  const hasModelStamp = hasColumn("day_plan_history", "model_stamp_json");
   const rows = getDb()
     .prepare(
-      "SELECT id, created_at, cause, day_contract_json, trace_ref FROM day_plan_history WHERE user_id = ? AND date_iso = ? ORDER BY created_at DESC LIMIT ?"
+      `SELECT id, created_at, cause, day_contract_json, trace_ref${hasModelStamp ? ", model_stamp_json" : ""} FROM day_plan_history WHERE user_id = ? AND date_iso = ? ORDER BY created_at DESC LIMIT ?`
     )
     .all(userId, dateISO, size);
   return rows.map((row) => ({
@@ -965,14 +1003,16 @@ export async function listDayPlanHistory(userId, dateISO, limit = 10) {
     cause: row.cause,
     day: JSON.parse(row.day_contract_json),
     traceRef: row.trace_ref,
+    modelStamp: row.model_stamp_json ? JSON.parse(row.model_stamp_json) : null,
   }));
 }
 
 export async function listLatestDayPlanHistoryByRange(userId, fromISO, toISO) {
   if (!userId || !fromISO || !toISO) return [];
+  const hasModelStamp = hasColumn("day_plan_history", "model_stamp_json");
   const rows = getDb()
     .prepare(
-      `SELECT h.date_iso, h.created_at, h.day_contract_json
+      `SELECT h.date_iso, h.created_at, h.day_contract_json${hasModelStamp ? ", h.model_stamp_json" : ""}
        FROM day_plan_history h
        JOIN (
          SELECT date_iso, MAX(created_at) as max_created
@@ -988,14 +1028,16 @@ export async function listLatestDayPlanHistoryByRange(userId, fromISO, toISO) {
     dateISO: row.date_iso,
     createdAt: row.created_at,
     day: JSON.parse(row.day_contract_json || "{}"),
+    modelStamp: row.model_stamp_json ? JSON.parse(row.model_stamp_json) : null,
   }));
 }
 
 export async function getDayPlanHistoryById(id) {
   if (!id) return null;
+  const hasModelStamp = hasColumn("day_plan_history", "model_stamp_json");
   const row = getDb()
     .prepare(
-      "SELECT id, user_id, date_iso, created_at, cause, day_contract_json, trace_ref FROM day_plan_history WHERE id = ?"
+      `SELECT id, user_id, date_iso, created_at, cause, day_contract_json, trace_ref${hasModelStamp ? ", model_stamp_json" : ""} FROM day_plan_history WHERE id = ?`
     )
     .get(id);
   if (!row) return null;
@@ -1007,6 +1049,7 @@ export async function getDayPlanHistoryById(id) {
     cause: row.cause,
     day: JSON.parse(row.day_contract_json),
     traceRef: row.trace_ref,
+    modelStamp: row.model_stamp_json ? JSON.parse(row.model_stamp_json) : null,
   };
 }
 
@@ -1502,6 +1545,252 @@ export async function insertContentFeedback({ userId, itemId, kind, reasonCode, 
     )
     .run(id, userId, itemId, kind, reasonCode, atIso, dateISO);
   return { id, userId, itemId, kind, reasonCode, atISO: atIso, dateISO };
+}
+
+export async function getContentSnapshot(snapshotId) {
+  if (!snapshotId) return null;
+  const row = getDb()
+    .prepare(
+      "SELECT id, created_at, created_by_admin, note, library_hash, packs_hash, params_hash, status, released_at, rolled_back_at FROM content_snapshots WHERE id = ?"
+    )
+    .get(snapshotId);
+  if (!row) return null;
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    createdByAdmin: row.created_by_admin,
+    note: row.note,
+    libraryHash: row.library_hash,
+    packsHash: row.packs_hash,
+    paramsHash: row.params_hash,
+    status: row.status,
+    releasedAt: row.released_at,
+    rolledBackAt: row.rolled_back_at,
+  };
+}
+
+export async function listContentSnapshots({ status = null, limit = 50 } = {}) {
+  const size = Math.min(Math.max(limit, 1), 200);
+  if (status) {
+    return getDb()
+      .prepare(
+        "SELECT id, created_at, created_by_admin, note, library_hash, packs_hash, params_hash, status, released_at, rolled_back_at FROM content_snapshots WHERE status = ? ORDER BY created_at DESC LIMIT ?"
+      )
+      .all(status, size)
+      .map((row) => ({
+        id: row.id,
+        createdAt: row.created_at,
+        createdByAdmin: row.created_by_admin,
+        note: row.note,
+        libraryHash: row.library_hash,
+        packsHash: row.packs_hash,
+        paramsHash: row.params_hash,
+        status: row.status,
+        releasedAt: row.released_at,
+        rolledBackAt: row.rolled_back_at,
+      }));
+  }
+  return getDb()
+    .prepare(
+      "SELECT id, created_at, created_by_admin, note, library_hash, packs_hash, params_hash, status, released_at, rolled_back_at FROM content_snapshots ORDER BY created_at DESC LIMIT ?"
+    )
+    .all(size)
+    .map((row) => ({
+      id: row.id,
+      createdAt: row.created_at,
+      createdByAdmin: row.created_by_admin,
+      note: row.note,
+      libraryHash: row.library_hash,
+      packsHash: row.packs_hash,
+      paramsHash: row.params_hash,
+      status: row.status,
+      releasedAt: row.released_at,
+      rolledBackAt: row.rolled_back_at,
+    }));
+}
+
+export async function getLatestReleasedSnapshot() {
+  const row = getDb()
+    .prepare(
+      "SELECT id, created_at, created_by_admin, note, library_hash, packs_hash, params_hash, status, released_at, rolled_back_at FROM content_snapshots WHERE status = 'released' ORDER BY released_at DESC, created_at DESC LIMIT 1"
+    )
+    .get();
+  if (!row) return null;
+  return {
+    id: row.id,
+    createdAt: row.created_at,
+    createdByAdmin: row.created_by_admin,
+    note: row.note,
+    libraryHash: row.library_hash,
+    packsHash: row.packs_hash,
+    paramsHash: row.params_hash,
+    status: row.status,
+    releasedAt: row.released_at,
+    rolledBackAt: row.rolled_back_at,
+  };
+}
+
+export async function getLatestSnapshotIdForPrefix(prefix) {
+  if (!prefix) return null;
+  const row = getDb()
+    .prepare("SELECT id FROM content_snapshots WHERE id LIKE ? ORDER BY id DESC LIMIT 1")
+    .get(`${prefix}%`);
+  return row?.id || null;
+}
+
+export async function insertContentSnapshot({ id, createdByAdmin, note, libraryHash, packsHash, paramsHash, status = "draft", createdAt = null }) {
+  if (!id) return null;
+  const now = createdAt || new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO content_snapshots (id, created_at, created_by_admin, note, library_hash, packs_hash, params_hash, status, released_at, rolled_back_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)"
+    )
+    .run(id, now, createdByAdmin, note || null, libraryHash, packsHash, paramsHash, status);
+  return { id, createdAt: now, createdByAdmin, note: note || null, libraryHash, packsHash, paramsHash, status };
+}
+
+export async function insertContentSnapshotItems(snapshotId, items = []) {
+  if (!snapshotId || !items.length) return 0;
+  const stmt = getDb().prepare(
+    "INSERT INTO content_snapshot_items (snapshot_id, kind, item_id, item_json) VALUES (?, ?, ?, ?)"
+  );
+  let count = 0;
+  items.forEach((item) => {
+    stmt.run(snapshotId, item.kind, item.itemId, JSON.stringify(item.item));
+    count += 1;
+  });
+  return count;
+}
+
+export async function insertContentSnapshotPacks(snapshotId, packs = []) {
+  if (!snapshotId || !packs.length) return 0;
+  const stmt = getDb().prepare(
+    "INSERT INTO content_snapshot_packs (snapshot_id, pack_id, pack_json) VALUES (?, ?, ?)"
+  );
+  let count = 0;
+  packs.forEach((pack) => {
+    stmt.run(snapshotId, pack.packId, JSON.stringify(pack.pack));
+    count += 1;
+  });
+  return count;
+}
+
+export async function insertContentSnapshotParams(snapshotId, params = []) {
+  if (!snapshotId || !params.length) return 0;
+  const stmt = getDb().prepare(
+    "INSERT INTO content_snapshot_params (snapshot_id, key, value_json, version) VALUES (?, ?, ?, ?)"
+  );
+  let count = 0;
+  params.forEach((param) => {
+    stmt.run(snapshotId, param.key, JSON.stringify(param.value), Number(param.version) || 0);
+    count += 1;
+  });
+  return count;
+}
+
+export async function createContentSnapshot({ id, createdByAdmin, note, libraryHash, packsHash, paramsHash, items, packs, params }) {
+  const instance = getDb();
+  instance.exec("BEGIN;");
+  try {
+    const snapshot = await insertContentSnapshot({ id, createdByAdmin, note, libraryHash, packsHash, paramsHash, status: "draft" });
+    await insertContentSnapshotItems(id, items || []);
+    await insertContentSnapshotPacks(id, packs || []);
+    await insertContentSnapshotParams(id, params || []);
+    instance.exec("COMMIT;");
+    return snapshot;
+  } catch (err) {
+    instance.exec("ROLLBACK;");
+    throw err;
+  }
+}
+
+export async function updateContentSnapshotStatus({ snapshotId, status, releasedAt = null, rolledBackAt = null }) {
+  if (!snapshotId || !status) return null;
+  getDb()
+    .prepare(
+      "UPDATE content_snapshots SET status = ?, released_at = ?, rolled_back_at = ? WHERE id = ?"
+    )
+    .run(status, releasedAt, rolledBackAt, snapshotId);
+  return getContentSnapshot(snapshotId);
+}
+
+export async function listContentSnapshotItems(snapshotId) {
+  if (!snapshotId) return [];
+  const rows = getDb()
+    .prepare("SELECT kind, item_id, item_json FROM content_snapshot_items WHERE snapshot_id = ? ORDER BY kind, item_id")
+    .all(snapshotId);
+  return rows.map((row) => ({
+    kind: row.kind,
+    itemId: row.item_id,
+    item: JSON.parse(row.item_json),
+  }));
+}
+
+export async function listContentSnapshotPacks(snapshotId) {
+  if (!snapshotId) return [];
+  const rows = getDb()
+    .prepare("SELECT pack_id, pack_json FROM content_snapshot_packs WHERE snapshot_id = ? ORDER BY pack_id")
+    .all(snapshotId);
+  return rows.map((row) => ({
+    packId: row.pack_id,
+    pack: JSON.parse(row.pack_json),
+  }));
+}
+
+export async function listContentSnapshotParams(snapshotId) {
+  if (!snapshotId) return [];
+  const rows = getDb()
+    .prepare("SELECT key, value_json, version FROM content_snapshot_params WHERE snapshot_id = ? ORDER BY key")
+    .all(snapshotId);
+  return rows.map((row) => ({
+    key: row.key,
+    value: JSON.parse(row.value_json),
+    version: row.version,
+  }));
+}
+
+export async function getSnapshotMeta(key) {
+  if (!key) return null;
+  const row = getDb().prepare("SELECT value FROM content_snapshot_meta WHERE key = ?").get(key);
+  return row?.value || null;
+}
+
+export async function upsertSnapshotMeta(key, value) {
+  if (!key || value == null) return null;
+  getDb()
+    .prepare(
+      "INSERT INTO content_snapshot_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value"
+    )
+    .run(key, String(value));
+  return { key, value: String(value) };
+}
+
+export async function getUserSnapshotPin(userId) {
+  if (!userId) return null;
+  const row = getDb()
+    .prepare(
+      "SELECT user_id, snapshot_id, pinned_at, pin_expires_at, reason FROM user_snapshot_pins WHERE user_id = ?"
+    )
+    .get(userId);
+  if (!row) return null;
+  return {
+    userId: row.user_id,
+    snapshotId: row.snapshot_id,
+    pinnedAt: row.pinned_at,
+    pinExpiresAt: row.pin_expires_at,
+    reason: row.reason,
+  };
+}
+
+export async function upsertUserSnapshotPin({ userId, snapshotId, pinnedAt, pinExpiresAt, reason }) {
+  if (!userId || !snapshotId || !pinExpiresAt || !reason) return null;
+  const at = pinnedAt || new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO user_snapshot_pins (user_id, snapshot_id, pinned_at, pin_expires_at, reason) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET snapshot_id=excluded.snapshot_id, pinned_at=excluded.pinned_at, pin_expires_at=excluded.pin_expires_at, reason=excluded.reason"
+    )
+    .run(userId, snapshotId, at, pinExpiresAt, reason);
+  return { userId, snapshotId, pinnedAt: at, pinExpiresAt, reason };
 }
 
 export async function getWorstItems(kind, limit = 20) {

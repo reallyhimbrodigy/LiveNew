@@ -14,6 +14,8 @@ import { logInfo, logError } from "./logger.js";
 import { assertDayContract, assertWeekPlan } from "./invariants.js";
 import { validateWorkoutItem, validateResetItem, validateNutritionItem } from "../domain/content/validateContent.js";
 import { runContentChecks } from "../domain/content/checks.js";
+import { hashJSON, sanitizeContentItem, sanitizePack } from "../domain/content/snapshotHash.js";
+import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import {
   validateProfile,
   validateCheckIn,
@@ -133,6 +135,17 @@ import {
   upsertUserContentPref,
   deleteUserContentPref,
   insertContentFeedback,
+  createContentSnapshot,
+  listContentSnapshots,
+  getContentSnapshot,
+  updateContentSnapshotStatus,
+  getLatestReleasedSnapshot,
+  getLatestSnapshotIdForPrefix,
+  listContentSnapshotItems,
+  listContentSnapshotPacks,
+  listContentSnapshotParams,
+  getSnapshotMeta,
+  upsertSnapshotMeta,
   insertOpsRun,
   getLatestOpsRun,
   insertOpsLog,
@@ -156,6 +169,8 @@ import { trackEvent, setDailyFlag, ensureDay3Retention, AnalyticsFlags, getFirst
 import { buildOutcomes } from "./outcomes.js";
 import { runLoadtestScript, evaluateLoadtestReport } from "./ops.js";
 import { buildReleaseChecklist } from "./releaseChecklist.js";
+import { diffSnapshots } from "./snapshotDiff.js";
+import { loadSnapshotBundle, resolveSnapshotForUser, setDefaultSnapshotId, getDefaultSnapshotId, repinUserSnapshot } from "./snapshots.js";
 
 const NODE_ENV = process.env.NODE_ENV || "development";
 const config = getConfig();
@@ -593,6 +608,57 @@ async function loadLibraryForStageMode(stageMode) {
   return loadLibraryForStatuses(statuses, { allowInvalid: stageMode });
 }
 
+function snapshotOverrideFromRequest(req, url) {
+  const header = req.headers["x-snapshot-id"];
+  const headerValue = Array.isArray(header) ? header[0] : header;
+  const queryValue = url.searchParams.get("snapshot");
+  const raw = headerValue || queryValue;
+  if (!raw || typeof raw !== "string") return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  return trimmed.length > 64 ? null : trimmed;
+}
+
+async function resolveSnapshotContext({ userId, userProfile, req, url }) {
+  const allowLive = config.isDevLike && !config.isAlphaLike && !config.isProdLike;
+  const overrideSnapshotId = allowLive ? snapshotOverrideFromRequest(req, url) : null;
+  const snapshotInfo = await resolveSnapshotForUser({
+    userId,
+    userProfile,
+    overrideSnapshotId,
+    allowLive,
+  });
+
+  if (snapshotInfo.snapshotId) {
+    const bundle = await loadSnapshotBundle(snapshotInfo.snapshotId, { userId });
+    if (bundle) {
+      return {
+        snapshotId: snapshotInfo.snapshotId,
+        source: snapshotInfo.source,
+        pinExpiresAt: snapshotInfo.pinExpiresAt || null,
+        snapshot: bundle.snapshot,
+        library: bundle.library || domain.defaultLibrary,
+        paramsState: bundle.paramsState,
+      };
+    }
+    logError({
+      event: "snapshot_load_failed",
+      snapshotId: snapshotInfo.snapshotId,
+      userId,
+    });
+  }
+
+  const paramsState = await getParameters(userId);
+  return {
+    snapshotId: null,
+    source: snapshotInfo.source || "live",
+    pinExpiresAt: null,
+    snapshot: null,
+    library: domain.defaultLibrary,
+    paramsState,
+  };
+}
+
 function normalizeContentKind(kind) {
   const key = typeof kind === "string" ? kind.trim().toLowerCase() : "";
   return CONTENT_KINDS.has(key) ? key : null;
@@ -720,12 +786,15 @@ function logRepair(requestId, userId, repaired, method, reason) {
   logInfo({ requestId, userId, event: "repair", repaired, method, reason: reason || null });
 }
 
-async function repairUserState(userId, reason, requestId = null) {
+async function repairUserState(userId, reason, requestId = null, options = {}) {
   const baseNow = new Date().toISOString();
+  const paramsStateOverride = options.paramsState || null;
+  const libraryOverride = options.library || null;
+  const modelStampOverride = options.modelStamp || null;
   const events = await getUserEvents(userId, 1, 5000);
   if (events.length) {
     const flags = await getFeatureFlags();
-    const paramsState = await getParameters(userId);
+    const paramsState = paramsStateOverride || (await getParameters(userId));
     const ruleConfig = buildRuleConfig(requestId, userId);
     let experimentEffects = {
       paramsEffective: paramsState.map,
@@ -756,6 +825,7 @@ async function repairUserState(userId, reason, requestId = null) {
     const paramsEffective = experimentEffects.paramsEffective || paramsState.map;
     const packOverride = experimentEffects.packOverride || null;
     const experimentMeta = experimentEffects.experimentMeta || null;
+    const modelStamp = modelStampOverride || null;
     let rebuilt = normalizeState({});
     for (const evt of events) {
       const todayISO = getTodayISOForProfile(rebuilt.userProfile);
@@ -770,6 +840,8 @@ async function repairUserState(userId, reason, requestId = null) {
         packOverride,
         experimentMeta,
         ruleConfig,
+        library: libraryOverride || domain.defaultLibrary,
+        modelStamp,
       };
       const result = reduceEvent(rebuilt, { type: evt.type, payload: evt.payload, atISO: evt.atISO || baseNow }, ctx);
       rebuilt = appendLogEvent(result.nextState, result.logEvent);
@@ -808,7 +880,7 @@ async function repairUserState(userId, reason, requestId = null) {
   const base = normalizeState(latest?.state || {});
   if (base.userProfile) {
     const flags = await getFeatureFlags();
-    const paramsState = await getParameters(userId);
+    const paramsState = paramsStateOverride || (await getParameters(userId));
     const ruleConfig = buildRuleConfig(requestId, userId);
     let experimentEffects = {
       paramsEffective: paramsState.map,
@@ -839,6 +911,7 @@ async function repairUserState(userId, reason, requestId = null) {
     const paramsEffective = experimentEffects.paramsEffective || paramsState.map;
     const packOverride = experimentEffects.packOverride || null;
     const experimentMeta = experimentEffects.experimentMeta || null;
+    const modelStamp = modelStampOverride || null;
     const resetState = normalizeState({
       ...base,
       weekPlan: null,
@@ -856,6 +929,8 @@ async function repairUserState(userId, reason, requestId = null) {
       packOverride,
       experimentMeta,
       ruleConfig,
+      library: libraryOverride || domain.defaultLibrary,
+      modelStamp,
     };
     try {
       const ensured = reduceEvent(resetState, { type: "ENSURE_WEEK", payload: {}, atISO: baseNow }, ctx);
@@ -922,19 +997,19 @@ function updateUserCache(userId, state, version) {
   evictIfNeeded();
 }
 
-async function repairAndReload(userId, reason, requestId) {
-  const repaired = await repairUserState(userId, reason, requestId);
+async function repairAndReload(userId, reason, requestId, options = {}) {
+  const repaired = await repairUserState(userId, reason, requestId, options);
   if (!repaired.repaired) return null;
   return loadUserState(userId);
 }
 
-async function ensureValidDayContract(userId, state, dateISO, reason, requestId) {
+async function ensureValidDayContract(userId, state, dateISO, reason, requestId, options = {}) {
   try {
     const day = toDayContract(state, dateISO, domain);
     assertDayContract(day);
     return { state, day };
   } catch (err) {
-    const repairedEntry = await repairAndReload(userId, reason, requestId);
+    const repairedEntry = await repairAndReload(userId, reason, requestId, options);
     if (repairedEntry) {
       const day = toDayContract(repairedEntry.state, dateISO, domain);
       assertDayContract(day);
@@ -2013,6 +2088,7 @@ function buildDecisionTrace(state, dateISO) {
     selected: dayPlan.meta?.selected || {},
     appliedRules: dayPlan.meta?.appliedRules || [],
     rationale: (dayPlan.rationale || []).slice(0, 3),
+    modelStamp: dayPlan.meta?.modelStamp || null,
   };
 }
 
@@ -2302,6 +2378,162 @@ async function summarizeBackups() {
     latestAtISO,
     countLast14: Math.min(backups.length, 14),
   };
+}
+
+async function computeReleaseChecklistState() {
+  const applied = await listAppliedMigrations();
+  const migrationFiles = (await fs.readdir(path.join(process.cwd(), "src", "db", "migrations"))).filter(
+    (name) => name.endsWith(".sql") && !name.endsWith(".down.sql")
+  );
+  const expectedIds = migrationFiles
+    .map((name) => name.replace(/\.sql$/, ""))
+    .sort();
+  const expectedCount = expectedIds.length;
+  const latestExpected = expectedIds[expectedIds.length - 1] || null;
+  const latestApplied = applied[applied.length - 1]?.id || null;
+  const migrationsApplied = applied.length >= expectedCount && latestApplied === latestExpected;
+
+  const validator = await getLatestValidatorRun("engine_matrix");
+  const loadtestRun = await getLatestOpsRun("loadtest");
+  const loadtestEval = loadtestRun
+    ? evaluateLoadtestReport(loadtestRun.report, { maxP95MsByRoute: config.maxP95MsByRoute, maxErrorRate: config.maxErrorRate })
+    : { ok: false, p95ByRoute: {}, errorRate: null };
+
+  const errorCount = countErrors(ERROR_WINDOW_LONG_MS);
+  const requestSnapshot = snapshotRequestCounts(ERROR_WINDOW_LONG_MS);
+  const errorRate = requestSnapshot.total > 0 ? errorCount / requestSnapshot.total : 0;
+  const errorRateOk = errorRate <= config.maxErrorRate;
+
+  const backups = await summarizeBackups();
+  const backupWindowMs = Math.max(1, Number(config.backupWindowHours) || 24) * 60 * 60 * 1000;
+  const latestBackupMs = backups.latestAtISO ? new Date(backups.latestAtISO).getTime() : 0;
+  const backupsOk = Boolean(backups.countLast14) && latestBackupMs && Date.now() - latestBackupMs <= backupWindowMs && backups.countLast14 <= 14;
+
+  const flags = await getFeatureFlags();
+  const incidentMode = resolveIncidentMode(flags);
+  const guards = resolveEngineGuards(flags, incidentMode);
+  const flagsOk =
+    !incidentMode &&
+    guards.regenEnabled &&
+    guards.signalsEnabled &&
+    guards.checkinsEnabled &&
+    guards.reentryEnabled &&
+    guards.communityEnabled;
+
+  const consentFlowOk = ["terms", "privacy", "alpha_processing"].every((key) => REQUIRED_CONSENTS.includes(key));
+
+  const checklist = buildReleaseChecklist({
+    migrationsApplied: {
+      pass: migrationsApplied,
+      details: {
+        appliedCount: applied.length,
+        expectedCount,
+        schemaVersion: latestApplied,
+        expectedVersion: latestExpected,
+      },
+    },
+    validatorOk: {
+      pass: validator ? validator.ok : false,
+      details: { latestRunId: validator?.id || null, latestAtISO: validator?.atISO || null },
+    },
+    loadtestOk: {
+      pass: loadtestRun ? loadtestRun.ok && loadtestEval.ok : false,
+      details: { latestAtISO: loadtestRun?.atISO || null, p95ByRoute: loadtestEval.p95ByRoute, errorRate: loadtestEval.errorRate },
+    },
+    errorRateOk: {
+      pass: errorRateOk,
+      details: { errorRate, windowMinutes: requestSnapshot.windowMinutes, totalRequests: requestSnapshot.total },
+    },
+    backupsOk: {
+      pass: backupsOk,
+      details: { latestAtISO: backups.latestAtISO, countLast14: backups.countLast14 },
+    },
+    flagsOk: {
+      pass: flagsOk,
+      details: {
+        incidentMode,
+        regenEnabled: guards.regenEnabled,
+        signalsEnabled: guards.signalsEnabled,
+        checkinsEnabled: guards.checkinsEnabled,
+        reentryEnabled: guards.reentryEnabled,
+        communityEnabled: guards.communityEnabled,
+      },
+    },
+    consentFlowOk: {
+      pass: consentFlowOk,
+      details: { required: REQUIRED_CONSENTS },
+    },
+  });
+
+  return {
+    checklist,
+    validator,
+    loadtestRun,
+    loadtestEval,
+    backups,
+    requestSnapshot,
+    errorRate,
+    errorRateOk,
+  };
+}
+
+function snapshotIdPrefix(date = new Date()) {
+  const dateISO = date.toISOString().slice(0, 10).replace(/-/g, "_");
+  return `snap_${dateISO}_`;
+}
+
+async function createSnapshotId() {
+  const prefix = snapshotIdPrefix(new Date());
+  const latest = await getLatestSnapshotIdForPrefix(prefix);
+  const match = latest ? latest.match(/_(\d{3})$/) : null;
+  const nextSeq = match ? Number(match[1]) + 1 : 1;
+  const seq = String(Math.max(1, nextSeq)).padStart(3, "0");
+  return `${prefix}${seq}`;
+}
+
+function normalizeSnapshotItems(items) {
+  const enabled = (items || []).filter((item) => item && item.enabled !== false);
+  const normalized = enabled.map((item) => ({
+    kind: item.kind,
+    itemId: item.id,
+    item: sanitizeContentItem(item),
+  }));
+  normalized.sort((a, b) => String(a.kind).localeCompare(String(b.kind)) || String(a.itemId).localeCompare(String(b.itemId)));
+  return normalized;
+}
+
+function normalizeSnapshotPacks(packs) {
+  const normalized = (packs || []).map((pack) => ({
+    packId: pack.id,
+    pack: sanitizePack({
+      id: pack.id,
+      name: pack.name,
+      weights: pack.weights || {},
+      constraints: pack.constraints || {},
+    }),
+  }));
+  normalized.sort((a, b) => String(a.packId).localeCompare(String(b.packId)));
+  return normalized;
+}
+
+function normalizeSnapshotParams(params) {
+  const normalized = (params || []).map((param) => ({
+    key: param.key,
+    value: param.value,
+    version: Number(param.version) || 0,
+  }));
+  normalized.sort((a, b) => String(a.key).localeCompare(String(b.key)));
+  return normalized;
+}
+
+function computeSnapshotHashes({ items, packs, params }) {
+  const itemsPayload = items.map((entry) => ({ kind: entry.kind, itemId: entry.itemId, item: entry.item }));
+  const packsPayload = packs.map((entry) => ({ packId: entry.packId, pack: entry.pack }));
+  const paramsPayload = params.map((entry) => ({ key: entry.key, value: entry.value, version: entry.version }));
+  const packsHash = hashJSON(packsPayload);
+  const paramsHash = hashJSON(paramsPayload);
+  const libraryHash = hashJSON({ items: itemsPayload, packs: packsPayload, params: paramsPayload });
+  return { libraryHash, packsHash, paramsHash };
 }
 
 function countErrors(windowMs = ERROR_WINDOW_LONG_MS) {
@@ -2825,8 +3057,18 @@ const server = http.createServer(async (req, res) => {
     let requestFlags = await getFeatureFlags();
     let featureFreezeEnabled = resolveFeatureFreeze(requestFlags);
     let incidentModeEnabled = resolveIncidentMode(requestFlags);
+    let snapshotContext = null;
+    const getSnapshotContext = async () => {
+      if (snapshotContext && snapshotContext.userId === userId) return snapshotContext;
+      snapshotContext = await resolveSnapshotContext({ userId, userProfile: state.userProfile, req, url });
+      snapshotContext.userId = userId;
+      return snapshotContext;
+    };
+    const getParamsForUser = async () => (await getSnapshotContext()).paramsState;
+    const getLibraryForUser = async () => (await getSnapshotContext()).library;
 
     const dispatchForUser = async (event) => {
+      const snapshotCtx = await getSnapshotContext();
       let attempts = 0;
       let currentState = state;
       let currentVersion = version;
@@ -2845,7 +3087,7 @@ const server = http.createServer(async (req, res) => {
         const engineGuards = resolveEngineGuards(flags, incidentModeEnabled);
         const effectiveToggles = resolveRuleToggles(currentState, flags);
         const remindersEnabled = flagEnabled(flags, "reminders.enabled");
-        const paramsState = await getParameters(userId);
+        const paramsState = snapshotCtx?.paramsState || (await getParameters(userId));
         const ruleConfig = buildRuleConfig(res.livenewRequestId, userId);
         let experimentEffects = {
           paramsEffective: paramsState.map,
@@ -2876,6 +3118,19 @@ const server = http.createServer(async (req, res) => {
         const paramsEffective = experimentEffects.paramsEffective || paramsState.map;
         const packOverride = experimentEffects.packOverride || null;
         const experimentMeta = experimentEffects.experimentMeta || null;
+        const packId = packOverride || currentState.userProfile?.contentPack || null;
+        const experimentIds = (experimentEffects.assignments || []).map(
+          (assignment) => `${assignment.experimentId}:${assignment.variantKey}`
+        );
+        const modelStamp = buildModelStamp({
+          snapshotId: snapshotCtx?.snapshotId || null,
+          libraryHash: snapshotCtx?.snapshot?.libraryHash || null,
+          packsHash: snapshotCtx?.snapshot?.packsHash || null,
+          paramsVersions: paramsState.versions || {},
+          packId,
+          cohortId: paramsState.cohortId || null,
+          experimentIds,
+        });
         const ctxBase = {
           ruleToggles: effectiveToggles,
           params: paramsEffective,
@@ -2887,6 +3142,8 @@ const server = http.createServer(async (req, res) => {
           experimentMeta,
           ruleConfig,
           preferences: contentPrefs,
+          library: snapshotCtx?.library || domain.defaultLibrary,
+          modelStamp,
         };
         let resEvent = dispatch(currentState, eventWithAt, ctxBase);
         let nextState = resEvent.state;
@@ -2934,6 +3191,7 @@ const server = http.createServer(async (req, res) => {
               cause: historyCause,
               dayContract,
               traceRef: null,
+              modelStamp: dayContract?.meta?.modelStamp || null,
             });
             const historyList = await listDayPlanHistory(userId, dateISO, 2);
             const prev = historyList.length > 1 ? historyList[1] : null;
@@ -3169,15 +3427,6 @@ const server = http.createServer(async (req, res) => {
         );
         return;
       }
-      const paramsState = await getParameters();
-      const checkinValidation = validateCheckIn(
-        { checkIn: body?.firstCheckIn },
-        { allowedTimes: paramsState.map?.timeBuckets?.allowed }
-      );
-      if (!checkinValidation.ok) {
-        sendError(res, 400, checkinValidation.error.code, checkinValidation.error.message, checkinValidation.error.field);
-        return;
-      }
       let targetUserId = userId;
       let targetEmail = userEmail;
       let issueTokens = false;
@@ -3199,9 +3448,19 @@ const server = http.createServer(async (req, res) => {
         userId = targetUserId;
         userEmail = targetEmail;
         res.livenewUserId = userId;
+        snapshotContext = null;
         const cached = await loadUserState(userId);
         state = cached.state;
         version = cached.version;
+      }
+      const paramsState = await getParamsForUser();
+      const checkinValidation = validateCheckIn(
+        { checkIn: body?.firstCheckIn },
+        { allowedTimes: paramsState.map?.timeBuckets?.allowed }
+      );
+      if (!checkinValidation.ok) {
+        sendError(res, 400, checkinValidation.error.code, checkinValidation.error.message, checkinValidation.error.field);
+        return;
       }
       await upsertUserConsents(userId, REQUIRED_CONSENTS);
 
@@ -3223,11 +3482,19 @@ const server = http.createServer(async (req, res) => {
       await trackEvent(userId, AnalyticsFlags.onboardCompleted, { dateISO: onboardDateISO }, new Date().toISOString(), onboardDateISO);
       const dateISO = checkIn?.dateISO || getTodayISOForProfile(userProfile);
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
-      const ensured = await ensureValidDayContract(userId, state, dateISO, "onboard_day_invariant", requestId);
+      const library = await getLibraryForUser();
+      const ensured = await ensureValidDayContract(
+        userId,
+        state,
+        dateISO,
+        "onboard_day_invariant",
+        requestId,
+        { paramsState, library }
+      );
       state = ensured.state;
       const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
       const prefs = await loadContentPrefs(userId);
-      const railReset = pickRailReset({ dayPlan, checkIn, library: domain.defaultLibrary, preferences: prefs });
+      const railReset = pickRailReset({ dayPlan, checkIn, library, preferences: prefs });
       const rail = {
         checkIn: {
           requiredFields: ["stress", "sleepQuality", "energy", "timeAvailableMin"],
@@ -3308,7 +3575,16 @@ const server = http.createServer(async (req, res) => {
         payload: { dateISO, forced: true },
       });
       state = resEvent.state;
-      const ensured = await ensureValidDayContract(userId, state, dateISO, "force_refresh_invariant", requestId);
+      const paramsState = await getParamsForUser();
+      const library = await getLibraryForUser();
+      const ensured = await ensureValidDayContract(
+        userId,
+        state,
+        dateISO,
+        "force_refresh_invariant",
+        requestId,
+        { paramsState, library }
+      );
       state = ensured.state;
       send(200, { ok: true, day: ensured.day });
       return;
@@ -3323,12 +3599,21 @@ const server = http.createServer(async (req, res) => {
       const dateISO = getTodayISOForProfile(state.userProfile);
       await maybeStartReEntry(dateISO);
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
-      const ensured = await ensureValidDayContract(userId, state, dateISO, "rail_today_invariant", requestId);
+      const paramsState = await getParamsForUser();
+      const library = await getLibraryForUser();
+      const ensured = await ensureValidDayContract(
+        userId,
+        state,
+        dateISO,
+        "rail_today_invariant",
+        requestId,
+        { paramsState, library }
+      );
       state = ensured.state;
       const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
       const checkIn = latestCheckInForDate(state.checkIns, dateISO);
       const prefs = await loadContentPrefs(userId);
-      const railReset = pickRailReset({ dayPlan, checkIn, library: domain.defaultLibrary, preferences: prefs });
+      const railReset = pickRailReset({ dayPlan, checkIn, library, preferences: prefs });
       const rail = {
         checkIn: {
           requiredFields: ["stress", "sleepQuality", "energy", "timeAvailableMin"],
@@ -3366,7 +3651,16 @@ const server = http.createServer(async (req, res) => {
         await maybeStartReEntry(dateISO);
       }
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
-      const ensured = await ensureValidDayContract(userId, state, dateISO, "plan_day_invariant", requestId);
+      const paramsState = await getParamsForUser();
+      const library = await getLibraryForUser();
+      const ensured = await ensureValidDayContract(
+        userId,
+        state,
+        dateISO,
+        "plan_day_invariant",
+        requestId,
+        { paramsState, library }
+      );
       state = ensured.state;
       const payload = { ok: true, day: ensured.day };
       setCachedResponse(userId, pathname, url.search, payload, CACHE_TTLS.planDay);
@@ -3383,7 +3677,16 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
-      const ensured = await ensureValidDayContract(userId, state, dateISO, "plan_why_invariant", requestId);
+      const paramsState = await getParamsForUser();
+      const library = await getLibraryForUser();
+      const ensured = await ensureValidDayContract(
+        userId,
+        state,
+        dateISO,
+        "plan_why_invariant",
+        requestId,
+        { paramsState, library }
+      );
       state = ensured.state;
       const summaries = await listPlanChangeSummaries(userId, dateISO, 1);
       const latestSummary = summaries.length ? summaries[0] : null;
@@ -3477,7 +3780,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const body = await parseJson(req);
-      const paramsState = await getParameters(userId);
+      const paramsState = await getParamsForUser();
       const validation = validateCheckIn(body, { allowedTimes: paramsState.map?.timeBuckets?.allowed });
       if (!validation.ok) {
         sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
@@ -4021,6 +4324,162 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/admin/snapshots/diff" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const fromId = url.searchParams.get("from");
+      const toId = url.searchParams.get("to");
+      if (!fromId || !toId) {
+        sendError(res, 400, "params_required", "from and to snapshot ids are required", "from");
+        return;
+      }
+      const itemsA = await listContentSnapshotItems(fromId);
+      const itemsB = await listContentSnapshotItems(toId);
+      const packsA = await listContentSnapshotPacks(fromId);
+      const packsB = await listContentSnapshotPacks(toId);
+      const paramsA = await listContentSnapshotParams(fromId);
+      const paramsB = await listContentSnapshotParams(toId);
+      const diff = diffSnapshots({
+        itemsA,
+        itemsB,
+        packsA,
+        packsB,
+        paramsA,
+        paramsB,
+      });
+      send(200, { ok: true, from: fromId, to: toId, diff });
+      return;
+    }
+
+    if (pathname === "/v1/admin/snapshots/create" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const note = typeof body?.note === "string" ? body.note.trim() : null;
+      const snapshotId = await createSnapshotId();
+      const items = normalizeSnapshotItems(await listContentItems(undefined, true, { statuses: ["enabled"] }));
+      const packs = normalizeSnapshotPacks(await listContentPacks());
+      const params = normalizeSnapshotParams(await listParameters());
+      const hashes = computeSnapshotHashes({ items, packs, params });
+      const snapshot = await createContentSnapshot({
+        id: snapshotId,
+        createdByAdmin: userId,
+        note,
+        libraryHash: hashes.libraryHash,
+        packsHash: hashes.packsHash,
+        paramsHash: hashes.paramsHash,
+        items,
+        packs,
+        params,
+      });
+      await auditAdmin("snapshot.create", snapshotId, { note });
+      send(200, {
+        ok: true,
+        snapshot: {
+          ...snapshot,
+          libraryHash: hashes.libraryHash,
+          packsHash: hashes.packsHash,
+          paramsHash: hashes.paramsHash,
+          status: "draft",
+        },
+      });
+      return;
+    }
+
+    const snapshotReleaseMatch = pathname.match(/^\/v1\/admin\/snapshots\/([^/]+)\/release$/);
+    if (snapshotReleaseMatch && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const snapshotId = snapshotReleaseMatch[1];
+      const snapshot = await getContentSnapshot(snapshotId);
+      if (!snapshot) {
+        sendError(res, 404, "not_found", "Snapshot not found");
+        return;
+      }
+      const { checklist, validator } = await computeReleaseChecklistState();
+      if (!checklist.pass || !(validator?.ok)) {
+        sendError(res, 409, "release_blocked", "Release blocked by checklist", null, {
+          checks: checklist.checks,
+          expose: true,
+        });
+        return;
+      }
+      const updated = await updateContentSnapshotStatus({
+        snapshotId,
+        status: "released",
+        releasedAt: new Date().toISOString(),
+        rolledBackAt: null,
+      });
+      await setDefaultSnapshotId(snapshotId);
+      await auditAdmin("snapshot.release", snapshotId, { libraryHash: snapshot.libraryHash });
+      send(200, { ok: true, snapshot: updated, defaultSnapshotId: snapshotId });
+      return;
+    }
+
+    const snapshotRollbackMatch = pathname.match(/^\/v1\/admin\/snapshots\/([^/]+)\/rollback$/);
+    if (snapshotRollbackMatch && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const snapshotId = snapshotRollbackMatch[1];
+      const snapshot = await getContentSnapshot(snapshotId);
+      if (!snapshot) {
+        sendError(res, 404, "not_found", "Snapshot not found");
+        return;
+      }
+      const body = await parseJson(req);
+      let targetSnapshotId = typeof body?.snapshotId === "string" ? body.snapshotId.trim() : "";
+      if (!targetSnapshotId) {
+        const released = await listContentSnapshots({ status: "released", limit: 5 });
+        const fallback = released.find((entry) => entry.id !== snapshotId);
+        targetSnapshotId = fallback?.id || "";
+      }
+      if (!targetSnapshotId) {
+        sendError(res, 409, "rollback_unavailable", "No released snapshot available for rollback");
+        return;
+      }
+      await setDefaultSnapshotId(targetSnapshotId);
+      const updated = await updateContentSnapshotStatus({
+        snapshotId,
+        status: "rolled_back",
+        releasedAt: snapshot.releasedAt || null,
+        rolledBackAt: new Date().toISOString(),
+      });
+      await auditAdmin("snapshot.rollback", snapshotId, { targetSnapshotId });
+      send(200, { ok: true, snapshot: updated, defaultSnapshotId: targetSnapshotId });
+      return;
+    }
+
+    const snapshotGetMatch = pathname.match(/^\/v1\/admin\/snapshots\/([^/]+)$/);
+    if (snapshotGetMatch && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const snapshotId = snapshotGetMatch[1];
+      const snapshot = await getContentSnapshot(snapshotId);
+      if (!snapshot) {
+        sendError(res, 404, "not_found", "Snapshot not found");
+        return;
+      }
+      const items = await listContentSnapshotItems(snapshotId);
+      const packs = await listContentSnapshotPacks(snapshotId);
+      const params = await listContentSnapshotParams(snapshotId);
+      send(200, {
+        ok: true,
+        snapshot,
+        counts: { items: items.length, packs: packs.length, params: params.length },
+      });
+      return;
+    }
+
+    if (pathname === "/v1/admin/snapshots" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const status = url.searchParams.get("status");
+      const snapshots = await listContentSnapshots({ status: status || null, limit: 50 });
+      const defaultSnapshotId = await getDefaultSnapshotId();
+      send(200, { ok: true, snapshots, defaultSnapshotId });
+      return;
+    }
+
     if (pathname === "/v1/admin/ops/status" && req.method === "GET") {
       const email = await requireAdmin();
       if (!email) return;
@@ -4031,6 +4490,9 @@ const server = http.createServer(async (req, res) => {
       const runningExperiments = await listExperiments("running");
       const packs = await listContentPacks();
       const parameters = await listParameters();
+      const defaultSnapshotId = await getDefaultSnapshotId();
+      const latestReleasedSnapshot = await getLatestReleasedSnapshot();
+      const releaseChecklistState = await computeReleaseChecklistState();
       send(200, {
         ok: true,
         validator: {
@@ -4052,6 +4514,13 @@ const server = http.createServer(async (req, res) => {
         experiments: { runningCount: runningExperiments.length },
         packs: { updatedAt: latestUpdatedAt(packs) },
         parameters: { updatedAt: latestUpdatedAt(parameters) },
+        snapshots: {
+          defaultSnapshotId: defaultSnapshotId || null,
+          latestReleasedSnapshotId: latestReleasedSnapshot?.id || null,
+          validatorOkAgainstDefault: validator ? validator.ok : false,
+          validatorRunId: validator?.id || null,
+        },
+        releaseChecklistPass: releaseChecklistState.checklist?.pass ?? false,
       });
       return;
     }
@@ -4090,89 +4559,7 @@ const server = http.createServer(async (req, res) => {
     if (pathname === "/v1/admin/release/checklist" && req.method === "GET") {
       const email = await requireAdmin();
       if (!email) return;
-      const applied = await listAppliedMigrations();
-      const migrationFiles = (await fs.readdir(path.join(process.cwd(), "src", "db", "migrations"))).filter(
-        (name) => name.endsWith(".sql") && !name.endsWith(".down.sql")
-      );
-      const expectedIds = migrationFiles
-        .map((name) => name.replace(/\\.sql$/, ""))
-        .sort();
-      const expectedCount = expectedIds.length;
-      const latestExpected = expectedIds[expectedIds.length - 1] || null;
-      const latestApplied = applied[applied.length - 1]?.id || null;
-      const migrationsApplied = applied.length >= expectedCount && latestApplied === latestExpected;
-
-      const validator = await getLatestValidatorRun("engine_matrix");
-      const loadtestRun = await getLatestOpsRun("loadtest");
-      const loadtestEval = loadtestRun
-        ? evaluateLoadtestReport(loadtestRun.report, { maxP95MsByRoute: config.maxP95MsByRoute, maxErrorRate: config.maxErrorRate })
-        : { ok: false, p95ByRoute: {}, errorRate: null };
-
-      const errorCount = countErrors(ERROR_WINDOW_LONG_MS);
-      const requestSnapshot = snapshotRequestCounts(ERROR_WINDOW_LONG_MS);
-      const errorRate = requestSnapshot.total > 0 ? errorCount / requestSnapshot.total : 0;
-      const errorRateOk = errorRate <= config.maxErrorRate;
-
-      const backups = await summarizeBackups();
-      const backupWindowMs = Math.max(1, Number(config.backupWindowHours) || 24) * 60 * 60 * 1000;
-      const latestBackupMs = backups.latestAtISO ? new Date(backups.latestAtISO).getTime() : 0;
-      const backupsOk = Boolean(backups.countLast14) && latestBackupMs && Date.now() - latestBackupMs <= backupWindowMs && backups.countLast14 <= 14;
-
-      const flags = await getFeatureFlags();
-      const incidentMode = resolveIncidentMode(flags);
-      const guards = resolveEngineGuards(flags, incidentMode);
-      const flagsOk =
-        !incidentMode &&
-        guards.regenEnabled &&
-        guards.signalsEnabled &&
-        guards.checkinsEnabled &&
-        guards.reentryEnabled &&
-        guards.communityEnabled;
-
-      const consentFlowOk = ["terms", "privacy", "alpha_processing"].every((key) => REQUIRED_CONSENTS.includes(key));
-
-      const checklist = buildReleaseChecklist({
-        migrationsApplied: {
-          pass: migrationsApplied,
-          details: {
-            appliedCount: applied.length,
-            expectedCount,
-            schemaVersion: latestApplied,
-            expectedVersion: latestExpected,
-          },
-        },
-        validatorOk: {
-          pass: validator ? validator.ok : false,
-          details: { latestRunId: validator?.id || null, latestAtISO: validator?.atISO || null },
-        },
-        loadtestOk: {
-          pass: loadtestRun ? loadtestRun.ok && loadtestEval.ok : false,
-          details: { latestAtISO: loadtestRun?.atISO || null, p95ByRoute: loadtestEval.p95ByRoute, errorRate: loadtestEval.errorRate },
-        },
-        errorRateOk: {
-          pass: errorRateOk,
-          details: { errorRate, windowMinutes: requestSnapshot.windowMinutes, totalRequests: requestSnapshot.total },
-        },
-        backupsOk: {
-          pass: backupsOk,
-          details: { latestAtISO: backups.latestAtISO, countLast14: backups.countLast14 },
-        },
-        flagsOk: {
-          pass: flagsOk,
-          details: {
-            incidentMode,
-            regenEnabled: guards.regenEnabled,
-            signalsEnabled: guards.signalsEnabled,
-            checkinsEnabled: guards.checkinsEnabled,
-            reentryEnabled: guards.reentryEnabled,
-            communityEnabled: guards.communityEnabled,
-          },
-        },
-        consentFlowOk: {
-          pass: consentFlowOk,
-          details: { required: REQUIRED_CONSENTS },
-        },
-      });
+      const { checklist } = await computeReleaseChecklistState();
       send(200, { ok: true, pass: checklist.pass, checks: checklist.checks });
       return;
     }
@@ -4657,6 +5044,43 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       send(200, { ok: true, user: result });
+      return;
+    }
+
+    const repinMatch = pathname.match(/^\/v1\/admin\/users\/([^/]+)\/repin-snapshot$/);
+    if (repinMatch && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const targetUserId = sanitizeUserId(repinMatch[1]);
+      if (targetUserId !== repinMatch[1]) {
+        sendError(res, 400, "userId_invalid", "userId is invalid", "userId");
+        return;
+      }
+      const body = await parseJson(req);
+      const snapshotId = typeof body?.snapshotId === "string" ? body.snapshotId.trim() : "";
+      if (!snapshotId) {
+        sendError(res, 400, "snapshot_required", "snapshotId is required", "snapshotId");
+        return;
+      }
+      const snapshot = await getContentSnapshot(snapshotId);
+      if (!snapshot) {
+        sendError(res, 404, "not_found", "Snapshot not found");
+        return;
+      }
+      const targetState = await getUserState(targetUserId);
+      if (!targetState?.state) {
+        sendError(res, 404, "not_found", "User state not found");
+        return;
+      }
+      const userProfile = targetState.state.userProfile || null;
+      const repin = await repinUserSnapshot({
+        userId: targetUserId,
+        snapshotId,
+        userProfile,
+        reason: body?.reason || "manual",
+      });
+      await auditAdmin("users.snapshot.repin", targetUserId, { snapshotId, reason: body?.reason || "manual" });
+      send(200, { ok: true, userId: targetUserId, snapshotId, pinExpiresAt: repin?.pinExpiresAt || null });
       return;
     }
 
@@ -5857,6 +6281,119 @@ const server = http.createServer(async (req, res) => {
           results.push({ scenarioId: id, ok: resCheck.ok, diffsCount: resCheck.diffs.length });
         }
         send(200, { ok: true, results });
+        return;
+      }
+
+      if (pathname === "/v1/dev/determinism/check" && req.method === "POST") {
+        const body = await parseJson(req);
+        const dateISO = body?.dateISO || getTodayISOForProfile(state.userProfile);
+        if (dateISO) {
+          const validation = validateDateParam(dateISO, "dateISO");
+          if (!validation.ok) {
+            sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+            return;
+          }
+        }
+        const atISO = body?.atISO || new Date().toISOString();
+        const snapshotCtx = await getSnapshotContext();
+        const flags = await getFeatureFlags();
+        const paramsState = await getParamsForUser();
+        const ruleConfig = buildRuleConfig(res.livenewRequestId, userId);
+        const contentPrefs = await loadContentPrefs(userId);
+        let experimentEffects = {
+          paramsEffective: paramsState.map,
+          packOverride: null,
+          experimentMeta: null,
+          assignments: [],
+        };
+        try {
+          experimentEffects = await applyExperiments({
+            userId,
+            cohortId: paramsState.cohortId || null,
+            params: paramsState.map,
+            logger: ruleConfig.logger,
+          });
+        } catch (err) {
+          logError({
+            event: "experiments_apply_failed",
+            userId,
+            requestId: res.livenewRequestId,
+            error: err?.code || err?.message || String(err),
+          });
+        }
+        const paramsMeta = {
+          cohortId: paramsState.cohortId || null,
+          versions: paramsState.versionsBySource || {},
+          experiments: experimentEffects.assignments || [],
+        };
+        const paramsEffective = experimentEffects.paramsEffective || paramsState.map;
+        const packOverride = experimentEffects.packOverride || null;
+        const experimentMeta = experimentEffects.experimentMeta || null;
+        const packId = packOverride || state.userProfile?.contentPack || null;
+        const experimentIds = (experimentEffects.assignments || []).map(
+          (assignment) => `${assignment.experimentId}:${assignment.variantKey}`
+        );
+        const modelStamp = buildModelStamp({
+          snapshotId: snapshotCtx?.snapshotId || null,
+          libraryHash: snapshotCtx?.snapshot?.libraryHash || null,
+          packsHash: snapshotCtx?.snapshot?.packsHash || null,
+          paramsVersions: paramsState.versions || {},
+          packId,
+          cohortId: paramsState.cohortId || null,
+          experimentIds,
+        });
+        const incidentEnabled = resolveIncidentMode(flags);
+        const ctxBase = {
+          ruleToggles: resolveRuleToggles(state, flags),
+          params: paramsEffective,
+          paramsMeta,
+          now: { todayISO: dateISO, atISO },
+          incidentMode: incidentEnabled,
+          engineGuards: resolveEngineGuards(flags, incidentEnabled),
+          packOverride,
+          experimentMeta,
+          ruleConfig,
+          preferences: contentPrefs,
+          library: snapshotCtx?.library || domain.defaultLibrary,
+          modelStamp,
+        };
+
+        const normalizeDayForHash = (day) => {
+          if (!day) return day;
+          const cloned = deepClone(day);
+          if (cloned?.why?.meta) {
+            delete cloned.why.meta.generatedAtISO;
+            delete cloned.why.meta.generatedAt;
+          }
+          return cloned;
+        };
+
+        const runOnce = () => {
+          let next = normalizeState(deepClone(state));
+          let resEnsure = dispatch(next, { type: "ENSURE_WEEK", payload: {}, atISO }, ctxBase);
+          next = resEnsure.state;
+          if (dateISO && !next.weekPlan?.days?.some((day) => day.dateISO === dateISO)) {
+            resEnsure = dispatch(next, { type: "WEEK_REBUILD", payload: { weekAnchorISO: dateISO }, atISO }, ctxBase);
+            next = resEnsure.state;
+          } else {
+            resEnsure = dispatch(next, { type: "ENSURE_WEEK", payload: {}, atISO }, ctxBase);
+            next = resEnsure.state;
+          }
+          const day = toDayContract(next, dateISO, domain);
+          const normalized = normalizeDayForHash(day);
+          return { day, hash: hashJSON(normalized) };
+        };
+
+        const runA = runOnce();
+        const runB = runOnce();
+        send(200, {
+          ok: true,
+          dateISO,
+          hashA: runA.hash,
+          hashB: runB.hash,
+          match: runA.hash === runB.hash,
+          day: runA.day,
+        });
         return;
       }
     }

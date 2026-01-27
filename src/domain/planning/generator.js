@@ -11,6 +11,7 @@ export function generateWeekPlan({
   params,
   ruleConfig,
   library,
+  modelStamp,
   overridesBase,
 }) {
   const startDateISO = weekStartMonday(weekAnchorISO);
@@ -34,6 +35,7 @@ export function generateWeekPlan({
       checkInsByDate,
       completionsByDate,
       feedback,
+      modelStamp,
       weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups },
       overrides: overridesBase || null,
       qualityRules: rules,

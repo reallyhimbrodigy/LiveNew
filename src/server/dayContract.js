@@ -159,6 +159,9 @@ export function toDayContract(state, dateISO, domain) {
 
   return {
     dateISO,
+    meta: {
+      modelStamp: dayPlan?.meta?.modelStamp || null,
+    },
     what: {
       workout: workout
         ? {

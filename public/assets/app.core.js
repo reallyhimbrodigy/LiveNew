@@ -888,6 +888,17 @@ function initAdmin() {
   const validatorOutput = qs("#validator-output");
   const outlineOutput = qs("#outline-output");
   const outlineStatus = qs("#outline-status");
+  const opsStatus = qs("#ops-status");
+  const opsValidatorList = qs("#ops-validator-list");
+  const opsWorstList = qs("#ops-worst-list");
+  const opsErrorsList = qs("#ops-errors-list");
+  const opsLatencyBody = qs("#ops-latency-table tbody");
+  const opsReleaseList = qs("#ops-release-checklist");
+  const opsSnapshotSummary = qs("#ops-snapshot-summary");
+  const snapshotStatus = qs("#snapshot-status");
+  const snapshotDetail = qs("#snapshot-detail");
+  const snapshotDiffOutput = qs("#snapshot-diff-output");
+  const snapshotRepinOutput = qs("#snapshot-repin-output");
 
   const showPanel = (ok) => {
     if (ok) {
@@ -982,6 +993,105 @@ function initAdmin() {
     }
     if (validatorOutput) validatorOutput.textContent = JSON.stringify(res.report || {}, null, 2);
     renderValidatorBanner({ releaseBlocked: res.report ? !res.report.ok : false });
+  };
+
+  const loadOpsDashboard = async () => {
+    if (opsStatus) opsStatus.textContent = t("admin.loading");
+    const ops = await apiGet("/v1/admin/ops/status");
+    if (opsStatus) {
+      const validatorOk = ops.validator?.latestOk ? t("admin.ok") : t("admin.failed");
+      const loadtestOk = ops.loadtest?.latestOk ? t("admin.ok") : t("admin.failed");
+      opsStatus.textContent = `${t("admin.validator")}: ${validatorOk} • ${t("admin.loadtest")}: ${loadtestOk}`;
+    }
+    if (opsReleaseList) {
+      clear(opsReleaseList);
+      const checklist = ops.releaseChecklistPass ? t("admin.ok") : t("admin.failed");
+      opsReleaseList.appendChild(
+        el("div", { class: "list-item" }, [
+          el("div", { text: `${t("admin.releaseChecklist")}: ${checklist}` }),
+          el("div", { class: "muted", text: `${t("admin.backupsOk")}: ${ops.backups?.latestAtISO || "—"}` }),
+        ])
+      );
+    }
+    if (opsSnapshotSummary) {
+      clear(opsSnapshotSummary);
+      opsSnapshotSummary.appendChild(
+        el("div", { class: "list-item" }, [
+          el("div", { text: `${t("admin.defaultSnapshot")}: ${ops.snapshots?.defaultSnapshotId || "—"}` }),
+          el("div", { class: "muted", text: `${t("admin.latestReleasedSnapshot")}: ${ops.snapshots?.latestReleasedSnapshotId || "—"}` }),
+        ])
+      );
+    }
+    if (opsLatencyBody) {
+      clear(opsLatencyBody);
+      const entries = Object.entries(ops.loadtest?.p95ByRoute || {}).sort((a, b) => a[0].localeCompare(b[0]));
+      if (!entries.length) {
+        opsLatencyBody.appendChild(
+          el("tr", {}, [el("td", { text: "—" }), el("td", { text: "—" })])
+        );
+      } else {
+        entries.forEach(([route, p95]) => {
+          opsLatencyBody.appendChild(
+            el("tr", {}, [el("td", { text: route }), el("td", { text: `${Math.round(p95)}ms` })])
+          );
+        });
+      }
+    }
+
+    const latestValidator = await apiGet("/v1/admin/validator/latest");
+    if (opsValidatorList) {
+      clear(opsValidatorList);
+      const report = latestValidator.latest?.report || null;
+      const failures = report?.failures || [];
+      if (!failures.length) {
+        opsValidatorList.appendChild(el("div", { class: "list-item muted", text: t("admin.noFailures") }));
+      } else {
+        failures.slice(0, 12).forEach((failure) => {
+          opsValidatorList.appendChild(
+            el("div", { class: "list-item" }, [
+              el("div", { text: `${failure.profile || ""} • ${failure.timeAvailableMin || ""}m • ${failure.packId || ""}` }),
+              el("div", { class: "muted", text: `${failure.code || ""} ${failure.message || ""}` }),
+            ])
+          );
+        });
+      }
+    }
+
+    if (opsWorstList) {
+      clear(opsWorstList);
+      const kinds = ["workout", "reset", "nutrition"];
+      for (const kind of kinds) {
+        const res = await apiGet(`/v1/admin/reports/worst-items?kind=${kind}&limit=3`);
+        (res.items || []).forEach((entry) => {
+          const item = entry.item || {};
+          const stats = entry.stats || {};
+          opsWorstList.appendChild(
+            el("div", { class: "list-item" }, [
+              el("div", { text: `${kind} • ${item.title || item.id || ""}` }),
+              el("div", { class: "muted", text: `${t("admin.notRelevantRate")}: ${formatPct(stats.notRelevantRate)}` }),
+            ])
+          );
+        });
+      }
+    }
+
+    const errors = await apiGet("/v1/admin/monitoring/errors");
+    if (opsErrorsList) {
+      clear(opsErrorsList);
+      const entries = errors.errors || [];
+      if (!entries.length) {
+        opsErrorsList.appendChild(el("div", { class: "list-item muted", text: t("admin.noErrors") }));
+      } else {
+        entries.slice(0, 10).forEach((entry) => {
+          opsErrorsList.appendChild(
+            el("div", { class: "list-item" }, [
+              el("div", { text: `${entry.code} • ${entry.routeKey}` }),
+              el("div", { class: "muted", text: `${entry.count} • ${entry.lastSeenAtISO || ""}` }),
+            ])
+          );
+        });
+      }
+    }
   };
 
   const buildOutlinePayload = () => {
@@ -1498,6 +1608,115 @@ function initAdmin() {
     renderMatrix(res.matrix || []);
   };
 
+  let snapshotsCache = [];
+  let currentSnapshotId = null;
+  let defaultSnapshotId = null;
+  const setSnapshotStatus = (messageKey, extra = "") => {
+    if (!snapshotStatus) return;
+    const base = messageKey ? t(messageKey) : "";
+    snapshotStatus.textContent = extra ? `${base} ${extra}` : base;
+  };
+  const fillSnapshotSelect = (select, options, value = "") => {
+    if (!select) return;
+    clear(select);
+    options.forEach((snap) => {
+      const opt = el("option", { text: snap.id });
+      opt.value = snap.id;
+      select.appendChild(opt);
+    });
+    if (value) select.value = value;
+  };
+  const renderSnapshotList = () => {
+    const list = qs("#snapshot-list");
+    if (!list) return;
+    clear(list);
+    snapshotsCache.forEach((snap) => {
+      const isDefault = snap.id === defaultSnapshotId;
+      const defaultLabel = isDefault ? ` • ${t("admin.default")}` : "";
+      const row = el("div", { class: "list-item" }, [
+        el("div", { text: `${snap.id}${defaultLabel}` }),
+        el("div", { class: "muted", text: `${snap.status || ""} • ${snap.createdAt || ""}` }),
+      ]);
+      row.addEventListener("click", async () => {
+        currentSnapshotId = snap.id;
+        await loadSnapshotDetail(snap.id);
+      });
+      list.appendChild(row);
+    });
+  };
+  const loadSnapshotDetail = async (snapshotId) => {
+    if (!snapshotId) return;
+    const res = await apiGet(`/v1/admin/snapshots/${encodeURIComponent(snapshotId)}`);
+    if (snapshotDetail) snapshotDetail.textContent = JSON.stringify(res.snapshot || {}, null, 2);
+    currentSnapshotId = snapshotId;
+  };
+  const loadSnapshots = async () => {
+    const res = await apiGet("/v1/admin/snapshots");
+    snapshotsCache = res.snapshots || [];
+    defaultSnapshotId = res.defaultSnapshotId || null;
+    renderSnapshotList();
+    const fromSelect = qs("#snapshot-diff-from");
+    const toSelect = qs("#snapshot-diff-to");
+    fillSnapshotSelect(fromSelect, snapshotsCache, snapshotsCache[0]?.id || "");
+    fillSnapshotSelect(toSelect, snapshotsCache, snapshotsCache[1]?.id || snapshotsCache[0]?.id || "");
+    if (currentSnapshotId) {
+      await loadSnapshotDetail(currentSnapshotId);
+    } else if (snapshotsCache[0]) {
+      await loadSnapshotDetail(snapshotsCache[0].id);
+    }
+  };
+  const createSnapshot = async () => {
+    const note = qs("#snapshot-note")?.value?.trim() || null;
+    const res = await apiPost("/v1/admin/snapshots/create", { note });
+    setSnapshotStatus("admin.snapshotCreated");
+    currentSnapshotId = res.snapshot?.id || null;
+    await loadSnapshots();
+  };
+  const releaseSnapshot = async () => {
+    if (!currentSnapshotId) return;
+    try {
+      await apiPost(`/v1/admin/snapshots/${encodeURIComponent(currentSnapshotId)}/release`, {});
+      setSnapshotStatus("admin.snapshotReleased");
+      await loadSnapshots();
+    } catch (err) {
+      const details = getErrorDetails(err);
+      if (snapshotDetail) snapshotDetail.textContent = JSON.stringify(details || {}, null, 2);
+      setSnapshotStatus("admin.snapshotReleaseFailed");
+    }
+  };
+  const rollbackSnapshot = async () => {
+    if (!currentSnapshotId) return;
+    const targetId = qs("#snapshot-rollback-id")?.value?.trim();
+    const payload = targetId ? { snapshotId: targetId } : {};
+    try {
+      await apiPost(`/v1/admin/snapshots/${encodeURIComponent(currentSnapshotId)}/rollback`, payload);
+      setSnapshotStatus("admin.snapshotRolledBack");
+      await loadSnapshots();
+    } catch (err) {
+      const details = getErrorDetails(err);
+      if (snapshotDetail) snapshotDetail.textContent = JSON.stringify(details || {}, null, 2);
+      setSnapshotStatus("admin.snapshotRollbackFailed");
+    }
+  };
+  const runSnapshotDiff = async () => {
+    const fromId = qs("#snapshot-diff-from")?.value;
+    const toId = qs("#snapshot-diff-to")?.value;
+    if (!fromId || !toId) return;
+    const res = await apiGet(`/v1/admin/snapshots/diff?from=${encodeURIComponent(fromId)}&to=${encodeURIComponent(toId)}`);
+    if (snapshotDiffOutput) snapshotDiffOutput.textContent = JSON.stringify(res.diff || {}, null, 2);
+  };
+  const repinSnapshot = async () => {
+    const targetUserId = qs("#snapshot-repin-user")?.value?.trim();
+    const snapshotId = qs("#snapshot-repin-id")?.value?.trim();
+    const reason = qs("#snapshot-repin-reason")?.value?.trim();
+    if (!targetUserId || !snapshotId) return;
+    const res = await apiPost(`/v1/admin/users/${encodeURIComponent(targetUserId)}/repin-snapshot`, {
+      snapshotId,
+      reason,
+    });
+    if (snapshotRepinOutput) snapshotRepinOutput.textContent = JSON.stringify(res || {}, null, 2);
+  };
+
   let supportUserId = null;
   const renderSupportResult = (user) => {
     const list = qs("#support-result");
@@ -1694,6 +1913,13 @@ function initAdmin() {
     qs("#outline-save")?.addEventListener("click", saveOutlineDraft);
     qs("#validator-load")?.addEventListener("click", loadValidatorLatest);
     qs("#validator-run")?.addEventListener("click", runValidatorNow);
+    qs("#ops-refresh")?.addEventListener("click", loadOpsDashboard);
+    qs("#snapshot-load")?.addEventListener("click", loadSnapshots);
+    qs("#snapshot-create")?.addEventListener("click", createSnapshot);
+    qs("#snapshot-release")?.addEventListener("click", releaseSnapshot);
+    qs("#snapshot-rollback")?.addEventListener("click", rollbackSnapshot);
+    qs("#snapshot-diff-run")?.addEventListener("click", runSnapshotDiff);
+    qs("#snapshot-repin")?.addEventListener("click", repinSnapshot);
     qs("#support-search")?.addEventListener("click", searchSupportUser);
     qs("#support-debug-bundle")?.addEventListener("click", createSupportDebugBundle);
     qs("#support-replay")?.addEventListener("click", replaySupportSandbox);
@@ -1716,6 +1942,8 @@ function initAdmin() {
     loadPacksList();
     loadExperiments();
     runPreviewMatrix();
+    loadOpsDashboard();
+    loadSnapshots();
     const adminRemindersDate = qs("#admin-reminders-date");
     if (adminRemindersDate) adminRemindersDate.value = todayISO();
     loadCohorts();
