@@ -79,6 +79,9 @@ export function getConfig() {
   const incidentModeDefault = process.env.INCIDENT_MODE === "true";
   const regenThrottleMs = Number(process.env.REGEN_THROTTLE_MS || 2 * 60 * 60 * 1000);
   const adminInDevEnabled = process.env.ADMIN_IN_DEV === "true";
+  const rulesFrozenOverride = parseBool(process.env.RULES_FROZEN);
+  const rulesFrozen = rulesFrozenOverride !== undefined ? rulesFrozenOverride : isAlphaLike || isProdLike;
+  const contentStageMode = process.env.CONTENT_STAGE_MODE === "true";
 
   const config = {
     envMode,
@@ -99,6 +102,8 @@ export function getConfig() {
     incidentModeDefault,
     regenThrottleMs,
     adminInDevEnabled,
+    rulesFrozen,
+    contentStageMode,
     port: Number(process.env.PORT || 3000),
     dataDir,
     dbStatusRequired: true,

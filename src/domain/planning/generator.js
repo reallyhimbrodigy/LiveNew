@@ -9,6 +9,9 @@ export function generateWeekPlan({
   feedback,
   qualityRules,
   params,
+  ruleConfig,
+  library,
+  overridesBase,
 }) {
   const startDateISO = weekStartMonday(weekAnchorISO);
   const days = [];
@@ -32,9 +35,11 @@ export function generateWeekPlan({
       completionsByDate,
       feedback,
       weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups },
-      overrides: null,
+      overrides: overridesBase || null,
       qualityRules: rules,
       params,
+      ruleConfig,
+      library,
     });
 
     days.push(dayPlan);

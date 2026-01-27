@@ -31,6 +31,37 @@
   </header>
 
   <main class="container">
+    <section class="card rail-card" id="rail-card">
+      <h1 data-i18n="rail.title">Quick start</h1>
+      <div class="rail-grid">
+        <div class="rail-checkin">
+          <h2 data-i18n="rail.checkInTitle">10-second check-in</h2>
+          <div class="grid-2">
+            <label><span data-i18n="checkIn.stress">Stress (1-10)</span> <input id="rail-stress" type="number" min="1" max="10" /></label>
+            <label><span data-i18n="checkIn.sleep">Sleep quality (1-10)</span> <input id="rail-sleep" type="number" min="1" max="10" /></label>
+            <label><span data-i18n="checkIn.energy">Energy (1-10)</span> <input id="rail-energy" type="number" min="1" max="10" /></label>
+            <label><span data-i18n="checkIn.timeAvailable">Time available</span>
+              <select id="rail-time">
+                <option value="5">5</option>
+                <option value="10" selected>10</option>
+                <option value="15">15</option>
+                <option value="20">20</option>
+                <option value="30">30</option>
+              </select>
+            </label>
+          </div>
+        </div>
+        <div class="rail-reset-card">
+          <h2 data-i18n="rail.resetHeading">2-minute reset</h2>
+          <div id="rail-reset" class="rail-reset-body"></div>
+        </div>
+      </div>
+      <div class="row">
+        <button id="rail-submit" data-i18n="rail.submit">Save quick check-in</button>
+        <button id="rail-view-full" class="ghost" data-i18n="rail.viewFull">View full day</button>
+      </div>
+    </section>
+
     <section class="card">
       <h1 data-i18n="day.title">Today</h1>
       <div class="row">

@@ -31,6 +31,21 @@ const SIGNALS = [
   { id: "wired", label: t("signals.wired") },
 ];
 
+let citationsById = new Map();
+let citationsLoaded = false;
+async function ensureCitations() {
+  if (citationsLoaded) return citationsById;
+  try {
+    const res = await apiGet("/v1/citations");
+    const list = Array.isArray(res?.citations) ? res.citations : [];
+    citationsById = new Map(list.filter((entry) => entry?.id).map((entry) => [entry.id, entry]));
+  } catch {
+    citationsById = new Map();
+  }
+  citationsLoaded = true;
+  return citationsById;
+}
+
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -155,6 +170,7 @@ function renderDay(day) {
   const resetSteps = (day.details.resetSteps || []).join(" • ") || "–";
   const nutrition = (day.details.nutritionPriorities || []).join(" • ") || "–";
   const anchors = day.details.anchors;
+  const citationIds = Array.isArray(day.details.citations) ? day.details.citations : [];
   const anchorLines = [];
   if (anchors?.sunlightAnchor) anchorLines.push(`${t("labels.sunlight")}: ${anchors.sunlightAnchor.instruction}`);
   if (anchors?.mealTimingAnchor) anchorLines.push(`${t("labels.meals")}: ${anchors.mealTimingAnchor.instruction}`);
@@ -164,6 +180,10 @@ function renderDay(day) {
   details.appendChild(el("div", { text: `${t("labels.nutritionPriorities")}: ${nutrition}` }));
   if (anchorLines.length) {
     details.appendChild(el("div", { text: `${t("labels.anchors")}: ${anchorLines.join(" | ")}` }));
+  }
+  if (citationIds.length) {
+    const citationLines = citationIds.map((id) => citationsById.get(id)?.title || id);
+    details.appendChild(el("div", { text: `${t("labels.citations")}: ${citationLines.join(" • ")}` }));
   }
   const expanded = day.why?.expanded;
   if (expanded) {
@@ -191,17 +211,70 @@ function initDay() {
   const checkinBtn = qs("#checkin-submit");
   const feedbackBtn = qs("#feedback-submit");
   const completionInputs = qsa("#completion-list input");
+  const railSubmit = qs("#rail-submit");
+  const railResetEl = qs("#rail-reset");
+  const railViewFull = qs("#rail-view-full");
 
   if (dateInput) dateInput.value = todayISO();
 
+  const renderRailReset = (reset) => {
+    if (!railResetEl) return;
+    clear(railResetEl);
+    if (!reset) {
+      railResetEl.appendChild(el("div", { class: "muted", text: t("rail.resetUnavailable") }));
+      return;
+    }
+    railResetEl.appendChild(el("div", { class: "rail-title", text: t("rail.resetTitle") }));
+    railResetEl.appendChild(
+      el("div", { class: "rail-reset-name", text: `${reset.title || "Reset"} (${reset.minutes || 2} min)` })
+    );
+    const steps = Array.isArray(reset.steps) ? reset.steps : [];
+    if (steps.length) {
+      railResetEl.appendChild(el("div", { class: "muted", text: steps.slice(0, 3).join(" • ") }));
+    }
+  };
+
+  const loadRail = async () => {
+    const res = await apiGet("/v1/rail/today");
+    const dateISO = res.day?.dateISO || todayISO();
+    if (dateInput) dateInput.value = dateISO;
+    await ensureCitations();
+    if (res.day) renderDay(res.day);
+    renderRailReset(res.rail?.reset || null);
+  };
+
   const loadDay = async () => {
     const dateISO = dateInput?.value || todayISO();
+    if (railResetEl && dateISO === todayISO()) {
+      await loadRail();
+      return;
+    }
     const res = await apiGet(`/v1/plan/day?date=${dateISO}`);
+    await ensureCitations();
     renderDay(res.day);
   };
 
   loadBtn?.addEventListener("click", loadDay);
   loadDay();
+
+  railSubmit?.addEventListener("click", async () => {
+    const dateISO = todayISO();
+    if (dateInput) dateInput.value = dateISO;
+    const checkIn = {
+      dateISO,
+      stress: Number(qs("#rail-stress")?.value || 5),
+      sleepQuality: Number(qs("#rail-sleep")?.value || 6),
+      energy: Number(qs("#rail-energy")?.value || 6),
+      timeAvailableMin: Number(qs("#rail-time")?.value || 10),
+    };
+    const res = await apiPost("/v1/checkin", { checkIn });
+    void res;
+    await loadRail();
+  });
+
+  railViewFull?.addEventListener("click", () => {
+    qs("#day-summary")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
 
   detailsToggle?.addEventListener("click", () => {
     details?.classList.toggle("hidden");
@@ -218,7 +291,14 @@ function initDay() {
       btn.addEventListener("click", async () => {
         const dateISO = dateInput?.value || todayISO();
         const res = await apiPost("/v1/signal", { dateISO, signal: signal.id });
-        if (res.day) renderDay(res.day);
+        if (res.day) {
+          if (railResetEl && dateISO === todayISO()) {
+            await loadRail();
+          } else {
+            await ensureCitations();
+            renderDay(res.day);
+          }
+        }
       });
       signalButtons.appendChild(btn);
     });
@@ -227,7 +307,14 @@ function initDay() {
   badDayBtn?.addEventListener("click", async () => {
     const dateISO = dateInput?.value || todayISO();
     const res = await apiPost("/v1/bad-day", { dateISO });
-    if (res.day) renderDay(res.day);
+    if (res.day) {
+      if (railResetEl && dateISO === todayISO()) {
+        await loadRail();
+      } else {
+        await ensureCitations();
+        renderDay(res.day);
+      }
+    }
   });
 
   checkinBtn?.addEventListener("click", async () => {
@@ -241,7 +328,14 @@ function initDay() {
       notes: qs("#checkin-notes")?.value || "",
     };
     const res = await apiPost("/v1/checkin", { checkIn });
-    if (res.day) renderDay(res.day);
+    if (res.day) {
+      if (railResetEl && dateISO === todayISO()) {
+        await loadRail();
+      } else {
+        await ensureCitations();
+        renderDay(res.day);
+      }
+    }
   });
 
   completionInputs.forEach((input) => {
@@ -535,6 +629,19 @@ function initAdmin() {
       .map((v) => v.trim())
       .filter(Boolean);
 
+  let stageModeEnabled = false;
+  const stageModeInputs = [qs("#sc-stage-mode"), qs("#matrix-stage-mode")].filter(Boolean);
+  const setStageMode = (value) => {
+    stageModeEnabled = Boolean(value);
+    stageModeInputs.forEach((input) => {
+      input.checked = stageModeEnabled;
+    });
+  };
+  stageModeInputs.forEach((input) => {
+    input.addEventListener("change", () => setStageMode(input.checked));
+  });
+  const stageHeaders = () => (stageModeEnabled ? { "x-content-stage": "true" } : undefined);
+
   const loadContentList = async () => {
     const kind = qs("#admin-kind")?.value || "workout";
     const res = await apiGet(`/v1/admin/content?kind=${kind}&page=1&pageSize=200`);
@@ -592,6 +699,133 @@ function initAdmin() {
     const id = currentItem.item.id;
     await apiPost(`/v1/admin/content/${kind}/${id}/disable`, {});
     loadContentList();
+  };
+
+  let scCurrent = null;
+  const scStatusText = qs("#sc-status-text");
+  const scSetStatus = (textKey, extra = "") => {
+    if (!scStatusText) return;
+    const base = textKey ? t(textKey) : "";
+    scStatusText.textContent = extra ? `${base} ${extra}` : base;
+  };
+  const scReportOutput = qs("#sc-report-output");
+  const scReportsList = qs("#sc-reports");
+
+  const scPopulateEditor = (kind, item) => {
+    scCurrent = { kind, item };
+    if (qs("#sc-id")) {
+      qs("#sc-id").textContent = item?.id ? `${t("admin.item")}: ${item.id} • ${t("admin.status")}: ${item.status || ""}` : "";
+    }
+    if (qs("#sc-title")) qs("#sc-title").value = item?.title || "";
+    if (qs("#sc-priority")) qs("#sc-priority").value = item?.priority || 0;
+    if (qs("#sc-minutes")) qs("#sc-minutes").value = item?.minutes || "";
+    if (qs("#sc-novelty")) qs("#sc-novelty").value = item?.noveltyGroup || "";
+    if (qs("#sc-tags")) qs("#sc-tags").value = (item?.tags || []).join(", ");
+    const steps = kind === "nutrition" ? item?.priorities || [] : item?.steps || [];
+    if (qs("#sc-steps")) qs("#sc-steps").value = (steps || []).join("\n");
+  };
+
+  const scCollectItem = (kind) => {
+    const tags = (qs("#sc-tags")?.value || "")
+      .split(",")
+      .map((t) => t.trim())
+      .filter(Boolean);
+    const stepsRaw = (qs("#sc-steps")?.value || "")
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const base = {
+      id: scCurrent?.item?.id,
+      title: qs("#sc-title")?.value || "",
+      priority: Number(qs("#sc-priority")?.value || 0),
+      noveltyGroup: qs("#sc-novelty")?.value || "",
+      minutes: Number(qs("#sc-minutes")?.value || 0),
+      tags,
+      enabled: true,
+    };
+    if (kind === "nutrition") base.priorities = stepsRaw;
+    else base.steps = stepsRaw;
+    return base;
+  };
+
+  const scLoadList = async () => {
+    const kind = qs("#sc-kind")?.value || "workout";
+    const status = qs("#sc-status")?.value || "draft";
+    const res = await apiGet(`/v1/admin/content?kind=${kind}&status=${status}&page=1&pageSize=200`);
+    const list = qs("#sc-list");
+    if (!list) return;
+    clear(list);
+    (res.items || []).forEach((item) => {
+      const row = el("div", { class: "list-item" }, [
+        el("div", { text: item.title || item.id }),
+        el("div", { class: "muted", text: `${item.status || ""} • ${t("admin.priority").toLowerCase()} ${item.priority ?? 0}` }),
+      ]);
+      row.addEventListener("click", () => scPopulateEditor(kind, item));
+      list.appendChild(row);
+    });
+    scSetStatus("", "");
+  };
+
+  const scSaveDraft = async () => {
+    const kind = qs("#sc-kind")?.value || "workout";
+    const item = scCollectItem(kind);
+    const res = await apiPost("/v1/admin/content/draft", { kind, item });
+    scPopulateEditor(kind, res.item);
+    scSetStatus("admin.saveDraft");
+    await scLoadList();
+  };
+
+  const scStage = async () => {
+    if (!scCurrent?.item?.id) return;
+    const { kind, item } = scCurrent;
+    const res = await apiPost(`/v1/admin/content/stage/${kind}/${encodeURIComponent(item.id)}`, {});
+    scPopulateEditor(kind, res.item);
+    scSetStatus("admin.stage");
+    await scLoadList();
+  };
+
+  const scEnable = async () => {
+    if (!scCurrent?.item?.id) return;
+    const { kind, item } = scCurrent;
+    const res = await apiPost(`/v1/admin/content/enable/${kind}/${encodeURIComponent(item.id)}`, {});
+    scPopulateEditor(kind, res.item);
+    scSetStatus("admin.enable");
+    await scLoadList();
+  };
+
+  const scDisable = async () => {
+    if (!scCurrent?.item?.id) return;
+    const { kind, item } = scCurrent;
+    const res = await apiPost(`/v1/admin/content/disable/${kind}/${encodeURIComponent(item.id)}`, {});
+    scPopulateEditor(kind, res.item);
+    scSetStatus("admin.disable");
+    await scLoadList();
+  };
+
+  const scValidate = async () => {
+    const scope = qs("#sc-scope")?.value || "all";
+    const res = await apiPost("/v1/admin/content/validate", { scope });
+    if (scReportOutput) {
+      scReportOutput.textContent = JSON.stringify(res.report || {}, null, 2);
+    }
+    scSetStatus("admin.validate");
+    await scLoadReports();
+  };
+
+  const scLoadReports = async () => {
+    const res = await apiGet("/v1/admin/content/validation-reports?limit=20");
+    if (!scReportsList) return;
+    clear(scReportsList);
+    (res.reports || []).forEach((entry) => {
+      const row = el("div", { class: "list-item" }, [
+        el("div", { text: `${entry.atISO || ""} • ${entry.scope || ""}` }),
+        el("div", { class: "muted", text: `${(entry.report?.errors || []).length} errors • ${(entry.report?.warnings || []).length} warnings` }),
+      ]);
+      row.addEventListener("click", () => {
+        if (scReportOutput) scReportOutput.textContent = JSON.stringify(entry.report || {}, null, 2);
+      });
+      scReportsList.appendChild(row);
+    });
   };
 
   const loadWorst = async () => {
@@ -757,6 +991,78 @@ function initAdmin() {
     }
   };
 
+  let experimentsCache = [];
+  const setExperimentsStatus = (message, extra = "") => {
+    const elStatus = qs("#experiments-status");
+    if (!elStatus) return;
+    const base = message ? t(message) : "";
+    if (!base) {
+      elStatus.textContent = extra || "";
+      return;
+    }
+    elStatus.textContent = extra ? `${base} ${extra}` : base;
+  };
+
+  const renderExperiments = (experiments) => {
+    const list = qs("#experiments-list");
+    if (!list) return;
+    clear(list);
+    (experiments || []).forEach((exp) => {
+      const config = exp.config || {};
+      const row = el("div", { class: "list-item" }, [
+        el("div", { text: `${exp.name || exp.id} (${exp.id})` }),
+        el("div", { class: "muted", text: `${exp.status || ""} • ${config.type || ""}` }),
+      ]);
+      const startBtn = el("button", { class: "ghost", text: t("admin.running") });
+      startBtn.addEventListener("click", async () => {
+        await apiPost(`/v1/admin/experiments/${encodeURIComponent(exp.id)}/start`, {});
+        await loadExperiments();
+      });
+      const stopBtn = el("button", { class: "ghost", text: t("admin.stopped") });
+      stopBtn.addEventListener("click", async () => {
+        await apiPost(`/v1/admin/experiments/${encodeURIComponent(exp.id)}/stop`, {});
+        await loadExperiments();
+      });
+      row.appendChild(startBtn);
+      row.appendChild(stopBtn);
+      list.appendChild(row);
+    });
+  };
+
+  const loadExperiments = async () => {
+    const res = await apiGet("/v1/admin/experiments");
+    experimentsCache = res.experiments || [];
+    renderExperiments(experimentsCache);
+    setExperimentsStatus("");
+  };
+
+  const createExperiment = async () => {
+    const name = qs("#exp-name")?.value?.trim();
+    if (!name) {
+      setExperimentsStatus("", t("admin.name"));
+      return;
+    }
+    let config = {};
+    try {
+      config = JSON.parse(qs("#exp-config")?.value || "{}");
+    } catch {
+      setExperimentsStatus("admin.invalidJson");
+      return;
+    }
+    const status = qs("#exp-status")?.value || "draft";
+    await apiPost("/v1/admin/experiments", { name, status, config_json: config });
+    await loadExperiments();
+  };
+
+  const loadExperimentAssignments = async (experimentIdOverride = null) => {
+    const experimentId = experimentIdOverride || qs("#exp-assign-id")?.value?.trim();
+    if (!experimentId) return;
+    const res = await apiGet(`/v1/admin/experiments/${encodeURIComponent(experimentId)}/assignments?page=1&pageSize=50`);
+    if (qs("#experiments-assignments")) {
+      qs("#experiments-assignments").textContent = JSON.stringify(res.items || [], null, 2);
+    }
+  };
+
   const renderMatrix = (rows) => {
     const tbody = qs("#matrix-table tbody");
     if (!tbody) return;
@@ -791,12 +1097,20 @@ function initAdmin() {
       stress: Number(qs("#matrix-stress")?.value || 5),
       energy: Number(qs("#matrix-energy")?.value || 6),
     };
-    const res = await apiPost("/v1/admin/preview/matrix", {
-      packIds,
-      profiles,
-      timeBuckets,
-      baseInputs,
-    });
+    const headers = stageHeaders();
+    const res = await apiPost(
+      "/v1/admin/preview/matrix",
+      {
+        packIds,
+        profiles,
+        timeBuckets,
+        baseInputs,
+      },
+      { headers }
+    );
+    if (typeof res.stageMode === "boolean") {
+      setStageMode(res.stageMode);
+    }
     renderMatrix(res.matrix || []);
   };
 
@@ -938,11 +1252,26 @@ function initAdmin() {
     qs("#admin-content-load")?.addEventListener("click", loadContentList);
     qs("#content-save")?.addEventListener("click", saveEditor);
     qs("#content-disable")?.addEventListener("click", disableItem);
+    qs("#sc-load")?.addEventListener("click", scLoadList);
+    qs("#sc-kind")?.addEventListener("change", () => {
+      scCurrent = null;
+      scLoadList();
+    });
+    qs("#sc-status")?.addEventListener("change", scLoadList);
+    qs("#sc-save-draft")?.addEventListener("click", scSaveDraft);
+    qs("#sc-stage")?.addEventListener("click", scStage);
+    qs("#sc-enable")?.addEventListener("click", scEnable);
+    qs("#sc-disable")?.addEventListener("click", scDisable);
+    qs("#sc-validate")?.addEventListener("click", scValidate);
+    qs("#sc-reports-load")?.addEventListener("click", scLoadReports);
     qs("#worst-load")?.addEventListener("click", loadWorst);
     qs("#heatmap-load")?.addEventListener("click", loadHeatmap);
     qs("#packs-load")?.addEventListener("click", () => loadPackDetail(qs("#packs-select")?.value));
     qs("#packs-save")?.addEventListener("click", savePack);
     qs("#packs-select")?.addEventListener("change", (e) => loadPackDetail(e.target.value));
+    qs("#experiments-load")?.addEventListener("click", loadExperiments);
+    qs("#exp-create")?.addEventListener("click", createExperiment);
+    qs("#exp-assign-load")?.addEventListener("click", () => loadExperimentAssignments());
     qs("#matrix-run")?.addEventListener("click", runPreviewMatrix);
     qs("#cohorts-load")?.addEventListener("click", loadCohorts);
     qs("#cohort-assign")?.addEventListener("click", assignCohort);
@@ -964,10 +1293,13 @@ function initAdmin() {
     initTabs();
     bindButtons();
     loadContentList();
+    scLoadList();
+    scLoadReports();
     loadWorst();
     loadHeatmap();
     loadParameters();
     loadPacksList();
+    loadExperiments();
     runPreviewMatrix();
     const adminRemindersDate = qs("#admin-reminders-date");
     if (adminRemindersDate) adminRemindersDate.value = todayISO();

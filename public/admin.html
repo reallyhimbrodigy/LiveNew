@@ -39,10 +39,12 @@
     <section class="card hidden" id="admin-panel">
       <div class="tabs">
         <button class="tab active" data-tab="content" data-i18n="admin.content">Content</button>
+        <button class="tab" data-tab="supplyChain" data-i18n="admin.supplyChain">Supply chain</button>
         <button class="tab" data-tab="worst" data-i18n="admin.worst">Worst items</button>
         <button class="tab" data-tab="heatmap" data-i18n="admin.heatmap">Heatmap</button>
         <button class="tab" data-tab="weekly" data-i18n="admin.weeklyReport">Weekly report</button>
         <button class="tab" data-tab="packs" data-i18n="admin.packs">Packs</button>
+        <button class="tab" data-tab="experiments" data-i18n="admin.experiments">Experiments</button>
         <button class="tab" data-tab="previewMatrix" data-i18n="admin.previewMatrix">Preview matrix</button>
         <button class="tab" data-tab="params" data-i18n="admin.parameters">Parameters</button>
         <button class="tab" data-tab="cohorts" data-i18n="admin.cohorts">Cohorts</button>
@@ -81,6 +83,70 @@
               <button id="content-save" data-i18n="admin.save">Save</button>
               <button id="content-disable" class="danger" data-i18n="admin.disable">Disable</button>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel hidden" data-panel="supplyChain">
+        <div class="row">
+          <label><span data-i18n="admin.kind">Kind</span>
+            <select id="sc-kind">
+              <option value="workout" data-i18n="admin.workouts">Workouts</option>
+              <option value="nutrition" data-i18n="admin.nutritionLabel">Nutrition</option>
+              <option value="reset" data-i18n="admin.resets">Resets</option>
+            </select>
+          </label>
+          <label><span data-i18n="admin.status">Status</span>
+            <select id="sc-status">
+              <option value="draft" data-i18n="admin.draft">Draft</option>
+              <option value="staged" data-i18n="admin.staged">Staged</option>
+              <option value="enabled" data-i18n="admin.enabled">Enabled</option>
+              <option value="disabled" data-i18n="admin.disabled">Disabled</option>
+              <option value="all" data-i18n="admin.all">All</option>
+            </select>
+          </label>
+          <button id="sc-load" data-i18n="admin.load">Load</button>
+          <label class="row">
+            <input id="sc-stage-mode" type="checkbox" />
+            <span data-i18n="admin.stageMode">Stage mode</span>
+          </label>
+        </div>
+        <div class="row">
+          <label><span data-i18n="admin.scope">Scope</span>
+            <select id="sc-scope">
+              <option value="draft" data-i18n="admin.draft">Draft</option>
+              <option value="staged" data-i18n="admin.staged">Staged</option>
+              <option value="enabled" data-i18n="admin.enabled">Enabled</option>
+              <option value="all" data-i18n="admin.all">All</option>
+            </select>
+          </label>
+          <button id="sc-validate" data-i18n="admin.validate">Validate</button>
+          <button id="sc-reports-load" class="ghost" data-i18n="admin.validationReports">Reports</button>
+          <span id="sc-status-text" class="muted"></span>
+        </div>
+        <div class="split">
+          <div class="list" id="sc-list"></div>
+          <div class="editor" id="sc-editor">
+            <h3 data-i18n="admin.supplyChainEditor">Supply chain editor</h3>
+            <div id="sc-id" class="muted"></div>
+            <div class="grid-2">
+              <label><span data-i18n="admin.titleLabel">Title</span> <input id="sc-title" type="text" /></label>
+              <label><span data-i18n="admin.priority">Priority</span> <input id="sc-priority" type="number" /></label>
+              <label><span data-i18n="admin.minutes">Minutes</span> <input id="sc-minutes" type="number" /></label>
+              <label><span data-i18n="admin.noveltyGroup">Novelty group</span> <input id="sc-novelty" type="text" /></label>
+              <label class="span-2"><span data-i18n="admin.tags">Tags (comma)</span> <input id="sc-tags" type="text" /></label>
+            </div>
+            <label><span data-i18n="admin.stepsPriorities">Steps / Priorities</span>
+              <textarea id="sc-steps" rows="6"></textarea>
+            </label>
+            <div class="row">
+              <button id="sc-save-draft" data-i18n="admin.saveDraft">Save draft</button>
+              <button id="sc-stage" class="ghost" data-i18n="admin.stage">Stage</button>
+              <button id="sc-enable" data-i18n="admin.enable">Enable</button>
+              <button id="sc-disable" class="danger" data-i18n="admin.disable">Disable</button>
+            </div>
+            <pre id="sc-report-output" class="list-item"></pre>
+            <div id="sc-reports" class="list"></div>
           </div>
         </div>
       </div>
@@ -173,6 +239,41 @@
         </div>
       </div>
 
+      <div class="tab-panel hidden" data-panel="experiments">
+        <div class="row">
+          <button id="experiments-load" data-i18n="admin.load">Load</button>
+          <span id="experiments-status" class="muted"></span>
+        </div>
+        <div class="card">
+          <h3 data-i18n="admin.createExperiment">Create experiment</h3>
+          <div class="grid-2">
+            <label><span data-i18n="admin.name">Name</span> <input id="exp-name" type="text" /></label>
+            <label><span data-i18n="admin.status">Status</span>
+              <select id="exp-status">
+                <option value="draft" data-i18n="admin.draft">Draft</option>
+                <option value="running" data-i18n="admin.running">Running</option>
+                <option value="stopped" data-i18n="admin.stopped">Stopped</option>
+              </select>
+            </label>
+          </div>
+          <label><span data-i18n="admin.configJson">Config (JSON)</span>
+            <textarea id="exp-config" rows="10"></textarea>
+          </label>
+          <div class="row">
+            <button id="exp-create" data-i18n="admin.create">Create</button>
+          </div>
+        </div>
+        <div id="experiments-list" class="list"></div>
+        <div class="card">
+          <h3 data-i18n="admin.assignments">Assignments</h3>
+          <div class="row">
+            <input id="exp-assign-id" type="text" placeholder="experiment id" data-i18n-placeholder="admin.experimentId" />
+            <button id="exp-assign-load" data-i18n="admin.loadAssignments">Load assignments</button>
+          </div>
+          <pre id="experiments-assignments" class="list-item"></pre>
+        </div>
+      </div>
+
       <div class="tab-panel hidden" data-panel="previewMatrix">
         <div class="row">
           <label><span data-i18n="admin.packIds">Pack IDs (comma)</span> <input id="matrix-pack-ids" type="text" /></label>
@@ -183,6 +284,10 @@
           <label><span data-i18n="admin.sleepQuality">Sleep</span> <input id="matrix-sleep" type="number" min="1" max="10" value="6" /></label>
           <label><span data-i18n="admin.stress">Stress</span> <input id="matrix-stress" type="number" min="1" max="10" value="5" /></label>
           <label><span data-i18n="admin.energy">Energy</span> <input id="matrix-energy" type="number" min="1" max="10" value="6" /></label>
+          <label class="row">
+            <input id="matrix-stage-mode" type="checkbox" />
+            <span data-i18n="admin.stageMode">Stage mode</span>
+          </label>
           <button id="matrix-run" data-i18n="admin.runMatrix">Run matrix</button>
         </div>
         <div class="table-wrap">

@@ -43,6 +43,15 @@ function normalizeError(errOrStatus, code, message, field) {
     return new AppError(code || "error", message || "Error", errOrStatus, field || null);
   }
   if (errOrStatus instanceof Error) {
+    if (errOrStatus.code || errOrStatus.httpStatus) {
+      return new AppError(
+        errOrStatus.code || code || "error",
+        errOrStatus.message || message || "Error",
+        errOrStatus.httpStatus || 500,
+        errOrStatus.field || field || null,
+        errOrStatus.details || null
+      );
+    }
     return internal("internal", "Something went wrong", null, { message: errOrStatus.message });
   }
   return internal("internal", "Something went wrong");

@@ -43,6 +43,7 @@ export async function initDb() {
   db = new DatabaseSync(DB_PATH);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA synchronous = NORMAL;");
+  db.exec("PRAGMA foreign_keys = ON;");
   await runMigrations(db);
   return db;
 }
@@ -911,45 +912,166 @@ export async function getDayPlanHistoryById(id) {
   };
 }
 
-export async function upsertContentItem(kind, item) {
+const CONTENT_STATUSES_ALL = ["draft", "staged", "enabled", "disabled"];
+const CONTENT_STATUS_SET = new Set(CONTENT_STATUSES_ALL);
+
+function normalizeContentStatus(status, fallback = "enabled") {
+  const key = typeof status === "string" ? status.trim().toLowerCase() : "";
+  if (CONTENT_STATUS_SET.has(key)) return key;
+  return fallback;
+}
+
+function deriveStatusFromItem(item) {
+  if (item?.status) return normalizeContentStatus(item.status);
+  if (item?.enabled === false) return "disabled";
+  return "enabled";
+}
+
+function normalizeStatuses(statuses, includeDisabled) {
+  if (Array.isArray(statuses) && statuses.length) {
+    const keys = statuses.map((status) => normalizeContentStatus(status, "")).filter(Boolean);
+    return Array.from(new Set(keys));
+  }
+  return includeDisabled ? CONTENT_STATUSES_ALL.slice() : ["enabled"];
+}
+
+function augmentContentItem(item, row, hasStatus, hasUpdatedBy) {
+  const status = hasStatus ? normalizeContentStatus(row.status, deriveStatusFromItem(item)) : deriveStatusFromItem(item);
+  const updatedByAdmin = hasUpdatedBy ? row.updated_by_admin || null : item.updatedByAdmin || null;
+  return { ...item, status, updatedByAdmin };
+}
+
+function selectContentRows({ kind, statuses, orderBy = "id", limit = null, offset = null }) {
+  const hasStatus = hasColumn("content_items", "status");
+  const hasUpdatedBy = hasColumn("content_items", "updated_by_admin");
+  const cols = ["json"];
+  if (hasStatus) cols.push("status");
+  if (hasUpdatedBy) cols.push("updated_by_admin");
+
+  const filters = [];
+  const params = [];
+  if (kind) {
+    filters.push("kind = ?");
+    params.push(kind);
+  }
+  if (hasStatus && statuses?.length) {
+    const placeholders = statuses.map(() => "?").join(", ");
+    filters.push(`status IN (${placeholders})`);
+    params.push(...statuses);
+  }
+  const whereSql = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+  const limitSql = limit != null ? " LIMIT ? OFFSET ?" : "";
+  const sql = `SELECT ${cols.join(", ")} FROM content_items ${whereSql} ORDER BY ${orderBy}${limitSql}`;
+  const stmt = getDb().prepare(sql);
+  const rows = limit != null ? stmt.all(...params, limit, offset || 0) : stmt.all(...params);
+  return { rows, hasStatus, hasUpdatedBy };
+}
+
+export async function upsertContentItem(kind, item, options = {}) {
   const id = item.id || crypto.randomUUID();
-  const payload = { ...item, id, kind };
+  const hasStatus = hasColumn("content_items", "status");
+  const hasUpdatedBy = hasColumn("content_items", "updated_by_admin");
+  const status = normalizeContentStatus(options.status || item.status, deriveStatusFromItem(item));
+  const updatedByAdmin = options.updatedByAdmin || item.updatedByAdmin || null;
   const now = new Date().toISOString();
+  const payload = { ...item, id, kind, status, updatedByAdmin, updatedAt: now };
+
+  const columns = ["id", "kind", "json", "updated_at"];
+  const values = [id, kind, JSON.stringify(payload), now];
+  if (hasStatus) {
+    columns.push("status");
+    values.push(status);
+  }
+  if (hasUpdatedBy) {
+    columns.push("updated_by_admin");
+    values.push(updatedByAdmin);
+  }
+  const placeholders = columns.map(() => "?").join(", ");
+  const updates = ["kind=excluded.kind", "json=excluded.json", "updated_at=excluded.updated_at"];
+  if (hasStatus) updates.push("status=excluded.status");
+  if (hasUpdatedBy) updates.push("updated_by_admin=excluded.updated_by_admin");
+
   getDb()
     .prepare(
-      "INSERT INTO content_items (id, kind, json, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(id) DO UPDATE SET kind=excluded.kind, json=excluded.json, updated_at=excluded.updated_at"
+      `INSERT INTO content_items (${columns.join(", ")}) VALUES (${placeholders}) ON CONFLICT(id) DO UPDATE SET ${updates.join(", ")}`
     )
-    .run(id, kind, JSON.stringify(payload), now);
+    .run(...values);
+
   return payload;
 }
 
-export async function listContentItems(kind, includeDisabled = true) {
-  const rows = kind
-    ? getDb().prepare("SELECT json FROM content_items WHERE kind = ?").all(kind)
-    : getDb().prepare("SELECT json FROM content_items").all();
-  const items = rows.map((row) => JSON.parse(row.json));
-  if (includeDisabled) return items;
-  return items.filter((item) => item.enabled !== false);
+export async function getContentItem(kind, id) {
+  const hasStatus = hasColumn("content_items", "status");
+  const hasUpdatedBy = hasColumn("content_items", "updated_by_admin");
+  const cols = ["json"];
+  if (hasStatus) cols.push("status");
+  if (hasUpdatedBy) cols.push("updated_by_admin");
+  const row = getDb()
+    .prepare(`SELECT ${cols.join(", ")} FROM content_items WHERE id = ? AND kind = ?`)
+    .get(id, kind);
+  if (!row) return null;
+  const parsed = JSON.parse(row.json);
+  return augmentContentItem(parsed, row, hasStatus, hasUpdatedBy);
 }
 
-export async function listContentItemsPaged(kind, page = 1, pageSize = 50) {
+export async function listContentItems(kind, includeDisabled = true, options = {}) {
+  const statuses = normalizeStatuses(options.statuses, includeDisabled);
+  const { rows, hasStatus, hasUpdatedBy } = selectContentRows({ kind, statuses });
+  const items = rows.map((row) => augmentContentItem(JSON.parse(row.json), row, hasStatus, hasUpdatedBy));
+  if (includeDisabled) return items;
+  return items.filter((item) => item.status === "enabled" && item.enabled !== false);
+}
+
+export async function listContentItemsPaged(kind, page = 1, pageSize = 50, options = {}) {
   const size = Math.min(Math.max(pageSize, 1), 200);
   const offset = (Math.max(page, 1) - 1) * size;
-  const rows = kind
-    ? getDb().prepare("SELECT json FROM content_items WHERE kind = ? ORDER BY id LIMIT ? OFFSET ?").all(kind, size, offset)
-    : getDb().prepare("SELECT json FROM content_items ORDER BY id LIMIT ? OFFSET ?").all(size, offset);
-  return rows.map((row) => JSON.parse(row.json));
+  const statuses = normalizeStatuses(options.statuses, true);
+  const { rows, hasStatus, hasUpdatedBy } = selectContentRows({
+    kind,
+    statuses,
+    orderBy: "id",
+    limit: size,
+    offset,
+  });
+  return rows.map((row) => augmentContentItem(JSON.parse(row.json), row, hasStatus, hasUpdatedBy));
 }
 
-export async function patchContentItem(kind, id, patch) {
-  const row = getDb().prepare("SELECT json FROM content_items WHERE id = ? AND kind = ?").get(id, kind);
-  if (!row) return null;
-  const current = JSON.parse(row.json);
-  const next = { ...current, ...patch, id, kind };
+export async function patchContentItem(kind, id, patch, options = {}) {
+  const existing = await getContentItem(kind, id);
+  if (!existing) return null;
   const now = new Date().toISOString();
+  const statusFromPatch = patch?.status ? normalizeContentStatus(patch.status) : null;
+  const derivedStatus = patch?.enabled === false ? "disabled" : null;
+  const status = statusFromPatch || options.status || derivedStatus || existing.status || "enabled";
+  const updatedByAdmin = options.updatedByAdmin || patch?.updatedByAdmin || existing.updatedByAdmin || null;
+  const next = {
+    ...existing,
+    ...patch,
+    id,
+    kind,
+    status,
+    updatedByAdmin,
+    updatedAt: now,
+  };
+
+  const hasStatus = hasColumn("content_items", "status");
+  const hasUpdatedBy = hasColumn("content_items", "updated_by_admin");
+  const updates = ["json = ?", "updated_at = ?"];
+  const values = [JSON.stringify(next), now];
+  if (hasStatus) {
+    updates.push("status = ?");
+    values.push(status);
+  }
+  if (hasUpdatedBy) {
+    updates.push("updated_by_admin = ?");
+    values.push(updatedByAdmin);
+  }
+  values.push(id, kind);
+
   getDb()
-    .prepare("UPDATE content_items SET json = ?, updated_at = ? WHERE id = ? AND kind = ?")
-    .run(JSON.stringify(next), now, id, kind);
+    .prepare(`UPDATE content_items SET ${updates.join(", ")} WHERE id = ? AND kind = ?`)
+    .run(...values);
+
   return next;
 }
 
@@ -962,14 +1084,24 @@ export async function seedContentItems(library) {
     ...(library.resets || []).map((item) => ({ kind: "reset", item })),
   ];
   const now = new Date().toISOString();
-  const stmt = getDb().prepare("INSERT INTO content_items (id, kind, json, updated_at) VALUES (?, ?, ?, ?)");
+  const hasStatus = hasColumn("content_items", "status");
+  const hasUpdatedBy = hasColumn("content_items", "updated_by_admin");
+  const columns = ["id", "kind", "json", "updated_at"];
+  if (hasStatus) columns.push("status");
+  if (hasUpdatedBy) columns.push("updated_by_admin");
+  const placeholders = columns.map(() => "?").join(", ");
+  const stmt = getDb().prepare(`INSERT INTO content_items (${columns.join(", ")}) VALUES (${placeholders})`);
   getDb().exec("BEGIN;");
   try {
     items.forEach(({ kind, item }) => {
-      const payload = { ...item, kind };
+      const status = normalizeContentStatus(item?.status, deriveStatusFromItem(item));
+      const payload = { ...item, kind, status, updatedAt: now };
       const id = payload.id || crypto.randomUUID();
       payload.id = id;
-      stmt.run(id, kind, JSON.stringify(payload), now);
+      const values = [id, kind, JSON.stringify(payload), now];
+      if (hasStatus) values.push(status);
+      if (hasUpdatedBy) values.push(null);
+      stmt.run(...values);
     });
     getDb().exec("COMMIT;");
     return true;
@@ -1042,6 +1174,172 @@ export async function upsertContentPack({ id, name, weights, constraints }) {
   return { id, name: name || id, weights: weights || {}, constraints: constraints || {}, updatedAt: now };
 }
 
+export function getContentStatuses() {
+  return CONTENT_STATUSES_ALL.slice();
+}
+
+export async function setContentStatus(kind, id, status, updatedByAdmin = null) {
+  const existing = await getContentItem(kind, id);
+  if (!existing) return null;
+  const nextStatus = normalizeContentStatus(status, existing.status || "enabled");
+  const enabled = nextStatus === "disabled" ? false : true;
+  return patchContentItem(
+    kind,
+    id,
+    { status: nextStatus, enabled },
+    { status: nextStatus, updatedByAdmin }
+  );
+}
+
+export async function insertContentValidationReport({ kind, scope, report }) {
+  const id = crypto.randomUUID();
+  const atISO = new Date().toISOString();
+  getDb()
+    .prepare("INSERT INTO content_validation_reports (id, at_iso, kind, scope, report_json) VALUES (?, ?, ?, ?, ?)")
+    .run(id, atISO, kind || "all", scope || "all", JSON.stringify(report || {}));
+  return { id, atISO, kind: kind || "all", scope: scope || "all", report };
+}
+
+export async function listContentValidationReports({ kind = null, scope = null, limit = 20 } = {}) {
+  const lim = Math.min(Math.max(Number(limit) || 20, 1), 100);
+  const filters = [];
+  const params = [];
+  if (kind) {
+    filters.push("kind = ?");
+    params.push(kind);
+  }
+  if (scope) {
+    filters.push("scope = ?");
+    params.push(scope);
+  }
+  const whereSql = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
+  const rows = getDb()
+    .prepare(`SELECT id, at_iso, kind, scope, report_json FROM content_validation_reports ${whereSql} ORDER BY at_iso DESC LIMIT ?`)
+    .all(...params, lim);
+  return rows.map((row) => ({
+    id: row.id,
+    atISO: row.at_iso,
+    kind: row.kind,
+    scope: row.scope,
+    report: JSON.parse(row.report_json || "{}"),
+  }));
+}
+
+const EXPERIMENT_STATUSES = new Set(["draft", "running", "stopped"]);
+
+function normalizeExperimentStatus(status, fallback = "draft") {
+  const key = typeof status === "string" ? status.trim().toLowerCase() : "";
+  if (EXPERIMENT_STATUSES.has(key)) return key;
+  return fallback;
+}
+
+function parseExperimentRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    config: JSON.parse(row.config_json || "{}"),
+  };
+}
+
+export async function listExperiments(status = null) {
+  const nextStatus = status ? normalizeExperimentStatus(status, "") : null;
+  const rows = nextStatus
+    ? getDb()
+        .prepare("SELECT id, name, status, created_at, updated_at, config_json FROM experiments WHERE status = ? ORDER BY updated_at DESC")
+        .all(nextStatus)
+    : getDb()
+        .prepare("SELECT id, name, status, created_at, updated_at, config_json FROM experiments ORDER BY updated_at DESC")
+        .all();
+  return rows.map(parseExperimentRow);
+}
+
+export async function listRunningExperiments() {
+  return listExperiments("running");
+}
+
+export async function getExperiment(id) {
+  const row = getDb()
+    .prepare("SELECT id, name, status, created_at, updated_at, config_json FROM experiments WHERE id = ?")
+    .get(id);
+  return parseExperimentRow(row);
+}
+
+export async function createExperiment({ name, config, status = "draft" }) {
+  const id = crypto.randomUUID();
+  const now = new Date().toISOString();
+  const nextStatus = normalizeExperimentStatus(status, "draft");
+  getDb()
+    .prepare("INSERT INTO experiments (id, name, status, created_at, updated_at, config_json) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, name, nextStatus, now, now, JSON.stringify(config || {}));
+  return { id, name, status: nextStatus, createdAt: now, updatedAt: now, config: config || {} };
+}
+
+export async function updateExperiment(id, patch = {}) {
+  const existing = await getExperiment(id);
+  if (!existing) return null;
+  const now = new Date().toISOString();
+  const next = {
+    ...existing,
+    ...patch,
+    id,
+    status: patch.status ? normalizeExperimentStatus(patch.status, existing.status) : existing.status,
+    updatedAt: now,
+  };
+  getDb()
+    .prepare("UPDATE experiments SET name = ?, status = ?, updated_at = ?, config_json = ? WHERE id = ?")
+    .run(next.name, next.status, now, JSON.stringify(next.config || {}), id);
+  return next;
+}
+
+export async function setExperimentStatus(id, status) {
+  return updateExperiment(id, { status: normalizeExperimentStatus(status, "draft") });
+}
+
+export async function getExperimentAssignment(experimentId, userId) {
+  const row = getDb()
+    .prepare("SELECT experiment_id, user_id, variant_key, assigned_at FROM experiment_assignments WHERE experiment_id = ? AND user_id = ?")
+    .get(experimentId, userId);
+  if (!row) return null;
+  return {
+    experimentId: row.experiment_id,
+    userId: row.user_id,
+    variantKey: row.variant_key,
+    assignedAt: row.assigned_at,
+  };
+}
+
+export async function upsertExperimentAssignment(experimentId, userId, variantKey) {
+  const existing = await getExperimentAssignment(experimentId, userId);
+  if (existing) return existing;
+  const assignedAt = new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT OR IGNORE INTO experiment_assignments (experiment_id, user_id, variant_key, assigned_at) VALUES (?, ?, ?, ?)"
+    )
+    .run(experimentId, userId, variantKey, assignedAt);
+  return getExperimentAssignment(experimentId, userId);
+}
+
+export async function listExperimentAssignments(experimentId, page = 1, pageSize = 50) {
+  const size = Math.min(Math.max(pageSize, 1), 200);
+  const offset = (Math.max(page, 1) - 1) * size;
+  const rows = getDb()
+    .prepare(
+      "SELECT experiment_id, user_id, variant_key, assigned_at FROM experiment_assignments WHERE experiment_id = ? ORDER BY assigned_at DESC LIMIT ? OFFSET ?"
+    )
+    .all(experimentId, size, offset);
+  return rows.map((row) => ({
+    experimentId: row.experiment_id,
+    userId: row.user_id,
+    variantKey: row.variant_key,
+    assignedAt: row.assigned_at,
+  }));
+}
+
 export async function bumpContentStats(userId, itemId, field, delta = 1) {
   if (!userId || !itemId) return;
   const column = field === "completed" ? "completed" : field === "not_relevant" ? "not_relevant" : "picked";
@@ -1067,7 +1365,7 @@ export async function getContentStats(userId) {
 }
 
 export async function getWorstItems(kind, limit = 20) {
-  const items = await listContentItems(kind, true);
+  const items = await listContentItems(kind, false, { statuses: ["enabled"] });
   const statsRows = getDb()
     .prepare(
       "SELECT item_id, SUM(picked) as picked, SUM(completed) as completed, SUM(not_relevant) as not_relevant FROM content_stats GROUP BY item_id"
@@ -1536,6 +1834,7 @@ export async function deleteUserData(userId) {
     instance.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM reminder_intents WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM user_cohorts WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM experiment_assignments WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM debug_bundles WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM admin_audit WHERE admin_user_id = ?").run(userId);
     if (normalizedEmail) {

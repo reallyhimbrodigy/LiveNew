@@ -46,9 +46,12 @@ export function setLibraryIndex(library) {
 }
 
 export function getLibraryIndex(library) {
+  if (library) {
+    // Per-request library overrides should not mutate the shared cache.
+    return buildLibraryIndex(library);
+  }
   if (!cachedIndex) {
-    if (library) cachedIndex = buildLibraryIndex(library);
-    else cachedIndex = buildLibraryIndex({ workouts: [], nutrition: [], resets: [] });
+    cachedIndex = buildLibraryIndex({ workouts: [], nutrition: [], resets: [] });
   }
   return cachedIndex;
 }

@@ -15,7 +15,7 @@
       "timeAvailableMin": 20
     },
     "expected": {
-      "dayContractHash": "418c9bd8543492ede51c10e13248902beb9f80d24d6300e0ab7941ddb10e14ea",
+      "dayContractHash": "5c3e004e7e117093f4fcf1493152293f7d615a20dd1d9b63571b7e95e9bdf134",
       "keyFields": {
         "profile": "Balanced",
         "focus": "stabilize",
@@ -41,7 +41,7 @@
       "timeAvailableMin": 15
     },
     "expected": {
-      "dayContractHash": "04d61224d66fb25cb33bc62732917e75cc59155a69444b99b5d48771a147b306",
+      "dayContractHash": "6e28ad0b4511bf6ce2c4b0020aac0080e9a601a4fadbc571f2dcbed479548f67",
       "keyFields": {
         "profile": "WiredOverstimulated",
         "focus": "downshift",
@@ -67,7 +67,7 @@
       "timeAvailableMin": 45
     },
     "expected": {
-      "dayContractHash": "c75fb1e025d0fd28f88aa2651e2aed3a06bae3eb8fbd0eb1d044afee69b81eff",
+      "dayContractHash": "b04b4d7587a30f8e9e98ce36013bae1c61d40631ebf7f5c8eed3269fc056d5e7",
       "keyFields": {
         "profile": "Balanced",
         "focus": "stabilize",
@@ -93,7 +93,7 @@
       "timeAvailableMin": 10
     },
     "expected": {
-      "dayContractHash": "84f99f010049645ced6799ee12e90175df1d95921aabceab1d7877777c85f2f6",
+      "dayContractHash": "d0b5fc7406092181f949ac8f709e40b9229092f1e13895eb587482fe506d66dd",
       "keyFields": {
         "profile": "PoorSleep",
         "focus": "downshift",
@@ -122,7 +122,7 @@
       "timeAvailableMin": 30
     },
     "expected": {
-      "dayContractHash": "90969b97077494edb97f55b2fbfeacfd3653f66ab564d7bc80da9af03f615626",
+      "dayContractHash": "b6d305fcc1aa5f107299875fed1bcbd16c764df59b53483fea539dd1250ca52e",
       "keyFields": {
         "profile": "WiredOverstimulated",
         "focus": "downshift",
@@ -148,7 +148,7 @@
       "timeAvailableMin": 20
     },
     "expected": {
-      "dayContractHash": "ab4097c0bce3c6d33e3b9638973632ab2e1bf85dcf3000fc177ce5d9a9164b03",
+      "dayContractHash": "4b8f4892191423a56c0152c019d9108218daba399e077f6fe22a062d8db911e9",
       "keyFields": {
         "profile": "DepletedBurnedOut",
         "focus": "stabilize",
@@ -174,7 +174,7 @@
       "timeAvailableMin": 5
     },
     "expected": {
-      "dayContractHash": "5d35b2c5b706cbeeba365ffbbaaf033660761de2db94b4854dae6301e81d202e",
+      "dayContractHash": "6b83742e65f30c7fef14f4f911482dd32f392e1b0e47c58108e7d3f02ca198d3",
       "keyFields": {
         "profile": "WiredOverstimulated",
         "focus": "downshift",
@@ -200,7 +200,7 @@
       "timeAvailableMin": 60
     },
     "expected": {
-      "dayContractHash": "f4590e110e954a2ce1e716cf13945b8b94611d42992e5ca1f5bd191f0493a460",
+      "dayContractHash": "bdfd27b37518ec091b33f56730069eacabbdb83f0f36b4bdaaaab55d8a123a96",
       "keyFields": {
         "profile": "Balanced",
         "focus": "stabilize",
@@ -226,7 +226,7 @@
       "timeAvailableMin": 20
     },
     "expected": {
-      "dayContractHash": "dd7acd15f4a3c26af05e00c0d7d8fd6034d6a604f11141cb0becbfc1ebdd6643",
+      "dayContractHash": "d76260a0059f159105f03c0a000fdfb84024f7b1d78433975817d195661a3d75",
       "keyFields": {
         "profile": "PoorSleep",
         "focus": "downshift",
@@ -253,7 +253,7 @@
       "timeAvailableMin": 15
     },
     "expected": {
-      "dayContractHash": "4f551a5032bdc50d6b86be8d63733c71676dd7e2ad9251b2e9426fc253590595",
+      "dayContractHash": "d6bade127e03e7d57c7604d3f771099c6dc14f3e305d93ac0f02d8d24767c225",
       "keyFields": {
         "profile": "Balanced",
         "focus": "downshift",
@@ -282,7 +282,7 @@
       "timeAvailableMin": 30
     },
     "expected": {
-      "dayContractHash": "6cfdf407b44791a58c00b694e663cad162044aeff94ac3bba7a3ec34d0bde3f2",
+      "dayContractHash": "89b8298ccfb036e53272ddfb56f57aa256606efc2e35cb20925f552c186a482f",
       "keyFields": {
         "profile": "Balanced",
         "focus": "stabilize",
@@ -308,7 +308,7 @@
       "timeAvailableMin": 10
     },
     "expected": {
-      "dayContractHash": "f88cb76c4890c66963d25bd6eeb3d6a4c1bf44788e394206ce01a28bc3ef218f",
+      "dayContractHash": "47ab97c00f91450f8b1e9ff56f7d063fab744617166ca56340095c0feb99c9e3",
       "keyFields": {
         "profile": "Balanced",
         "focus": "stabilize",
@@ -335,7 +335,7 @@
       "panic": true
     },
     "expected": {
-      "dayContractHash": "c147b17072117e3e2867f2221ba0888fb72a632180056fa6467ab09b07cb1d9d",
+      "dayContractHash": "a7432739f9600a8d1e37048e5913b8bf41215b967ab193eceb21d1cd12233644",
       "keyFields": {
         "profile": "PoorSleep",
         "focus": "downshift",
@@ -362,7 +362,7 @@
       "illness": true
     },
     "expected": {
-      "dayContractHash": "c710f899caa5b935b66696e6be925e42c99baa8e3b4d830d7ce7f7cc33c0e108",
+      "dayContractHash": "abd1df69392ef4d368905abb330f077f6a6c7c6c84b382a750530309fdc3351d",
       "keyFields": {
         "profile": "DepletedBurnedOut",
         "focus": "stabilize",
@@ -388,7 +388,7 @@
       "timeAvailableMin": 30
     },
     "expected": {
-      "dayContractHash": "ddac86d6b715b043560bd3704752da03550766915b9dfaa7d89ad3d4ce4d800a",
+      "dayContractHash": "f93d0cc64da8b16a959a9cf73348b6a92c4769d7eb93817b077cd81d0f19e868",
       "keyFields": {
         "profile": "Balanced",
         "focus": "stabilize",
@@ -414,7 +414,7 @@
       "timeAvailableMin": 20
     },
     "expected": {
-      "dayContractHash": "f117389147dc5137504fde4aa38425dfa99233b73a7f1289da307b8b9d4e0629",
+      "dayContractHash": "1b68b54be74bcf764f69a70563b4c6b3a05845ee0618e9598e472e492a7d42cd",
       "keyFields": {
         "profile": "WiredOverstimulated",
         "focus": "downshift",
@@ -440,7 +440,7 @@
       "timeAvailableMin": 30
     },
     "expected": {
-      "dayContractHash": "6cfc6a7632737eb997f850a1b62fb1070910bfcd3d545b884aa5c6e3e6150ab3",
+      "dayContractHash": "7d7121640dba4ab4a45bff369cec2e372a8a7b8ba30ec242f8e2366cf95f877e",
       "keyFields": {
         "profile": "DepletedBurnedOut",
         "focus": "stabilize",
@@ -466,7 +466,7 @@
       "timeAvailableMin": 5
     },
     "expected": {
-      "dayContractHash": "5bf45ec4a9ba20fd244a809958537b95006dab899f5da4c64e8b4665cc3d1b35",
+      "dayContractHash": "c63ef9896b157f446e920e979954cbd6e3422ecbcf717368f92363016d63625d",
       "keyFields": {
         "profile": "DepletedBurnedOut",
         "focus": "downshift",
@@ -492,7 +492,7 @@
       "timeAvailableMin": 60
     },
     "expected": {
-      "dayContractHash": "b8ce72a8876bcbb04235a0f2ccfe84307abe64f774fe618d14b94833cf7ee156",
+      "dayContractHash": "b2dcdcd88d2886017daa047898ee0c663d568e3251df54ee0086cbe5bac37d1a",
       "keyFields": {
         "profile": "Balanced",
         "focus": "rebuild",
@@ -518,7 +518,7 @@
       "timeAvailableMin": 30
     },
     "expected": {
-      "dayContractHash": "9d2a466572538b968a415d3a7356a43919c2d252e141f26c637c3a8d4a3c1c30",
+      "dayContractHash": "e457b9206cb21b83ac11f1ae7510873cee4220e3af3938606b5c949a4559d584",
       "keyFields": {
         "profile": "Balanced",
         "focus": "stabilize",

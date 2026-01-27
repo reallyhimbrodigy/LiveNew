@@ -11,7 +11,7 @@ function stringArray(value) {
   return Array.isArray(value) && value.every((entry) => typeof entry === "string");
 }
 
-function validateBaseItem(item) {
+function validateBaseItem(item, options = {}) {
   if (!item || typeof item !== "object") {
     return { ok: false, field: "item", message: "Item must be an object" };
   }
@@ -24,14 +24,14 @@ function validateBaseItem(item) {
   if (!stringArray(item.tags)) {
     return { ok: false, field: "tags", message: "tags must be a string array" };
   }
-  if (item.enabled === false) {
+  if (!options.allowDisabled && item.enabled === false) {
     return { ok: false, field: "enabled", message: "item must be enabled" };
   }
   return { ok: true };
 }
 
-export function validateWorkoutItem(item) {
-  const base = validateBaseItem(item);
+export function validateWorkoutItem(item, options = {}) {
+  const base = validateBaseItem(item, options);
   if (!base.ok) return base;
   if (!finiteNumber(item.minutes)) {
     return { ok: false, field: "minutes", message: "minutes is required" };
@@ -45,8 +45,8 @@ export function validateWorkoutItem(item) {
   return { ok: true };
 }
 
-export function validateResetItem(item) {
-  const base = validateBaseItem(item);
+export function validateResetItem(item, options = {}) {
+  const base = validateBaseItem(item, options);
   if (!base.ok) return base;
   if (!finiteNumber(item.minutes)) {
     return { ok: false, field: "minutes", message: "minutes is required" };
@@ -57,12 +57,11 @@ export function validateResetItem(item) {
   return { ok: true };
 }
 
-export function validateNutritionItem(item) {
-  const base = validateBaseItem(item);
+export function validateNutritionItem(item, options = {}) {
+  const base = validateBaseItem(item, options);
   if (!base.ok) return base;
   if (!stringArray(item.priorities)) {
     return { ok: false, field: "priorities", message: "priorities must be a string array" };
   }
   return { ok: true };
 }
-

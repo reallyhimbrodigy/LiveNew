@@ -103,6 +103,26 @@ function buildWhatWouldChange({ dayPlan, checkIn, drivers, appliedRules }) {
   return bullets.slice(0, 4);
 }
 
+function pushCitation(list, id) {
+  if (!id) return;
+  if (!list.includes(id)) list.push(id);
+}
+
+function buildCitations(dayPlan) {
+  const citations = [];
+  if (dayPlan?.anchors?.sunlightAnchor) {
+    pushCitation(citations, "sunlight_circadian");
+  }
+  const resetTags = Array.isArray(dayPlan?.reset?.tags) ? dayPlan.reset.tags : [];
+  if (resetTags.some((tag) => tag === "breathe" || tag === "downshift" || tag === "panic_mode")) {
+    pushCitation(citations, "breathing_downshift");
+  }
+  if (dayPlan?.focus === "downshift" || dayPlan?.focus === "stabilize") {
+    pushCitation(citations, "cortisol_rhythm");
+  }
+  return citations.slice(0, 3);
+}
+
 export function toDayContract(state, dateISO, domain) {
   void domain;
   const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
@@ -126,6 +146,7 @@ export function toDayContract(state, dateISO, domain) {
   const relevance = dayPlan?.meta?.relevance ?? null;
   const appliedRules = dayPlan?.meta?.appliedRules || [];
   const whatWouldChange = buildWhatWouldChange({ dayPlan, checkIn, drivers, appliedRules });
+  const citations = buildCitations(dayPlan);
 
   return {
     dateISO,
@@ -180,6 +201,7 @@ export function toDayContract(state, dateISO, domain) {
       resetSteps: Array.isArray(reset?.steps) ? reset.steps : [],
       nutritionPriorities: Array.isArray(nutrition?.priorities) ? nutrition.priorities : [],
       anchors: dayPlan?.anchors || null,
+      citations,
     },
   };
 }

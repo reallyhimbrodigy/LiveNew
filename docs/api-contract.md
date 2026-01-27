@@ -34,14 +34,16 @@ In `ENV_MODE=dev|dogfood`, a `details` object may be included.
 
 ### Plan and explainability
 
+- `GET /v1/rail/today` -> `{ ok, rail, day }`
 - `GET /v1/plan/day?date=YYYY-MM-DD` -> `{ ok, day }`
-- `GET /v1/plan/week?date=YYYY-MM-DD` -> `{ ok, week }`
-- `GET /v1/plan/why?date=YYYY-MM-DD` -> `{ ok, day, summary }`
+- `GET /v1/plan/week?date=YYYY-MM-DD` -> `{ ok, weekPlan }`
+- `GET /v1/plan/why?date=YYYY-MM-DD` -> `{ ok, dateISO, why, changeSummary }`
+- `GET /v1/citations` -> `{ ok, citations }`
 
 ### Inputs and adaptation
 
 - `POST /v1/checkin` with `{ checkIn }`
-- `POST /v1/signal` with `{ signalKey }`
+- `POST /v1/signal` with `{ dateISO, signal }`
 - `POST /v1/complete` with `{ dateISO, part }`
 - `POST /v1/plan/force-refresh` with `{ dateISO }`
 
@@ -60,26 +62,25 @@ Day-level payloads (`day`) follow this shape:
 ```json
 {
   "dateISO": "YYYY-MM-DD",
-  "profile": "Balanced",
-  "focus": "stabilize",
-  "workout": {
-    "id": "w_strength_15",
-    "title": "Strength basics",
-    "minutes": 15,
-    "steps": ["..."]
-  },
-  "reset": {
-    "id": "r_breath_2",
-    "title": "Two minute breath",
-    "minutes": 2,
-    "steps": ["..."]
-  },
-  "nutrition": {
-    "id": "n_stabilize_plate",
-    "title": "Stabilize your plate",
-    "priorities": ["..."]
+  "what": {
+    "workout": {
+      "id": "w_strength_15",
+      "title": "Strength basics",
+      "minutes": 15,
+      "window": "PM"
+    },
+    "reset": {
+      "id": "r_breath_2",
+      "title": "Two minute breath",
+      "minutes": 2
+    },
+    "nutrition": {
+      "id": "n_stabilize_plate",
+      "title": "Stabilize your plate"
+    }
   },
   "why": {
+    "profile": "Balanced",
     "focus": "stabilize",
     "driversTop2": ["sleep_low", "stress_high"],
     "shortRationale": "Downshift today because sleep was low and stress is high.",
@@ -99,8 +100,25 @@ Day-level payloads (`day`) follow this shape:
       "drivers": [],
       "appliedRules": [],
       "anchors": [],
-      "safety": {}
-    }
+      "safety": {},
+      "rationale": []
+    },
+    "statement": "Today is about stabilizing energy and stress.",
+    "rationale": [],
+    "meta": {},
+    "safety": { "level": "ok", "reasons": [] },
+    "checkInPrompt": { "shouldPrompt": false, "reason": null }
+  },
+  "howLong": {
+    "totalMinutes": 17,
+    "timeAvailableMin": 20
+  },
+  "details": {
+    "workoutSteps": [],
+    "resetSteps": [],
+    "nutritionPriorities": [],
+    "anchors": {},
+    "citations": ["sunlight_circadian"]
   }
 }
 ```
@@ -108,6 +126,7 @@ Day-level payloads (`day`) follow this shape:
 Notes:
 
 - Some plans intentionally set `workout` to `null` in safety blocks.
+- `details.citations` contains citation ids. Resolve titles/links via `GET /v1/citations`.
 - Clients should treat unknown fields as forward-compatible and ignore them.
 
 ## CORS requirements

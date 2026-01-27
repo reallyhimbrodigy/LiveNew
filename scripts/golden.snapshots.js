@@ -42,6 +42,12 @@ function roundNumber(value, places = 4) {
 
 function normalizeDayContract(day) {
   const next = JSON.parse(JSON.stringify(day));
+  if (next?.why?.meta?.generatedAtISO) {
+    delete next.why.meta.generatedAtISO;
+  }
+  if (next?.why?.checkInPrompt) {
+    delete next.why.checkInPrompt;
+  }
   const packScore = next?.why?.packMatch?.score;
   if (Number.isFinite(packScore)) {
     next.why.packMatch.score = roundNumber(packScore);
@@ -268,4 +274,3 @@ main().catch((err) => {
   console.error(err);
   process.exitCode = 1;
 });
-

@@ -128,20 +128,20 @@ async function apiFetch(path, options = {}) {
   return payload;
 }
 
-export function apiGet(path) {
-  return apiFetch(path, { method: "GET" });
+export function apiGet(path, options = {}) {
+  return apiFetch(path, { method: "GET", headers: options.headers });
 }
 
-export function apiPost(path, body) {
-  return apiFetch(path, { method: "POST", body });
+export function apiPost(path, body, options = {}) {
+  return apiFetch(path, { method: "POST", body, headers: options.headers });
 }
 
-export function apiPatch(path, body) {
-  return apiFetch(path, { method: "PATCH", body });
+export function apiPatch(path, body, options = {}) {
+  return apiFetch(path, { method: "PATCH", body, headers: options.headers });
 }
 
-export function apiDelete(path, body) {
-  return apiFetch(path, { method: "DELETE", body });
+export function apiDelete(path, body, options = {}) {
+  return apiFetch(path, { method: "DELETE", body, headers: options.headers });
 }
 
 export function requestAuth(email) {

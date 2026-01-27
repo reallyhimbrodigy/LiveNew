@@ -75,7 +75,7 @@ function validateContentPackWeights(value) {
   });
 }
 
-function validateParamValue(key, value) {
+export function validateParamValue(key, value) {
   switch (key) {
     case "profileThresholds":
       return validateProfileThresholds(value);

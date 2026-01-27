@@ -14,6 +14,8 @@ export function adaptPlan({
   qualityRules,
   weekContextBase,
   params,
+  ruleConfig,
+  library,
 }) {
   const notes = [];
   let nextPlan = weekPlan;
@@ -38,6 +40,9 @@ export function adaptPlan({
       feedback,
       qualityRules: baseQualityRules,
       params,
+      overridesBase,
+      ruleConfig,
+      library,
     });
     const mergedOverride = { ...(overridesBase || {}), ...(override || {}) };
     const res = rebuildDay({
@@ -51,6 +56,8 @@ export function adaptPlan({
       qualityRules: baseQualityRules,
       weekContextBase: baseContext,
       params,
+      ruleConfig,
+      library,
     });
     if (res.changed) {
       nextPlan = res.weekPlan;
@@ -73,6 +80,8 @@ export function adaptPlan({
       qualityRules: baseQualityRules,
       weekContextBase: baseContext,
       params,
+      ruleConfig,
+      library,
     });
     if (res.changed) {
       nextPlan = res.weekPlan;
@@ -95,6 +104,8 @@ function rebuildDay({
   qualityRules,
   weekContextBase,
   params,
+  ruleConfig,
+  library,
 }) {
   const idx = weekPlan.days.findIndex((d) => d.dateISO === dateISO);
   if (idx === -1) return { weekPlan, changed: false };
@@ -116,6 +127,8 @@ function rebuildDay({
     overrides,
     qualityRules,
     params,
+    ruleConfig,
+    library,
   });
 
   const nextDays = weekPlan.days.slice();
@@ -135,6 +148,9 @@ function buildOverrideFromSignal({
   feedback,
   qualityRules,
   params,
+  overridesBase,
+  ruleConfig,
+  library,
 }) {
   const checkIn = checkInsByDate ? checkInsByDate[todayISO] : undefined;
 
@@ -159,9 +175,11 @@ function buildOverrideFromSignal({
       completionsByDate,
       feedback,
       weekContext: { busyDays: user.busyDays || [], recentNoveltyGroups: [] },
-      overrides: null,
+      overrides: overridesBase || null,
       qualityRules,
       params,
+      ruleConfig,
+      library,
     });
     if (stressState.capacity >= 60 && stressState.loadBand !== "high") return { focusBias: "rebuild", source: "signal" };
     return { focusBias: "stabilize", source: "signal" };

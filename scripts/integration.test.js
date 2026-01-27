@@ -2,6 +2,7 @@ import { spawn } from "child_process";
 import path from "path";
 import { setTimeout as delay } from "timers/promises";
 import fs from "fs/promises";
+import crypto from "crypto";
 
 const ROOT = process.cwd();
 const PORT = String(3900 + Math.floor(Math.random() * 500));
@@ -41,6 +42,22 @@ function todayISOWithBoundary(timeZone, dayBoundaryHour = 4) {
   } catch {
     return todayISO();
   }
+}
+
+function hashBucket(userId, experimentId) {
+  const hash = crypto.createHash("sha256").update(`${userId}:${experimentId}`).digest("hex");
+  const head = hash.slice(0, 8);
+  const value = Number.parseInt(head, 16);
+  if (!Number.isFinite(value)) return 0;
+  return value % 100;
+}
+
+function chooseVariant(userId, experimentId, variants, percent = 100) {
+  const bucket = hashBucket(userId, experimentId);
+  const pct = Math.max(0, Math.min(100, Math.floor(Number(percent) || 100)));
+  if (bucket >= pct) return null;
+  const index = variants.length ? bucket % variants.length : -1;
+  return index >= 0 ? variants[index] : null;
 }
 
 async function fetchJson(pathname, options = {}) {
@@ -88,7 +105,7 @@ async function run() {
     DATA_DIR,
     DB_PATH: path.join(DATA_DIR, "livenew.sqlite"),
     AUTH_REQUIRED: "false",
-    ADMIN_EMAILS: "admin@example.com",
+    ADMIN_EMAILS: "admin@example.com,admin2@example.com",
     ADMIN_IN_DEV: "true",
   };
   const server = spawn("node", ["src/server/index.js"], {
@@ -144,6 +161,19 @@ async function run() {
     const adminAccess = onboard.payload?.accessToken || onboard.payload?.token;
     assert(adminAccess, "onboard/complete should return access token");
 
+    const adminEmail2 = "admin2@example.com";
+    const onboard2 = await fetchJson("/v1/onboard/complete", {
+      method: "POST",
+      body: {
+        email: adminEmail2,
+        userProfile: profile,
+        firstCheckIn: checkIn,
+      },
+    });
+    assert(onboard2.payload?.ok, "second admin onboard should return ok");
+    const adminAccess2 = onboard2.payload?.accessToken || onboard2.payload?.token;
+    assert(adminAccess2, "second admin onboard should return access token");
+
     const requestRes = await fetchJson("/v1/auth/request", {
       method: "POST",
       body: { email: "test@example.com" },
@@ -162,12 +192,12 @@ async function run() {
     await fetchJson("/v1/profile", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },
-      body: { userProfile: { ...profile, contentPack: "calm_reset", timezone: "America/New_York" } },
+      body: { userProfile: { ...profile, contentPack: "calm_reset", timezone: profile.timezone } },
     });
 
     const dayRes = await fetchJson(`/v1/plan/day?date=${userToday}`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${adminAccess}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     assert(dayRes.payload?.ok, "plan/day should succeed with access token");
 
@@ -181,18 +211,18 @@ async function run() {
 
     await fetchJson("/v1/checkin", {
       method: "POST",
-      headers: { Authorization: `Bearer ${adminAccess}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
       body: { checkIn: { dateISO: userToday, stress: 3, sleepQuality: 7, energy: 6, timeAvailableMin: 20 } },
     });
     await fetchJson("/v1/checkin", {
       method: "POST",
-      headers: { Authorization: `Bearer ${adminAccess}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
       body: { checkIn: { dateISO: userToday, stress: 4, sleepQuality: 6, energy: 5, timeAvailableMin: 60 } },
     });
 
     const mergedDayRes = await fetchJson(`/v1/plan/day?date=${userToday}`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${adminAccess}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     assert(
       mergedDayRes.payload?.day?.howLong?.timeAvailableMin === 60,
@@ -203,7 +233,7 @@ async function run() {
     const yesterday = addDaysISO(userToday, -1);
     const backdatedRes = await fetchJson("/v1/checkin", {
       method: "POST",
-      headers: { Authorization: `Bearer ${adminAccess}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
       body: { checkIn: { dateISO: yesterday, stress: 5, sleepQuality: 7, energy: 6, timeAvailableMin: 20 } },
     });
     assert(backdatedRes.payload?.backdated === true, "backdated check-in should be flagged");
@@ -213,7 +243,7 @@ async function run() {
     );
     const afterBackdate = await fetchJson(`/v1/plan/day?date=${userToday}`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${adminAccess}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     assert(
       JSON.stringify(afterBackdate.payload?.day || {}) === beforeBackdate,
@@ -222,10 +252,20 @@ async function run() {
 
     const whyRes = await fetchJson(`/v1/plan/why?date=${userToday}`, {
       method: "GET",
-      headers: { Authorization: `Bearer ${adminAccess}` },
+      headers: { Authorization: `Bearer ${accessToken}` },
     });
     assert(whyRes.payload?.why?.expanded, "plan/why should return expanded explainability");
     assert("changeSummary" in (whyRes.payload || {}), "plan/why should include changeSummary");
+
+    const railRes = await fetchJson("/v1/rail/today", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    assert(railRes.payload?.rail?.reset, "rail/today should return a reset");
+    assert(railRes.payload?.day, "rail/today should return a day contract");
+
+    const citationsRes = await fetchJson("/v1/citations", { method: "GET" });
+    assert(Array.isArray(citationsRes.payload?.citations) && citationsRes.payload.citations.length > 0, "citations should load");
 
     const matrixRes = await fetchJson("/v1/admin/preview/matrix", {
       method: "POST",
@@ -235,12 +275,110 @@ async function run() {
     assert(matrixRes.payload?.ok, "admin preview matrix should succeed");
     assert(Array.isArray(matrixRes.payload?.matrix) && matrixRes.payload.matrix.length >= 2, "matrix should have rows");
 
+    const scId = `r_test_reset_${Date.now()}`;
+    const scItem = {
+      id: scId,
+      title: "Test reset",
+      tags: ["downshift", "breathe"],
+      minutes: 2,
+      steps: ["Inhale slowly", "Exhale longer"],
+      priority: 1,
+    };
+    const draftRes = await fetchJson("/v1/admin/content/draft", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccess2}` },
+      body: { kind: "reset", item: scItem },
+    });
+    assert(draftRes.payload?.item?.status === "draft", "content draft should set draft status");
+    const stageRes = await fetchJson(`/v1/admin/content/stage/reset/${scId}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccess2}` },
+      body: {},
+    });
+    assert(stageRes.payload?.item?.status === "staged", "content stage should set staged status");
+    const enableRes = await fetchJson(`/v1/admin/content/enable/reset/${scId}`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccess2}` },
+      body: {},
+    });
+    assert(enableRes.payload?.item?.status === "enabled", "content enable should set enabled status");
+    const validateRes = await fetchJson("/v1/admin/content/validate", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccess2}` },
+      body: { scope: "enabled" },
+    });
+    assert(validateRes.payload?.report, "content validate should return a report");
+
     const searchRes = await fetchJson(`/v1/admin/users/search?email=${encodeURIComponent("test@example.com")}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${adminAccess}` },
     });
     assert(searchRes.payload?.user?.userId, "admin user search should return userId");
     const targetUserId = searchRes.payload.user.userId;
+
+    const experimentConfig = {
+      type: "pack",
+      variants: [
+        { key: "A", packId: "balanced_routine" },
+        { key: "B", packId: "calm_reset" },
+      ],
+      targeting: { percent: 100 },
+    };
+    const experimentCreateRes = await fetchJson("/v1/admin/experiments", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccess2}` },
+      body: { name: "pack-exp", status: "draft", config_json: experimentConfig },
+    });
+    const experimentId = experimentCreateRes.payload?.experiment?.id;
+    assert(experimentId, "experiment create should return id");
+    await fetchJson(`/v1/admin/experiments/${experimentId}/start`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccess2}` },
+      body: {},
+    });
+    const expectedVariant = chooseVariant(
+      targetUserId,
+      experimentId,
+      experimentConfig.variants,
+      experimentConfig.targeting.percent
+    );
+    assert(expectedVariant?.packId, "expected experiment variant should resolve");
+    await fetchJson("/v1/plan/force-refresh", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: { dateISO: userToday },
+    });
+    const experimentDayRes = await fetchJson(`/v1/plan/day?date=${userToday}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    assert(
+      experimentDayRes.payload?.day?.why?.packMatch?.packId === expectedVariant.packId,
+      "pack experiment should override effective pack"
+    );
+    await fetchJson(`/v1/admin/experiments/${experimentId}/stop`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccess2}` },
+      body: {},
+    });
+
+    const guardrailConfig = {
+      type: "parameters",
+      variants: [
+        { key: "A", paramsOverride: { profileThresholds: {} } },
+        { key: "B", paramsOverride: { timeBuckets: { allowed: [5, 10, 15], default: 10 } } },
+      ],
+      targeting: { percent: 100 },
+    };
+    const guardrailRes = await fetchJson("/v1/admin/experiments", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${adminAccess2}` },
+      body: { name: "guardrail-exp", status: "draft", config_json: guardrailConfig },
+    });
+    assert(
+      guardrailRes.res.status === 400 && guardrailRes.payload?.error?.code === "experiment_guardrail_violation",
+      "experiment guardrails should reject safety overrides"
+    );
 
     const bundleRes = await fetchJson(`/v1/admin/users/${targetUserId}/debug-bundle`, {
       method: "POST",
@@ -277,38 +415,38 @@ async function run() {
       "user changelog should include created entry"
     );
 
-		    const historyBefore = await fetchJson(`/v1/plan/history/day?date=${userToday}`, {
-		      method: "GET",
-		      headers: { Authorization: `Bearer ${adminAccess}` },
-		    });
-		    const beforeCount = historyBefore.payload?.history?.length || 0;
-	    const dayBefore = await fetchJson(`/v1/plan/day?date=${userToday}`, {
-	      method: "GET",
-	      headers: { Authorization: `Bearer ${adminAccess}` },
-	    });
-	    const signalRes = await fetchJson("/v1/signal", {
-	      method: "POST",
-	      headers: { Authorization: `Bearer ${adminAccess}` },
-	      body: { dateISO: userToday, signal: "wired" },
-	    });
-	    const historyAfter = await fetchJson(`/v1/plan/history/day?date=${userToday}`, {
-	      method: "GET",
-	      headers: { Authorization: `Bearer ${adminAccess}` },
-	    });
-	    const afterCount = historyAfter.payload?.history?.length || 0;
-	    assert(afterCount >= beforeCount + 1, "signal should create a new day plan history entry");
-	    const dayAfter = await fetchJson(`/v1/plan/day?date=${userToday}`, {
-	      method: "GET",
-	      headers: { Authorization: `Bearer ${adminAccess}` },
-	    });
-	    assert(
-	      JSON.stringify(dayBefore.payload?.day) !== JSON.stringify(dayAfter.payload?.day),
-	      "cache should invalidate after mutation"
-	    );
-	    assert(
-	      JSON.stringify(signalRes.payload?.day) === JSON.stringify(dayAfter.payload?.day),
-	      "day view should match latest mutation"
-	    );
+    const historyBefore = await fetchJson(`/v1/plan/history/day?date=${userToday}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const beforeCount = historyBefore.payload?.history?.length || 0;
+    const dayBefore = await fetchJson(`/v1/plan/day?date=${userToday}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const signalRes = await fetchJson("/v1/signal", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: { dateISO: userToday, signal: "wired" },
+    });
+    const historyAfter = await fetchJson(`/v1/plan/history/day?date=${userToday}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const afterCount = historyAfter.payload?.history?.length || 0;
+    assert(afterCount >= beforeCount + 1, "signal should create a new day plan history entry");
+    const dayAfter = await fetchJson(`/v1/plan/day?date=${userToday}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    assert(
+      JSON.stringify(dayBefore.payload?.day) !== JSON.stringify(dayAfter.payload?.day),
+      "cache should invalidate after mutation"
+    );
+    assert(
+      JSON.stringify(signalRes.payload?.day) === JSON.stringify(dayAfter.payload?.day),
+      "day view should match latest mutation"
+    );
 
 	    const adminRes = await fetchJson("/v1/admin/flags", {
 	      method: "GET",
@@ -318,7 +456,7 @@ async function run() {
 
 	    await fetchJson("/v1/complete", {
 	      method: "POST",
-	      headers: { Authorization: `Bearer ${adminAccess}` },
+	      headers: { Authorization: `Bearer ${accessToken}` },
 	      body: { dateISO: userToday, part: "workout" },
 	    });
 	    const analyticsRes = await fetchJson(`/v1/admin/analytics/daily?from=${userToday}&to=${userToday}`, {

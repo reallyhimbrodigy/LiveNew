@@ -1,0 +1,20 @@
+[
+  {
+    "id": "cortisol_rhythm",
+    "title": "Circadian rhythms overview",
+    "url": "https://www.nigms.nih.gov/education/fact-sheets/Pages/circadian-rhythms.aspx",
+    "note": "General education"
+  },
+  {
+    "id": "sunlight_circadian",
+    "title": "Light and circadian timing (overview)",
+    "url": "https://www.nigms.nih.gov/education/fact-sheets/Pages/circadian-rhythms.aspx",
+    "note": "General education"
+  },
+  {
+    "id": "breathing_downshift",
+    "title": "Breath control and stress response (overview)",
+    "url": "https://www.health.harvard.edu/mind-and-mood/relaxation-techniques-breath-control-helps-quell-errant-stress-response",
+    "note": "General education"
+  }
+]

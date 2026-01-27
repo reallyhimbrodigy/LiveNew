@@ -13,6 +13,7 @@ import { AppError, badRequest, internal, sendError } from "./errors.js";
 import { logInfo, logError } from "./logger.js";
 import { assertDayContract, assertWeekPlan } from "./invariants.js";
 import { validateWorkoutItem, validateResetItem, validateNutritionItem } from "../domain/content/validateContent.js";
+import { runContentChecks } from "../domain/content/checks.js";
 import {
   validateProfile,
   validateCheckIn,
@@ -40,9 +41,12 @@ import {
   verifyAuthCode,
   getSession,
   seedContentItems,
+  getContentItem,
   listContentItems,
   listContentItemsPaged,
   patchContentItem,
+  setContentStatus,
+  getContentStatuses,
   upsertContentItem,
   bumpContentStats,
   getContentStats,
@@ -74,6 +78,14 @@ import {
   resetAuthAttempts,
   isAuthLocked,
   insertAdminAudit,
+  insertContentValidationReport,
+  listContentValidationReports,
+  listExperiments,
+  getExperiment,
+  createExperiment,
+  updateExperiment,
+  setExperimentStatus,
+  listExperimentAssignments,
   insertDebugBundle,
   getDebugBundle,
   searchUserByEmail,
@@ -107,7 +119,8 @@ import { getConfig } from "./config.js";
 import { ensureSecretKey } from "./env.js";
 import { computeBootSummary } from "./bootSummary.js";
 import { handleSetupRoutes } from "./setupRoutes.js";
-import { getParameters, getDefaultParameters, resetParametersCache } from "./parameters.js";
+import { getParameters, getDefaultParameters, resetParametersCache, validateParamValue } from "./parameters.js";
+import { applyExperiments, SAFETY_DENYLIST } from "./experiments.js";
 import { createTaskScheduler } from "./tasks.js";
 import { signAccessToken, verifyAccessToken, issueRefreshToken, rotateRefreshToken, revokeRefreshToken } from "../security/tokens.js";
 import { diffDayContracts } from "./diff.js";
@@ -127,6 +140,7 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
   .filter(Boolean);
 
 const PUBLIC_DIR = path.join(process.cwd(), "public");
+const CITATIONS_PATH = path.join(PUBLIC_DIR, "citations.json");
 const REQUIRED_CONTENT_IDS = new Set(["r_panic_mode"]);
 const DEFAULT_TIMEZONE = "America/Los_Angeles";
 const ALL_PROFILES = [
@@ -136,6 +150,19 @@ const ALL_PROFILES = [
   "DepletedBurnedOut",
   "RestlessAnxious",
 ];
+
+let citationsCache = null;
+async function loadCitations() {
+  if (citationsCache) return citationsCache;
+  try {
+    const raw = await fs.readFile(CITATIONS_PATH, "utf8");
+    const parsed = JSON.parse(raw);
+    citationsCache = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    citationsCache = [];
+  }
+  return citationsCache;
+}
 
 const userStates = new Map();
 const MAX_USERS = 50;
@@ -166,7 +193,7 @@ const DEFAULT_COHORTS = [
   { id: "high_stress", name: "High Stress" },
   { id: "poor_sleep", name: "Poor Sleep" },
 ];
-const LATENCY_ROUTES = new Set(["GET /v1/plan/day", "POST /v1/checkin", "POST /v1/signal"]);
+const LATENCY_ROUTES = new Set(["GET /v1/plan/day", "GET /v1/rail/today", "POST /v1/checkin", "POST /v1/signal"]);
 const ACCESS_TOKEN_TTL_SEC = 15 * 60;
 
 const secretState = ensureSecretKey(config);
@@ -227,7 +254,7 @@ async function ensureDataDirWritable(runtimeConfig) {
 }
 
 async function applyLibraryFromDb() {
-  const items = await listContentItems(undefined, false);
+  const items = await listContentItems(undefined, false, { statuses: ["enabled"] });
   if (!items.length) return;
   const workouts = [];
   const nutrition = [];
@@ -264,20 +291,24 @@ async function ensureRequiredContentItems() {
     if (!REQUIRED_CONTENT_IDS.has(reset.id)) continue;
     const existing = byId.get(reset.id);
     if (!existing || existing.enabled === false) {
-      await upsertContentItem("reset", { ...reset, enabled: true });
+      await upsertContentItem(
+        "reset",
+        { ...reset, enabled: true },
+        { status: "enabled", updatedByAdmin: null }
+      );
     }
   }
 }
 
-function validateContentItem(kind, item) {
-  if (kind === "workout") return validateWorkoutItem(item);
-  if (kind === "reset") return validateResetItem(item);
-  if (kind === "nutrition") return validateNutritionItem(item);
+function validateContentItem(kind, item, options = {}) {
+  if (kind === "workout") return validateWorkoutItem(item, options);
+  if (kind === "reset") return validateResetItem(item, options);
+  if (kind === "nutrition") return validateNutritionItem(item, options);
   return { ok: false, field: "kind", message: "kind must be workout, reset, or nutrition" };
 }
 
-function validateContentItemOrThrow(kind, item) {
-  const validation = validateContentItem(kind, item);
+function validateContentItemOrThrow(kind, item, options = {}) {
+  const validation = validateContentItem(kind, item, options);
   if (!validation.ok) {
     throw badRequest("invalid_content_item", validation.message, validation.field);
   }
@@ -385,7 +416,8 @@ function resolveRuleToggles(state, flags) {
     circadianAnchorsEnabled: flagEnabled(flags, "rules.circadianAnchors.enabled"),
     safetyEnabled: flagEnabled(flags, "rules.safety.enabled"),
   };
-  if (!isDevRoutesEnabled) return base;
+  const allowOverrides = isDevRoutesEnabled && config.isDevLike;
+  if (!allowOverrides) return base;
   const overrides = state.ruleToggles || {};
   return {
     constraintsEnabled: base.constraintsEnabled && overrides.constraintsEnabled !== false,
@@ -396,6 +428,142 @@ function resolveRuleToggles(state, flags) {
     circadianAnchorsEnabled: base.circadianAnchorsEnabled && overrides.circadianAnchorsEnabled !== false,
     safetyEnabled: base.safetyEnabled && overrides.safetyEnabled !== false,
   };
+}
+
+function buildRuleConfig(requestId, userId = null) {
+  return {
+    envMode: config.envMode,
+    rulesFrozen: config.rulesFrozen,
+    logger: {
+      warn(payload) {
+        logInfo({ requestId, userId, ...(payload || {}) });
+      },
+    },
+  };
+}
+
+const ENABLED_STATUSES = ["enabled"];
+const STAGE_STATUSES = ["enabled", "staged"];
+const CONTENT_KINDS = new Set(["workout", "nutrition", "reset"]);
+
+function isStageModeRequest(req, url, adminEmail) {
+  if (!adminEmail) return false;
+  const header = String(req.headers["x-content-stage"] || "").toLowerCase();
+  const queryValue = url.searchParams.get("stage");
+  return config.contentStageMode || header === "true" || String(queryValue).toLowerCase() === "true";
+}
+
+function statusesForScope(scope) {
+  const normalized = typeof scope === "string" ? scope.trim().toLowerCase() : "enabled";
+  if (normalized === "draft") return ["draft"];
+  if (normalized === "staged") return ["staged"];
+  if (normalized === "disabled") return ["disabled"];
+  if (normalized === "all") return Array.from(getContentStatuses());
+  return ["enabled"];
+}
+
+async function loadLibraryForStatuses(statuses, { allowInvalid = false } = {}) {
+  const items = await listContentItems(undefined, true, { statuses });
+  if (!items.length) return null;
+  const library = { workouts: [], nutrition: [], resets: [] };
+  const invalid = [];
+  items.forEach((item) => {
+    if (item.enabled === false) return;
+    const validation = validateContentItem(item.kind, item);
+    if (!validation.ok) {
+      invalid.push({ id: item.id, kind: item.kind, field: validation.field, message: validation.message });
+      return;
+    }
+    if (item.kind === "workout") library.workouts.push(item);
+    if (item.kind === "nutrition") library.nutrition.push(item);
+    if (item.kind === "reset") library.resets.push(item);
+  });
+  if (invalid.length) {
+    logError({ event: "invalid_content_items", count: invalid.length, invalid });
+    if (!allowInvalid && (config.isAlphaLike || config.isProdLike)) {
+      throw internal("invalid_content_item", "Invalid content items present");
+    }
+  }
+  return library;
+}
+
+async function loadLibraryForStageMode(stageMode) {
+  const statuses = stageMode ? STAGE_STATUSES : ENABLED_STATUSES;
+  return loadLibraryForStatuses(statuses, { allowInvalid: stageMode });
+}
+
+function normalizeContentKind(kind) {
+  const key = typeof kind === "string" ? kind.trim().toLowerCase() : "";
+  return CONTENT_KINDS.has(key) ? key : null;
+}
+
+async function runChecksForItem(kind, id) {
+  const statuses = Array.from(getContentStatuses());
+  const items = await listContentItems(kind, true, { statuses });
+  const report = runContentChecks(items, { kind, scope: "all" });
+  const item = items.find((entry) => entry.id === id) || null;
+  const errors = report.errors.filter((entry) => entry.id === id);
+  const warnings = report.warnings.filter((entry) => entry.id === id);
+  return { item, report, errors, warnings };
+}
+
+function normalizeExperimentStatus(status) {
+  const key = typeof status === "string" ? status.trim().toLowerCase() : "draft";
+  if (key === "running" || key === "stopped" || key === "draft") return key;
+  return "draft";
+}
+
+async function validateExperimentConfig(config, { requirePackIds = true } = {}) {
+  if (!config || typeof config !== "object") {
+    throw badRequest("invalid_experiment_config", "config_json required", "config_json");
+  }
+  const type = config.type;
+  if (type !== "pack" && type !== "parameters") {
+    throw badRequest("invalid_experiment_type", "type must be pack or parameters", "config_json.type");
+  }
+  const variants = Array.isArray(config.variants) ? config.variants.filter((v) => v && v.key) : [];
+  if (variants.length < 2) {
+    throw badRequest("invalid_experiment_variants", "At least two variants required", "config_json.variants");
+  }
+  const seenKeys = new Set();
+  variants.forEach((variant) => {
+    if (seenKeys.has(variant.key)) {
+      throw badRequest("duplicate_experiment_variant", `Duplicate variant key: ${variant.key}`, "config_json.variants");
+    }
+    seenKeys.add(variant.key);
+  });
+
+  if (type === "pack") {
+    if (!requirePackIds) return config;
+    const packs = await listContentPacks();
+    const packIds = new Set(packs.map((pack) => pack.id));
+    variants.forEach((variant) => {
+      if (!variant.packId || !packIds.has(variant.packId)) {
+        throw badRequest("invalid_experiment_pack", `Unknown packId for variant ${variant.key}`, "config_json.variants");
+      }
+    });
+    return config;
+  }
+
+  variants.forEach((variant) => {
+    const override = variant.paramsOverride;
+    if (!override) return;
+    const keys = Object.keys(override);
+    const blocked = keys.filter((key) => SAFETY_DENYLIST.has(key));
+    if (blocked.length) {
+      throw badRequest(
+        "experiment_guardrail_violation",
+        `paramsOverride may not change safety thresholds: ${blocked.join(", ")}`,
+        "config_json.variants"
+      );
+    }
+    keys.forEach((key) => {
+      if (!validateParamValue(key, override[key])) {
+        throw badRequest("invalid_experiment_override", `Invalid paramsOverride for ${key}`, "config_json.variants");
+      }
+    });
+  });
+  return config;
 }
 
 function addMinutesToTimeStr(timeStr, minutesToAdd) {
@@ -457,7 +625,36 @@ async function repairUserState(userId, reason, requestId = null) {
   if (events.length) {
     const flags = await getFeatureFlags();
     const paramsState = await getParameters(userId);
-    const paramsMeta = { cohortId: paramsState.cohortId || null, versions: paramsState.versionsBySource || {} };
+    const ruleConfig = buildRuleConfig(requestId, userId);
+    let experimentEffects = {
+      paramsEffective: paramsState.map,
+      packOverride: null,
+      experimentMeta: null,
+      assignments: [],
+    };
+    try {
+      experimentEffects = await applyExperiments({
+        userId,
+        cohortId: paramsState.cohortId || null,
+        params: paramsState.map,
+        logger: ruleConfig.logger,
+      });
+    } catch (err) {
+      logError({
+        event: "experiments_apply_failed",
+        userId,
+        requestId,
+        error: err?.code || err?.message || String(err),
+      });
+    }
+    const paramsMeta = {
+      cohortId: paramsState.cohortId || null,
+      versions: paramsState.versionsBySource || {},
+      experiments: experimentEffects.assignments || [],
+    };
+    const paramsEffective = experimentEffects.paramsEffective || paramsState.map;
+    const packOverride = experimentEffects.packOverride || null;
+    const experimentMeta = experimentEffects.experimentMeta || null;
     let rebuilt = normalizeState({});
     for (const evt of events) {
       const todayISO = getTodayISOForProfile(rebuilt.userProfile);
@@ -467,8 +664,11 @@ async function repairUserState(userId, reason, requestId = null) {
         ruleToggles: resolveRuleToggles(rebuilt, flags),
         scenarios: { getScenarioById },
         isDev: isDevRoutesEnabled,
-        params: paramsState.map,
+        params: paramsEffective,
         paramsMeta,
+        packOverride,
+        experimentMeta,
+        ruleConfig,
       };
       const result = reduceEvent(rebuilt, { type: evt.type, payload: evt.payload, atISO: evt.atISO || baseNow }, ctx);
       rebuilt = appendLogEvent(result.nextState, result.logEvent);
@@ -508,7 +708,36 @@ async function repairUserState(userId, reason, requestId = null) {
   if (base.userProfile) {
     const flags = await getFeatureFlags();
     const paramsState = await getParameters(userId);
-    const paramsMeta = { cohortId: paramsState.cohortId || null, versions: paramsState.versionsBySource || {} };
+    const ruleConfig = buildRuleConfig(requestId, userId);
+    let experimentEffects = {
+      paramsEffective: paramsState.map,
+      packOverride: null,
+      experimentMeta: null,
+      assignments: [],
+    };
+    try {
+      experimentEffects = await applyExperiments({
+        userId,
+        cohortId: paramsState.cohortId || null,
+        params: paramsState.map,
+        logger: ruleConfig.logger,
+      });
+    } catch (err) {
+      logError({
+        event: "experiments_apply_failed",
+        userId,
+        requestId,
+        error: err?.code || err?.message || String(err),
+      });
+    }
+    const paramsMeta = {
+      cohortId: paramsState.cohortId || null,
+      versions: paramsState.versionsBySource || {},
+      experiments: experimentEffects.assignments || [],
+    };
+    const paramsEffective = experimentEffects.paramsEffective || paramsState.map;
+    const packOverride = experimentEffects.packOverride || null;
+    const experimentMeta = experimentEffects.experimentMeta || null;
     const resetState = normalizeState({
       ...base,
       weekPlan: null,
@@ -521,8 +750,11 @@ async function repairUserState(userId, reason, requestId = null) {
       ruleToggles: resolveRuleToggles(resetState, flags),
       scenarios: { getScenarioById },
       isDev: isDevRoutesEnabled,
-      params: paramsState.map,
+      params: paramsEffective,
       paramsMeta,
+      packOverride,
+      experimentMeta,
+      ruleConfig,
     };
     try {
       const ensured = reduceEvent(resetState, { type: "ENSURE_WEEK", payload: {}, atISO: baseNow }, ctx);
@@ -825,6 +1057,7 @@ function appendLogEvent(current, logEvent) {
 
 function dispatch(state, event, ctxOverrides = {}) {
   const todayISO = getTodayISOForProfile(state.userProfile);
+  const ruleConfig = ctxOverrides.ruleConfig || buildRuleConfig(ctxOverrides.requestId || null, state.userProfile?.id || null);
   const ctx = {
     domain,
     ruleToggles: ctxOverrides.ruleToggles || state.ruleToggles,
@@ -833,6 +1066,7 @@ function dispatch(state, event, ctxOverrides = {}) {
     isDev: isDevRoutesEnabled,
     params: ctxOverrides.params,
     paramsMeta: ctxOverrides.paramsMeta,
+    ruleConfig,
     ...ctxOverrides,
   };
 
@@ -975,6 +1209,31 @@ async function ensureWeekForDate(state, dateISO, dispatchFn) {
     return res.state;
   }
   return (await dispatchFn({ type: "ENSURE_WEEK", payload: {} })).state;
+}
+
+function resetSort(a, b) {
+  const priorityDiff = Number(b?.priority || 0) - Number(a?.priority || 0);
+  if (priorityDiff) return priorityDiff;
+  const minutesDiff = Number(a?.minutes || 0) - Number(b?.minutes || 0);
+  if (minutesDiff) return minutesDiff;
+  return String(a?.id || "").localeCompare(String(b?.id || ""));
+}
+
+function pickRailReset({ dayPlan, checkIn, library }) {
+  const lib = library || domain.defaultLibrary;
+  const resets = Array.isArray(lib?.resets) ? lib.resets : [];
+  const enabled = resets.filter((item) => item && item.enabled !== false);
+  if (!enabled.length) return null;
+  const panicActive = Boolean(checkIn?.panic || dayPlan?.safety?.reasons?.includes?.("panic"));
+  if (panicActive) {
+    const panicReset = enabled.find((item) => item.id === "r_panic_mode");
+    if (panicReset) return panicReset;
+  }
+  const twoMinute = enabled.filter((item) => Number(item.minutes || 0) <= 2);
+  const pool = twoMinute.length ? twoMinute : enabled;
+  const tagged = pool.filter((item) => Array.isArray(item.tags) && item.tags.some((tag) => tag === "downshift" || tag === "breathe"));
+  const ranked = (tagged.length ? tagged : pool).slice().sort(resetSort);
+  return ranked[0] || enabled[0];
 }
 
 function contentTypeForPath(filePath) {
@@ -1721,10 +1980,13 @@ const server = http.createServer(async (req, res) => {
       }
       try {
         const [workouts, nutrition, resets] = await Promise.all([
-          listContentItems("workout"),
-          listContentItems("nutrition"),
-          listContentItems("reset"),
+          listContentItems("workout", true, { statuses: ["enabled"] }),
+          listContentItems("nutrition", true, { statuses: ["enabled"] }),
+          listContentItems("reset", true, { statuses: ["enabled"] }),
         ]);
+        if (!workouts.length || !nutrition.length || !resets.length) {
+          contentOk = false;
+        }
         workouts.forEach((item) => validateContentItemOrThrow("workout", item));
         nutrition.forEach((item) => validateContentItemOrThrow("nutrition", item));
         resets.forEach((item) => validateContentItemOrThrow("reset", item));
@@ -1761,6 +2023,12 @@ const server = http.createServer(async (req, res) => {
           migrationsCount,
         },
       });
+      return;
+    }
+
+    if (pathname === "/v1/citations" && req.method === "GET") {
+      const citations = await loadCitations();
+      sendJson(res, 200, { ok: true, citations });
       return;
     }
 
@@ -2057,13 +2325,45 @@ const server = http.createServer(async (req, res) => {
         const effectiveToggles = resolveRuleToggles(currentState, flags);
         const remindersEnabled = flagEnabled(flags, "reminders.enabled");
         const paramsState = await getParameters(userId);
-        const paramsMeta = { cohortId: paramsState.cohortId || null, versions: paramsState.versionsBySource || {} };
+        const ruleConfig = buildRuleConfig(res.livenewRequestId, userId);
+        let experimentEffects = {
+          paramsEffective: paramsState.map,
+          packOverride: null,
+          experimentMeta: null,
+          assignments: [],
+        };
+        try {
+          experimentEffects = await applyExperiments({
+            userId,
+            cohortId: paramsState.cohortId || null,
+            params: paramsState.map,
+            logger: ruleConfig.logger,
+          });
+        } catch (err) {
+          logError({
+            event: "experiments_apply_failed",
+            userId,
+            requestId: res.livenewRequestId,
+            error: err?.code || err?.message || String(err),
+          });
+        }
+        const paramsMeta = {
+          cohortId: paramsState.cohortId || null,
+          versions: paramsState.versionsBySource || {},
+          experiments: experimentEffects.assignments || [],
+        };
+        const paramsEffective = experimentEffects.paramsEffective || paramsState.map;
+        const packOverride = experimentEffects.packOverride || null;
+        const experimentMeta = experimentEffects.experimentMeta || null;
         const ctxBase = {
           ruleToggles: effectiveToggles,
-          params: paramsState.map,
+          params: paramsEffective,
           paramsMeta,
           now: { todayISO, atISO },
           incidentMode: incidentModeEnabled,
+          packOverride,
+          experimentMeta,
+          ruleConfig,
         };
         let resEvent = dispatch(currentState, eventWithAt, ctxBase);
         let nextState = resEvent.state;
@@ -2338,6 +2638,52 @@ const server = http.createServer(async (req, res) => {
       const payload = { ok: true, weekPlan: validWeek.weekPlan };
       setCachedResponse(userId, pathname, url.search, payload);
       send(200, payload);
+      return;
+    }
+
+    if (pathname === "/v1/plan/force-refresh" && req.method === "POST") {
+      const body = await parseJson(req);
+      const dateISO = body?.dateISO || getTodayISOForProfile(state.userProfile);
+      const validation = validateDateParam(dateISO, "dateISO");
+      if (!validation.ok) {
+        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+        return;
+      }
+      state = await ensureWeekForDate(state, dateISO, dispatchForUser);
+      const resEvent = await dispatchForUser({
+        type: "FORCE_REFRESH",
+        payload: { dateISO, forced: true },
+      });
+      state = resEvent.state;
+      const ensured = await ensureValidDayContract(userId, state, dateISO, "force_refresh_invariant", requestId);
+      state = ensured.state;
+      send(200, { ok: true, day: ensured.day });
+      return;
+    }
+
+    if (pathname === "/v1/rail/today" && req.method === "GET") {
+      const dateISO = getTodayISOForProfile(state.userProfile);
+      state = await ensureWeekForDate(state, dateISO, dispatchForUser);
+      const ensured = await ensureValidDayContract(userId, state, dateISO, "rail_today_invariant", requestId);
+      state = ensured.state;
+      const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
+      const checkIn = latestCheckInForDate(state.checkIns, dateISO);
+      const railReset = pickRailReset({ dayPlan, checkIn, library: domain.defaultLibrary });
+      const rail = {
+        checkIn: {
+          requiredFields: ["stress", "sleepQuality", "energy", "timeAvailableMin"],
+          estimatedSeconds: 10,
+        },
+        reset: railReset
+          ? {
+              id: railReset.id || null,
+              title: railReset.title || null,
+              minutes: railReset.minutes ?? null,
+              steps: Array.isArray(railReset.steps) ? railReset.steps : [],
+            }
+          : null,
+      };
+      send(200, { ok: true, rail, day: ensured.day });
       return;
     }
 
@@ -2957,6 +3303,9 @@ const server = http.createServer(async (req, res) => {
       const body = await parseJson(req);
       const flags = await getFeatureFlags();
       const paramsState = await getParameters();
+      const stageMode = isStageModeRequest(req, url, email);
+      const library = (await loadLibraryForStageMode(stageMode)) || domain.defaultLibrary;
+      const ruleConfig = buildRuleConfig(res.livenewRequestId, userId);
       const packs = await listContentPacks();
       const packIds = Array.isArray(body.packIds) && body.packIds.length
         ? body.packIds.filter((id) => typeof id === "string")
@@ -3006,6 +3355,8 @@ const server = http.createServer(async (req, res) => {
               overrides: { profileOverride: profile },
               qualityRules,
               params: paramsState.map,
+              ruleConfig,
+              library,
             });
             matrix.push({
               profile,
@@ -3026,7 +3377,122 @@ const server = http.createServer(async (req, res) => {
         }
       }
 
-      send(200, { ok: true, matrix });
+      send(200, { ok: true, matrix, stageMode });
+      return;
+    }
+
+    if (pathname === "/v1/admin/experiments" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const status = url.searchParams.get("status");
+      const experiments = await listExperiments(status || null);
+      send(200, { ok: true, experiments });
+      return;
+    }
+
+    if (pathname === "/v1/admin/experiments" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const name = typeof body?.name === "string" && body.name.trim() ? body.name.trim() : null;
+      if (!name) {
+        sendError(res, 400, "name_required", "name is required", "name");
+        return;
+      }
+      const rawConfig = parseMaybeJson(body.config_json ?? body.config, "config_json");
+      const configValidated = await validateExperimentConfig(rawConfig);
+      const status = normalizeExperimentStatus(body.status);
+      const experiment = await createExperiment({ name, config: configValidated, status });
+      await auditAdmin("experiments.create", experiment.id, { status });
+      send(200, { ok: true, experiment });
+      return;
+    }
+
+    const experimentMatch = pathname.match(/^\/v1\/admin\/experiments\/([^/]+)$/);
+    if (experimentMatch && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const experiment = await getExperiment(experimentMatch[1]);
+      if (!experiment) {
+        sendError(res, 404, "not_found", "Experiment not found");
+        return;
+      }
+      send(200, { ok: true, experiment });
+      return;
+    }
+    if (experimentMatch && req.method === "PATCH") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const experimentId = experimentMatch[1];
+      const existing = await getExperiment(experimentId);
+      if (!existing) {
+        sendError(res, 404, "not_found", "Experiment not found");
+        return;
+      }
+      const body = await parseJson(req);
+      const patch = {};
+      if (typeof body?.name === "string" && body.name.trim()) {
+        patch.name = body.name.trim();
+      }
+      if (body?.status) {
+        patch.status = normalizeExperimentStatus(body.status);
+      }
+      if (body?.config != null || body?.config_json != null) {
+        const rawConfig = parseMaybeJson(body.config_json ?? body.config, "config_json");
+        patch.config = await validateExperimentConfig(rawConfig);
+      }
+      if (!Object.keys(patch).length) {
+        sendError(res, 400, "patch_empty", "No valid fields to update");
+        return;
+      }
+      const experiment = await updateExperiment(experimentId, patch);
+      await auditAdmin("experiments.patch", experimentId, { fields: Object.keys(patch) });
+      send(200, { ok: true, experiment });
+      return;
+    }
+
+    const experimentStartMatch = pathname.match(/^\/v1\/admin\/experiments\/([^/]+)\/start$/);
+    if (experimentStartMatch && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const experimentId = experimentStartMatch[1];
+      const existing = await getExperiment(experimentId);
+      if (!existing) {
+        sendError(res, 404, "not_found", "Experiment not found");
+        return;
+      }
+      await validateExperimentConfig(existing.config);
+      const experiment = await setExperimentStatus(experimentId, "running");
+      await auditAdmin("experiments.start", experimentId, {});
+      send(200, { ok: true, experiment });
+      return;
+    }
+
+    const experimentStopMatch = pathname.match(/^\/v1\/admin\/experiments\/([^/]+)\/stop$/);
+    if (experimentStopMatch && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const experimentId = experimentStopMatch[1];
+      const existing = await getExperiment(experimentId);
+      if (!existing) {
+        sendError(res, 404, "not_found", "Experiment not found");
+        return;
+      }
+      const experiment = await setExperimentStatus(experimentId, "stopped");
+      await auditAdmin("experiments.stop", experimentId, {});
+      send(200, { ok: true, experiment });
+      return;
+    }
+
+    const experimentAssignmentsMatch = pathname.match(/^\/v1\/admin\/experiments\/([^/]+)\/assignments$/);
+    if (experimentAssignmentsMatch && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const experimentId = experimentAssignmentsMatch[1];
+      const page = Number(url.searchParams.get("page") || 1);
+      const pageSize = Number(url.searchParams.get("pageSize") || 50);
+      const { items, total } = await listExperimentAssignments(experimentId, page, pageSize);
+      send(200, { ok: true, experimentId, items, total, page, pageSize });
       return;
     }
 
@@ -3204,7 +3670,37 @@ const server = http.createServer(async (req, res) => {
       }
       const flags = await getFeatureFlags();
       const paramsState = await getParameters(targetUserId);
-      const paramsMeta = { cohortId: paramsState.cohortId || null, versions: paramsState.versionsBySource || {} };
+      const ruleConfig = buildRuleConfig(res.livenewRequestId, targetUserId);
+      let experimentEffects = {
+        paramsEffective: paramsState.map,
+        packOverride: null,
+        experimentMeta: null,
+        assignments: [],
+      };
+      try {
+        experimentEffects = await applyExperiments({
+          userId: targetUserId,
+          cohortId: paramsState.cohortId || null,
+          params: paramsState.map,
+          logger: ruleConfig.logger,
+          persistAssignments: false,
+        });
+      } catch (err) {
+        logError({
+          event: "experiments_apply_failed",
+          userId: targetUserId,
+          requestId: res.livenewRequestId,
+          error: err?.code || err?.message || String(err),
+        });
+      }
+      const paramsMeta = {
+        cohortId: paramsState.cohortId || null,
+        versions: paramsState.versionsBySource || {},
+        experiments: experimentEffects.assignments || [],
+      };
+      const paramsEffective = experimentEffects.paramsEffective || paramsState.map;
+      const packOverride = experimentEffects.packOverride || null;
+      const experimentMeta = experimentEffects.experimentMeta || null;
       const events = (await getUserEventsRecent(targetUserId, 30))
         .slice()
         .sort((a, b) => (a.atISO || "").localeCompare(b.atISO || ""));
@@ -3217,8 +3713,11 @@ const server = http.createServer(async (req, res) => {
           ruleToggles: resolveRuleToggles(sandboxState, flags),
           scenarios: { getScenarioById },
           isDev: isDevRoutesEnabled,
-          params: paramsState.map,
+          params: paramsEffective,
           paramsMeta,
+          packOverride,
+          experimentMeta,
+          ruleConfig,
         };
         const resEvent = reduceEvent(sandboxState, { type: evt.type, payload: evt.payload, atISO: evt.atISO }, ctx);
         sandboxState = appendLogEvent(resEvent.nextState, resEvent.logEvent);
@@ -3231,8 +3730,11 @@ const server = http.createServer(async (req, res) => {
         ruleToggles: resolveRuleToggles(sandboxState, flags),
         scenarios: { getScenarioById },
         isDev: isDevRoutesEnabled,
-        params: paramsState.map,
+        params: paramsEffective,
         paramsMeta,
+        packOverride,
+        experimentMeta,
+        ruleConfig,
       };
       const ensured = reduceEvent(sandboxState, { type: "ENSURE_WEEK", payload: {}, atISO: ensureCtx.now.atISO }, ensureCtx);
       sandboxState = appendLogEvent(ensured.nextState, ensured.logEvent);
@@ -3358,6 +3860,122 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/admin/content/draft" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const kind = normalizeContentKind(body?.kind);
+      const item = body?.item;
+      if (!kind) {
+        sendError(res, 400, "kind_invalid", "kind must be workout, nutrition, or reset", "kind");
+        return;
+      }
+      if (!item || typeof item !== "object") {
+        sendError(res, 400, "item_invalid", "item is required", "item");
+        return;
+      }
+      const id = item.id || crypto.randomUUID();
+      const candidate = { ...item, id, kind, status: "draft" };
+      validateContentItemOrThrow(kind, candidate, { allowDisabled: true });
+      const saved = await upsertContentItem(kind, candidate, { status: "draft", updatedByAdmin: userId });
+      await auditAdmin("content.draft", `${kind}:${saved.id}`, { kind, id: saved.id });
+      send(200, { ok: true, item: saved });
+      return;
+    }
+
+    const contentStageMatch = pathname.match(/^\/v1\/admin\/content\/stage\/(workout|nutrition|reset)\/([^/]+)$/);
+    if (contentStageMatch && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const kind = contentStageMatch[1];
+      const id = contentStageMatch[2];
+      const { item, errors, warnings } = await runChecksForItem(kind, id);
+      if (!item) {
+        sendError(res, 404, "not_found", "Content item not found");
+        return;
+      }
+      validateContentItemOrThrow(kind, item, { allowDisabled: true });
+      if (errors.length) {
+        sendError(res, badRequest("invalid_content_item", "Content checks failed", "item", { errors, warnings }));
+        return;
+      }
+      const staged = await setContentStatus(kind, id, "staged", userId);
+      await auditAdmin("content.stage", `${kind}:${id}`, { kind, id, warnings });
+      send(200, { ok: true, item: staged, warnings });
+      return;
+    }
+
+    const contentEnableMatch = pathname.match(/^\/v1\/admin\/content\/enable\/(workout|nutrition|reset)\/([^/]+)$/);
+    if (contentEnableMatch && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const kind = contentEnableMatch[1];
+      const id = contentEnableMatch[2];
+      const { item, errors, warnings } = await runChecksForItem(kind, id);
+      if (!item) {
+        sendError(res, 404, "not_found", "Content item not found");
+        return;
+      }
+      if (item.status !== "staged") {
+        sendError(res, 409, "content_not_staged", "Item must be staged before enabling");
+        return;
+      }
+      if (errors.length) {
+        sendError(res, badRequest("invalid_content_item", "Content checks failed", "item", { errors, warnings }));
+        return;
+      }
+      const enabledItem = await setContentStatus(kind, id, "enabled", userId);
+      await applyLibraryFromDb();
+      await auditAdmin("content.enable", `${kind}:${id}`, { kind, id, warnings });
+      send(200, { ok: true, item: enabledItem, warnings });
+      return;
+    }
+
+    const contentDisableSupplyMatch = pathname.match(/^\/v1\/admin\/content\/disable\/(workout|nutrition|reset)\/([^/]+)$/);
+    if (contentDisableSupplyMatch && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const kind = contentDisableSupplyMatch[1];
+      const id = contentDisableSupplyMatch[2];
+      if (REQUIRED_CONTENT_IDS.has(id)) {
+        sendError(res, 400, "required_content", "This item cannot be disabled");
+        return;
+      }
+      const existing = await getContentItem(kind, id);
+      if (!existing) {
+        sendError(res, 404, "not_found", "Content item not found");
+        return;
+      }
+      const disabledItem = await setContentStatus(kind, id, "disabled", userId);
+      await applyLibraryFromDb();
+      await auditAdmin("content.disable", `${kind}:${id}`, { kind, id });
+      send(200, { ok: true, item: disabledItem });
+      return;
+    }
+
+    if (pathname === "/v1/admin/content/validate" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const scope = typeof body?.scope === "string" ? body.scope : "all";
+      const statuses = statusesForScope(scope);
+      const items = await listContentItems(undefined, true, { statuses });
+      const report = runContentChecks(items, { kind: "all", scope });
+      const savedReport = await insertContentValidationReport({ kind: "all", scope, report });
+      await auditAdmin("content.validate", scope, { scope, errors: report.errors.length, warnings: report.warnings.length });
+      send(200, { ok: true, scope, report, reportId: savedReport.id, atISO: savedReport.atISO });
+      return;
+    }
+
+    if (pathname === "/v1/admin/content/validation-reports" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const limit = Number(url.searchParams.get("limit") || 20);
+      const reports = await listContentValidationReports({ limit });
+      send(200, { ok: true, reports });
+      return;
+    }
+
     const contentDisableMatch = pathname.match(/^\/v1\/admin\/content\/(workout|nutrition|reset)\/([^/]+)\/disable$/);
     if (contentDisableMatch && req.method === "POST") {
       const email = await requireAdmin();
@@ -3368,11 +3986,12 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "required_content", "This item cannot be disabled");
         return;
       }
-      const updated = await patchContentItem(kind, id, { enabled: false });
-      if (!updated) {
+      const existing = await getContentItem(kind, id);
+      if (!existing) {
         sendError(res, 404, "not_found", "Content item not found");
         return;
       }
+      const updated = await setContentStatus(kind, id, "disabled", userId);
       await applyLibraryFromDb();
       await auditAdmin("content.disable", `${kind}:${id}`, { kind, id });
       send(200, { ok: true, item: updated });
@@ -3423,15 +4042,14 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "field_invalid", "minutes must be number", "minutes");
         return;
       }
-      const existingItems = await listContentItems(kind, true);
-      const existing = existingItems.find((item) => item.id === id);
+      const existing = await getContentItem(kind, id);
       if (!existing) {
         sendError(res, 404, "not_found", "Content item not found");
         return;
       }
       const merged = { ...existing, ...patch, id, kind };
-      validateContentItemOrThrow(kind, merged);
-      const updated = await patchContentItem(kind, id, patch);
+      validateContentItemOrThrow(kind, merged, { allowDisabled: true });
+      const updated = await patchContentItem(kind, id, patch, { updatedByAdmin: userId });
       if (!updated) {
         sendError(res, 404, "not_found", "Content item not found");
         return;
@@ -3446,10 +4064,12 @@ const server = http.createServer(async (req, res) => {
       const email = await requireAdmin();
       if (!email) return;
       const kind = url.searchParams.get("kind");
+      const statusParam = url.searchParams.get("status");
       const page = Number(url.searchParams.get("page") || 1);
       const pageSize = Number(url.searchParams.get("pageSize") || 50);
-      const items = await listContentItemsPaged(kind || undefined, page, pageSize);
-      send(200, { ok: true, items, page, pageSize });
+      const statuses = statusParam ? statusesForScope(statusParam) : Array.from(getContentStatuses());
+      const items = await listContentItemsPaged(kind || undefined, page, pageSize, { statuses });
+      send(200, { ok: true, items, page, pageSize, statuses });
       return;
     }
 
@@ -3487,9 +4107,9 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const id = item.id || crypto.randomUUID();
-      const candidate = { ...item, id, kind };
+      const candidate = { ...item, id, kind, enabled: true };
       validateContentItemOrThrow(kind, candidate);
-      const saved = await upsertContentItem(kind, candidate);
+      const saved = await upsertContentItem(kind, candidate, { status: "enabled", updatedByAdmin: userId });
       await applyLibraryFromDb();
       await auditAdmin("content.create", `${kind}:${saved.id}`, { kind, id: saved.id });
       send(200, { ok: true, item: saved });
@@ -3514,13 +4134,13 @@ const server = http.createServer(async (req, res) => {
           return;
         }
         const id = item.id || crypto.randomUUID();
-        const candidate = { ...item, id, kind };
+        const candidate = { ...item, id, kind, enabled: true };
         validateContentItemOrThrow(kind, candidate);
         candidates.push({ kind, candidate });
       }
       const saved = [];
       for (const { kind, candidate } of candidates) {
-        const record = await upsertContentItem(kind, candidate);
+        const record = await upsertContentItem(kind, candidate, { status: "enabled", updatedByAdmin: userId });
         saved.push(record);
       }
       await applyLibraryFromDb();
@@ -3866,6 +4486,8 @@ const server = http.createServer(async (req, res) => {
         const now = { atISO: nowAtISO, todayISO: dateISOForAt(replayState.userProfile, nowAtISO) };
         const flags = await getFeatureFlags();
         const paramsState = await getParameters();
+        const ruleConfig = buildRuleConfig(res.livenewRequestId, replayUserId);
+        const paramsMeta = { cohortId: null, versions: paramsState.versionsBySource || {}, experiments: [] };
 
         for (const evt of validation.value.events) {
           const atISO = evt.atISO || now.atISO;
@@ -3877,6 +4499,8 @@ const server = http.createServer(async (req, res) => {
             scenarios: { getScenarioById },
             isDev: true,
             params: paramsState.map,
+            paramsMeta,
+            ruleConfig,
           };
           const result = reduceEvent(replayState, { type: evt.type, payload: evt.payload, atISO }, ctx);
           replayState = appendLogEvent(result.nextState, result.logEvent);
@@ -3946,6 +4570,8 @@ const server = http.createServer(async (req, res) => {
         let rebuilt = normalizeState({});
         const flags = await getFeatureFlags();
         const paramsState = await getParameters();
+        const ruleConfig = buildRuleConfig(res.livenewRequestId, targetUserId);
+        const paramsMeta = { cohortId: null, versions: paramsState.versionsBySource || {}, experiments: [] };
         for (const evt of events) {
           const todayISO = dateISOForAt(rebuilt.userProfile, evt.atISO);
           const ctx = {
@@ -3955,6 +4581,8 @@ const server = http.createServer(async (req, res) => {
             scenarios: { getScenarioById },
             isDev: true,
             params: paramsState.map,
+            paramsMeta,
+            ruleConfig,
           };
           const result = reduceEvent(rebuilt, { type: evt.type, payload: evt.payload, atISO: evt.atISO }, ctx);
           rebuilt = appendLogEvent(result.nextState, result.logEvent);
@@ -4090,26 +4718,14 @@ const server = http.createServer(async (req, res) => {
 
     sendError(res, 404, "not_found", "Not found");
   } catch (err) {
-    const status = err?.status || 500;
-    if (err?.code) {
-      sendError(res, status, err.code, err.message || "Request error", err.field);
-      if (NODE_ENV !== "production") {
-        logError({
-          atISO: new Date().toISOString(),
-          errorCode: err.code,
-          stack: err.stack,
-        });
-      }
-      return;
-    }
     if (NODE_ENV !== "production") {
       logError({
         atISO: new Date().toISOString(),
-        errorCode: "server_error",
+        errorCode: err?.code || "server_error",
         stack: err?.stack,
       });
     }
-    sendError(res, status, "server_error", err?.message || "Server error");
+    sendError(res, err, undefined, undefined, undefined, res?.livenewRequestId);
   }
 });
 

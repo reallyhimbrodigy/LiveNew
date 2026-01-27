@@ -1,0 +1,427 @@
+{
+  "ok": true,
+  "generatedAt": "2026-01-27T05:32:32.664Z",
+  "driftCount": 20,
+  "drifts": [
+    {
+      "id": "balanced_baseline_la",
+      "expectedHash": "5217afef1269b6d4c94405f90fd2f741b712551ad7b2555c4266bfcb677d16c0",
+      "actualHash": "5c3e004e7e117093f4fcf1493152293f7d615a20dd1d9b63571b7e95e9bdf134",
+      "expectedKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_15",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 17
+      },
+      "actualKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_15",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 17
+      }
+    },
+    {
+      "id": "high_stress_calm_pack",
+      "expectedHash": "e55eedc474be79f927512405b5c52774e24313de3f1d4fdbeb647f9a0d8da4fd",
+      "actualHash": "6e28ad0b4511bf6ce2c4b0020aac0080e9a601a4fadbc571f2dcbed479548f67",
+      "expectedKeyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      },
+      "actualKeyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      }
+    },
+    {
+      "id": "rebuild_strength_high_energy",
+      "expectedHash": "384229a859cc31a6b4755f178bd7e3ed52a87787944656f00c048a4ad70e4af7",
+      "actualHash": "b04b4d7587a30f8e9e98ce36013bae1c61d40631ebf7f5c8eed3269fc056d5e7",
+      "expectedKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      },
+      "actualKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      }
+    },
+    {
+      "id": "poor_sleep_short_time",
+      "expectedHash": "fd81c4012f62d4104c7b54853583e4c1b12715e86df021644c8b11ef8784b5f3",
+      "actualHash": "d0b5fc7406092181f949ac8f709e40b9229092f1e13895eb587482fe506d66dd",
+      "expectedKeyFields": {
+        "profile": "PoorSleep",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      },
+      "actualKeyFields": {
+        "profile": "PoorSleep",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      }
+    },
+    {
+      "id": "wired_overstimulated_evening",
+      "expectedHash": "367def6dfa3e96a828eb307374cefb09ace3daa05213960a317063ea4b3d2185",
+      "actualHash": "b6d305fcc1aa5f107299875fed1bcbd16c764df59b53483fea539dd1250ca52e",
+      "expectedKeyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      },
+      "actualKeyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      }
+    },
+    {
+      "id": "depleted_burned_out_mid",
+      "expectedHash": "885e9693fc1a5c5ee7fab3a314f56be05dffd705f5d9ffa942f85fe9d664008a",
+      "actualHash": "4b8f4892191423a56c0152c019d9108218daba399e077f6fe22a062d8db911e9",
+      "expectedKeyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "stabilize",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 7
+      },
+      "actualKeyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "stabilize",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 7
+      }
+    },
+    {
+      "id": "restless_anxious_short",
+      "expectedHash": "bccb63fab3dce933b17678654417d6eb9b4c8810692e6b7428203d8e2c6f405b",
+      "actualHash": "6b83742e65f30c7fef14f4f911482dd32f392e1b0e47c58108e7d3f02ca198d3",
+      "expectedKeyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 8
+      },
+      "actualKeyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 8
+      }
+    },
+    {
+      "id": "time_rich_balanced",
+      "expectedHash": "917dce1793161af49de7218b12f556a79b745ca42a6f7dfd81b451964ff79877",
+      "actualHash": "bdfd27b37518ec091b33f56730069eacabbdb83f0f36b4bdaaaab55d8a123a96",
+      "expectedKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      },
+      "actualKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      }
+    },
+    {
+      "id": "low_sleep_high_stress_rebuild_pack",
+      "expectedHash": "8d982b32220e99809763358e5e024572dad6e142b11b045af6d2328e13cae1c2",
+      "actualHash": "d76260a0059f159105f03c0a000fdfb84024f7b1d78433975817d195661a3d75",
+      "expectedKeyFields": {
+        "profile": "PoorSleep",
+        "focus": "downshift",
+        "workoutId": null,
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 3
+      },
+      "actualKeyFields": {
+        "profile": "PoorSleep",
+        "focus": "downshift",
+        "workoutId": null,
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 3
+      }
+    },
+    {
+      "id": "calm_pack_morning_boundary",
+      "expectedHash": "af0ab05b11320d01bce3ea3d49fcc752842906f2dfdb5b3aba329e3f811df8b4",
+      "actualHash": "d6bade127e03e7d57c7604d3f771099c6dc14f3e305d93ac0f02d8d24767c225",
+      "expectedKeyFields": {
+        "profile": "Balanced",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 8
+      },
+      "actualKeyFields": {
+        "profile": "Balanced",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 8
+      }
+    },
+    {
+      "id": "balanced_pack_busy_day",
+      "expectedHash": "0d02d16e7cd635b252abc0e8bd8757becec2eca511124b09256b00d6111b7eee",
+      "actualHash": "89b8298ccfb036e53272ddfb56f57aa256606efc2e35cb20925f552c186a482f",
+      "expectedKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_15",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 17
+      },
+      "actualKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_15",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 17
+      }
+    },
+    {
+      "id": "rebuild_pack_low_time",
+      "expectedHash": "f0ea6e2268fb3f76fe430bd089658774c8d7e919c1996f7cf9929ab153fb51d1",
+      "actualHash": "47ab97c00f91450f8b1e9ff56f7d063fab744617166ca56340095c0feb99c9e3",
+      "expectedKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 7
+      },
+      "actualKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 7
+      }
+    },
+    {
+      "id": "safety_panic_mode",
+      "expectedHash": "00e5f676b3d56f1b8b36a4cdeb360d0037b63da3cb6c7fa9b9b1a92925171b8a",
+      "actualHash": "a7432739f9600a8d1e37048e5913b8bf41215b967ab193eceb21d1cd12233644",
+      "expectedKeyFields": {
+        "profile": "PoorSleep",
+        "focus": "downshift",
+        "workoutId": null,
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 3
+      },
+      "actualKeyFields": {
+        "profile": "PoorSleep",
+        "focus": "downshift",
+        "workoutId": null,
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 3
+      }
+    },
+    {
+      "id": "safety_illness",
+      "expectedHash": "b57921f92af1c6769ca6086abc43b68d83979e27ee9b4e2cddb7ce5f00a7d1f1",
+      "actualHash": "abd1df69392ef4d368905abb330f077f6a6c7c6c84b382a750530309fdc3351d",
+      "expectedKeyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "stabilize",
+        "workoutId": null,
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 3
+      },
+      "actualKeyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "stabilize",
+        "workoutId": null,
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 3
+      }
+    },
+    {
+      "id": "high_energy_low_stress_calm_pack",
+      "expectedHash": "0687053ec337bebd8b900a39632301674bd4a20445251afbeb2e676fa8ffa5e6",
+      "actualHash": "f93d0cc64da8b16a959a9cf73348b6a92c4769d7eb93817b077cd81d0f19e868",
+      "expectedKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      },
+      "actualKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      }
+    },
+    {
+      "id": "moderate_sleep_high_stress",
+      "expectedHash": "e80d05a838e52ac0aac8fceeeb8b6f6ed2b63ff05c9e6ad93c2972ee2ffa4e2e",
+      "actualHash": "1b68b54be74bcf764f69a70563b4c6b3a05845ee0618e9598e472e492a7d42cd",
+      "expectedKeyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      },
+      "actualKeyFields": {
+        "profile": "WiredOverstimulated",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_breath_2",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 7
+      }
+    },
+    {
+      "id": "low_energy_rebuild_pack",
+      "expectedHash": "d27af21da4938c77bf3d84b71a9911927d6775ed5c06dfa8d27df8766b946d19",
+      "actualHash": "7d7121640dba4ab4a45bff369cec2e372a8a7b8ba30ec242f8e2366cf95f877e",
+      "expectedKeyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "stabilize",
+        "workoutId": "w_walk_5",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 8
+      },
+      "actualKeyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "stabilize",
+        "workoutId": "w_walk_5",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 8
+      }
+    },
+    {
+      "id": "short_time_calm_pack",
+      "expectedHash": "607d899854eec5807db7ce39a988be23d467ce97febd0acaa9cf0e032be2e744",
+      "actualHash": "c63ef9896b157f446e920e979954cbd6e3422ecbcf717368f92363016d63625d",
+      "expectedKeyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 8
+      },
+      "actualKeyFields": {
+        "profile": "DepletedBurnedOut",
+        "focus": "downshift",
+        "workoutId": "w_walk_5",
+        "resetId": "r_panic_mode",
+        "nutritionId": "n_caffeine_cutoff",
+        "totalMinutes": 8
+      }
+    },
+    {
+      "id": "time_rich_rebuild_pack",
+      "expectedHash": "faf43b061bfb5617cc620b14a1c4e63377e3b44c6aaf15e82a3b5d6c8195d78e",
+      "actualHash": "b2dcdcd88d2886017daa047898ee0c663d568e3251df54ee0086cbe5bac37d1a",
+      "expectedKeyFields": {
+        "profile": "Balanced",
+        "focus": "rebuild",
+        "workoutId": "w_strength_30",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_rebuild_consistency",
+        "totalMinutes": 33
+      },
+      "actualKeyFields": {
+        "profile": "Balanced",
+        "focus": "rebuild",
+        "workoutId": "w_strength_30",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_rebuild_consistency",
+        "totalMinutes": 33
+      }
+    },
+    {
+      "id": "balanced_pack_high_sleep",
+      "expectedHash": "74b12b8159dc8d710a6d488b69cdc1966478e48d411a20022031db239bbb449d",
+      "actualHash": "e457b9206cb21b83ac11f1ae7510873cee4220e3af3938606b5c949a4559d584",
+      "expectedKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      },
+      "actualKeyFields": {
+        "profile": "Balanced",
+        "focus": "stabilize",
+        "workoutId": "w_strength_20",
+        "resetId": "r_name_it_3",
+        "nutritionId": "n_stabilize_plate",
+        "totalMinutes": 23
+      }
+    }
+  ]
+}
