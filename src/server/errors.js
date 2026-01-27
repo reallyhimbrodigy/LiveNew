@@ -84,7 +84,7 @@ export function sendError(res, errOrStatus, code, message, field, requestId) {
     }
   }
 
-  const headers = { "Content-Type": "application/json" };
+  const headers = { "Content-Type": "application/json", ...(res?.livenewExtraHeaders || {}) };
   if (res?.livenewApiVersion) headers["x-api-version"] = res.livenewApiVersion;
   res.writeHead(err.httpStatus || 500, headers);
   res.errorCode = err.code;

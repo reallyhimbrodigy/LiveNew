@@ -57,6 +57,7 @@ import {
   updateRefreshTokenDeviceName,
   revokeRefreshTokenById,
   seedParameters,
+  listParameters,
   cleanupOldEvents,
   upsertDecisionTrace,
   getDecisionTrace,
@@ -98,6 +99,7 @@ import {
   listChangelogEntries,
   upsertReminderIntent,
   listReminderIntentsByDate,
+  listReminderIntentsByRange,
   updateReminderIntentStatus,
   listReminderIntentsAdmin,
   seedCohorts,
@@ -127,6 +129,16 @@ import {
   listCommunityResponses,
   listCommunityPending,
   moderateCommunityResponse,
+  listUserContentPrefs,
+  upsertUserContentPref,
+  deleteUserContentPref,
+  insertContentFeedback,
+  insertOpsRun,
+  getLatestOpsRun,
+  insertOpsLog,
+  listLatestDayPlanHistoryByRange,
+  runWithQueryTracker,
+  getQueryStats,
 } from "../state/db.js";
 import { createBackup, restoreBackup, listBackups } from "../db/backup.js";
 import { getConfig } from "./config.js";
@@ -141,6 +153,9 @@ import { signAccessToken, verifyAccessToken, issueRefreshToken, rotateRefreshTok
 import { diffDayContracts } from "./diff.js";
 import { toDateISOWithBoundary, validateTimeZone } from "../domain/utils/time.js";
 import { trackEvent, setDailyFlag, ensureDay3Retention, AnalyticsFlags, getFirstFlagDate } from "./analytics.js";
+import { buildOutcomes } from "./outcomes.js";
+import { runLoadtestScript, evaluateLoadtestReport } from "./ops.js";
+import { buildReleaseChecklist } from "./releaseChecklist.js";
 
 const NODE_ENV = process.env.NODE_ENV || "development";
 const config = getConfig();
@@ -189,12 +204,15 @@ let shuttingDown = false;
 const authEmailRateLimiters = new Map();
 const authIpRateLimiters = new Map();
 const readCache = new Map();
+const contentPrefsCache = new Map();
 const latencySamples = new Map();
 const errorCounters = new Map();
+const requestCounters = new Map();
 const recent5xx = [];
 const featureFlagsCache = { data: null, loadedAt: 0 };
 const FEATURE_FLAGS_TTL_MS = 10 * 1000;
 const ERROR_WINDOW_MS = 60 * 60 * 1000;
+const ERROR_WINDOW_LONG_MS = 24 * 60 * 60 * 1000;
 const ERROR_SPIKE_WINDOW_MS = 5 * 60 * 1000;
 const ERROR_SPIKE_THRESHOLD = 10;
 let last5xxAlertAt = 0;
@@ -220,6 +238,14 @@ const DEFAULT_COHORTS = [
   { id: "high_stress", name: "High Stress" },
   { id: "poor_sleep", name: "Poor Sleep" },
 ];
+const CONTENT_PREFS_TTL_MS = 30 * 1000;
+const CACHE_TTLS = {
+  railToday: 10 * 1000,
+  planDay: 20 * 1000,
+  planWeek: 30 * 1000,
+  trends: 30 * 1000,
+  outcomes: 30 * 1000,
+};
 const LATENCY_ROUTES = new Set(["GET /v1/plan/day", "GET /v1/rail/today", "POST /v1/checkin", "POST /v1/signal"]);
 const ACCESS_TOKEN_TTL_SEC = 15 * 60;
 
@@ -1222,14 +1248,29 @@ function dispatch(state, event, ctxOverrides = {}) {
   return { state: next, result, logEvent, effects };
 }
 
+function attachDbStats(res) {
+  const stats = getQueryStats();
+  if (!stats) return;
+  res.livenewDbStats = stats;
+  const shouldExpose = config.isDevLike || res.livenewIsAdmin;
+  if (!shouldExpose) return;
+  res.livenewExtraHeaders = {
+    ...(res.livenewExtraHeaders || {}),
+    "x-db-queries": String(stats.count ?? 0),
+    "x-db-ms": String(Math.round(stats.totalMs ?? 0)),
+  };
+}
+
 function sendError(res, errOrStatus, code, message, field) {
+  attachDbStats(res);
   baseSendError(res, errOrStatus, code, message, field, res?.livenewRequestId);
 }
 
 function sendJson(res, status, payload, userId) {
   const body = userId ? { userId, ...payload } : { ...payload };
   if (res?.livenewRequestId) body.requestId = res.livenewRequestId;
-  const headers = { "Content-Type": "application/json" };
+  attachDbStats(res);
+  const headers = { "Content-Type": "application/json", ...(res?.livenewExtraHeaders || {}) };
   if (res?.livenewApiVersion) headers["x-api-version"] = res.livenewApiVersion;
   res.writeHead(status, headers);
   res.end(JSON.stringify(body));
@@ -1506,20 +1547,30 @@ function resetSort(a, b) {
   return String(a?.id || "").localeCompare(String(b?.id || ""));
 }
 
-function pickRailReset({ dayPlan, checkIn, library }) {
+function pickRailReset({ dayPlan, checkIn, library, preferences }) {
   const lib = library || domain.defaultLibrary;
   const resets = Array.isArray(lib?.resets) ? lib.resets : [];
   const enabled = resets.filter((item) => item && item.enabled !== false);
   if (!enabled.length) return null;
+  const filtered = preferences?.avoids?.size
+    ? enabled.filter((item) => !preferences.avoids.has(item.id))
+    : enabled;
+  const poolBase = filtered.length ? filtered : enabled;
   const panicActive = Boolean(checkIn?.panic || dayPlan?.safety?.reasons?.includes?.("panic"));
   if (panicActive) {
-    const panicReset = enabled.find((item) => item.id === "r_panic_mode");
+    const panicReset = poolBase.find((item) => item.id === "r_panic_mode") || enabled.find((item) => item.id === "r_panic_mode");
     if (panicReset) return panicReset;
   }
-  const twoMinute = enabled.filter((item) => Number(item.minutes || 0) <= 2);
-  const pool = twoMinute.length ? twoMinute : enabled;
+  const twoMinute = poolBase.filter((item) => Number(item.minutes || 0) <= 2);
+  const pool = twoMinute.length ? twoMinute : poolBase;
   const tagged = pool.filter((item) => Array.isArray(item.tags) && item.tags.some((tag) => tag === "downshift" || tag === "breathe"));
-  const ranked = (tagged.length ? tagged : pool).slice().sort(resetSort);
+  const favorites = preferences?.favorites || null;
+  const ranked = (tagged.length ? tagged : pool).slice().sort((a, b) => {
+    const favA = favorites?.has?.(a.id) ? 1 : 0;
+    const favB = favorites?.has?.(b.id) ? 1 : 0;
+    if (favA !== favB) return favB - favA;
+    return resetSort(a, b);
+  });
   return ranked[0] || enabled[0];
 }
 
@@ -1721,7 +1772,7 @@ function record5xx(nowMs) {
 function recordErrorCounter({ routeKey, code, status }) {
   if (!routeKey || status < 400) return;
   const nowMs = Date.now();
-  const cutoff = nowMs - ERROR_WINDOW_MS;
+  const cutoff = nowMs - ERROR_WINDOW_LONG_MS;
   const key = `${code || "error"}::${routeKey}`;
   const existing = errorCounters.get(key) || { code: code || "error", routeKey, timestamps: [], lastSeenAtISO: null };
   existing.timestamps = pruneWindow(existing.timestamps, cutoff);
@@ -1740,17 +1791,38 @@ function snapshotErrorCounters(limit = 50) {
   for (const entry of errorCounters.values()) {
     const timestamps = pruneWindow(entry.timestamps || [], cutoff);
     if (!timestamps.length) continue;
-    entry.timestamps = timestamps;
-    entry.lastSeenAtISO = new Date(timestamps[timestamps.length - 1]).toISOString();
+    const lastSeenAtISO = new Date(timestamps[timestamps.length - 1]).toISOString();
     entries.push({
       code: entry.code,
       routeKey: entry.routeKey,
       count: timestamps.length,
-      lastSeenAtISO: entry.lastSeenAtISO,
+      lastSeenAtISO,
     });
   }
   entries.sort((a, b) => b.count - a.count || String(a.code).localeCompare(String(b.code)));
   return entries.slice(0, Math.max(1, Math.min(Number(limit) || 50, 200)));
+}
+
+function recordRequestCounter(routeKey, status) {
+  if (!routeKey) return;
+  const nowMs = Date.now();
+  const cutoff = nowMs - ERROR_WINDOW_LONG_MS;
+  const entry = requestCounters.get(routeKey) || { routeKey, timestamps: [] };
+  entry.timestamps = pruneWindow(entry.timestamps, cutoff);
+  entry.timestamps.push(nowMs);
+  requestCounters.set(routeKey, entry);
+}
+
+function snapshotRequestCounts(windowMs = ERROR_WINDOW_LONG_MS) {
+  const nowMs = Date.now();
+  const cutoff = nowMs - windowMs;
+  let total = 0;
+  for (const entry of requestCounters.values()) {
+    const timestamps = pruneWindow(entry.timestamps || [], cutoff);
+    entry.timestamps = timestamps;
+    total += timestamps.length;
+  }
+  return { total, windowMinutes: Math.round(windowMs / 60000) };
 }
 
 function diffSelectionStats(prevStats, nextStats) {
@@ -1878,6 +1950,27 @@ function invalidateUserCache(userId) {
   for (const key of readCache.keys()) {
     if (key.startsWith(prefix)) readCache.delete(key);
   }
+}
+
+async function loadContentPrefs(userId) {
+  if (!userId) return { favorites: new Set(), avoids: new Set(), list: [] };
+  const cached = contentPrefsCache.get(userId);
+  const now = Date.now();
+  if (cached && now - cached.loadedAt < CONTENT_PREFS_TTL_MS) return cached.prefs;
+  const list = await listUserContentPrefs(userId);
+  const favorites = new Set();
+  const avoids = new Set();
+  list.forEach((entry) => {
+    if (entry.pref === "favorite") favorites.add(entry.itemId);
+    if (entry.pref === "avoid") avoids.add(entry.itemId);
+  });
+  const prefs = { favorites, avoids, list };
+  contentPrefsCache.set(userId, { prefs, loadedAt: now });
+  return prefs;
+}
+
+function invalidateContentPrefs(userId) {
+  if (userId) contentPrefsCache.delete(userId);
 }
 
 function latestCheckInForDate(checkIns, dateISO) {
@@ -2184,6 +2277,45 @@ function defaultDateRange(days) {
   return { fromISO, toISO };
 }
 
+function latestUpdatedAt(entries) {
+  if (!Array.isArray(entries) || !entries.length) return null;
+  return entries.reduce((latest, entry) => {
+    if (!entry?.updatedAt) return latest;
+    if (!latest || entry.updatedAt > latest) return entry.updatedAt;
+    return latest;
+  }, null);
+}
+
+function backupIdToISO(id) {
+  if (!id) return null;
+  const match = String(id).match(/^db\.(\d{4}-\d{2}-\d{2})T(\d{2})-(\d{2})-(\d{2})-(\d{3})Z\.bak$/);
+  if (!match) return null;
+  const [, date, hh, mm, ss, ms] = match;
+  return `${date}T${hh}:${mm}:${ss}.${ms}Z`;
+}
+
+async function summarizeBackups() {
+  const backups = await listBackups();
+  const latestId = backups[0] || null;
+  const latestAtISO = backupIdToISO(latestId);
+  return {
+    latestAtISO,
+    countLast14: Math.min(backups.length, 14),
+  };
+}
+
+function countErrors(windowMs = ERROR_WINDOW_LONG_MS) {
+  const nowMs = Date.now();
+  const cutoff = nowMs - windowMs;
+  let total = 0;
+  for (const entry of errorCounters.values()) {
+    const timestamps = pruneWindow(entry.timestamps || [], cutoff);
+    entry.timestamps = timestamps;
+    total += timestamps.length;
+  }
+  return total;
+}
+
 async function serveFile(res, filePath, { replaceDevFlag } = {}) {
   try {
     const raw = await fs.readFile(filePath, "utf8");
@@ -2196,6 +2328,7 @@ async function serveFile(res, filePath, { replaceDevFlag } = {}) {
 }
 
 const server = http.createServer(async (req, res) => {
+  return runWithQueryTracker(async () => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
   const routeKey = `${req.method} ${pathname}`;
@@ -2220,6 +2353,7 @@ const server = http.createServer(async (req, res) => {
   res.on("finish", () => {
     const durationMs = Number(process.hrtime.bigint() - started) / 1e6;
     recordLatency(routeKey, durationMs);
+    recordRequestCounter(routeKey, res.statusCode);
     if (res.statusCode >= 400) {
       const code =
         res.errorCode ||
@@ -2235,6 +2369,8 @@ const server = http.createServer(async (req, res) => {
       status: res.statusCode,
       ms: Math.round(durationMs),
       errorCode: res.errorCode || undefined,
+      dbQueries: res.livenewDbStats?.count ?? undefined,
+      dbMs: res.livenewDbStats?.totalMs ?? undefined,
     };
     logInfo(logEntry);
   });
@@ -2659,6 +2795,7 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 403, "forbidden", "Admin access required");
         return null;
       }
+      res.livenewIsAdmin = true;
       return email;
     };
     const auditAdmin = async (action, target = null, props = {}) => {
@@ -2695,6 +2832,7 @@ const server = http.createServer(async (req, res) => {
       let currentVersion = version;
       const atISO = event.atISO || new Date().toISOString();
       const eventWithAt = { ...event, atISO };
+      const contentPrefs = await loadContentPrefs(userId);
 
       while (attempts < 2) {
         const prevStats = currentState.selectionStats;
@@ -2748,6 +2886,7 @@ const server = http.createServer(async (req, res) => {
           packOverride,
           experimentMeta,
           ruleConfig,
+          preferences: contentPrefs,
         };
         let resEvent = dispatch(currentState, eventWithAt, ctxBase);
         let nextState = resEvent.state;
@@ -2832,7 +2971,10 @@ const server = http.createServer(async (req, res) => {
           const analyticsUpdates = {};
           if (eventWithAt.type === "CHECKIN_SAVED") analyticsUpdates.checkins_count = 1;
           if (eventWithAt.type === "BAD_DAY_MODE") analyticsUpdates.bad_day_mode_count = 1;
-          if (eventWithAt.type === "FEEDBACK_SUBMITTED" && eventWithAt.payload?.reason === "not_relevant") {
+          if (
+            eventWithAt.type === "FEEDBACK_SUBMITTED" &&
+            (eventWithAt.payload?.reasonCode === "not_relevant" || eventWithAt.payload?.reason === "not_relevant")
+          ) {
             analyticsUpdates.feedback_not_relevant_count = 1;
           }
           if (eventWithAt.type === "TOGGLE_PART_COMPLETION") {
@@ -3010,9 +3152,13 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, profileValidation.error.code, profileValidation.error.message, profileValidation.error.field);
         return;
       }
-      const acceptTerms = body?.acceptTerms === true;
-      const acceptPrivacy = body?.acceptPrivacy === true;
-      const acceptAlpha = body?.acceptAlphaProcessing === true;
+      const consent = body?.consent || {};
+      const acceptTerms = consent.terms === true || body?.acceptTerms === true;
+      const acceptPrivacy = consent.privacy === true || body?.acceptPrivacy === true;
+      const acceptAlpha =
+        consent.alphaProcessing === true ||
+        consent.alpha_processing === true ||
+        body?.acceptAlphaProcessing === true;
       if (!acceptTerms || !acceptPrivacy || !acceptAlpha) {
         sendError(
           res,
@@ -3059,7 +3205,11 @@ const server = http.createServer(async (req, res) => {
       }
       await upsertUserConsents(userId, REQUIRED_CONSENTS);
 
-      const userProfile = normalizeUserProfile(profileValidation.value.userProfile);
+      const packId = typeof body?.packId === "string" ? body.packId.trim() : null;
+      const userProfile = normalizeUserProfile({
+        ...profileValidation.value.userProfile,
+        contentPack: packId || profileValidation.value.userProfile?.contentPack,
+      });
       const checkIn = applyDataMinimizationToCheckIn(checkinValidation.value.checkIn, userProfile);
       const currentCohort = await getUserCohort(userId);
       if (!currentCohort || !currentCohort.overriddenByAdmin) {
@@ -3071,8 +3221,28 @@ const server = http.createServer(async (req, res) => {
       const onboardDateISO = checkIn?.dateISO || getTodayISOForProfile(userProfile);
       await setDailyFlag(onboardDateISO, userId, AnalyticsFlags.onboardCompleted);
       await trackEvent(userId, AnalyticsFlags.onboardCompleted, { dateISO: onboardDateISO }, new Date().toISOString(), onboardDateISO);
-      const day = checkIn?.dateISO ? toDayContract(state, checkIn.dateISO, domain) : null;
-      const payload = { ok: true, weekPlan: state.weekPlan, day };
+      const dateISO = checkIn?.dateISO || getTodayISOForProfile(userProfile);
+      state = await ensureWeekForDate(state, dateISO, dispatchForUser);
+      const ensured = await ensureValidDayContract(userId, state, dateISO, "onboard_day_invariant", requestId);
+      state = ensured.state;
+      const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
+      const prefs = await loadContentPrefs(userId);
+      const railReset = pickRailReset({ dayPlan, checkIn, library: domain.defaultLibrary, preferences: prefs });
+      const rail = {
+        checkIn: {
+          requiredFields: ["stress", "sleepQuality", "energy", "timeAvailableMin"],
+          estimatedSeconds: 10,
+        },
+        reset: railReset
+          ? {
+              id: railReset.id || null,
+              title: railReset.title || null,
+              minutes: railReset.minutes ?? null,
+              steps: Array.isArray(railReset.steps) ? railReset.steps : [],
+            }
+          : null,
+      };
+      const payload = { ok: true, weekPlan: state.weekPlan, week: state.weekPlan, day: ensured.day, rail };
       if (issueTokens) {
         const deviceName = getDeviceName(req);
         const refresh = await issueRefreshToken({ userId, deviceName });
@@ -3114,7 +3284,7 @@ const server = http.createServer(async (req, res) => {
       const validWeek = await ensureValidWeekPlan(userId, state, "plan_week_invariant", requestId);
       state = validWeek.state;
       const payload = { ok: true, weekPlan: validWeek.weekPlan };
-      setCachedResponse(userId, pathname, url.search, payload);
+      setCachedResponse(userId, pathname, url.search, payload, CACHE_TTLS.planWeek);
       send(200, payload);
       return;
     }
@@ -3145,6 +3315,11 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/rail/today" && req.method === "GET") {
+      const cached = getCachedResponse(userId, pathname, url.search);
+      if (cached) {
+        send(200, cached);
+        return;
+      }
       const dateISO = getTodayISOForProfile(state.userProfile);
       await maybeStartReEntry(dateISO);
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
@@ -3152,7 +3327,8 @@ const server = http.createServer(async (req, res) => {
       state = ensured.state;
       const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
       const checkIn = latestCheckInForDate(state.checkIns, dateISO);
-      const railReset = pickRailReset({ dayPlan, checkIn, library: domain.defaultLibrary });
+      const prefs = await loadContentPrefs(userId);
+      const railReset = pickRailReset({ dayPlan, checkIn, library: domain.defaultLibrary, preferences: prefs });
       const rail = {
         checkIn: {
           requiredFields: ["stress", "sleepQuality", "energy", "timeAvailableMin"],
@@ -3167,7 +3343,9 @@ const server = http.createServer(async (req, res) => {
             }
           : null,
       };
-      send(200, { ok: true, rail, day: ensured.day });
+      const payload = { ok: true, rail, day: ensured.day };
+      setCachedResponse(userId, pathname, url.search, payload, CACHE_TTLS.railToday);
+      send(200, payload);
       return;
     }
 
@@ -3191,7 +3369,7 @@ const server = http.createServer(async (req, res) => {
       const ensured = await ensureValidDayContract(userId, state, dateISO, "plan_day_invariant", requestId);
       state = ensured.state;
       const payload = { ok: true, day: ensured.day };
-      setCachedResponse(userId, pathname, url.search, payload);
+      setCachedResponse(userId, pathname, url.search, payload, CACHE_TTLS.planDay);
       send(200, payload);
       return;
     }
@@ -3392,13 +3570,77 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
         return;
       }
-      const { dateISO, helped, reason } = validation.value;
-      const { result } = await dispatchForUser({ type: "FEEDBACK_SUBMITTED", payload: { dateISO, helped, reason } });
+      const { dateISO, helped, reasonCode, itemId, kind } = validation.value;
+      const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
+      let resolvedKind = kind || null;
+      let resolvedItemId = itemId || null;
+      if (!resolvedKind && resolvedItemId && dayPlan) {
+        if (dayPlan.workout?.id === resolvedItemId) resolvedKind = "workout";
+        if (dayPlan.reset?.id === resolvedItemId) resolvedKind = "reset";
+        if (dayPlan.nutrition?.id === resolvedItemId) resolvedKind = "nutrition";
+      }
+      if (!resolvedItemId && resolvedKind && dayPlan) {
+        if (resolvedKind === "workout") resolvedItemId = dayPlan.workout?.id || null;
+        if (resolvedKind === "reset") resolvedItemId = dayPlan.reset?.id || null;
+        if (resolvedKind === "nutrition") resolvedItemId = dayPlan.nutrition?.id || null;
+      }
+      const { result } = await dispatchForUser({
+        type: "FEEDBACK_SUBMITTED",
+        payload: { dateISO, helped, reasonCode, itemId: resolvedItemId, kind: resolvedKind },
+      });
+      if (reasonCode && resolvedItemId && resolvedKind) {
+        await insertContentFeedback({
+          userId,
+          itemId: resolvedItemId,
+          kind: resolvedKind,
+          reasonCode,
+          dateISO,
+        });
+      }
       send(200, {
         ok: true,
         notes: result?.notes || [],
         modifiers: state.modifiers || {},
       });
+      return;
+    }
+
+    if (pathname === "/v1/content/prefs" && req.method === "GET") {
+      const prefs = await listUserContentPrefs(userId);
+      send(200, { ok: true, prefs });
+      return;
+    }
+
+    if (pathname === "/v1/content/prefs" && req.method === "POST") {
+      const body = await parseJson(req);
+      const itemId = body?.itemId;
+      const pref = body?.pref;
+      if (!itemId || typeof itemId !== "string") {
+        sendError(res, 400, "itemId_required", "itemId is required", "itemId");
+        return;
+      }
+      if (pref !== "favorite" && pref !== "avoid") {
+        sendError(res, 400, "pref_invalid", "pref must be favorite or avoid", "pref");
+        return;
+      }
+      const updated = await upsertUserContentPref(userId, itemId, pref);
+      invalidateContentPrefs(userId);
+      invalidateUserCache(userId);
+      send(200, { ok: true, pref: updated });
+      return;
+    }
+
+    const prefsDeleteMatch = pathname.match(/^\\/v1\\/content\\/prefs\\/([^/]+)$/);
+    if (prefsDeleteMatch && req.method === "DELETE") {
+      const itemId = prefsDeleteMatch[1];
+      if (!itemId) {
+        sendError(res, 400, "itemId_required", "itemId is required", "itemId");
+        return;
+      }
+      const removed = await deleteUserContentPref(userId, itemId);
+      invalidateContentPrefs(userId);
+      invalidateUserCache(userId);
+      send(200, { ok: true, removed });
       return;
     }
 
@@ -3524,7 +3766,33 @@ const server = http.createServer(async (req, res) => {
       }
       const trends = buildTrends(state, daysNum, requestTodayISO);
       const payload = { ok: true, days: trends };
-      setCachedResponse(userId, pathname, url.search, payload);
+      setCachedResponse(userId, pathname, url.search, payload, CACHE_TTLS.trends);
+      send(200, payload);
+      return;
+    }
+
+    if (pathname === "/v1/outcomes" && req.method === "GET") {
+      const cached = getCachedResponse(userId, pathname, url.search);
+      if (cached) {
+        send(200, cached);
+        return;
+      }
+      const daysParam = url.searchParams.get("days") || "7";
+      const daysNum = Number(daysParam);
+      const allowed = [7, 14, 30];
+      if (!allowed.includes(daysNum)) {
+        sendError(res, 400, "days_invalid", "days must be 7, 14, or 30", "days");
+        return;
+      }
+      const toISO = requestTodayISO;
+      const fromISO = domain.addDaysISO(toISO, -(daysNum - 1));
+      const historyList = await listLatestDayPlanHistoryByRange(userId, fromISO, toISO);
+      const historyByDate = new Map();
+      historyList.forEach((entry) => historyByDate.set(entry.dateISO, entry.day));
+      const reminderIntents = await listReminderIntentsByRange(userId, fromISO, toISO);
+      const outcomes = buildOutcomes({ state, days: daysNum, todayISO: requestTodayISO, reminderIntents, historyByDate });
+      const payload = { ok: true, ...outcomes };
+      setCachedResponse(userId, pathname, url.search, payload, CACHE_TTLS.outcomes);
       send(200, payload);
       return;
     }
@@ -3753,6 +4021,162 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    if (pathname === "/v1/admin/ops/status" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const validator = await getLatestValidatorRun("engine_matrix");
+      const loadtestRun = await getLatestOpsRun("loadtest");
+      const loadtestEval = loadtestRun ? evaluateLoadtestReport(loadtestRun.report, { maxP95MsByRoute: config.maxP95MsByRoute, maxErrorRate: config.maxErrorRate }) : null;
+      const backups = await summarizeBackups();
+      const runningExperiments = await listExperiments("running");
+      const packs = await listContentPacks();
+      const parameters = await listParameters();
+      send(200, {
+        ok: true,
+        validator: {
+          latestOk: validator ? validator.ok : false,
+          latestRunId: validator?.id || null,
+          latestAtISO: validator?.atISO || null,
+          failuresCount: validator?.report?.totals?.failed || 0,
+        },
+        loadtest: {
+          latestOk: loadtestRun ? loadtestRun.ok && (loadtestEval?.ok ?? true) : false,
+          latestAtISO: loadtestRun?.atISO || null,
+          p95ByRoute: loadtestEval?.p95ByRoute || {},
+          errorRate: loadtestEval?.errorRate ?? null,
+        },
+        backups: {
+          latestAtISO: backups.latestAtISO,
+          countLast14: backups.countLast14,
+        },
+        experiments: { runningCount: runningExperiments.length },
+        packs: { updatedAt: latestUpdatedAt(packs) },
+        parameters: { updatedAt: latestUpdatedAt(parameters) },
+      });
+      return;
+    }
+
+    if (pathname === "/v1/admin/ops/loadtest/run" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const protoHeader = req.headers["x-forwarded-proto"];
+      const proto = Array.isArray(protoHeader) ? protoHeader[0] : protoHeader;
+      const scheme = proto ? String(proto).split(",")[0].trim() : "http";
+      const baseUrl = `${scheme}://${req.headers.host}`;
+      const authTokenHeader = req.headers.authorization;
+      const authToken = Array.isArray(authTokenHeader) ? authTokenHeader[0] : authTokenHeader;
+      const report = await runLoadtestScript({ baseUrl, authToken: authToken || null });
+      const evaluation = report?.metrics ? evaluateLoadtestReport(report, { maxP95MsByRoute: config.maxP95MsByRoute, maxErrorRate: config.maxErrorRate }) : { ok: false, p95ByRoute: {}, errorRate: null };
+      const ok = report?.ok === true && evaluation.ok;
+      const stored = await insertOpsRun({
+        kind: "loadtest",
+        ok,
+        report: { ...(report || {}), evaluation },
+      });
+      await auditAdmin("ops.loadtest.run", stored.id, { ok });
+      send(200, { ok: true, runId: stored.id, report: stored.report });
+      return;
+    }
+
+    if (pathname === "/v1/admin/ops/loadtest/latest" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const run = await getLatestOpsRun("loadtest");
+      const evaluation = run ? evaluateLoadtestReport(run.report, { maxP95MsByRoute: config.maxP95MsByRoute, maxErrorRate: config.maxErrorRate }) : null;
+      send(200, { ok: true, latest: run, evaluation });
+      return;
+    }
+
+    if (pathname === "/v1/admin/release/checklist" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const applied = await listAppliedMigrations();
+      const migrationFiles = (await fs.readdir(path.join(process.cwd(), "src", "db", "migrations"))).filter(
+        (name) => name.endsWith(".sql") && !name.endsWith(".down.sql")
+      );
+      const expectedIds = migrationFiles
+        .map((name) => name.replace(/\\.sql$/, ""))
+        .sort();
+      const expectedCount = expectedIds.length;
+      const latestExpected = expectedIds[expectedIds.length - 1] || null;
+      const latestApplied = applied[applied.length - 1]?.id || null;
+      const migrationsApplied = applied.length >= expectedCount && latestApplied === latestExpected;
+
+      const validator = await getLatestValidatorRun("engine_matrix");
+      const loadtestRun = await getLatestOpsRun("loadtest");
+      const loadtestEval = loadtestRun
+        ? evaluateLoadtestReport(loadtestRun.report, { maxP95MsByRoute: config.maxP95MsByRoute, maxErrorRate: config.maxErrorRate })
+        : { ok: false, p95ByRoute: {}, errorRate: null };
+
+      const errorCount = countErrors(ERROR_WINDOW_LONG_MS);
+      const requestSnapshot = snapshotRequestCounts(ERROR_WINDOW_LONG_MS);
+      const errorRate = requestSnapshot.total > 0 ? errorCount / requestSnapshot.total : 0;
+      const errorRateOk = errorRate <= config.maxErrorRate;
+
+      const backups = await summarizeBackups();
+      const backupWindowMs = Math.max(1, Number(config.backupWindowHours) || 24) * 60 * 60 * 1000;
+      const latestBackupMs = backups.latestAtISO ? new Date(backups.latestAtISO).getTime() : 0;
+      const backupsOk = Boolean(backups.countLast14) && latestBackupMs && Date.now() - latestBackupMs <= backupWindowMs && backups.countLast14 <= 14;
+
+      const flags = await getFeatureFlags();
+      const incidentMode = resolveIncidentMode(flags);
+      const guards = resolveEngineGuards(flags, incidentMode);
+      const flagsOk =
+        !incidentMode &&
+        guards.regenEnabled &&
+        guards.signalsEnabled &&
+        guards.checkinsEnabled &&
+        guards.reentryEnabled &&
+        guards.communityEnabled;
+
+      const consentFlowOk = ["terms", "privacy", "alpha_processing"].every((key) => REQUIRED_CONSENTS.includes(key));
+
+      const checklist = buildReleaseChecklist({
+        migrationsApplied: {
+          pass: migrationsApplied,
+          details: {
+            appliedCount: applied.length,
+            expectedCount,
+            schemaVersion: latestApplied,
+            expectedVersion: latestExpected,
+          },
+        },
+        validatorOk: {
+          pass: validator ? validator.ok : false,
+          details: { latestRunId: validator?.id || null, latestAtISO: validator?.atISO || null },
+        },
+        loadtestOk: {
+          pass: loadtestRun ? loadtestRun.ok && loadtestEval.ok : false,
+          details: { latestAtISO: loadtestRun?.atISO || null, p95ByRoute: loadtestEval.p95ByRoute, errorRate: loadtestEval.errorRate },
+        },
+        errorRateOk: {
+          pass: errorRateOk,
+          details: { errorRate, windowMinutes: requestSnapshot.windowMinutes, totalRequests: requestSnapshot.total },
+        },
+        backupsOk: {
+          pass: backupsOk,
+          details: { latestAtISO: backups.latestAtISO, countLast14: backups.countLast14 },
+        },
+        flagsOk: {
+          pass: flagsOk,
+          details: {
+            incidentMode,
+            regenEnabled: guards.regenEnabled,
+            signalsEnabled: guards.signalsEnabled,
+            checkinsEnabled: guards.checkinsEnabled,
+            reentryEnabled: guards.reentryEnabled,
+            communityEnabled: guards.communityEnabled,
+          },
+        },
+        consentFlowOk: {
+          pass: consentFlowOk,
+          details: { required: REQUIRED_CONSENTS },
+        },
+      });
+      send(200, { ok: true, pass: checklist.pass, checks: checklist.checks });
+      return;
+    }
+
     if (pathname === "/v1/admin/monitoring/errors" && req.method === "GET") {
       const email = await requireAdmin();
       if (!email) return;
@@ -3903,6 +4327,7 @@ const server = http.createServer(async (req, res) => {
       const updated = await upsertParameter(key, value);
       resetParametersCache();
       await auditAdmin("parameters.patch", key, { key });
+      await insertOpsLog({ adminUserId: userId, action: "params_updated", target: key, props: { key } });
       send(200, { ok: true, key, version: updated.version, updatedAt: updated.updatedAt });
       return;
     }
@@ -3943,6 +4368,7 @@ const server = http.createServer(async (req, res) => {
       const updated = await upsertContentPack({ id: packId, name, weights, constraints });
       resetParametersCache();
       await auditAdmin("packs.patch", packId, { packId });
+      await insertOpsLog({ adminUserId: userId, action: "pack_updated", target: packId, props: { packId } });
       send(200, { ok: true, pack: updated });
       return;
     }
@@ -4114,6 +4540,7 @@ const server = http.createServer(async (req, res) => {
       await validateExperimentConfig(existing.config);
       const experiment = await setExperimentStatus(experimentId, "running");
       await auditAdmin("experiments.start", experimentId, {});
+      await insertOpsLog({ adminUserId: userId, action: "experiment_started", target: experimentId, props: {} });
       send(200, { ok: true, experiment });
       return;
     }
@@ -4130,6 +4557,7 @@ const server = http.createServer(async (req, res) => {
       }
       const experiment = await setExperimentStatus(experimentId, "stopped");
       await auditAdmin("experiments.stop", experimentId, {});
+      await insertOpsLog({ adminUserId: userId, action: "experiment_stopped", target: experimentId, props: {} });
       send(200, { ok: true, experiment });
       return;
     }
@@ -5444,6 +5872,7 @@ const server = http.createServer(async (req, res) => {
     }
     sendError(res, err, undefined, undefined, undefined, res?.livenewRequestId);
   }
+  });
 });
 
 server.listen(PORT, () => {

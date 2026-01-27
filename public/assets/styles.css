@@ -225,6 +225,13 @@ textarea:focus-visible {
   background: #fff;
 }
 
+.prefs-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .table {
   width: 100%;
   border-collapse: collapse;

@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { DatabaseSync } from "node:sqlite";
 import { runMigrations } from "../db/migrate.js";
 import {
@@ -14,6 +15,61 @@ import {
 const DB_PATH = process.env.DB_PATH || "data/livenew.sqlite";
 let db = null;
 const columnCache = new Map();
+const queryTracker = new AsyncLocalStorage();
+
+function recordQueryDuration(startMs) {
+  const store = queryTracker.getStore();
+  if (!store) return;
+  store.count += 1;
+  store.totalMs += Math.max(0, Date.now() - startMs);
+}
+
+function wrapStatement(stmt) {
+  const methods = ["run", "get", "all", "iterate"];
+  methods.forEach((method) => {
+    if (typeof stmt[method] !== "function") return;
+    const original = stmt[method].bind(stmt);
+    stmt[method] = (...args) => {
+      const store = queryTracker.getStore();
+      if (!store) return original(...args);
+      const start = Date.now();
+      try {
+        return original(...args);
+      } finally {
+        recordQueryDuration(start);
+      }
+    };
+  });
+  return stmt;
+}
+
+function instrumentDb(instance) {
+  if (instance.__livenewInstrumented) return;
+  const originalPrepare = instance.prepare.bind(instance);
+  instance.prepare = (sql) => wrapStatement(originalPrepare(sql));
+  const originalExec = instance.exec.bind(instance);
+  instance.exec = (sql) => {
+    const store = queryTracker.getStore();
+    if (!store) return originalExec(sql);
+    const start = Date.now();
+    try {
+      return originalExec(sql);
+    } finally {
+      recordQueryDuration(start);
+    }
+  };
+  instance.__livenewInstrumented = true;
+}
+
+export function runWithQueryTracker(fn) {
+  return queryTracker.run({ count: 0, totalMs: 0 }, fn);
+}
+
+export function getQueryStats() {
+  const store = queryTracker.getStore();
+  if (!store) return null;
+  return { count: store.count, totalMs: store.totalMs };
+}
 
 async function ensureDir() {
   await fs.mkdir(path.dirname(DB_PATH), { recursive: true });
@@ -41,6 +97,7 @@ export async function initDb() {
   if (db) return db;
   await ensureDir();
   db = new DatabaseSync(DB_PATH);
+  instrumentDb(db);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA synchronous = NORMAL;");
   db.exec("PRAGMA foreign_keys = ON;");
@@ -370,6 +427,24 @@ export async function listReminderIntentsByDate(userId, dateISO) {
     .all(userId, dateISO);
   return rows.map((row) => ({
     id: row.id,
+    intentKey: row.intent_key,
+    scheduledForISO: row.scheduled_for_iso,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function listReminderIntentsByRange(userId, fromISO, toISO) {
+  if (!userId || !fromISO || !toISO) return [];
+  const rows = getDb()
+    .prepare(
+      "SELECT id, date_iso, intent_key, scheduled_for_iso, status, created_at, updated_at FROM reminder_intents WHERE user_id = ? AND date_iso BETWEEN ? AND ? ORDER BY date_iso ASC, scheduled_for_iso ASC"
+    )
+    .all(userId, fromISO, toISO);
+  return rows.map((row) => ({
+    id: row.id,
+    dateISO: row.date_iso,
     intentKey: row.intent_key,
     scheduledForISO: row.scheduled_for_iso,
     status: row.status,
@@ -893,6 +968,29 @@ export async function listDayPlanHistory(userId, dateISO, limit = 10) {
   }));
 }
 
+export async function listLatestDayPlanHistoryByRange(userId, fromISO, toISO) {
+  if (!userId || !fromISO || !toISO) return [];
+  const rows = getDb()
+    .prepare(
+      `SELECT h.date_iso, h.created_at, h.day_contract_json
+       FROM day_plan_history h
+       JOIN (
+         SELECT date_iso, MAX(created_at) as max_created
+         FROM day_plan_history
+         WHERE user_id = ? AND date_iso BETWEEN ? AND ?
+         GROUP BY date_iso
+       ) latest ON h.date_iso = latest.date_iso AND h.created_at = latest.max_created
+       WHERE h.user_id = ?
+       ORDER BY h.date_iso ASC`
+    )
+    .all(userId, fromISO, toISO, userId);
+  return rows.map((row) => ({
+    dateISO: row.date_iso,
+    createdAt: row.created_at,
+    day: JSON.parse(row.day_contract_json || "{}"),
+  }));
+}
+
 export async function getDayPlanHistoryById(id) {
   if (!id) return null;
   const row = getDb()
@@ -1364,6 +1462,48 @@ export async function getContentStats(userId) {
   return stats;
 }
 
+export async function listUserContentPrefs(userId) {
+  if (!userId) return [];
+  const rows = getDb()
+    .prepare("SELECT user_id, item_id, pref, created_at FROM user_content_prefs WHERE user_id = ? ORDER BY created_at DESC")
+    .all(userId);
+  return rows.map((row) => ({
+    userId: row.user_id,
+    itemId: row.item_id,
+    pref: row.pref,
+    createdAt: row.created_at,
+  }));
+}
+
+export async function upsertUserContentPref(userId, itemId, pref) {
+  if (!userId || !itemId || !pref) return null;
+  const createdAt = new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO user_content_prefs (user_id, item_id, pref, created_at) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, item_id) DO UPDATE SET pref=excluded.pref, created_at=excluded.created_at"
+    )
+    .run(userId, itemId, pref, createdAt);
+  return { userId, itemId, pref, createdAt };
+}
+
+export async function deleteUserContentPref(userId, itemId) {
+  if (!userId || !itemId) return false;
+  const res = getDb().prepare("DELETE FROM user_content_prefs WHERE user_id = ? AND item_id = ?").run(userId, itemId);
+  return res.changes > 0;
+}
+
+export async function insertContentFeedback({ userId, itemId, kind, reasonCode, dateISO, atISO = null }) {
+  if (!userId || !itemId || !kind || !reasonCode || !dateISO) return null;
+  const id = crypto.randomUUID();
+  const atIso = atISO || new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO content_feedback (id, user_id, item_id, kind, reason_code, at_iso, date_iso) VALUES (?, ?, ?, ?, ?, ?, ?)"
+    )
+    .run(id, userId, itemId, kind, reasonCode, atIso, dateISO);
+  return { id, userId, itemId, kind, reasonCode, atISO: atIso, dateISO };
+}
+
 export async function getWorstItems(kind, limit = 20) {
   const items = await listContentItems(kind, false, { statuses: ["enabled"] });
   const statsRows = getDb()
@@ -1762,6 +1902,38 @@ export async function insertAdminAudit({ adminUserId, action, target = null, pro
     .prepare("INSERT INTO admin_audit (id, at_iso, admin_user_id, action, target, props_json) VALUES (?, ?, ?, ?, ?, ?)")
     .run(id, atIso, adminUserId, action, target, JSON.stringify(props || {}));
   return { id, atISO: atIso };
+}
+
+export async function insertOpsLog({ adminUserId, action, target = null, props = {}, atISO = null }) {
+  const id = crypto.randomUUID();
+  const atIso = atISO || new Date().toISOString();
+  getDb()
+    .prepare("INSERT INTO ops_log (id, at_iso, admin_user_id, action, target, props_json) VALUES (?, ?, ?, ?, ?, ?)")
+    .run(id, atIso, adminUserId, action, target || "", JSON.stringify(props || {}));
+  return { id, atISO: atIso };
+}
+
+export async function insertOpsRun({ kind, ok, report, atISO = null, id = null }) {
+  const runId = id || crypto.randomUUID();
+  const atIso = atISO || new Date().toISOString();
+  getDb()
+    .prepare("INSERT INTO ops_runs (id, kind, at_iso, ok, report_json) VALUES (?, ?, ?, ?, ?)")
+    .run(runId, kind, atIso, ok ? 1 : 0, JSON.stringify(report || {}));
+  return { id: runId, kind, atISO: atIso, ok: Boolean(ok), report: report || {} };
+}
+
+export async function getLatestOpsRun(kind = "loadtest") {
+  const row = getDb()
+    .prepare("SELECT id, kind, at_iso, ok, report_json FROM ops_runs WHERE kind = ? ORDER BY at_iso DESC LIMIT 1")
+    .get(kind);
+  if (!row) return null;
+  return {
+    id: row.id,
+    kind: row.kind,
+    atISO: row.at_iso,
+    ok: row.ok === 1,
+    report: JSON.parse(row.report_json || "{}"),
+  };
 }
 
 export async function insertDebugBundle({ userId, expiresAt, redacted }) {

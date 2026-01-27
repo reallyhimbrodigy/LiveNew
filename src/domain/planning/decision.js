@@ -11,6 +11,111 @@ import { computeConfidence, computeRelevance } from "./quality.js";
 import { validateDayPlan } from "./validatePlan.js";
 import { constraintsContextForUser, filterByConstraints, itemAllowedByConstraints, timeOfDayBoost } from "./constraintsMemory.js";
 
+const FAVORITE_BOOST = 0.35;
+const DISLIKE_PENALTY = 0.35;
+const GROUP_PENALTY = 0.2;
+const TOO_HARD_PENALTY = 0.3;
+const TOO_EASY_PENALTY = 0.2;
+const WRONG_TIME_PENALTY = 0.2;
+
+function normalizeReasonCode(reason) {
+  if (!reason) return null;
+  if (reason === "wrong_time") return "wrong_time_of_day";
+  return reason;
+}
+
+function normalizePreferences(preferences) {
+  const favorites = preferences?.favorites instanceof Set ? preferences.favorites : new Set(preferences?.favorites || []);
+  const avoids = preferences?.avoids instanceof Set ? preferences.avoids : new Set(preferences?.avoids || []);
+  return { favorites, avoids };
+}
+
+function buildFeedbackContext(feedback, library) {
+  const entries = Array.isArray(feedback) ? feedback.slice(0, 60) : [];
+  const itemsById = new Map();
+  const workouts = library?.workouts || [];
+  const resets = library?.resets || [];
+  const nutrition = library?.nutrition || [];
+  workouts.forEach((item) => itemsById.set(item.id, { ...item, kind: "workout" }));
+  resets.forEach((item) => itemsById.set(item.id, { ...item, kind: "reset" }));
+  nutrition.forEach((item) => itemsById.set(item.id, { ...item, kind: "nutrition" }));
+
+  const dislikedItems = new Set();
+  const dislikedGroups = new Set();
+  const tooHardGroups = new Map();
+  let tooEasyActive = false;
+  let wrongTimeActive = false;
+
+  entries.forEach((entry) => {
+    const reason = normalizeReasonCode(entry?.reasonCode || entry?.reason);
+    if (!reason) return;
+    const itemId = entry?.itemId;
+    const item = itemId ? itemsById.get(itemId) : null;
+    if (reason === "too_easy") {
+      tooEasyActive = true;
+    } else if (reason === "wrong_time_of_day") {
+      wrongTimeActive = true;
+    }
+    if (!item) return;
+    if (reason === "boring" || reason === "not_my_style" || reason === "not_relevant") {
+      dislikedItems.add(item.id);
+      if (item.noveltyGroup) dislikedGroups.add(item.noveltyGroup);
+    } else if (reason === "too_hard") {
+      if (item.noveltyGroup && item.intensityCost != null) {
+        const current = tooHardGroups.get(item.noveltyGroup) || 0;
+        const next = Math.max(current, Number(item.intensityCost) || 0);
+        tooHardGroups.set(item.noveltyGroup, next);
+      }
+    }
+  });
+
+  return { dislikedItems, dislikedGroups, tooHardGroups, tooEasyActive, wrongTimeActive };
+}
+
+function preferenceScore(item, preferences) {
+  if (!preferences?.favorites?.size) return 0;
+  return preferences.favorites.has(item.id) ? FAVORITE_BOOST : 0;
+}
+
+function feedbackScore(item, feedbackCtx, checkIn, constraintsContext) {
+  if (!feedbackCtx) return 0;
+  let score = 0;
+  if (feedbackCtx.dislikedItems?.has(item.id)) score -= DISLIKE_PENALTY;
+  if (item.noveltyGroup && feedbackCtx.dislikedGroups?.has(item.noveltyGroup)) score -= GROUP_PENALTY;
+  if (item.noveltyGroup && feedbackCtx.tooHardGroups?.has(item.noveltyGroup)) {
+    const cap = feedbackCtx.tooHardGroups.get(item.noveltyGroup) || 0;
+    if (item.intensityCost != null && Number(item.intensityCost) >= cap - 1) score -= TOO_HARD_PENALTY;
+  }
+  if (feedbackCtx.tooEasyActive && Number(checkIn?.energy || 0) >= 7) {
+    if (item.intensityCost != null && Number(item.intensityCost) <= 3) score -= TOO_EASY_PENALTY;
+  }
+  if (feedbackCtx.wrongTimeActive) {
+    const pref = constraintsContext?.timeOfDayPreference;
+    if (pref && pref !== "any") {
+      const ideal = Array.isArray(item?.idealTimeOfDay) ? item.idealTimeOfDay : [];
+      if (ideal.length) {
+        score += ideal.includes(pref) ? WRONG_TIME_PENALTY : -WRONG_TIME_PENALTY;
+      }
+    }
+  }
+  return score;
+}
+
+function applyPreferenceFilter(items, preferences, options = {}) {
+  if (!Array.isArray(items) || !items.length) return [];
+  if (!preferences?.avoids?.size) return items;
+  const filtered = items.filter((item) => !preferences.avoids.has(item.id));
+  if (filtered.length) return filtered;
+  return options.allowFallback === false ? [] : items;
+}
+
+function selectionScore(item, baseScore, selectionContext, kind) {
+  if (!selectionContext) return baseScore;
+  const prefScore = preferenceScore(item, selectionContext.preferences);
+  const fbScore = feedbackScore(item, selectionContext.feedback, selectionContext.checkIn, selectionContext.constraintsContext);
+  return baseScore + prefScore + fbScore;
+}
+
 export function buildDayPlan({
   user,
   dateISO,
@@ -18,6 +123,7 @@ export function buildDayPlan({
   checkInsByDate,
   completionsByDate,
   feedback,
+  preferences,
   weekContext,
   overrides,
   qualityRules,
@@ -44,6 +150,14 @@ export function buildDayPlan({
   const packWeights = packResolved.weights;
   const packId = packResolved.packId;
   const constraintsCtx = constraintsContextForUser(user);
+  const preferencesCtx = normalizePreferences(preferences);
+  const feedbackCtx = buildFeedbackContext(feedback, libraryRef);
+  const selectionContext = {
+    preferences: preferencesCtx,
+    feedback: feedbackCtx,
+    checkIn,
+    constraintsContext: constraintsCtx,
+  };
 
   const recoveryDebt = rules.recoveryDebtEnabled ? computeRecoveryDebt(checkInsByDate, dateISO, paramMap) : 0;
   const stressState = assignStressProfile({
@@ -139,6 +253,7 @@ export function buildDayPlan({
     keepSelection: ov.keepSelection,
     library: libraryRef,
     constraintsContext: constraintsCtx,
+    selectionContext,
   });
   const rankedNutrition = rankNutrition({
     focus,
@@ -148,6 +263,7 @@ export function buildDayPlan({
     keepSelection: ov.keepSelection,
     library: libraryRef,
     constraintsContext: constraintsCtx,
+    selectionContext,
   });
   const rankedResets = rankResets({
     focus: resetFocus,
@@ -158,6 +274,7 @@ export function buildDayPlan({
     keepSelection: ov.keepSelection,
     library: libraryRef,
     constraintsContext: constraintsCtx,
+    selectionContext,
   });
 
   let workout =
@@ -171,6 +288,7 @@ export function buildDayPlan({
       packWeights,
       library: libraryRef,
       constraintsContext: constraintsCtx,
+      selectionContext,
     });
   let nutrition =
     rankedNutrition[0] ||
@@ -181,6 +299,7 @@ export function buildDayPlan({
       packWeights,
       library: libraryRef,
       constraintsContext: constraintsCtx,
+      selectionContext,
     });
   let reset =
     rankedResets[0] ||
@@ -192,6 +311,7 @@ export function buildDayPlan({
       packWeights,
       library: libraryRef,
       constraintsContext: constraintsCtx,
+      selectionContext,
     });
   const workoutWindow = pickWorkoutWindow(user);
 
@@ -246,6 +366,7 @@ export function buildDayPlan({
         packWeights,
         library: libraryRef,
         constraintsContext: constraintsCtx,
+        selectionContext,
       });
       appendAppliedRule(appliedRules, safety.level === "block" ? "safety_block" : "emergency_downshift", ruleCfg);
     }
@@ -264,7 +385,8 @@ export function buildDayPlan({
   if (ov.forceBadDayMode) {
     dayDraft.focus = "downshift";
     if (dayDraft.workout) {
-      dayDraft.workout = enforceWorkoutCap(dayDraft.workout, {
+      dayDraft.workout = enforceWorkoutCap({
+        current: dayDraft.workout,
         focus: "downshift",
         timeMin,
         checkIn,
@@ -273,10 +395,11 @@ export function buildDayPlan({
         packWeights,
         library: libraryRef,
         constraintsContext: constraintsCtx,
+        selectionContext,
       });
     }
-    dayDraft.reset = enforceBadDayReset(dayDraft.reset, packWeights, libraryRef, constraintsCtx);
-    dayDraft.nutrition = enforceBadDayNutrition(dayDraft.nutrition, packWeights, libraryRef, constraintsCtx);
+    dayDraft.reset = enforceBadDayReset(dayDraft.reset, packWeights, libraryRef, constraintsCtx, selectionContext);
+    dayDraft.nutrition = enforceBadDayNutrition(dayDraft.nutrition, packWeights, libraryRef, constraintsCtx, selectionContext);
   } else if (dayDraft.workout && dayDraft.workout.intensityCost > finalIntensityCap) {
     dayDraft.workout = pickWorkout({
       focus: dayDraft.focus,
@@ -287,6 +410,7 @@ export function buildDayPlan({
       packWeights,
       library: libraryRef,
       constraintsContext: constraintsCtx,
+      selectionContext,
     });
   }
 
@@ -299,6 +423,7 @@ export function buildDayPlan({
     packWeights,
     library: libraryRef,
     constraintsContext: constraintsCtx,
+    selectionContext,
   });
   dayDraft = gateResult.dayDraft;
   if (gateResult.qualityGate?.triggered) {
@@ -372,7 +497,18 @@ function applyConstraintsFilter(candidates, lib, constraintsContext) {
   return enabled;
 }
 
-function rankWorkouts({ focus, timeMin, checkIn, intensityCap, avoidGroups, packWeights, keepSelection, library, constraintsContext }) {
+function rankWorkouts({
+  focus,
+  timeMin,
+  checkIn,
+  intensityCap,
+  avoidGroups,
+  packWeights,
+  keepSelection,
+  library,
+  constraintsContext,
+  selectionContext,
+}) {
   const libraryRef = library || defaultLibrary;
   const index = getLibraryIndex(libraryRef);
   const lib = index.byKind.workout;
@@ -388,18 +524,35 @@ function rankWorkouts({ focus, timeMin, checkIn, intensityCap, avoidGroups, pack
   if (!candidates.length) candidates = lib.filter(baseFilter);
   candidates = applyNoveltyFilter(candidates, avoidGroups);
   candidates = applyConstraintsFilter(candidates, lib, constraintsContext);
-  if (!candidates.length) candidates = lib.filter((item) => item.enabled !== false);
-  const sorted = candidates.sort((a, b) => workoutSort(a, b, { focus, timeMin, packWeights, constraintsContext }));
+  candidates = applyPreferenceFilter(candidates, selectionContext?.preferences);
+  if (!candidates.length) candidates = applyPreferenceFilter(lib.filter((item) => item.enabled !== false), selectionContext?.preferences);
+  const sorted = candidates.sort((a, b) =>
+    workoutSort(a, b, { focus, timeMin, packWeights, constraintsContext, selectionContext })
+  );
   const keepId = keepSelection?.workoutId;
   if (!keepId) return sorted;
   const keepItem = lib.find((item) => item.id === keepId);
-  if (!keepItem || !baseFilter(keepItem) || !itemAllowedByConstraints(keepItem, constraintsContext, { relaxEquipment: true })) {
+  if (
+    !keepItem ||
+    !baseFilter(keepItem) ||
+    !itemAllowedByConstraints(keepItem, constraintsContext, { relaxEquipment: true }) ||
+    selectionContext?.preferences?.avoids?.has(keepItem.id)
+  ) {
     return sorted;
   }
   return injectKeepSelection(sorted, keepItem);
 }
 
-function rankNutrition({ focus, avoidGroups, forceBadDayMode, packWeights, keepSelection, library, constraintsContext }) {
+function rankNutrition({
+  focus,
+  avoidGroups,
+  forceBadDayMode,
+  packWeights,
+  keepSelection,
+  library,
+  constraintsContext,
+  selectionContext,
+}) {
   const libraryRef = library || defaultLibrary;
   const index = getLibraryIndex(libraryRef);
   const lib = index.byKind.nutrition;
@@ -412,19 +565,39 @@ function rankNutrition({ focus, avoidGroups, forceBadDayMode, packWeights, keepS
   }
 
   candidates = applyConstraintsFilter(candidates, lib, constraintsContext);
-  if (!candidates.length) candidates = lib.filter((item) => item.enabled !== false);
+  candidates = applyPreferenceFilter(candidates, selectionContext?.preferences);
+  if (!candidates.length) candidates = applyPreferenceFilter(lib.filter((item) => item.enabled !== false), selectionContext?.preferences);
   candidates = applyNoveltyFilter(candidates, avoidGroups);
   candidates = applyConstraintsFilter(candidates, lib, constraintsContext);
-  if (!candidates.length) candidates = lib.filter((item) => item.enabled !== false);
-  const sorted = candidates.sort((a, b) => commonSort(a, b, packWeights?.nutritionTagWeights, constraintsContext));
+  candidates = applyPreferenceFilter(candidates, selectionContext?.preferences);
+  if (!candidates.length) candidates = applyPreferenceFilter(lib.filter((item) => item.enabled !== false), selectionContext?.preferences);
+  const sorted = candidates.sort((a, b) =>
+    commonSort(a, b, packWeights?.nutritionTagWeights, constraintsContext, selectionContext)
+  );
   const keepId = keepSelection?.nutritionId;
   if (!keepId) return sorted;
   const keepItem = lib.find((item) => item.id === keepId && item.enabled !== false);
-  if (!keepItem || !itemAllowedByConstraints(keepItem, constraintsContext, { relaxEquipment: true })) return sorted;
+  if (
+    !keepItem ||
+    !itemAllowedByConstraints(keepItem, constraintsContext, { relaxEquipment: true }) ||
+    selectionContext?.preferences?.avoids?.has(keepItem.id)
+  ) {
+    return sorted;
+  }
   return injectKeepSelection(sorted, keepItem);
 }
 
-function rankResets({ focus, timeMin, avoidGroups, forceBadDayMode, packWeights, keepSelection, library, constraintsContext }) {
+function rankResets({
+  focus,
+  timeMin,
+  avoidGroups,
+  forceBadDayMode,
+  packWeights,
+  keepSelection,
+  library,
+  constraintsContext,
+  selectionContext,
+}) {
   const libraryRef = library || defaultLibrary;
   const index = getLibraryIndex(libraryRef);
   const lib = index.byKind.reset;
@@ -436,18 +609,36 @@ function rankResets({ focus, timeMin, avoidGroups, forceBadDayMode, packWeights,
   if (!candidates.length) candidates = lib.filter(baseFilter);
   candidates = applyNoveltyFilter(candidates, avoidGroups);
   candidates = applyConstraintsFilter(candidates, lib, constraintsContext);
-  if (!candidates.length) candidates = lib.filter(baseFilter);
-  const sorted = candidates.sort((a, b) => commonSort(a, b, packWeights?.resetTagWeights, constraintsContext));
+  candidates = applyPreferenceFilter(candidates, selectionContext?.preferences);
+  if (!candidates.length) candidates = applyPreferenceFilter(lib.filter(baseFilter), selectionContext?.preferences);
+  const sorted = candidates.sort((a, b) =>
+    commonSort(a, b, packWeights?.resetTagWeights, constraintsContext, selectionContext)
+  );
   const keepId = keepSelection?.resetId;
   if (!keepId) return sorted;
   const keepItem = lib.find((item) => item.id === keepId);
-  if (!keepItem || !baseFilter(keepItem) || !itemAllowedByConstraints(keepItem, constraintsContext, { relaxEquipment: true })) {
+  if (
+    !keepItem ||
+    !baseFilter(keepItem) ||
+    !itemAllowedByConstraints(keepItem, constraintsContext, { relaxEquipment: true }) ||
+    selectionContext?.preferences?.avoids?.has(keepItem.id)
+  ) {
     return sorted;
   }
   return injectKeepSelection(sorted, keepItem);
 }
 
-function pickWorkout({ focus, timeMin, checkIn, intensityCap, avoidGroups, packWeights, library, constraintsContext }) {
+function pickWorkout({
+  focus,
+  timeMin,
+  checkIn,
+  intensityCap,
+  avoidGroups,
+  packWeights,
+  library,
+  constraintsContext,
+  selectionContext,
+}) {
   const libraryRef = library || defaultLibrary;
   const ranked = rankWorkouts({
     focus,
@@ -458,17 +649,43 @@ function pickWorkout({ focus, timeMin, checkIn, intensityCap, avoidGroups, packW
     packWeights,
     library: libraryRef,
     constraintsContext,
+    selectionContext,
   });
   return ranked[0] || libraryRef.workouts?.[0] || (library ? null : defaultLibrary.workouts[0]);
 }
 
-function pickNutrition({ focus, avoidGroups, forceBadDayMode, packWeights, library, constraintsContext }) {
+function pickNutrition({
+  focus,
+  avoidGroups,
+  forceBadDayMode,
+  packWeights,
+  library,
+  constraintsContext,
+  selectionContext,
+}) {
   const libraryRef = library || defaultLibrary;
-  const ranked = rankNutrition({ focus, avoidGroups, forceBadDayMode, packWeights, library: libraryRef, constraintsContext });
+  const ranked = rankNutrition({
+    focus,
+    avoidGroups,
+    forceBadDayMode,
+    packWeights,
+    library: libraryRef,
+    constraintsContext,
+    selectionContext,
+  });
   return ranked[0] || libraryRef.nutrition?.[0] || (library ? null : defaultLibrary.nutrition[0]);
 }
 
-function pickReset({ focus, timeMin, avoidGroups, forceBadDayMode, packWeights, library, constraintsContext }) {
+function pickReset({
+  focus,
+  timeMin,
+  avoidGroups,
+  forceBadDayMode,
+  packWeights,
+  library,
+  constraintsContext,
+  selectionContext,
+}) {
   const libraryRef = library || defaultLibrary;
   const ranked = rankResets({
     focus,
@@ -478,6 +695,7 @@ function pickReset({ focus, timeMin, avoidGroups, forceBadDayMode, packWeights, 
     packWeights,
     library: libraryRef,
     constraintsContext,
+    selectionContext,
   });
   return ranked[0] || libraryRef.resets?.[0] || (library ? null : defaultLibrary.resets[0]);
 }
@@ -506,20 +724,31 @@ function isSafetyBlock(checkIn, safety) {
   return Boolean(checkIn?.panic || checkIn?.illness || checkIn?.fever);
 }
 
-function pickShortestReset(maxMinutes, packWeights, library, constraintsContext) {
+function pickShortestReset(maxMinutes, packWeights, library, constraintsContext, selectionContext) {
   const libraryRef = library || defaultLibrary;
   const cap = maxMinutes != null ? Math.max(1, maxMinutes) : 5;
   const enabled = (libraryRef.resets || defaultLibrary.resets).filter((item) => item.enabled !== false);
   const constrained = applyConstraintsFilter(enabled, enabled, constraintsContext);
-  const pool = (constrained.length ? constrained : enabled).filter((item) => item.minutes <= cap);
-  const eligible = pool.sort((a, b) => commonSort(a, b, packWeights?.resetTagWeights, constraintsContext));
+  const poolBase = (constrained.length ? constrained : enabled).filter((item) => item.minutes <= cap);
+  const pool = applyPreferenceFilter(poolBase, selectionContext?.preferences);
+  const eligible = pool.sort((a, b) => commonSort(a, b, packWeights?.resetTagWeights, constraintsContext, selectionContext));
   if (eligible.length) return eligible[0];
   return (constrained.length ? constrained : enabled)
     .slice()
     .sort((a, b) => (a.minutes || 0) - (b.minutes || 0))[0];
 }
 
-function applyQualityGate({ dayDraft, checkIn, timeMin, rankedWorkouts, safety, packWeights, library, constraintsContext }) {
+function applyQualityGate({
+  dayDraft,
+  checkIn,
+  timeMin,
+  rankedWorkouts,
+  safety,
+  packWeights,
+  library,
+  constraintsContext,
+  selectionContext,
+}) {
   const reasons = new Set();
   const timeAvailableMin = Number(checkIn?.timeAvailableMin ?? timeMin ?? 0) || null;
   const safetyBlock = isSafetyBlock(checkIn, safety);
@@ -553,15 +782,17 @@ function applyQualityGate({ dayDraft, checkIn, timeMin, rankedWorkouts, safety, 
   if (!validation.ok) {
     const emergencyCap = timeAvailableMin ?? timeMin ?? 10;
     let workout =
-      safetyBlock ? null : pickEmergencyWorkout(emergencyCap, packWeights, library, constraintsContext) || current.workout;
-    let reset = pickShortestReset(emergencyCap, packWeights, library, constraintsContext);
+      safetyBlock
+        ? null
+        : pickEmergencyWorkout(emergencyCap, packWeights, library, constraintsContext, selectionContext) || current.workout;
+    let reset = pickShortestReset(emergencyCap, packWeights, library, constraintsContext, selectionContext);
     if (emergencyCap != null) {
       const remaining = Math.max(0, emergencyCap - (reset?.minutes || 0));
       if (workout && workout.minutes > remaining) {
         workout = rankedWorkouts.find((item) => item.minutes <= remaining) || (safetyBlock ? null : workout);
       }
       if ((reset?.minutes || 0) > emergencyCap) {
-        reset = pickShortestReset(emergencyCap, packWeights, library, constraintsContext);
+        reset = pickShortestReset(emergencyCap, packWeights, library, constraintsContext, selectionContext);
       }
     }
     current = {
@@ -569,7 +800,7 @@ function applyQualityGate({ dayDraft, checkIn, timeMin, rankedWorkouts, safety, 
       focus: safetyBlock ? current.focus : "downshift",
       workout,
       reset,
-      nutrition: pickEmergencyNutrition(packWeights, library, constraintsContext),
+      nutrition: pickEmergencyNutrition(packWeights, library, constraintsContext, selectionContext),
       rationale: [...(current.rationale || []), "Quality gate: emergency downshift applied"],
     };
     fallbackUsed = true;
@@ -583,10 +814,12 @@ function applyQualityGate({ dayDraft, checkIn, timeMin, rankedWorkouts, safety, 
   return { dayDraft: current, qualityGate };
 }
 
-function workoutSort(a, b, { focus, timeMin, packWeights, constraintsContext }) {
-  const packScoreA = scorePack(a, packWeights?.workoutTagWeights) + timeOfDayBoost(a, constraintsContext);
-  const packScoreB = scorePack(b, packWeights?.workoutTagWeights) + timeOfDayBoost(b, constraintsContext);
-  if (packScoreA !== packScoreB) return packScoreB - packScoreA;
+function workoutSort(a, b, { focus, timeMin, packWeights, constraintsContext, selectionContext }) {
+  const baseA = scorePack(a, packWeights?.workoutTagWeights) + timeOfDayBoost(a, constraintsContext);
+  const baseB = scorePack(b, packWeights?.workoutTagWeights) + timeOfDayBoost(b, constraintsContext);
+  const scoreA = selectionScore(a, baseA, selectionContext, "workout");
+  const scoreB = selectionScore(b, baseB, selectionContext, "workout");
+  if (scoreA !== scoreB) return scoreB - scoreA;
   if (a.priority !== b.priority) return b.priority - a.priority;
   if (focus === "downshift") {
     if (a.intensityCost !== b.intensityCost) return a.intensityCost - b.intensityCost;
@@ -600,22 +833,24 @@ function workoutSort(a, b, { focus, timeMin, packWeights, constraintsContext }) 
   return a.id.localeCompare(b.id);
 }
 
-function commonSort(a, b, tagWeights, constraintsContext) {
-  const packScoreA = scorePack(a, tagWeights) + timeOfDayBoost(a, constraintsContext);
-  const packScoreB = scorePack(b, tagWeights) + timeOfDayBoost(b, constraintsContext);
-  if (packScoreA !== packScoreB) return packScoreB - packScoreA;
+function commonSort(a, b, tagWeights, constraintsContext, selectionContext) {
+  const baseA = scorePack(a, tagWeights) + timeOfDayBoost(a, constraintsContext);
+  const baseB = scorePack(b, tagWeights) + timeOfDayBoost(b, constraintsContext);
+  const scoreA = selectionScore(a, baseA, selectionContext, "common");
+  const scoreB = selectionScore(b, baseB, selectionContext, "common");
+  if (scoreA !== scoreB) return scoreB - scoreA;
   if (a.priority !== b.priority) return b.priority - a.priority;
   if (a.intensityCost !== b.intensityCost) return a.intensityCost - b.intensityCost;
   if (a.minutes !== b.minutes) return a.minutes - b.minutes;
   return a.id.localeCompare(b.id);
 }
 
-function enforceBadDayReset(current, packWeights, library, constraintsContext) {
+function enforceBadDayReset(current, packWeights, library, constraintsContext, selectionContext) {
   const libraryRef = library || defaultLibrary;
   const lib = libraryRef.resets || defaultLibrary.resets;
   const enabled = lib.filter((item) => item.enabled !== false);
   if (!current) {
-    return pickShortestReset(3, packWeights, libraryRef, constraintsContext) || enabled[0] || (library ? null : defaultLibrary.resets[0]);
+    return pickShortestReset(3, packWeights, libraryRef, constraintsContext, selectionContext) || enabled[0] || (library ? null : defaultLibrary.resets[0]);
   }
   const currentAllowed = itemAllowedByConstraints(current, constraintsContext, { relaxEquipment: true });
   if (currentAllowed && current.minutes <= 3 && current.tags.includes("downshift")) return current;
@@ -623,25 +858,23 @@ function enforceBadDayReset(current, packWeights, library, constraintsContext) {
     .filter((r) => r.minutes <= 3)
     .filter((r) => r.tags.includes("downshift"));
   const constrained = applyConstraintsFilter(candidates, enabled, constraintsContext);
-  const sorted = (constrained.length ? constrained : candidates).sort((a, b) =>
-    commonSort(a, b, packWeights?.resetTagWeights, constraintsContext)
-  );
+  const filtered = applyPreferenceFilter(constrained.length ? constrained : candidates, selectionContext?.preferences);
+  const sorted = filtered.sort((a, b) => commonSort(a, b, packWeights?.resetTagWeights, constraintsContext, selectionContext));
   return sorted[0] || (currentAllowed ? current : null);
 }
 
-function enforceBadDayNutrition(current, packWeights, library, constraintsContext) {
+function enforceBadDayNutrition(current, packWeights, library, constraintsContext, selectionContext) {
   const libraryRef = library || defaultLibrary;
   const lib = libraryRef.nutrition || defaultLibrary.nutrition;
   const enabled = lib.filter((item) => item.enabled !== false);
-  if (!current) return pickEmergencyNutrition(packWeights, libraryRef, constraintsContext) || enabled[0] || (library ? null : defaultLibrary.nutrition[0]);
+  if (!current) return pickEmergencyNutrition(packWeights, libraryRef, constraintsContext, selectionContext) || enabled[0] || (library ? null : defaultLibrary.nutrition[0]);
   const currentAllowed = itemAllowedByConstraints(current, constraintsContext, { relaxEquipment: true });
   let next = currentAllowed ? current : null;
   if (!next || !(next.tags.includes("sleep") || next.tags.includes("downshift"))) {
     const candidates = enabled.filter((n) => n.tags.includes("sleep") || n.tags.includes("downshift"));
     const constrained = applyConstraintsFilter(candidates, enabled, constraintsContext);
-    const sorted = (constrained.length ? constrained : candidates).sort((a, b) =>
-      commonSort(a, b, packWeights?.nutritionTagWeights, constraintsContext)
-    );
+    const filtered = applyPreferenceFilter(constrained.length ? constrained : candidates, selectionContext?.preferences);
+    const sorted = filtered.sort((a, b) => commonSort(a, b, packWeights?.nutritionTagWeights, constraintsContext, selectionContext));
     next = sorted[0] || next;
   }
   if (next && Array.isArray(next.priorities)) {
@@ -650,9 +883,20 @@ function enforceBadDayNutrition(current, packWeights, library, constraintsContex
   return next;
 }
 
-function enforceWorkoutCap(current, { focus, timeMin, checkIn, intensityCap, avoidGroups, packWeights, library, constraintsContext }) {
+function enforceWorkoutCap({
+  current,
+  focus,
+  timeMin,
+  checkIn,
+  intensityCap,
+  avoidGroups,
+  packWeights,
+  library,
+  constraintsContext,
+  selectionContext,
+}) {
   if (current.intensityCost <= intensityCap && current.minutes <= timeMin) return current;
-  return pickWorkout({ focus, timeMin, checkIn, intensityCap, avoidGroups, packWeights, library, constraintsContext });
+  return pickWorkout({ focus, timeMin, checkIn, intensityCap, avoidGroups, packWeights, library, constraintsContext, selectionContext });
 }
 
 export { focusFromProfile };
@@ -670,7 +914,7 @@ function scorePack(item, tagWeights) {
   return item.tags.reduce((sum, tag) => sum + (tagWeights[tag] || 0), 0);
 }
 
-function pickEmergencyWorkout(timeMin, packWeights, library, constraintsContext) {
+function pickEmergencyWorkout(timeMin, packWeights, library, constraintsContext, selectionContext) {
   const libraryRef = library || defaultLibrary;
   const lib = libraryRef.workouts || defaultLibrary.workouts;
   const cap = timeMin != null ? Math.max(5, timeMin) : 15;
@@ -679,20 +923,24 @@ function pickEmergencyWorkout(timeMin, packWeights, library, constraintsContext)
     .filter((w) => w.tags.includes("downshift") || w.tags.includes("gentle"))
     .filter((w) => w.minutes <= cap);
   const constrained = applyConstraintsFilter(candidates, lib, constraintsContext);
-  const pool = constrained.length ? constrained : candidates;
+  const basePool = constrained.length ? constrained : candidates;
+  const pool = applyPreferenceFilter(basePool, selectionContext?.preferences);
   if (!pool.length) return null;
-  return pool.sort((a, b) => workoutSort(a, b, { focus: "downshift", timeMin: cap, packWeights, constraintsContext }))[0];
+  return pool.sort((a, b) =>
+    workoutSort(a, b, { focus: "downshift", timeMin: cap, packWeights, constraintsContext, selectionContext })
+  )[0];
 }
 
-function pickEmergencyReset(packWeights, library, constraintsContext) {
+function pickEmergencyReset(packWeights, library, constraintsContext, selectionContext) {
   const libraryRef = library || defaultLibrary;
   const lib = libraryRef.resets || defaultLibrary.resets;
   const enabled = lib.filter((item) => item.enabled !== false);
   const candidates = enabled.filter((r) => r.tags.includes("downshift") || r.tags.includes("breathe"));
   const constrained = applyConstraintsFilter(candidates, enabled, constraintsContext);
-  const pool = constrained.length ? constrained : candidates;
+  const basePool = constrained.length ? constrained : candidates;
+  const pool = applyPreferenceFilter(basePool, selectionContext?.preferences);
   if (!pool.length) return enabled[0] || (library ? null : defaultLibrary.resets[0]);
-  return pool.sort((a, b) => commonSort(a, b, packWeights?.resetTagWeights, constraintsContext))[0];
+  return pool.sort((a, b) => commonSort(a, b, packWeights?.resetTagWeights, constraintsContext, selectionContext))[0];
 }
 
 function pickPanicReset(library, constraintsContext) {
@@ -705,25 +953,26 @@ function pickPanicReset(library, constraintsContext) {
   return pool[0];
 }
 
-function pickEmergencyNutrition(packWeights, library, constraintsContext) {
+function pickEmergencyNutrition(packWeights, library, constraintsContext, selectionContext) {
   const libraryRef = library || defaultLibrary;
   const lib = libraryRef.nutrition || defaultLibrary.nutrition;
   const enabled = lib.filter((item) => item.enabled !== false);
   const candidates = enabled.filter((n) => n.tags.includes("sleep") || n.tags.includes("downshift"));
   const constrained = applyConstraintsFilter(candidates, enabled, constraintsContext);
-  const pool = constrained.length ? constrained : candidates;
+  const basePool = constrained.length ? constrained : candidates;
+  const pool = applyPreferenceFilter(basePool, selectionContext?.preferences);
   if (!pool.length) return enabled[0] || (library ? null : defaultLibrary.nutrition[0]);
-  return pool.sort((a, b) => commonSort(a, b, packWeights?.nutritionTagWeights, constraintsContext))[0];
+  return pool.sort((a, b) => commonSort(a, b, packWeights?.nutritionTagWeights, constraintsContext, selectionContext))[0];
 }
 
-function applySafetyOverrides(dayDraft, safety, { timeMin, focus, packWeights, library, constraintsContext }) {
+function applySafetyOverrides(dayDraft, safety, { timeMin, focus, packWeights, library, constraintsContext, selectionContext }) {
   if (safety.level === "block") {
     const shouldNullWorkout = safety.reasons.includes("panic") || safety.reasons.includes("illness") || safety.reasons.includes("fever");
-    const workout = shouldNullWorkout ? null : pickEmergencyWorkout(timeMin || 10, packWeights, library, constraintsContext);
+    const workout = shouldNullWorkout ? null : pickEmergencyWorkout(timeMin || 10, packWeights, library, constraintsContext, selectionContext);
     const reset = safety.reasons.includes("panic")
-      ? pickPanicReset(library, constraintsContext) || pickEmergencyReset(packWeights, library, constraintsContext)
-      : pickEmergencyReset(packWeights, library, constraintsContext);
-    const nutrition = pickEmergencyNutrition(packWeights, library, constraintsContext);
+      ? pickPanicReset(library, constraintsContext) || pickEmergencyReset(packWeights, library, constraintsContext, selectionContext)
+      : pickEmergencyReset(packWeights, library, constraintsContext, selectionContext);
+    const nutrition = pickEmergencyNutrition(packWeights, library, constraintsContext, selectionContext);
     return {
       ...dayDraft,
       focus: focus === "rebuild" ? "downshift" : dayDraft.focus,
@@ -735,7 +984,8 @@ function applySafetyOverrides(dayDraft, safety, { timeMin, focus, packWeights, l
   }
   if (safety.level === "caution") {
     if (dayDraft.workout && dayDraft.workout.intensityCost > 2) {
-      const workout = pickEmergencyWorkout(timeMin || 10, packWeights, library, constraintsContext) || dayDraft.workout;
+      const workout =
+        pickEmergencyWorkout(timeMin || 10, packWeights, library, constraintsContext, selectionContext) || dayDraft.workout;
       return {
         ...dayDraft,
         workout,

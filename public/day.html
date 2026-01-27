@@ -96,6 +96,11 @@
       <div id="day-details" class="details hidden"></div>
     </section>
 
+    <section class="card" id="prefs-card">
+      <h2 data-i18n="prefs.title">Favorites &amp; avoid</h2>
+      <div id="prefs-list" class="list"></div>
+    </section>
+
     <section class="card" id="community-card">
       <h2 data-i18n="community.title">What worked for others</h2>
       <div id="community-list" class="list"></div>
@@ -149,17 +154,22 @@
     <section class="card">
       <h2 data-i18n="day.feedback">Feedback</h2>
       <div class="row">
-        <select id="feedback-helped">
-          <option value="yes" data-i18n="feedback.helped">Helped</option>
-          <option value="no" data-i18n="feedback.notHelped">Did not help</option>
-        </select>
-        <select id="feedback-reason">
-          <option value="too_hard" data-i18n="feedback.tooHard">Too hard</option>
-          <option value="too_easy" data-i18n="feedback.tooEasy">Too easy</option>
-          <option value="wrong_time" data-i18n="feedback.wrongTime">Wrong time</option>
-          <option value="not_relevant" data-i18n="feedback.notRelevant">Not relevant</option>
-        </select>
-        <button id="feedback-submit" data-i18n="day.sendFeedback">Send feedback</button>
+        <label><span data-i18n="feedback.kind">Item</span>
+          <select id="feedback-kind">
+            <option value="workout" data-i18n="labels.workout">Workout</option>
+            <option value="reset" data-i18n="labels.reset">Reset</option>
+            <option value="nutrition" data-i18n="labels.nutrition">Nutrition</option>
+          </select>
+        </label>
+      </div>
+      <div class="row wrap" id="feedback-buttons">
+        <button data-helped="true" data-i18n="feedback.helped">Helped</button>
+        <button data-reason="not_relevant" data-i18n="feedback.notRelevant">Not relevant</button>
+        <button data-reason="too_hard" data-i18n="feedback.tooHard">Too hard</button>
+        <button data-reason="too_easy" data-i18n="feedback.tooEasy">Too easy</button>
+        <button data-reason="boring" data-i18n="feedback.boring">Boring</button>
+        <button data-reason="not_my_style" data-i18n="feedback.notMyStyle">Not my style</button>
+        <button data-reason="wrong_time_of_day" data-i18n="feedback.wrongTimeOfDay">Wrong time of day</button>
       </div>
     </section>
   </main>

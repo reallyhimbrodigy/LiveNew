@@ -11,7 +11,15 @@ const SIGNALS = new Set([
   "anxious",
   "wired",
 ]);
-const FEEDBACK_REASONS = new Set(["too_hard", "too_easy", "wrong_time", "not_relevant"]);
+const FEEDBACK_REASONS = new Set([
+  "too_hard",
+  "too_easy",
+  "boring",
+  "not_my_style",
+  "wrong_time_of_day",
+  "wrong_time",
+  "not_relevant",
+]);
 const PARTS = new Set(["workout", "reset", "nutrition"]);
 const TIME_OPTIONS = new Set([5, 10, 15, 20, 30, 45, 60]);
 const CONTENT_PACKS = new Set(["calm_reset", "balanced_routine", "rebuild_strength"]);
@@ -256,7 +264,9 @@ export function validateSignal(body) {
 export function validateFeedback(body) {
   const dateISO = body?.dateISO;
   const helped = body?.helped;
-  const reason = body?.reason;
+  const reasonCode = body?.reasonCode || body?.reason;
+  const kind = body?.kind;
+  const itemId = body?.itemId;
   if (!isDateISO(dateISO)) {
     return fail("feedback_invalid", "dateISO must be YYYY-MM-DD", "dateISO");
   }
@@ -264,11 +274,17 @@ export function validateFeedback(body) {
     return fail("feedback_invalid", "helped must be boolean", "helped");
   }
   if (helped === false) {
-    if (!FEEDBACK_REASONS.has(reason)) {
-      return fail("feedback_invalid", "reason required when helped is false", "reason");
+    if (!FEEDBACK_REASONS.has(reasonCode)) {
+      return fail("feedback_invalid", "reason required when helped is false", "reasonCode");
     }
   }
-  return ok({ dateISO, helped, reason });
+  if (itemId != null && typeof itemId !== "string") {
+    return fail("feedback_invalid", "itemId must be string", "itemId");
+  }
+  if (kind != null && !PARTS.has(kind)) {
+    return fail("feedback_invalid", "kind must be workout, reset, or nutrition", "kind");
+  }
+  return ok({ dateISO, helped, reasonCode: reasonCode || null, itemId: itemId || null, kind: kind || null });
 }
 
 export function validateComplete(body) {

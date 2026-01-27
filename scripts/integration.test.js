@@ -151,6 +151,7 @@ async function run() {
       method: "POST",
       body: {
         email: adminEmail,
+        consent: { terms: true, privacy: true, alphaProcessing: true },
         userProfile: profile,
         firstCheckIn: checkIn,
       },
@@ -166,6 +167,7 @@ async function run() {
       method: "POST",
       body: {
         email: adminEmail2,
+        consent: { terms: true, privacy: true, alphaProcessing: true },
         userProfile: profile,
         firstCheckIn: checkIn,
       },

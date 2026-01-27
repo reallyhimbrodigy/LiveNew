@@ -26,6 +26,7 @@ export function reduceEvent(state, event, ctx) {
   const ruleToggles = ctx.ruleToggles || initialStatePatch().ruleToggles;
   const qualityRules = buildQualityRules(ruleToggles);
   const params = ctx.params || {};
+  const preferences = ctx.preferences || null;
   const regenPolicy = ctx.regenPolicy || {};
   const ruleConfig = ctx.ruleConfig || {};
   const packOverride = ctx.packOverride || null;
@@ -895,7 +896,9 @@ export function reduceEvent(state, event, ctx) {
       const user = ensureUser();
       const dateISO = event.payload?.dateISO;
       const helped = event.payload?.helped;
-      const reason = event.payload?.reason;
+      const reason = normalizeFeedbackReason(event.payload?.reasonCode || event.payload?.reason);
+      const itemId = event.payload?.itemId || null;
+      const kind = event.payload?.kind || null;
       if (!user || !nextState.weekPlan || !dateISO) return { nextState, effects, logEvent, result };
 
       const feedbackEntry = {
@@ -903,6 +906,9 @@ export function reduceEvent(state, event, ctx) {
         dateISO,
         helped,
         reason: reason || undefined,
+        reasonCode: reason || undefined,
+        itemId: itemId || undefined,
+        kind: kind || undefined,
         atISO: event.atISO,
       };
       nextState.feedback = [feedbackEntry, ...(nextState.feedback || [])].slice(0, 120);
@@ -915,12 +921,12 @@ export function reduceEvent(state, event, ctx) {
         } else if (reason === "too_easy") {
           delete modifiers.intensityCapValue;
           delete modifiers.intensityCapUntilISO;
-        } else if (reason === "wrong_time") {
+        } else if (reason === "wrong_time_of_day") {
           const day = findDay(nextState.weekPlan, dateISO);
           const currentWindow = day?.workoutWindow || "AM";
           modifiers.preferredWindowBias = nextWindowFrom(currentWindow);
           modifiers.preferredWindowBiasUntilISO = domain.addDaysISO(dateISO, 7);
-        } else if (reason === "not_relevant") {
+        } else if (reason === "not_relevant" || reason === "boring" || reason === "not_my_style") {
           modifiers.noveltyRotationBoost = true;
           modifiers.noveltyRotationBoostUntilISO = domain.addDaysISO(dateISO, 7);
         }
@@ -1005,7 +1011,7 @@ export function reduceEvent(state, event, ctx) {
         nextState.selectionStats = incrementNotRelevantForDay(nextState.selectionStats, todayPlan);
       }
       effects.persist = true;
-      logEvent = { type: "feedback", payload: { dateISO, helped, reason }, atISO: event.atISO };
+      logEvent = { type: "feedback", payload: { dateISO, helped, reason, reasonCode: reason, itemId, kind }, atISO: event.atISO };
       return { nextState, effects, logEvent, result };
     }
 
@@ -1390,6 +1396,7 @@ function normalizePlanPipeline({
         checkInsByDate,
         completionsByDate,
         feedback,
+        preferences,
         weekContext: { busyDays: effectiveUser.busyDays || [], recentNoveltyGroups },
         overrides: mergeOverrides(withBaseOverrides(intensityCap != null ? { intensityCap } : null), reEntryOverride),
         qualityRules: rulesForDay,
@@ -1445,6 +1452,7 @@ function rebuildDayInPlan({
     checkInsByDate,
     completionsByDate,
     feedback,
+    preferences,
     weekContext: { busyDays: userForDay.busyDays || [], recentNoveltyGroups },
     overrides: mergeOverrides(withBaseOverrides(overrides), reEntryOverride),
     qualityRules,
@@ -1589,6 +1597,12 @@ function nextWindowFrom(current) {
   const idx = cycle.indexOf(current);
   if (idx === -1) return "AM";
   return cycle[(idx + 1) % cycle.length];
+}
+
+function normalizeFeedbackReason(reason) {
+  if (!reason) return null;
+  if (reason === "wrong_time") return "wrong_time_of_day";
+  return reason;
 }
 
 function hasBadDayYesterday(eventLog, todayISO, domain) {

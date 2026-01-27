@@ -1,6 +1,7 @@
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
 const USERS = Math.max(1, Number(process.env.USERS || 50));
 const JITTER_MS = Math.max(0, Number(process.env.JITTER_MS || 25));
+const AUTH_TOKEN = process.env.AUTH_TOKEN || "";
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -58,6 +59,7 @@ async function request(endpoint, userId, { method = "GET", path = "/", body = nu
     "x-livenew-user": userId,
     "x-client-type": "api",
   };
+  if (AUTH_TOKEN) headers.Authorization = AUTH_TOKEN;
   const init = { method, headers };
   if (body != null) {
     headers["content-type"] = "application/json";
@@ -113,6 +115,15 @@ async function simulateUser(i) {
     path: "/v1/profile",
     body: buildProfile(userId),
   });
+
+  if (AUTH_TOKEN) {
+    await jitter();
+    await request("POST /v1/consents/accept", userId, {
+      method: "POST",
+      path: "/v1/consents/accept",
+      body: { acceptTerms: true, acceptPrivacy: true, acceptAlphaProcessing: true },
+    });
+  }
 
   await jitter();
   const rail = await request("GET /v1/rail/today", userId, {

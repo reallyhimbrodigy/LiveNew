@@ -2,6 +2,7 @@ import {
   apiGet,
   apiPost,
   apiPatch,
+  apiDelete,
   requestAuth,
   verifyAuth,
   getToken,
@@ -259,7 +260,8 @@ function initDay() {
   const signalButtons = qs("#signal-buttons");
   const badDayBtn = qs("#bad-day-btn");
   const checkinBtn = qs("#checkin-submit");
-  const feedbackBtn = qs("#feedback-submit");
+  const feedbackButtons = qsa("#feedback-buttons button");
+  const feedbackKind = qs("#feedback-kind");
   const completionInputs = qsa("#completion-list input");
   const railSubmit = qs("#rail-submit");
   const railResetEl = qs("#rail-reset");
@@ -268,7 +270,10 @@ function initDay() {
   const communityText = qs("#community-text");
   const communitySubmit = qs("#community-submit");
   const communityStatus = qs("#community-status");
+  const prefsList = qs("#prefs-list");
   let currentResetId = null;
+  let currentDay = null;
+  let prefsMap = new Map();
 
   if (dateInput) dateInput.value = todayISO();
 
@@ -302,6 +307,64 @@ function initDay() {
     });
   };
 
+  const renderPrefs = (day) => {
+    if (!prefsList) return;
+    clear(prefsList);
+    if (!day) {
+      prefsList.appendChild(el("div", { class: "list-item muted", text: t("prefs.none") }));
+      return;
+    }
+    const items = [
+      { kind: "workout", item: day.what?.workout },
+      { kind: "reset", item: day.what?.reset },
+      { kind: "nutrition", item: day.what?.nutrition },
+    ];
+    items.forEach(({ kind, item }) => {
+      if (!item?.id) return;
+      const currentPref = prefsMap.get(item.id) || null;
+      const row = el("div", { class: "list-item prefs-row" }, [
+        el("div", { text: `${t(`labels.${kind}`)}: ${item.title || item.id}` }),
+      ]);
+      const favActive = currentPref === "favorite";
+      const avoidActive = currentPref === "avoid";
+      const favBtn = el("button", { text: favActive ? t("prefs.unfavorite") : t("prefs.favorite"), class: favActive ? "" : "ghost" });
+      const avoidBtn = el("button", { text: avoidActive ? t("prefs.unavoid") : t("prefs.avoid"), class: avoidActive ? "" : "ghost" });
+      favBtn.addEventListener("click", async () => {
+        if (favActive) {
+          await apiDelete(`/v1/content/prefs/${encodeURIComponent(item.id)}`);
+          prefsMap.delete(item.id);
+        } else {
+          await apiPost("/v1/content/prefs", { itemId: item.id, pref: "favorite" });
+          prefsMap.set(item.id, "favorite");
+        }
+        renderPrefs(currentDay);
+      });
+      avoidBtn.addEventListener("click", async () => {
+        if (avoidActive) {
+          await apiDelete(`/v1/content/prefs/${encodeURIComponent(item.id)}`);
+          prefsMap.delete(item.id);
+        } else {
+          await apiPost("/v1/content/prefs", { itemId: item.id, pref: "avoid" });
+          prefsMap.set(item.id, "avoid");
+        }
+        renderPrefs(currentDay);
+      });
+      row.appendChild(favBtn);
+      row.appendChild(avoidBtn);
+      prefsList.appendChild(row);
+    });
+  };
+
+  const loadPrefs = async () => {
+    try {
+      const res = await apiGet("/v1/content/prefs");
+      prefsMap = new Map((res.prefs || []).map((entry) => [entry.itemId, entry.pref]));
+    } catch {
+      prefsMap = new Map();
+    }
+    renderPrefs(currentDay);
+  };
+
   const loadCommunity = async (resetId) => {
     if (!resetId) return;
     currentResetId = resetId;
@@ -327,6 +390,8 @@ function initDay() {
       await ensureCitations();
       if (res.day) {
         renderDay(res.day);
+        currentDay = res.day;
+        renderPrefs(currentDay);
         const resetId = res.day?.what?.reset?.id;
         if (resetId) {
           await loadCommunity(resetId);
@@ -355,6 +420,8 @@ function initDay() {
       const res = await apiGet(`/v1/plan/day?date=${dateISO}`);
       await ensureCitations();
       renderDay(res.day);
+      currentDay = res.day;
+      renderPrefs(currentDay);
       const resetId = res.day?.what?.reset?.id;
       if (resetId) {
         await loadCommunity(resetId);
@@ -373,6 +440,7 @@ function initDay() {
 
   loadBtn?.addEventListener("click", loadDay);
   loadDay();
+  loadPrefs();
 
   railSubmit?.addEventListener("click", async () => {
     const dateISO = todayISO();
@@ -463,11 +531,17 @@ function initDay() {
     });
   });
 
-  feedbackBtn?.addEventListener("click", async () => {
-    const dateISO = dateInput?.value || todayISO();
-    const helped = qs("#feedback-helped")?.value === "yes";
-    const reason = qs("#feedback-reason")?.value;
-    await apiPost("/v1/feedback", { dateISO, helped, reason: helped ? undefined : reason });
+  feedbackButtons.forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const dateISO = dateInput?.value || todayISO();
+      const helped = btn.dataset.helped === "true";
+      const reasonCode = btn.dataset.reason || null;
+      const kind = feedbackKind?.value || "reset";
+      const itemId = currentDay?.what?.[kind]?.id || null;
+      const payload = { dateISO, helped, kind, itemId };
+      if (!helped) payload.reasonCode = reasonCode;
+      await apiPost("/v1/feedback", payload);
+    });
   });
 
   communitySubmit?.addEventListener("click", async () => {
@@ -528,6 +602,9 @@ function initTrends() {
   const select = qs("#trends-days");
   const loadBtn = qs("#trends-load");
   const tbody = qs("#trends-table tbody");
+  const outcomesSummary = qs("#outcomes-summary");
+  const outcomesAnchors = qs("#outcomes-anchors tbody");
+  const outcomesResets = qs("#outcomes-resets tbody");
 
   const loadTrends = async () => {
     const days = select?.value || "7";
@@ -544,6 +621,39 @@ function initTrends() {
       ]);
       tbody.appendChild(tr);
     });
+    const outcomes = await apiGet(`/v1/outcomes?days=${days}`);
+    if (outcomesSummary) {
+      clear(outcomesSummary);
+      outcomesSummary.appendChild(
+        el("div", { class: "list-item" }, [
+          el("div", { text: t("outcomes.daysAny") }),
+          el("div", { class: "muted", text: String(outcomes.metrics?.daysAnyRegulationAction ?? 0) }),
+        ])
+      );
+    }
+    if (outcomesAnchors) {
+      clear(outcomesAnchors);
+      (outcomes.metrics?.anchorsCompletedTrend || []).forEach((row) => {
+        const tr = el("tr", {}, [
+          el("td", { text: row.dateISO }),
+          el("td", { text: row.sunlight ? t("misc.yes") : t("misc.no") }),
+          el("td", { text: row.meal ? t("misc.yes") : t("misc.no") }),
+          el("td", { text: row.downshift ? t("misc.yes") : t("misc.no") }),
+        ]);
+        outcomesAnchors.appendChild(tr);
+      });
+    }
+    if (outcomesResets) {
+      clear(outcomesResets);
+      (outcomes.metrics?.topResets || []).forEach((entry) => {
+        const tr = el("tr", {}, [
+          el("td", { text: entry.title || entry.resetId }),
+          el("td", { text: String(entry.completedCount || 0) }),
+          el("td", { text: entry.lastUsedAtISO || "–" }),
+        ]);
+        outcomesResets.appendChild(tr);
+      });
+    }
   };
 
   loadBtn?.addEventListener("click", loadTrends);

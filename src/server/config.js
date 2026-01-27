@@ -83,6 +83,12 @@ export function getConfig() {
   const rulesFrozen = rulesFrozenOverride !== undefined ? rulesFrozenOverride : isAlphaLike || isProdLike;
   const contentStageMode = process.env.CONTENT_STAGE_MODE === "true";
   const alertWebhookUrl = (process.env.ALERT_WEBHOOK_URL || "").trim();
+  const maxP95MsByRoute = {
+    "/v1/rail/today": Number(process.env.MAX_P95_RAIL_MS || 300),
+    "/v1/plan/day": Number(process.env.MAX_P95_PLAN_DAY_MS || 300),
+  };
+  const maxErrorRate = Number(process.env.MAX_ERROR_RATE || 0.01);
+  const backupWindowHours = Number(process.env.BACKUP_WINDOW_HOURS || 24);
 
   const config = {
     envMode,
@@ -106,6 +112,9 @@ export function getConfig() {
     rulesFrozen,
     contentStageMode,
     alertWebhookUrl,
+    maxP95MsByRoute,
+    maxErrorRate,
+    backupWindowHours,
     port: Number(process.env.PORT || 3000),
     dataDir,
     dbStatusRequired: true,
