@@ -27,7 +27,13 @@ function normalizeReasonCode(reason) {
 function normalizePreferences(preferences) {
   const favorites = preferences?.favorites instanceof Set ? preferences.favorites : new Set(preferences?.favorites || []);
   const avoids = preferences?.avoids instanceof Set ? preferences.avoids : new Set(preferences?.avoids || []);
-  return { favorites, avoids };
+  const stabilityPref = preferences?.stability || null;
+  const preferredIds = stabilityPref?.preferredIds instanceof Set
+    ? stabilityPref.preferredIds
+    : new Set(stabilityPref?.preferredIds || []);
+  const bonus = Number.isFinite(stabilityPref?.bonus) ? stabilityPref.bonus : 0.15;
+  const stability = stabilityPref ? { preferredIds, bonus } : null;
+  return { favorites, avoids, stability };
 }
 
 function buildFeedbackContext(feedback, library) {
@@ -113,7 +119,10 @@ function selectionScore(item, baseScore, selectionContext, kind) {
   if (!selectionContext) return baseScore;
   const prefScore = preferenceScore(item, selectionContext.preferences);
   const fbScore = feedbackScore(item, selectionContext.feedback, selectionContext.checkIn, selectionContext.constraintsContext);
-  return baseScore + prefScore + fbScore;
+  const stability = selectionContext.preferences?.stability;
+  const stabilityScore =
+    stability?.preferredIds?.has(item.id) ? Number(stability?.bonus) || 0 : 0;
+  return baseScore + prefScore + fbScore + stabilityScore;
 }
 
 export function buildDayPlan({

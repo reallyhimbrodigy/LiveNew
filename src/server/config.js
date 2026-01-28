@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-const ALLOWED_MODES = new Set(["dev", "dogfood", "alpha", "prod"]);
+const ALLOWED_MODES = new Set(["dev", "dogfood", "alpha", "prod", "test"]);
 let cachedConfig = null;
 
 function parseBool(value) {
@@ -44,7 +44,7 @@ export function getConfig() {
   if (cachedConfig) return cachedConfig;
 
   const envMode = getEnvMode();
-  const isDevLike = envMode === "dev" || envMode === "dogfood";
+  const isDevLike = envMode === "dev" || envMode === "dogfood" || envMode === "test";
   const isAlphaLike = envMode === "alpha";
   const isProdLike = envMode === "prod";
 
@@ -89,6 +89,7 @@ export function getConfig() {
   };
   const maxErrorRate = Number(process.env.MAX_ERROR_RATE || 0.01);
   const backupWindowHours = Number(process.env.BACKUP_WINDOW_HOURS || 24);
+  const planChangeLimit7d = Number(process.env.PLAN_CHANGE_LIMIT_7D || 8);
 
   const config = {
     envMode,
@@ -115,6 +116,7 @@ export function getConfig() {
     maxP95MsByRoute,
     maxErrorRate,
     backupWindowHours,
+    planChangeLimit7d,
     port: Number(process.env.PORT || 3000),
     dataDir,
     dbStatusRequired: true,

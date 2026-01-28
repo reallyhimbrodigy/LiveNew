@@ -45,7 +45,7 @@ function buildAnchorMap(reminderIntents) {
   return map;
 }
 
-export function buildOutcomes({ state, days, todayISO, reminderIntents, historyByDate }) {
+export function buildOutcomes({ state, days, todayISO, reminderIntents, historyByDate, planChanges7d = 0, stabilityLimit = 8 }) {
   const rangeDays = Math.max(1, Math.min(Number(days) || 7, 30));
   const toISO = todayISO;
   const fromISO = addDaysISO(toISO, -(rangeDays - 1));
@@ -86,6 +86,10 @@ export function buildOutcomes({ state, days, todayISO, reminderIntents, historyB
     .sort((a, b) => b.completedCount - a.completedCount || String(a.resetId).localeCompare(String(b.resetId)))
     .slice(0, 5);
 
+  const normalizedChanges = Number.isFinite(planChanges7d) ? planChanges7d : 0;
+  const limit = Number.isFinite(stabilityLimit) && stabilityLimit > 0 ? stabilityLimit : 8;
+  const stabilityScore = 1 - Math.min(1, normalizedChanges / (limit * 2));
+
   return {
     range: { days: rangeDays, fromISO, toISO },
     metrics: {
@@ -93,6 +97,8 @@ export function buildOutcomes({ state, days, todayISO, reminderIntents, historyB
       stressAvgTrend,
       anchorsCompletedTrend,
       topResets,
+      planChanges7d: normalizedChanges,
+      stabilityScore,
     },
   };
 }

@@ -15,9 +15,10 @@ import {
 } from "../state/db.js";
 
 const SNAPSHOT_CACHE = new Map();
-const SNAPSHOT_TTL_MS = 60 * 1000;
+const SNAPSHOT_TTL_MS = 5 * 60 * 1000;
 const META_TTL_MS = 10 * 1000;
 let defaultSnapshotCache = { value: null, loadedAt: 0 };
+let snapshotCacheStats = { hits: 0, misses: 0 };
 
 function normalizeExpiryDateISO(value) {
   if (!value) return null;
@@ -139,7 +140,11 @@ export async function loadSnapshotBundle(snapshotId, { userId } = {}) {
   if (!snapshotId) return null;
   const cached = SNAPSHOT_CACHE.get(snapshotId);
   const now = Date.now();
-  if (cached && now - cached.loadedAt < SNAPSHOT_TTL_MS) return cached.value;
+  if (cached && now - cached.loadedAt < SNAPSHOT_TTL_MS) {
+    snapshotCacheStats.hits += 1;
+    return cached.value;
+  }
+  snapshotCacheStats.misses += 1;
 
   const snapshot = await getContentSnapshot(snapshotId);
   if (!snapshot) return null;
@@ -214,4 +219,12 @@ export function clearSnapshotCache(snapshotId = null) {
   } else {
     SNAPSHOT_CACHE.clear();
   }
+}
+
+export function getSnapshotCacheStats() {
+  return {
+    entries: SNAPSHOT_CACHE.size,
+    hits: snapshotCacheStats.hits,
+    misses: snapshotCacheStats.misses,
+  };
 }

@@ -97,6 +97,7 @@ import {
   getDayPlanHistoryById,
   insertPlanChangeSummary,
   listPlanChangeSummaries,
+  countPlanChangeSummariesInRange,
   insertChangelogEntry,
   listChangelogEntries,
   upsertReminderIntent,
@@ -155,6 +156,8 @@ import {
   listLatestDayPlanHistoryByRange,
   runWithQueryTracker,
   getQueryStats,
+  getTopQueries,
+  explainQueryPlan,
 } from "../state/db.js";
 import { createBackup, restoreBackup, listBackups } from "../db/backup.js";
 import { getConfig } from "./config.js";
@@ -173,13 +176,15 @@ import { buildOutcomes } from "./outcomes.js";
 import { runLoadtestScript, evaluateLoadtestReport } from "./ops.js";
 import { buildReleaseChecklist } from "./releaseChecklist.js";
 import { diffSnapshots } from "./snapshotDiff.js";
-import { loadSnapshotBundle, resolveSnapshotForUser, setDefaultSnapshotId, getDefaultSnapshotId, repinUserSnapshot } from "./snapshots.js";
+import { loadSnapshotBundle, resolveSnapshotForUser, setDefaultSnapshotId, getDefaultSnapshotId, repinUserSnapshot, clearSnapshotCache, getSnapshotCacheStats } from "./snapshots.js";
 import { scheduleStartupSmoke } from "./startupSmoke.js";
+import { getEnvPolicy } from "./envPolicy.js";
 
 const NODE_ENV = process.env.NODE_ENV || "development";
 const config = getConfig();
+const envPolicy = getEnvPolicy(config.envMode);
 const PORT = config.port;
-const isDevRoutesEnabled = config.devRoutesEnabled;
+const isDevRoutesEnabled = envPolicy.allowDevRoutes && config.devRoutesEnabled;
 const EVENT_SOURCING = process.env.EVENT_SOURCING === "true";
 const EVENT_RETENTION_DAYS = Number(process.env.EVENT_RETENTION_DAYS || 90);
 const TEST_MODE = process.env.TEST_MODE === "true";
@@ -371,11 +376,13 @@ const engineValidator = createEngineValidator({
   listContentPacks,
   listContentItems,
   validateContentItem,
+  loadSnapshotBundle,
   logInfo,
 });
 
 async function runEngineValidatorTask(options = {}) {
-  const report = await engineValidator(options);
+  const snapshotId = options.snapshotId || (await getDefaultSnapshotId());
+  const report = await engineValidator({ ...options, snapshotId });
   const atISO = report.endedAt || new Date().toISOString();
   await insertValidatorRun({
     id: report.runId,
@@ -383,6 +390,7 @@ async function runEngineValidatorTask(options = {}) {
     ok: report.ok,
     report,
     atISO,
+    snapshotId: report?.meta?.snapshotId || snapshotId || null,
   });
   await cleanupValidatorRuns("engine_matrix", 30);
   if (!report.ok) {
@@ -648,7 +656,7 @@ const STAGE_STATUSES = ["enabled", "staged"];
 const CONTENT_KINDS = new Set(["workout", "nutrition", "reset"]);
 
 function isStageModeRequest(req, url, adminEmail) {
-  if (!adminEmail) return false;
+  if (!adminEmail || !envPolicy.allowStageContentPreview) return false;
   const header = String(req.headers["x-content-stage"] || "").toLowerCase();
   const queryValue = url.searchParams.get("stage");
   return config.contentStageMode || header === "true" || String(queryValue).toLowerCase() === "true";
@@ -705,7 +713,7 @@ function snapshotOverrideFromRequest(req, url) {
 }
 
 async function resolveSnapshotContext({ userId, userProfile, req, url }) {
-  const allowLive = config.isDevLike && !config.isAlphaLike && !config.isProdLike;
+  const allowLive = envPolicy.allowStageContentPreview && config.isDevLike && !config.isAlphaLike && !config.isProdLike;
   const overrideSnapshotId = allowLive ? snapshotOverrideFromRequest(req, url) : null;
   const snapshotInfo = await resolveSnapshotForUser({
     userId,
@@ -876,6 +884,7 @@ async function repairUserState(userId, reason, requestId = null, options = {}) {
   const paramsStateOverride = options.paramsState || null;
   const libraryOverride = options.library || null;
   const modelStampOverride = options.modelStamp || null;
+  const snapshotIdOverride = options.snapshotId || null;
   const events = await getUserEvents(userId, 1, 5000);
   if (events.length) {
     const flags = await getFeatureFlags();
@@ -893,6 +902,7 @@ async function repairUserState(userId, reason, requestId = null, options = {}) {
         cohortId: paramsState.cohortId || null,
         params: paramsState.map,
         logger: ruleConfig.logger,
+        snapshotId: snapshotIdOverride,
       });
     } catch (err) {
       logError({
@@ -979,6 +989,7 @@ async function repairUserState(userId, reason, requestId = null, options = {}) {
         cohortId: paramsState.cohortId || null,
         params: paramsState.map,
         logger: ruleConfig.logger,
+        snapshotId: snapshotIdOverride,
       });
     } catch (err) {
       logError({
@@ -1176,6 +1187,48 @@ function buildRegenPolicy(prevState, eventWithAt, nextState) {
   });
   if (!Object.keys(lockSelectionsByDate).length) return null;
   return { lockSelectionsByDate, reason: "regen_throttle" };
+}
+
+function mergeRegenPolicies(...policies) {
+  const lockSelectionsByDate = {};
+  let reason = null;
+  policies.forEach((policy) => {
+    if (!policy?.lockSelectionsByDate) return;
+    Object.entries(policy.lockSelectionsByDate).forEach(([dateISO, locked]) => {
+      if (locked) lockSelectionsByDate[dateISO] = true;
+    });
+    if (!reason && policy.reason) reason = policy.reason;
+  });
+  if (!Object.keys(lockSelectionsByDate).length) return null;
+  return { lockSelectionsByDate, reason };
+}
+
+function buildStabilityPolicy(prevState, eventWithAt, planChanges7d) {
+  if (!Number.isFinite(planChanges7d) || planChanges7d <= config.planChangeLimit7d) return null;
+  const forced = eventWithAt.payload?.forced === true;
+  if (forced) return null;
+  const dates = getEventDatesForThrottle(prevState, eventWithAt);
+  if (!dates.size) return null;
+  const lockSelectionsByDate = {};
+  dates.forEach((dateISO) => {
+    if (dateISO) lockSelectionsByDate[dateISO] = true;
+  });
+  return { lockSelectionsByDate, reason: "stability_lock" };
+}
+
+function buildStabilityPreferences(state, todayISO) {
+  const preferredIds = new Set();
+  const days = state?.weekPlan?.days || [];
+  if (!todayISO || !Array.isArray(days)) return { preferredIds, bonus: 0.15 };
+  const fromISO = domain.addDaysISO(todayISO, -6);
+  days.forEach((day) => {
+    if (!day?.dateISO) return;
+    if (day.dateISO < fromISO || day.dateISO > todayISO) return;
+    if (day.workout?.id) preferredIds.add(day.workout.id);
+    if (day.reset?.id) preferredIds.add(day.reset.id);
+    if (day.nutrition?.id) preferredIds.add(day.nutrition.id);
+  });
+  return { preferredIds, bonus: 0.15 };
 }
 
 const PLAN_MUTATION_EVENTS = new Set([
@@ -1891,6 +1944,36 @@ function summarizeDayContract(day) {
     appliedRules: (day.why?.expanded?.appliedRules || []).slice(0, 5),
     driversTop2: day.why?.driversTop2 || [],
   };
+}
+
+function diffList(prev = [], next = []) {
+  const a = new Set(prev || []);
+  const b = new Set(next || []);
+  const added = [];
+  const removed = [];
+  b.forEach((value) => {
+    if (!a.has(value)) added.push(value);
+  });
+  a.forEach((value) => {
+    if (!b.has(value)) removed.push(value);
+  });
+  return { added, removed };
+}
+
+function extractAppliedRules(day) {
+  const rules = day?.why?.expanded?.appliedRules;
+  return Array.isArray(rules) ? rules : [];
+}
+
+function extractDrivers(day) {
+  if (Array.isArray(day?.why?.driversTop2)) return day.why.driversTop2;
+  const drivers = day?.why?.expanded?.drivers;
+  return Array.isArray(drivers) ? drivers.slice(0, 2) : [];
+}
+
+function deltaNumber(prev, next) {
+  if (!Number.isFinite(prev) || !Number.isFinite(next)) return null;
+  return next - prev;
 }
 
 function dateISOForAt(profile, atISO) {
@@ -3099,7 +3182,15 @@ const server = http.createServer(async (req, res) => {
       try {
         const migrations = await listAppliedMigrations();
         migrationsCount = migrations.length;
-        migrationsOk = migrations.length > 0;
+        const migrationFiles = (await fs.readdir(path.join(process.cwd(), "src", "db", "migrations"))).filter(
+          (name) => name.endsWith(".sql") && !name.endsWith(".down.sql")
+        );
+        const expectedIds = migrationFiles
+          .map((name) => name.replace(/\.sql$/, ""))
+          .sort();
+        const latestExpected = expectedIds[expectedIds.length - 1] || null;
+        const latestApplied = migrations[migrations.length - 1]?.id || null;
+        migrationsOk = migrations.length >= expectedIds.length && latestApplied === latestExpected;
       } catch {
         migrationsOk = false;
       }
@@ -3445,12 +3536,19 @@ const server = http.createServer(async (req, res) => {
       let currentVersion = version;
       const atISO = event.atISO || new Date().toISOString();
       const eventWithAt = { ...event, atISO };
-      const contentPrefs = await loadContentPrefs(userId);
+      const contentPrefsBase = await loadContentPrefs(userId);
 
       while (attempts < 2) {
         const prevStats = currentState.selectionStats;
         const prevState = currentState;
         const todayISO = getTodayISOForProfile(currentState.userProfile);
+        const planChanges7d = await countPlanChangeSummariesInRange(
+          userId,
+          domain.addDaysISO(todayISO, -6),
+          todayISO
+        );
+        const stabilityPrefs = buildStabilityPreferences(currentState, todayISO);
+        const contentPrefs = { ...contentPrefsBase, stability: stabilityPrefs, planChanges7d };
         const flags = await getFeatureFlags();
         requestFlags = flags;
         featureFreezeEnabled = resolveFeatureFreeze(flags);
@@ -3472,6 +3570,7 @@ const server = http.createServer(async (req, res) => {
             cohortId: paramsState.cohortId || null,
             params: paramsState.map,
             logger: ruleConfig.logger,
+            snapshotId: snapshotCtx?.snapshotId || null,
           });
         } catch (err) {
           logError({
@@ -3519,8 +3618,10 @@ const server = http.createServer(async (req, res) => {
         let resEvent = dispatch(currentState, eventWithAt, ctxBase);
         let nextState = resEvent.state;
         const regenPolicy = buildRegenPolicy(currentState, eventWithAt, nextState);
-        if (regenPolicy) {
-          resEvent = dispatch(currentState, eventWithAt, { ...ctxBase, regenPolicy });
+        const stabilityPolicy = buildStabilityPolicy(currentState, eventWithAt, planChanges7d);
+        const combinedPolicy = mergeRegenPolicies(regenPolicy, stabilityPolicy);
+        if (combinedPolicy) {
+          resEvent = dispatch(currentState, eventWithAt, { ...ctxBase, regenPolicy: combinedPolicy });
           nextState = resEvent.state;
         }
         const guarded = applyPlanGuards(prevState, nextState, eventWithAt.type, engineGuards, res.livenewRequestId, userId);
@@ -3878,14 +3979,15 @@ const server = http.createServer(async (req, res) => {
       await trackEvent(userId, AnalyticsFlags.onboardCompleted, { dateISO: onboardDateISO }, new Date().toISOString(), onboardDateISO);
       const dateISO = checkIn?.dateISO || getTodayISOForProfile(userProfile);
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
-      const library = await getLibraryForUser();
+      const snapshotCtx = await getSnapshotContext();
+      const library = snapshotCtx.library || domain.defaultLibrary;
       const ensured = await ensureValidDayContract(
         userId,
         state,
         dateISO,
         "onboard_day_invariant",
         requestId,
-        { paramsState, library }
+        { paramsState, library, snapshotId: snapshotCtx.snapshotId || null }
       );
       state = ensured.state;
       const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
@@ -3971,15 +4073,16 @@ const server = http.createServer(async (req, res) => {
         payload: { dateISO, forced: true },
       });
       state = resEvent.state;
-      const paramsState = await getParamsForUser();
-      const library = await getLibraryForUser();
+      const snapshotCtx = await getSnapshotContext();
+      const paramsState = snapshotCtx.paramsState || (await getParamsForUser());
+      const library = snapshotCtx.library || domain.defaultLibrary;
       const ensured = await ensureValidDayContract(
         userId,
         state,
         dateISO,
         "force_refresh_invariant",
         requestId,
-        { paramsState, library }
+        { paramsState, library, snapshotId: snapshotCtx.snapshotId || null }
       );
       state = ensured.state;
       send(200, { ok: true, day: ensured.day });
@@ -3995,15 +4098,16 @@ const server = http.createServer(async (req, res) => {
       const dateISO = getTodayISOForProfile(state.userProfile);
       await maybeStartReEntry(dateISO);
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
-      const paramsState = await getParamsForUser();
-      const library = await getLibraryForUser();
+      const snapshotCtx = await getSnapshotContext();
+      const paramsState = snapshotCtx.paramsState || (await getParamsForUser());
+      const library = snapshotCtx.library || domain.defaultLibrary;
       const ensured = await ensureValidDayContract(
         userId,
         state,
         dateISO,
         "rail_today_invariant",
         requestId,
-        { paramsState, library }
+        { paramsState, library, snapshotId: snapshotCtx.snapshotId || null }
       );
       state = ensured.state;
       const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
@@ -4047,15 +4151,16 @@ const server = http.createServer(async (req, res) => {
         await maybeStartReEntry(dateISO);
       }
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
-      const paramsState = await getParamsForUser();
-      const library = await getLibraryForUser();
+      const snapshotCtx = await getSnapshotContext();
+      const paramsState = snapshotCtx.paramsState || (await getParamsForUser());
+      const library = snapshotCtx.library || domain.defaultLibrary;
       const ensured = await ensureValidDayContract(
         userId,
         state,
         dateISO,
         "plan_day_invariant",
         requestId,
-        { paramsState, library }
+        { paramsState, library, snapshotId: snapshotCtx.snapshotId || null }
       );
       state = ensured.state;
       const payload = { ok: true, day: ensured.day };
@@ -4489,7 +4594,20 @@ const server = http.createServer(async (req, res) => {
       const historyByDate = new Map();
       historyList.forEach((entry) => historyByDate.set(entry.dateISO, entry.day));
       const reminderIntents = await listReminderIntentsByRange(userId, fromISO, toISO);
-      const outcomes = buildOutcomes({ state, days: daysNum, todayISO: requestTodayISO, reminderIntents, historyByDate });
+      const planChanges7d = await countPlanChangeSummariesInRange(
+        userId,
+        domain.addDaysISO(requestTodayISO, -6),
+        requestTodayISO
+      );
+      const outcomes = buildOutcomes({
+        state,
+        days: daysNum,
+        todayISO: requestTodayISO,
+        reminderIntents,
+        historyByDate,
+        planChanges7d,
+        stabilityLimit: config.planChangeLimit7d,
+      });
       const payload = { ok: true, ...outcomes };
       setCachedResponse(userId, pathname, url.search, payload, CACHE_TTLS.outcomes);
       send(200, payload);
@@ -4710,12 +4828,13 @@ const server = http.createServer(async (req, res) => {
       if (!email) return;
       const body = await parseJson(req);
       const kind = String(body?.kind || "engine_matrix");
+      const snapshotId = typeof body?.snapshotId === "string" ? body.snapshotId.trim() : "";
       if (kind !== "engine_matrix") {
         sendError(res, 400, "validator_kind_invalid", "kind must be engine_matrix", "kind");
         return;
       }
-      const report = await runEngineValidatorTask();
-      await auditAdmin("validator.run", report.runId, { kind, ok: report.ok, failed: report.totals?.failed || 0 });
+      const report = await runEngineValidatorTask({ snapshotId: snapshotId || null });
+      await auditAdmin("validator.run", report.runId, { kind, ok: report.ok, failed: report.totals?.failed || 0, snapshotId: snapshotId || null });
       send(200, { ok: true, kind, runId: report.runId, report });
       return;
     }
@@ -4768,6 +4887,7 @@ const server = http.createServer(async (req, res) => {
         packs,
         params,
       });
+      clearSnapshotCache(snapshotId);
       await auditAdmin("snapshot.create", snapshotId, { note });
       send(200, {
         ok: true,
@@ -4792,14 +4912,34 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 404, "not_found", "Snapshot not found");
         return;
       }
-      const { checklist, validator } = await computeReleaseChecklistState();
-      if (!checklist.pass || !(validator?.ok)) {
+      const body = await parseJson(req);
+      const includeUserNotes = body?.includeUserNotes === true;
+      const { checklist } = await computeReleaseChecklistState();
+      if (!checklist.pass) {
         sendError(res, 409, "release_blocked", "Release blocked by checklist", null, {
           checks: checklist.checks,
           expose: true,
         });
         return;
       }
+      const latestValidator = await getLatestValidatorRun("engine_matrix", snapshotId);
+      const validatorFresh =
+        latestValidator?.atISO && Date.now() - Date.parse(latestValidator.atISO) <= 6 * 60 * 60 * 1000;
+      let validatorOk = Boolean(latestValidator?.ok && validatorFresh);
+      let validatorReport = latestValidator?.report || null;
+      if (!validatorOk) {
+        const report = await runEngineValidatorTask({ snapshotId });
+        validatorOk = Boolean(report.ok);
+        validatorReport = report;
+      }
+      if (!validatorOk) {
+        sendError(res, 409, "release_blocked", "Release blocked by validator", null, {
+          expose: true,
+          validator: { snapshotId, ok: false, report: validatorReport },
+        });
+        return;
+      }
+      const prevReleased = await getLatestReleasedSnapshot();
       const updated = await updateContentSnapshotStatus({
         snapshotId,
         status: "released",
@@ -4807,6 +4947,32 @@ const server = http.createServer(async (req, res) => {
         rolledBackAt: null,
       });
       await setDefaultSnapshotId(snapshotId);
+      clearSnapshotCache(snapshotId);
+      let diff = null;
+      if (prevReleased && prevReleased.id !== snapshotId) {
+        const itemsA = await listContentSnapshotItems(prevReleased.id);
+        const itemsB = await listContentSnapshotItems(snapshotId);
+        const packsA = await listContentSnapshotPacks(prevReleased.id);
+        const packsB = await listContentSnapshotPacks(snapshotId);
+        const paramsA = await listContentSnapshotParams(prevReleased.id);
+        const paramsB = await listContentSnapshotParams(snapshotId);
+        diff = diffSnapshots({ itemsA, itemsB, packsA, packsB, paramsA, paramsB });
+      }
+      const releaseNotes = JSON.stringify({ note: snapshot.note || "", diff }, null, 2);
+      await insertChangelogEntry({
+        version: snapshotId,
+        title: `Snapshot ${snapshotId} released`,
+        notes: releaseNotes,
+        audience: "admin",
+      });
+      if (includeUserNotes) {
+        await insertChangelogEntry({
+          version: snapshotId,
+          title: snapshot.note || `Snapshot ${snapshotId}`,
+          notes: snapshot.note || "Snapshot update",
+          audience: "user",
+        });
+      }
       await auditAdmin("snapshot.release", snapshotId, { libraryHash: snapshot.libraryHash });
       send(200, { ok: true, snapshot: updated, defaultSnapshotId: snapshotId });
       return;
@@ -4840,6 +5006,21 @@ const server = http.createServer(async (req, res) => {
         releasedAt: snapshot.releasedAt || null,
         rolledBackAt: new Date().toISOString(),
       });
+      clearSnapshotCache(snapshotId);
+      clearSnapshotCache(targetSnapshotId);
+      const runningExperiments = await listExperiments("running");
+      const nowISO = new Date().toISOString();
+      for (const exp of runningExperiments) {
+        if (exp.snapshotId && exp.snapshotId === snapshotId) {
+          await updateExperiment(exp.id, { status: "stopped", stoppedAt: nowISO });
+          await insertAdminAudit({
+            adminUserId: userId,
+            action: "experiment.auto_stop",
+            target: exp.id,
+            props: { reason: "snapshot_rollback", snapshotId },
+          });
+        }
+      }
       await auditAdmin("snapshot.rollback", snapshotId, { targetSnapshotId });
       send(200, { ok: true, snapshot: updated, defaultSnapshotId: targetSnapshotId });
       return;
@@ -4889,6 +5070,7 @@ const server = http.createServer(async (req, res) => {
       const defaultSnapshotId = await getDefaultSnapshotId();
       const latestReleasedSnapshot = await getLatestReleasedSnapshot();
       const releaseChecklistState = await computeReleaseChecklistState();
+      const validatorDefault = defaultSnapshotId ? await getLatestValidatorRun("engine_matrix", defaultSnapshotId) : null;
       send(200, {
         ok: true,
         validator: {
@@ -4913,9 +5095,10 @@ const server = http.createServer(async (req, res) => {
         snapshots: {
           defaultSnapshotId: defaultSnapshotId || null,
           latestReleasedSnapshotId: latestReleasedSnapshot?.id || null,
-          validatorOkAgainstDefault: validator ? validator.ok : false,
-          validatorRunId: validator?.id || null,
+          validatorOkAgainstDefault: validatorDefault ? validatorDefault.ok : false,
+          validatorRunId: validatorDefault?.id || null,
         },
+        snapshotCache: getSnapshotCacheStats(),
         startupSmoke: {
           lastAtISO: startupSmokeStatus.lastAtISO,
           ok: startupSmokeStatus.ok,
@@ -4972,6 +5155,38 @@ const server = http.createServer(async (req, res) => {
       const limit = Number.isFinite(limitRaw) ? limitRaw : 50;
       const errors = snapshotErrorCounters(limit);
       send(200, { ok: true, windowMinutes: Math.round(ERROR_WINDOW_MS / 60000), errors });
+      return;
+    }
+
+    if (pathname === "/v1/admin/db/top-queries" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const limit = Number(url.searchParams.get("limit") || 10);
+      const queries = getTopQueries(limit);
+      send(200, { ok: true, queries });
+      return;
+    }
+
+    if (pathname === "/v1/admin/db/explain" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const sql = typeof body?.sql === "string" ? body.sql.trim() : "";
+      if (!sql) {
+        sendError(res, 400, "sql_required", "sql is required", "sql");
+        return;
+      }
+      if (sql.includes(";")) {
+        sendError(res, 400, "sql_invalid", "Only single SELECT statements are allowed", "sql");
+        return;
+      }
+      const upper = sql.toUpperCase();
+      if (!(upper.startsWith("SELECT") || upper.startsWith("WITH"))) {
+        sendError(res, 400, "sql_invalid", "Only SELECT statements are allowed", "sql");
+        return;
+      }
+      const plan = await explainQueryPlan(sql);
+      send(200, { ok: true, plan });
       return;
     }
 
@@ -5266,7 +5481,13 @@ const server = http.createServer(async (req, res) => {
       const rawConfig = parseMaybeJson(body.config_json ?? body.config, "config_json");
       const configValidated = await validateExperimentConfig(rawConfig);
       const status = normalizeExperimentStatus(body.status);
-      const experiment = await createExperiment({ name, config: configValidated, status });
+      const defaultSnapshotId = await getDefaultSnapshotId();
+      const snapshotId = typeof body?.snapshotId === "string" && body.snapshotId.trim() ? body.snapshotId.trim() : defaultSnapshotId;
+      if (!snapshotId) {
+        sendError(res, 409, "snapshot_required", "snapshotId is required for experiments", "snapshotId");
+        return;
+      }
+      const experiment = await createExperiment({ name, config: configValidated, status, snapshotId });
       await auditAdmin("experiments.create", experiment.id, { status });
       send(200, { ok: true, experiment });
       return;
@@ -5305,6 +5526,13 @@ const server = http.createServer(async (req, res) => {
         const rawConfig = parseMaybeJson(body.config_json ?? body.config, "config_json");
         patch.config = await validateExperimentConfig(rawConfig);
       }
+      if (typeof body?.snapshotId === "string" && body.snapshotId.trim()) {
+        if (existing.status === "running" && body.snapshotId.trim() !== existing.snapshotId) {
+          sendError(res, 409, "experiment_snapshot_locked", "Cannot change snapshot while running", "snapshotId");
+          return;
+        }
+        patch.snapshotId = body.snapshotId.trim();
+      }
       if (!Object.keys(patch).length) {
         sendError(res, 400, "patch_empty", "No valid fields to update");
         return;
@@ -5326,7 +5554,18 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       await validateExperimentConfig(existing.config);
-      const experiment = await setExperimentStatus(experimentId, "running");
+      const defaultSnapshotId = await getDefaultSnapshotId();
+      const snapshotId = existing.snapshotId || defaultSnapshotId;
+      if (!snapshotId || snapshotId !== defaultSnapshotId) {
+        sendError(res, 409, "experiment_snapshot_mismatch", "Experiment snapshot must match default snapshot", "snapshotId");
+        return;
+      }
+      const experiment = await updateExperiment(experimentId, {
+        status: "running",
+        snapshotId,
+        startedAt: new Date().toISOString(),
+        stoppedAt: null,
+      });
       await auditAdmin("experiments.start", experimentId, {});
       await insertOpsLog({ adminUserId: userId, action: "experiment_started", target: experimentId, props: {} });
       send(200, { ok: true, experiment });
@@ -5343,7 +5582,10 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 404, "not_found", "Experiment not found");
         return;
       }
-      const experiment = await setExperimentStatus(experimentId, "stopped");
+      const experiment = await updateExperiment(experimentId, {
+        status: "stopped",
+        stoppedAt: new Date().toISOString(),
+      });
       await auditAdmin("experiments.stop", experimentId, {});
       await insertOpsLog({ adminUserId: userId, action: "experiment_stopped", target: experimentId, props: {} });
       send(200, { ok: true, experiment });
@@ -5552,6 +5794,187 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       send(200, { ok: true, bundle });
+      return;
+    }
+
+    if (pathname === "/v1/admin/support/replay" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const targetUserId = sanitizeUserId(body?.userId || "");
+      if (!targetUserId || targetUserId !== body?.userId) {
+        sendError(res, 400, "userId_invalid", "userId is invalid", "userId");
+        return;
+      }
+      const snapshotId = typeof body?.snapshotId === "string" ? body.snapshotId.trim() : "";
+      if (!snapshotId) {
+        sendError(res, 400, "snapshot_required", "snapshotId is required", "snapshotId");
+        return;
+      }
+      const limit = Math.min(Math.max(Number(body?.limit || 30), 1), 100);
+      const bundle = await loadSnapshotBundle(snapshotId, { userId: targetUserId });
+      if (!bundle) {
+        sendError(res, 404, "snapshot_not_found", "Snapshot not found");
+        return;
+      }
+      const snapshotState = await getUserState(targetUserId);
+      let sandboxState = normalizeState(deepClone(snapshotState?.state || {}));
+      try {
+        validateState(sandboxState);
+      } catch {
+        sandboxState = normalizeState({});
+      }
+      const flags = await getFeatureFlags();
+      const ruleConfig = buildRuleConfig(res.livenewRequestId, targetUserId);
+      const paramsState = bundle.paramsState || (await getParameters(targetUserId));
+      let experimentEffects = {
+        paramsEffective: paramsState.map,
+        packOverride: null,
+        experimentMeta: null,
+        assignments: [],
+      };
+      try {
+        experimentEffects = await applyExperiments({
+          userId: targetUserId,
+          cohortId: paramsState.cohortId || null,
+          params: paramsState.map,
+          logger: ruleConfig.logger,
+          persistAssignments: false,
+          snapshotId,
+        });
+      } catch (err) {
+        logError({
+          event: "experiments_apply_failed",
+          userId: targetUserId,
+          requestId: res.livenewRequestId,
+          error: err?.code || err?.message || String(err),
+        });
+      }
+      const paramsMeta = {
+        cohortId: paramsState.cohortId || null,
+        versions: paramsState.versionsBySource || {},
+        experiments: experimentEffects.assignments || [],
+      };
+      const paramsEffective = experimentEffects.paramsEffective || paramsState.map;
+      const packOverride = experimentEffects.packOverride || null;
+      const experimentMeta = experimentEffects.experimentMeta || null;
+      const packId = packOverride || sandboxState.userProfile?.contentPack || null;
+      const experimentIds = (experimentEffects.assignments || []).map(
+        (assignment) => `${assignment.experimentId}:${assignment.variantKey}`
+      );
+      const modelStamp = buildModelStamp({
+        snapshotId,
+        libraryHash: bundle.snapshot?.libraryHash || null,
+        packsHash: bundle.snapshot?.packsHash || null,
+        paramsVersions: paramsState.versions || {},
+        packId,
+        cohortId: paramsState.cohortId || null,
+        experimentIds,
+      });
+      const contentPrefs = await loadContentPrefs(targetUserId);
+      const engineGuards = resolveEngineGuards(flags, resolveIncidentMode(flags));
+      const events = (await getUserEventsRecent(targetUserId, limit))
+        .slice()
+        .sort((a, b) => (a.atISO || "").localeCompare(b.atISO || ""));
+
+      for (const evt of events) {
+        const todayISO = dateISOForAt(sandboxState.userProfile, evt.atISO);
+        const ctx = {
+          domain,
+          now: { todayISO, atISO: evt.atISO },
+          ruleToggles: resolveRuleToggles(sandboxState, flags),
+          scenarios: { getScenarioById },
+          isDev: isDevRoutesEnabled,
+          params: paramsEffective,
+          paramsMeta,
+          packOverride,
+          experimentMeta,
+          ruleConfig,
+          library: bundle.library || domain.defaultLibrary,
+          preferences: contentPrefs,
+          modelStamp,
+          engineGuards,
+        };
+        const resEvent = reduceEvent(sandboxState, { type: evt.type, payload: evt.payload, atISO: evt.atISO }, ctx);
+        sandboxState = appendLogEvent(resEvent.nextState, resEvent.logEvent);
+      }
+
+      const sandboxTodayISO = getTodayISOForProfile(sandboxState.userProfile);
+      const ensureCtx = {
+        domain,
+        now: { todayISO: sandboxTodayISO, atISO: new Date().toISOString() },
+        ruleToggles: resolveRuleToggles(sandboxState, flags),
+        scenarios: { getScenarioById },
+        isDev: isDevRoutesEnabled,
+        params: paramsEffective,
+        paramsMeta,
+        packOverride,
+        experimentMeta,
+        ruleConfig,
+        library: bundle.library || domain.defaultLibrary,
+        preferences: contentPrefs,
+        modelStamp,
+        engineGuards,
+      };
+      const ensured = reduceEvent(sandboxState, { type: "ENSURE_WEEK", payload: {}, atISO: ensureCtx.now.atISO }, ensureCtx);
+      sandboxState = appendLogEvent(ensured.nextState, ensured.logEvent);
+
+      const affectedDates = new Set([sandboxTodayISO]);
+      events.forEach((evt) => {
+        const dateISO = evt.payload?.dateISO || evt.payload?.checkIn?.dateISO;
+        if (dateISO) affectedDates.add(dateISO);
+      });
+
+      const diffs = [];
+      const dates = Array.from(affectedDates).sort();
+      for (const dateISO of dates) {
+        if (!sandboxState.weekPlan || !sandboxState.weekPlan.days?.some((day) => day.dateISO === dateISO)) {
+          const rebuildCtx = {
+            ...ensureCtx,
+            now: { todayISO: dateISO, atISO: ensureCtx.now.atISO },
+          };
+          const rebuilt = reduceEvent(
+            sandboxState,
+            { type: "WEEK_REBUILD", payload: { weekAnchorISO: dateISO }, atISO: rebuildCtx.now.atISO },
+            rebuildCtx
+          );
+          sandboxState = appendLogEvent(rebuilt.nextState, rebuilt.logEvent);
+        }
+        const history = await listDayPlanHistory(targetUserId, dateISO, 1);
+        const storedDay = history?.[0]?.day || null;
+        const sandboxDay = toDayContract(sandboxState, dateISO, domain);
+        if (!storedDay || !sandboxDay) continue;
+        const diff = diffDayContracts(storedDay, sandboxDay);
+        if (!diff.changes?.length) continue;
+        const storedRules = extractAppliedRules(storedDay);
+        const sandboxRules = extractAppliedRules(sandboxDay);
+        const storedDrivers = extractDrivers(storedDay);
+        const sandboxDrivers = extractDrivers(sandboxDay);
+        const storedSnapshotId = storedDay?.meta?.modelStamp?.snapshotId || null;
+        diffs.push({
+          dateISO,
+          changeCount: diff.changes.length,
+          changes: diff.changes.slice(0, 20),
+          topAppliedRulesChanged: diffList(storedRules, sandboxRules),
+          topDriverChanged: diffList(storedDrivers, sandboxDrivers),
+          packMatchDelta: deltaNumber(storedDay?.why?.packMatch?.score, sandboxDay?.why?.packMatch?.score),
+          confidenceDelta: deltaNumber(storedDay?.why?.confidence, sandboxDay?.why?.confidence),
+          relevanceDelta: deltaNumber(storedDay?.why?.relevance, sandboxDay?.why?.relevance),
+          snapshotMismatch: storedSnapshotId ? storedSnapshotId !== snapshotId : false,
+        });
+      }
+
+      const summary = {
+        eventsReplayed: events.length,
+        affectedDates: dates,
+        snapshotId,
+        diffCount: diffs.length,
+      };
+      const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+      const redacted = redactSensitive({ snapshotId, summary, diffs });
+      const debugBundle = await insertDebugBundle({ userId: targetUserId, expiresAt, redacted });
+      await auditAdmin("support.replay", targetUserId, { snapshotId, events: events.length });
+      send(200, { ok: true, replay: { diffs, summary, bundleId: debugBundle.id } });
       return;
     }
 
@@ -6736,6 +7159,7 @@ const server = http.createServer(async (req, res) => {
             cohortId: paramsState.cohortId || null,
             params: paramsState.map,
             logger: ruleConfig.logger,
+            snapshotId: snapshotCtx?.snapshotId || null,
           });
         } catch (err) {
           logError({

@@ -775,6 +775,26 @@ function initTrends() {
             el("div", { class: "muted", text: String(outcomes.metrics?.daysAnyRegulationAction ?? 0) }),
           ])
         );
+        const stabilityScore = outcomes.metrics?.stabilityScore;
+        const planChanges7d = outcomes.metrics?.planChanges7d;
+        let stabilityLabel = "–";
+        if (stabilityScore != null && Number.isFinite(stabilityScore)) {
+          if (stabilityScore >= 0.75) stabilityLabel = t("outcomes.stabilityHigh");
+          else if (stabilityScore >= 0.4) stabilityLabel = t("outcomes.stabilityMedium");
+          else stabilityLabel = t("outcomes.stabilityLow");
+        }
+        outcomesSummary.appendChild(
+          el("div", { class: "list-item" }, [
+            el("div", { text: t("outcomes.stability") }),
+            el("div", { class: "muted", text: stabilityLabel }),
+          ])
+        );
+        outcomesSummary.appendChild(
+          el("div", { class: "list-item" }, [
+            el("div", { text: t("outcomes.planChanges") }),
+            el("div", { class: "muted", text: planChanges7d != null ? String(planChanges7d) : "–" }),
+          ])
+        );
       }
       if (outcomesAnchors) {
         clear(outcomesAnchors);
@@ -1938,6 +1958,22 @@ function initAdmin() {
     if (qs("#support-output")) qs("#support-output").textContent = JSON.stringify(res, null, 2);
   };
 
+  const replaySupportSnapshot = async () => {
+    if (!supportUserId) return;
+    const snapshotId = qs("#support-replay-snapshot")?.value?.trim();
+    const limit = Number(qs("#support-replay-limit")?.value || 30);
+    if (!snapshotId) return;
+    const res = await apiPost("/v1/admin/support/replay", {
+      userId: supportUserId,
+      snapshotId,
+      limit,
+    });
+    if (qs("#support-output")) qs("#support-output").textContent = JSON.stringify(res, null, 2);
+    if (res?.replay?.bundleId && qs("#support-bundle-id")) {
+      qs("#support-bundle-id").value = res.replay.bundleId;
+    }
+  };
+
   const loadCommunityPending = async () => {
     const res = await apiGet("/v1/admin/community/pending?page=1&pageSize=50");
     const list = qs("#community-pending-list");
@@ -2096,6 +2132,7 @@ function initAdmin() {
     qs("#support-search")?.addEventListener("click", searchSupportUser);
     qs("#support-debug-bundle")?.addEventListener("click", createSupportDebugBundle);
     qs("#support-replay")?.addEventListener("click", replaySupportSandbox);
+    qs("#support-replay-snapshot-btn")?.addEventListener("click", replaySupportSnapshot);
     qs("#support-bundle-load")?.addEventListener("click", () => loadSupportBundle());
     qs("#community-pending-load")?.addEventListener("click", loadCommunityPending);
     qs("#changelog-create")?.addEventListener("click", createChangelog);

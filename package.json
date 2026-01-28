@@ -14,7 +14,8 @@
     "test:integration": "node scripts/integration.test.js",
     "test:golden": "node scripts/golden.snapshots.js",
     "test:load": "node scripts/loadtest.js",
-    "test": "npm run test:integration && npm run test:golden"
+    "test:migrations": "node scripts/migrations.test.js",
+    "test": "npm run test:integration && npm run test:golden && npm run test:migrations"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",

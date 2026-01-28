@@ -84,6 +84,7 @@ export function createEngineValidator({
   listContentPacks,
   listContentItems,
   validateContentItem,
+  loadSnapshotBundle,
   logInfo,
 }) {
   if (!domain || !toDayContract || !assertDayContract) {
@@ -97,21 +98,79 @@ export function createEngineValidator({
   return async function runEngineValidator(options = {}) {
     const runId = crypto.randomUUID();
     const startedAt = new Date().toISOString();
-    const paramsState = await getParameters();
-    const paramsMap = paramsState?.map || {};
-    const packs = await listContentPacks();
-    const packIds = stableSort((packs || []).map((pack) => pack.id));
+    const snapshotId = options.snapshotId || null;
+    let paramsState = await getParameters();
+    let paramsMap = paramsState?.map || {};
+    let packIds = [];
+    let library = null;
+    let librarySource = "live";
+
+    let snapshotMissing = false;
+    if (snapshotId && typeof loadSnapshotBundle === "function") {
+      const bundle = await loadSnapshotBundle(snapshotId);
+      if (bundle) {
+        paramsState = bundle.paramsState || paramsState;
+        paramsMap = paramsState?.map || {};
+        const snapshotPacks = bundle.packs || [];
+        packIds = stableSort(
+          snapshotPacks
+            .map((entry) => entry.packId || entry.id || entry?.pack?.id)
+            .filter(Boolean)
+        );
+        library = bundle.library || null;
+        librarySource = "snapshot";
+      } else {
+        snapshotMissing = true;
+      }
+    }
+
+    if (snapshotMissing) {
+      const endedAt = new Date().toISOString();
+      return {
+        ok: false,
+        runId,
+        startedAt,
+        endedAt,
+        totals: { cells: 0, passed: 0, failed: 1 },
+        failures: [
+          {
+            profile: "all",
+            timeAvailableMin: null,
+            packId: null,
+            inputs: null,
+            code: "snapshot_not_found",
+            message: "Snapshot not found",
+          },
+        ],
+        meta: {
+          packs: [],
+          profiles: stableSort(options.profiles || DEFAULT_PROFILES),
+          timeBuckets: [],
+          baseInputs: BASE_INPUT_SETS,
+          dateISO: options.dateISO || domain.isoToday(),
+          snapshotId,
+          librarySource: "snapshot",
+        },
+      };
+    }
+
+    if (!packIds.length) {
+      const packs = await listContentPacks();
+      packIds = stableSort((packs || []).map((pack) => pack.id));
+    }
     const timeBucketsRaw = paramsMap?.timeBuckets?.allowed || [5, 10, 15, 20, 30, 45, 60];
     const timeBuckets = stableSort(timeBucketsRaw.map((n) => Number(n)).filter((n) => Number.isFinite(n)));
     const profiles = stableSort(options.profiles || DEFAULT_PROFILES);
     const dateISO = options.dateISO || domain.isoToday();
-    const items = await listContentItems(undefined, false, { statuses: ["enabled"] });
-    const library = buildLibraryFromItems({
-      items,
-      baseLibrary: domain.defaultLibrary,
-      validateContentItem,
-      log,
-    });
+    if (!library) {
+      const items = await listContentItems(undefined, false, { statuses: ["enabled"] });
+      library = buildLibraryFromItems({
+        items,
+        baseLibrary: domain.defaultLibrary,
+        validateContentItem,
+        log,
+      });
+    }
 
     let cells = 0;
     const failures = [];
@@ -206,6 +265,8 @@ export function createEngineValidator({
         timeBuckets,
         baseInputs: BASE_INPUT_SETS,
         dateISO,
+        snapshotId: snapshotId || null,
+        librarySource,
       },
     };
     return report;

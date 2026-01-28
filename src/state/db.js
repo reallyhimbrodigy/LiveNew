@@ -16,6 +16,36 @@ const DB_PATH = process.env.DB_PATH || "data/livenew.sqlite";
 let db = null;
 const columnCache = new Map();
 const queryTracker = new AsyncLocalStorage();
+const QUERY_LOG_LIMIT = 200;
+const queryLog = [];
+const queryStats = new Map();
+
+function normalizeSql(sql) {
+  if (!sql) return "";
+  return String(sql).replace(/\s+/g, " ").trim().slice(0, 500);
+}
+
+function recordQueryStat(sql, durationMs) {
+  const key = normalizeSql(sql);
+  if (!key) return;
+  const stats = queryStats.get(key) || { count: 0, totalMs: 0 };
+  stats.count += 1;
+  stats.totalMs += Math.max(0, durationMs || 0);
+  queryStats.set(key, stats);
+  queryLog.push({ key, ms: Math.max(0, durationMs || 0) });
+  if (queryLog.length <= QUERY_LOG_LIMIT) return;
+  const removed = queryLog.shift();
+  if (!removed) return;
+  const existing = queryStats.get(removed.key);
+  if (!existing) return;
+  existing.count = Math.max(0, existing.count - 1);
+  existing.totalMs = Math.max(0, existing.totalMs - removed.ms);
+  if (existing.count <= 0) {
+    queryStats.delete(removed.key);
+  } else {
+    queryStats.set(removed.key, existing);
+  }
+}
 
 function recordQueryDuration(startMs) {
   const store = queryTracker.getStore();
@@ -24,19 +54,20 @@ function recordQueryDuration(startMs) {
   store.totalMs += Math.max(0, Date.now() - startMs);
 }
 
-function wrapStatement(stmt) {
+function wrapStatement(stmt, sql) {
   const methods = ["run", "get", "all", "iterate"];
   methods.forEach((method) => {
     if (typeof stmt[method] !== "function") return;
     const original = stmt[method].bind(stmt);
     stmt[method] = (...args) => {
       const store = queryTracker.getStore();
-      if (!store) return original(...args);
       const start = Date.now();
       try {
         return original(...args);
       } finally {
-        recordQueryDuration(start);
+        const duration = Date.now() - start;
+        if (store) recordQueryDuration(start);
+        recordQueryStat(sql, duration);
       }
     };
   });
@@ -46,16 +77,17 @@ function wrapStatement(stmt) {
 function instrumentDb(instance) {
   if (instance.__livenewInstrumented) return;
   const originalPrepare = instance.prepare.bind(instance);
-  instance.prepare = (sql) => wrapStatement(originalPrepare(sql));
+  instance.prepare = (sql) => wrapStatement(originalPrepare(sql), sql);
   const originalExec = instance.exec.bind(instance);
   instance.exec = (sql) => {
     const store = queryTracker.getStore();
-    if (!store) return originalExec(sql);
     const start = Date.now();
     try {
       return originalExec(sql);
     } finally {
-      recordQueryDuration(start);
+      const duration = Date.now() - start;
+      if (store) recordQueryDuration(start);
+      recordQueryStat(sql, duration);
     }
   };
   instance.__livenewInstrumented = true;
@@ -69,6 +101,23 @@ export function getQueryStats() {
   const store = queryTracker.getStore();
   if (!store) return null;
   return { count: store.count, totalMs: store.totalMs };
+}
+
+export function getTopQueries(limit = 10) {
+  const size = Math.min(Math.max(Number(limit) || 10, 1), 50);
+  const entries = Array.from(queryStats.entries()).map(([sqlPreview, stats]) => ({
+    sqlPreview,
+    count: stats.count,
+    totalMs: stats.totalMs,
+    avgMs: stats.count ? stats.totalMs / stats.count : 0,
+  }));
+  return entries.sort((a, b) => b.totalMs - a.totalMs).slice(0, size);
+}
+
+export async function explainQueryPlan(sql) {
+  if (!sql) return [];
+  const statement = `EXPLAIN QUERY PLAN ${sql}`;
+  return getDb().prepare(statement).all();
 }
 
 async function ensureDir() {
@@ -397,6 +446,14 @@ export async function listPlanChangeSummaries(userId, dateISO, limit = 10) {
     cause: row.cause,
     summary: JSON.parse(row.summary_json),
   }));
+}
+
+export async function countPlanChangeSummariesInRange(userId, fromISO, toISO) {
+  if (!userId || !fromISO || !toISO) return 0;
+  const row = getDb()
+    .prepare("SELECT COUNT(1) AS count FROM plan_change_summaries WHERE user_id = ? AND date_iso BETWEEN ? AND ?")
+    .get(userId, fromISO, toISO);
+  return Number(row?.count || 0);
 }
 
 export async function upsertReminderIntent({ id, userId, dateISO, intentKey, scheduledForISO, status }) {
@@ -1382,6 +1439,9 @@ function parseExperimentRow(row) {
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    snapshotId: row.snapshot_id || "",
+    startedAt: row.started_at || null,
+    stoppedAt: row.stopped_at || null,
     config: JSON.parse(row.config_json || "{}"),
   };
 }
@@ -1390,10 +1450,14 @@ export async function listExperiments(status = null) {
   const nextStatus = status ? normalizeExperimentStatus(status, "") : null;
   const rows = nextStatus
     ? getDb()
-        .prepare("SELECT id, name, status, created_at, updated_at, config_json FROM experiments WHERE status = ? ORDER BY updated_at DESC")
+        .prepare(
+          "SELECT id, name, status, created_at, updated_at, snapshot_id, started_at, stopped_at, config_json FROM experiments WHERE status = ? ORDER BY updated_at DESC"
+        )
         .all(nextStatus)
     : getDb()
-        .prepare("SELECT id, name, status, created_at, updated_at, config_json FROM experiments ORDER BY updated_at DESC")
+        .prepare(
+          "SELECT id, name, status, created_at, updated_at, snapshot_id, started_at, stopped_at, config_json FROM experiments ORDER BY updated_at DESC"
+        )
         .all();
   return rows.map(parseExperimentRow);
 }
@@ -1404,19 +1468,33 @@ export async function listRunningExperiments() {
 
 export async function getExperiment(id) {
   const row = getDb()
-    .prepare("SELECT id, name, status, created_at, updated_at, config_json FROM experiments WHERE id = ?")
+    .prepare(
+      "SELECT id, name, status, created_at, updated_at, snapshot_id, started_at, stopped_at, config_json FROM experiments WHERE id = ?"
+    )
     .get(id);
   return parseExperimentRow(row);
 }
 
-export async function createExperiment({ name, config, status = "draft" }) {
+export async function createExperiment({ name, config, status = "draft", snapshotId = "" }) {
   const id = crypto.randomUUID();
   const now = new Date().toISOString();
   const nextStatus = normalizeExperimentStatus(status, "draft");
   getDb()
-    .prepare("INSERT INTO experiments (id, name, status, created_at, updated_at, config_json) VALUES (?, ?, ?, ?, ?, ?)")
-    .run(id, name, nextStatus, now, now, JSON.stringify(config || {}));
-  return { id, name, status: nextStatus, createdAt: now, updatedAt: now, config: config || {} };
+    .prepare(
+      "INSERT INTO experiments (id, name, status, created_at, updated_at, snapshot_id, started_at, stopped_at, config_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    )
+    .run(id, name, nextStatus, now, now, snapshotId || "", null, null, JSON.stringify(config || {}));
+  return {
+    id,
+    name,
+    status: nextStatus,
+    createdAt: now,
+    updatedAt: now,
+    snapshotId: snapshotId || "",
+    startedAt: null,
+    stoppedAt: null,
+    config: config || {},
+  };
 }
 
 export async function updateExperiment(id, patch = {}) {
@@ -1431,8 +1509,17 @@ export async function updateExperiment(id, patch = {}) {
     updatedAt: now,
   };
   getDb()
-    .prepare("UPDATE experiments SET name = ?, status = ?, updated_at = ?, config_json = ? WHERE id = ?")
-    .run(next.name, next.status, now, JSON.stringify(next.config || {}), id);
+    .prepare("UPDATE experiments SET name = ?, status = ?, updated_at = ?, snapshot_id = ?, started_at = ?, stopped_at = ?, config_json = ? WHERE id = ?")
+    .run(
+      next.name,
+      next.status,
+      now,
+      next.snapshotId || "",
+      next.startedAt || null,
+      next.stoppedAt || null,
+      JSON.stringify(next.config || {}),
+      id
+    );
   return next;
 }
 
@@ -2249,18 +2336,28 @@ export async function getDebugBundle(id, nowISO = new Date().toISOString()) {
   };
 }
 
-export async function insertValidatorRun({ kind, ok, report, atISO = null, id = null }) {
+export async function insertValidatorRun({ kind, ok, report, atISO = null, id = null, snapshotId = null }) {
   const runId = id || crypto.randomUUID();
   const atIso = atISO || new Date().toISOString();
-  getDb()
-    .prepare("INSERT INTO validator_runs (id, kind, at_iso, ok, report_json) VALUES (?, ?, ?, ?, ?)")
-    .run(runId, kind, atIso, ok ? 1 : 0, JSON.stringify(report || {}));
-  return { id: runId, kind, atISO: atIso, ok: Boolean(ok), report: report || {} };
+  const hasSnapshot = hasColumn("validator_runs", "snapshot_id");
+  if (hasSnapshot) {
+    getDb()
+      .prepare("INSERT INTO validator_runs (id, kind, at_iso, ok, report_json, snapshot_id) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(runId, kind, atIso, ok ? 1 : 0, JSON.stringify(report || {}), snapshotId || null);
+  } else {
+    getDb()
+      .prepare("INSERT INTO validator_runs (id, kind, at_iso, ok, report_json) VALUES (?, ?, ?, ?, ?)")
+      .run(runId, kind, atIso, ok ? 1 : 0, JSON.stringify(report || {}));
+  }
+  return { id: runId, kind, atISO: atIso, ok: Boolean(ok), report: report || {}, snapshotId: snapshotId || null };
 }
 
 export async function getValidatorRun(id) {
+  const hasSnapshot = hasColumn("validator_runs", "snapshot_id");
   const row = getDb()
-    .prepare("SELECT id, kind, at_iso, ok, report_json FROM validator_runs WHERE id = ?")
+    .prepare(
+      `SELECT id, kind, at_iso, ok, report_json${hasSnapshot ? ", snapshot_id" : ""} FROM validator_runs WHERE id = ?`
+    )
     .get(id);
   if (!row) return null;
   return {
@@ -2269,12 +2366,32 @@ export async function getValidatorRun(id) {
     atISO: row.at_iso,
     ok: row.ok === 1,
     report: JSON.parse(row.report_json || "{}"),
+    snapshotId: row.snapshot_id || null,
   };
 }
 
-export async function getLatestValidatorRun(kind = "engine_matrix") {
+export async function getLatestValidatorRun(kind = "engine_matrix", snapshotId = null) {
+  const hasSnapshot = hasColumn("validator_runs", "snapshot_id");
+  if (snapshotId && hasSnapshot) {
+    const row = getDb()
+      .prepare(
+        "SELECT id, kind, at_iso, ok, report_json, snapshot_id FROM validator_runs WHERE kind = ? AND snapshot_id = ? ORDER BY at_iso DESC LIMIT 1"
+      )
+      .get(kind, snapshotId);
+    if (!row) return null;
+    return {
+      id: row.id,
+      kind: row.kind,
+      atISO: row.at_iso,
+      ok: row.ok === 1,
+      report: JSON.parse(row.report_json || "{}"),
+      snapshotId: row.snapshot_id || null,
+    };
+  }
   const row = getDb()
-    .prepare("SELECT id, kind, at_iso, ok, report_json FROM validator_runs WHERE kind = ? ORDER BY at_iso DESC LIMIT 1")
+    .prepare(
+      `SELECT id, kind, at_iso, ok, report_json${hasSnapshot ? ", snapshot_id" : ""} FROM validator_runs WHERE kind = ? ORDER BY at_iso DESC LIMIT 1`
+    )
     .get(kind);
   if (!row) return null;
   return {
@@ -2283,13 +2400,17 @@ export async function getLatestValidatorRun(kind = "engine_matrix") {
     atISO: row.at_iso,
     ok: row.ok === 1,
     report: JSON.parse(row.report_json || "{}"),
+    snapshotId: row.snapshot_id || null,
   };
 }
 
 export async function listValidatorRuns(kind = "engine_matrix", limit = 20) {
   const safeLimit = Math.max(1, Math.min(Number(limit) || 20, 200));
+  const hasSnapshot = hasColumn("validator_runs", "snapshot_id");
   const rows = getDb()
-    .prepare("SELECT id, kind, at_iso, ok, report_json FROM validator_runs WHERE kind = ? ORDER BY at_iso DESC LIMIT ?")
+    .prepare(
+      `SELECT id, kind, at_iso, ok, report_json${hasSnapshot ? ", snapshot_id" : ""} FROM validator_runs WHERE kind = ? ORDER BY at_iso DESC LIMIT ?`
+    )
     .all(kind, safeLimit);
   return rows.map((row) => ({
     id: row.id,
@@ -2297,6 +2418,7 @@ export async function listValidatorRuns(kind = "engine_matrix", limit = 20) {
     atISO: row.at_iso,
     ok: row.ok === 1,
     report: JSON.parse(row.report_json || "{}"),
+    snapshotId: row.snapshot_id || null,
   }));
 }
 

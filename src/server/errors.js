@@ -1,4 +1,4 @@
-const ALPHA_LIKE = new Set(["alpha", "prod"]);
+import { getEnvPolicy } from "./envPolicy.js";
 
 export class AppError extends Error {
   constructor(code, message, httpStatus = 500, field = null, details = null) {
@@ -31,10 +31,8 @@ export function internal(code, message, field, details) {
   return new AppError(code || "internal", message || "Something went wrong", 500, field, details);
 }
 
-function isDevLike() {
-  const mode = String(process.env.ENV_MODE || "").toLowerCase();
-  if (!mode) return true;
-  return !ALPHA_LIKE.has(mode);
+function allowVerboseErrors() {
+  return getEnvPolicy().allowVerboseErrors;
 }
 
 function normalizeError(errOrStatus, code, message, field) {
@@ -80,7 +78,7 @@ export function sendError(res, errOrStatus, code, message, field, requestId) {
   }
   const exposeDetails =
     err.details?.expose === true || err.code === "consent_required" || err.code === "consent_required_version";
-  if (isDevLike() || exposeDetails) {
+  if (allowVerboseErrors() || exposeDetails) {
     const details = err.details || undefined;
     if (details) {
       if (details.expose) {

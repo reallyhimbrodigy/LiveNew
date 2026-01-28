@@ -96,7 +96,7 @@ function normalizeConfig(raw) {
   };
 }
 
-export async function applyExperiments({ userId, cohortId, params, logger, persistAssignments = true }) {
+export async function applyExperiments({ userId, cohortId, params, logger, persistAssignments = true, snapshotId = null }) {
   if (!userId || !params) {
     return { paramsEffective: params, packOverride: null, experimentMeta: null, assignments: [] };
   }
@@ -112,6 +112,11 @@ export async function applyExperiments({ userId, cohortId, params, logger, persi
   const appliedParamsOverride = {};
 
   for (const exp of experiments) {
+    if (snapshotId) {
+      if (!exp.snapshotId || exp.snapshotId !== snapshotId) continue;
+    } else if (exp.snapshotId) {
+      continue;
+    }
     const config = normalizeConfig(exp.config || exp.config_json || exp.configJson);
     if (!config) continue;
     if (!matchesTargeting(config.targeting, cohortId)) continue;
