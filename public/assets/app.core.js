@@ -541,9 +541,9 @@ function initDay() {
   const ensureConsent = async () => ensurePlanAccess(consentGate);
 
   const loadRail = async () => {
-    const ok = await ensureConsent();
-    if (!ok) return;
     try {
+      const ok = await ensureConsent();
+      if (!ok) return;
       const res = await apiGet("/v1/rail/today");
       const dateISO = res.day?.dateISO || todayISO();
       if (dateInput) dateInput.value = dateISO;
@@ -567,14 +567,14 @@ function initDay() {
   };
 
   const loadDay = async () => {
-    const ok = await ensureConsent();
-    if (!ok) return;
-    const dateISO = dateInput?.value || todayISO();
-    if (railResetEl && dateISO === todayISO()) {
-      await loadRail();
-      return;
-    }
     try {
+      const ok = await ensureConsent();
+      if (!ok) return;
+      const dateISO = dateInput?.value || todayISO();
+      if (railResetEl && dateISO === todayISO()) {
+        await loadRail();
+        return;
+      }
       const res = await apiGet(`/v1/plan/day?date=${dateISO}`);
       await ensureCitations();
       renderDay(res.day);
