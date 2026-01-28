@@ -253,9 +253,22 @@ async function init() {
     document.title = titleMap[page];
   }
   bindAuth();
-  const boot = await bootstrapApp();
-  setAppState(boot);
+  const state = await bootstrapApp();
   await updateAdminVisibility();
+  if (page === "day" || page === "week") {
+    if (!state.auth?.isAuthenticated) {
+      routeError({ code: "auth_required" });
+      return;
+    }
+    if (!state.consentComplete) {
+      const consentGate = setupConsentGate(() => {
+        if (page === "day") initDay();
+        if (page === "week") initWeek();
+      });
+      consentGate.show();
+      return;
+    }
+  }
   if (page === "day") initDay();
   if (page === "week") initWeek();
   if (page === "trends") initTrends();

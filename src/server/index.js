@@ -1880,6 +1880,8 @@ function contentTypeForPath(filePath) {
   if (filePath.endsWith(".css")) return "text/css";
   if (filePath.endsWith(".html")) return "text/html";
   if (filePath.endsWith(".json")) return "application/json";
+  if (filePath.endsWith(".ico")) return "image/x-icon";
+  if (filePath.endsWith(".png")) return "image/png";
   return "application/octet-stream";
 }
 
@@ -2776,8 +2778,14 @@ function countErrors(windowMs = ERROR_WINDOW_LONG_MS) {
 
 async function serveFile(res, filePath, { replaceDevFlag } = {}) {
   try {
-    const raw = await fs.readFile(filePath, "utf8");
-    const body = replaceDevFlag ? raw.replace("__IS_DEV__", isDevRoutesEnabled ? "true" : "false") : raw;
+    const isText =
+      filePath.endsWith(".js") ||
+      filePath.endsWith(".css") ||
+      filePath.endsWith(".html") ||
+      filePath.endsWith(".json");
+    const raw = await fs.readFile(filePath, isText ? "utf8" : undefined);
+    const body =
+      replaceDevFlag && isText ? raw.replace("__IS_DEV__", isDevRoutesEnabled ? "true" : "false") : raw;
     res.writeHead(200, { "Content-Type": contentTypeForPath(filePath) });
     res.end(body);
   } catch (err) {
@@ -2867,6 +2875,16 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && pathname.startsWith("/assets/")) {
     await serveFile(res, path.join(PUBLIC_DIR, pathname.slice(1)));
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/favicon.ico") {
+    await serveFile(res, path.join(PUBLIC_DIR, "favicon.ico"));
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/favicon.png") {
+    await serveFile(res, path.join(PUBLIC_DIR, "favicon.png"));
     return;
   }
 
