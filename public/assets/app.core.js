@@ -53,11 +53,18 @@ const DEFAULT_APP_STATE = {
   uiState: "login",
 };
 
-function getAppState() {
-  return window.__APP_STATE || { ...DEFAULT_APP_STATE };
+function ensureAppState() {
+  if (!window.__APP_STATE) {
+    window.__APP_STATE = { ...DEFAULT_APP_STATE };
+  }
+  return window.__APP_STATE;
 }
 
-function setAppState(bootstrap) {
+export function getAppState() {
+  return ensureAppState();
+}
+
+export function setAppState(bootstrap) {
   const next = {
     ...DEFAULT_APP_STATE,
     ...(bootstrap || {}),
@@ -2339,8 +2346,6 @@ function initAdmin() {
 export {
   initBaseUi,
   bootstrapApp,
-  getAppState,
-  setAppState,
   routeError,
   setupConsentGate,
   ensurePlanAccess,
