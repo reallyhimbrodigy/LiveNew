@@ -74,7 +74,12 @@ export function sendError(res, errOrStatus, code, message, field, requestId) {
   if (err.code === "consent_required" && err.details?.required) {
     payload.error.required = err.details.required;
   }
-  const exposeDetails = err.details?.expose === true || err.code === "consent_required";
+  if (err.code === "consent_required_version" && err.details?.requiredVersion != null) {
+    payload.error.requiredVersion = err.details.requiredVersion;
+    if (err.details.userVersion != null) payload.error.userVersion = err.details.userVersion;
+  }
+  const exposeDetails =
+    err.details?.expose === true || err.code === "consent_required" || err.code === "consent_required_version";
   if (isDevLike() || exposeDetails) {
     const details = err.details || undefined;
     if (details) {

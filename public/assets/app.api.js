@@ -120,16 +120,15 @@ async function apiFetch(path, options = {}) {
   }
   if (!res.ok || payload?.ok === false) {
     const errorPayload = payload?.error || {};
-    const message =
-      errorPayload.message ||
-      (typeof payload?.error === "string" ? payload.error : null) ||
-      `Request failed (${res.status})`;
+    const message = errorPayload.message || `HTTP ${res.status}`;
     const err = new Error(message);
-    err.code = errorPayload.code || (res.status === 401 ? "auth_required" : "unknown_error");
+    err.code = errorPayload.code || "http_error";
     err.httpStatus = res.status;
     err.requestId = errorPayload.requestId || null;
     err.details = payload?.details || errorPayload.details || null;
-    err.required = errorPayload.required || err.details?.required || [];
+    err.required = errorPayload.required || null;
+    err.requiredVersion = errorPayload.requiredVersion || null;
+    err.userVersion = errorPayload.userVersion || null;
     err.payload = payload;
     throw err;
   }

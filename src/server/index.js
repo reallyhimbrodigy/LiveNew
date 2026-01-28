@@ -125,6 +125,9 @@ import {
   upsertUserConsents,
   missingUserConsents,
   listUserConsents,
+  getUserConsentVersion,
+  getConsentMeta,
+  setConsentMeta,
   setCommunityOptIn,
   getCommunityOptIn,
   insertCommunityResponse,
@@ -171,6 +174,7 @@ import { runLoadtestScript, evaluateLoadtestReport } from "./ops.js";
 import { buildReleaseChecklist } from "./releaseChecklist.js";
 import { diffSnapshots } from "./snapshotDiff.js";
 import { loadSnapshotBundle, resolveSnapshotForUser, setDefaultSnapshotId, getDefaultSnapshotId, repinUserSnapshot } from "./snapshots.js";
+import { scheduleStartupSmoke } from "./startupSmoke.js";
 
 const NODE_ENV = process.env.NODE_ENV || "development";
 const config = getConfig();
@@ -178,6 +182,7 @@ const PORT = config.port;
 const isDevRoutesEnabled = config.devRoutesEnabled;
 const EVENT_SOURCING = process.env.EVENT_SOURCING === "true";
 const EVENT_RETENTION_DAYS = Number(process.env.EVENT_RETENTION_DAYS || 90);
+const TEST_MODE = process.env.TEST_MODE === "true";
 const runtimeAdminEmails = config.adminEmails;
 const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
   .split(",")
@@ -189,6 +194,8 @@ const CITATIONS_PATH = path.join(PUBLIC_DIR, "citations.json");
 const REQUIRED_CONTENT_IDS = new Set(["r_panic_mode"]);
 const REQUIRED_CONSENTS = ["terms", "privacy", "alpha_processing"];
 const DEFAULT_TIMEZONE = "America/Los_Angeles";
+const REQUIRED_CONSENT_VERSION_ENV = Number(process.env.REQUIRED_CONSENT_VERSION || "");
+const CONSENT_VERSION_CACHE_TTL_MS = 30 * 1000;
 const ALL_PROFILES = [
   "Balanced",
   "PoorSleep",
@@ -247,6 +254,33 @@ function validateRouteRegexPatterns() {
   });
 }
 
+function recordRouteHit(method, pathname) {
+  if (!TEST_MODE) return;
+  const key = `${method} ${pathname}`;
+  const count = routeHits.get(key) || 0;
+  routeHits.set(key, count + 1);
+}
+
+let consentVersionCache = { value: 1, atMs: 0 };
+async function getRequiredConsentVersion() {
+  if (Number.isFinite(REQUIRED_CONSENT_VERSION_ENV) && REQUIRED_CONSENT_VERSION_ENV > 0) {
+    return REQUIRED_CONSENT_VERSION_ENV;
+  }
+  const now = Date.now();
+  if (consentVersionCache.value && now - consentVersionCache.atMs < CONSENT_VERSION_CACHE_TTL_MS) {
+    return consentVersionCache.value;
+  }
+  try {
+    const raw = await getConsentMeta("required_version");
+    const parsed = Number(raw);
+    const value = Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+    consentVersionCache = { value, atMs: now };
+    return value;
+  } catch {
+    return consentVersionCache.value || 1;
+  }
+}
+
 const userStates = new Map();
 const MAX_USERS = 50;
 const lastSignalByUser = new Map();
@@ -257,6 +291,8 @@ const authEmailRateLimiters = new Map();
 const authIpRateLimiters = new Map();
 const readCache = new Map();
 const contentPrefsCache = new Map();
+const routeHits = new Map();
+const startupSmokeStatus = { lastAtISO: null, ok: null, lastErrorCode: null };
 const latencySamples = new Map();
 const errorCounters = new Map();
 const requestCounters = new Map();
@@ -309,6 +345,14 @@ const secretState = ensureSecretKey(config);
 
 await ensureDataDirWritable(config);
 await initDb();
+try {
+  const existingConsentVersion = await getConsentMeta("required_version");
+  if (!existingConsentVersion) {
+    await setConsentMeta("required_version", "1");
+  }
+} catch {
+  // ignore consent meta boot failures
+}
 validateLibraryContent(domain.defaultLibrary);
 await seedContentItems(domain.defaultLibrary);
 await seedContentPacks(defaultPackSeeds());
@@ -1286,13 +1330,32 @@ async function handleConsentAccept(body, userId, res) {
     );
     return false;
   }
-  await upsertUserConsents(userId, REQUIRED_CONSENTS);
-  sendJson(res, 200, { ok: true, accepted: REQUIRED_CONSENTS }, userId);
+  const requiredVersion = await getRequiredConsentVersion();
+  await upsertUserConsents(userId, REQUIRED_CONSENTS, null, requiredVersion);
+  sendJson(
+    res,
+    200,
+    { ok: true, accepted: REQUIRED_CONSENTS, consentVersion: requiredVersion },
+    userId
+  );
   return true;
 }
 
 async function ensureRequiredConsents(userId, res) {
   if (!userId) return true;
+  const requiredVersion = await getRequiredConsentVersion();
+  const userVersion = await getUserConsentVersion(userId);
+  if (userVersion < requiredVersion) {
+    sendError(
+      res,
+      forbidden("consent_required_version", "Consent update required", null, {
+        requiredVersion,
+        userVersion,
+        expose: true,
+      })
+    );
+    return false;
+  }
   const missing = await missingUserConsents(userId, REQUIRED_CONSENTS);
   if (!missing.length) return true;
   sendError(
@@ -1306,10 +1369,16 @@ async function ensureRequiredConsents(userId, res) {
 }
 
 function consentStatusFromMap(consents) {
+  const normalize = (entry) => {
+    if (!entry) return false;
+    if (typeof entry === "string") return true;
+    if (typeof entry === "object") return Boolean(entry.acceptedAt || entry.accepted_at || entry.value);
+    return false;
+  };
   return {
-    terms: Boolean(consents?.terms),
-    privacy: Boolean(consents?.privacy),
-    alpha_processing: Boolean(consents?.alpha_processing),
+    terms: normalize(consents?.terms),
+    privacy: normalize(consents?.privacy),
+    alpha_processing: normalize(consents?.alpha_processing),
   };
 }
 
@@ -1336,17 +1405,29 @@ function profileCompleteness(profile) {
 async function buildBootstrapPayload({ userId, userProfile, userEmail, flags }) {
   const isAuthenticated = Boolean(userId);
   let consents = {};
+  let userVersion = 0;
   if (isAuthenticated) {
     consents = await listUserConsents(userId);
+    userVersion = await getUserConsentVersion(userId);
   }
   const accepted = consentStatusFromMap(consents);
+  const userAcceptedKeys = Object.keys(accepted).filter((key) => accepted[key]);
+  const requiredVersion = await getRequiredConsentVersion();
   const consentComplete = REQUIRED_CONSENTS.every((key) => accepted[key] === true);
+  const consentVersionOk = userVersion >= requiredVersion;
   const profileStatus = profileCompleteness(userProfile);
   const tz = getUserTimezone(userProfile);
   const dayBoundaryHour = getDayBoundaryHour(userProfile);
   const dateISO = toDateISOWithBoundary(new Date(), tz, dayBoundaryHour) || domain.isoToday();
   const incidentMode = resolveIncidentMode(flags);
   const admin = userEmail ? isAdmin(userEmail) : false;
+  const uiState = !isAuthenticated
+    ? "login"
+    : !consentComplete || !consentVersionOk
+      ? "consent"
+      : !profileStatus.isComplete
+        ? "onboard"
+        : "home";
   return {
     ok: true,
     now: { dateISO, tz, dayBoundaryHour },
@@ -1357,8 +1438,12 @@ async function buildBootstrapPayload({ userId, userProfile, userEmail, flags }) 
     },
     consent: {
       required: REQUIRED_CONSENTS.slice(),
+      requiredKeys: REQUIRED_CONSENTS.slice(),
       accepted,
-      isComplete: consentComplete,
+      userAcceptedKeys,
+      isComplete: consentComplete && consentVersionOk,
+      requiredVersion,
+      userVersion,
     },
     profile: {
       isComplete: profileStatus.isComplete,
@@ -1366,9 +1451,10 @@ async function buildBootstrapPayload({ userId, userProfile, userEmail, flags }) 
     },
     features: {
       incidentMode,
-      railTodayAvailable: consentComplete && !incidentMode && isAuthenticated,
+      railTodayAvailable: consentComplete && consentVersionOk && !incidentMode && isAuthenticated,
     },
     env: { mode: config.envMode },
+    uiState,
   };
 }
 
@@ -2789,7 +2875,7 @@ async function serveFile(res, filePath, { replaceDevFlag } = {}) {
     res.writeHead(200, { "Content-Type": contentTypeForPath(filePath) });
     res.end(body);
   } catch (err) {
-    sendJson(res, 404, { ok: false, error: "not_found" });
+    sendError(res, 404, "not_found", "Not found");
   }
 }
 
@@ -2798,6 +2884,7 @@ const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname;
   const routeKey = `${req.method} ${pathname}`;
+  recordRouteHit(req.method, pathname);
   const requestId = getRequestId(req);
   const started = process.hrtime.bigint();
   const clientIp = getClientIp(req);
@@ -3673,13 +3760,20 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 401, "auth_required", "Authorization required");
         return;
       }
+      const requiredVersion = await getRequiredConsentVersion();
+      const userVersion = await getUserConsentVersion(userId);
       const consents = await listUserConsents(userId);
       const accepted = consentStatusFromMap(consents);
       send(200, {
         ok: true,
         accepted,
         required: REQUIRED_CONSENTS.slice(),
-        isComplete: REQUIRED_CONSENTS.every((key) => accepted[key] === true),
+        requiredKeys: REQUIRED_CONSENTS.slice(),
+        userAcceptedKeys: Object.keys(accepted).filter((key) => accepted[key]),
+        requiredVersion,
+        userVersion,
+        isComplete:
+          REQUIRED_CONSENTS.every((key) => accepted[key] === true) && userVersion >= requiredVersion,
       });
       return;
     }
@@ -3695,6 +3789,10 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/consents/accept" && req.method === "POST") {
+      if (!userId) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
       const body = await parseJson(req);
       await handleConsentAccept(body, userId, res);
       return;
@@ -3759,7 +3857,8 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, checkinValidation.error.code, checkinValidation.error.message, checkinValidation.error.field);
         return;
       }
-      await upsertUserConsents(userId, REQUIRED_CONSENTS);
+      const requiredVersion = await getRequiredConsentVersion();
+      await upsertUserConsents(userId, REQUIRED_CONSENTS, null, requiredVersion);
 
       const packId = typeof body?.packId === "string" ? body.packId.trim() : null;
       const userProfile = normalizeUserProfile({
@@ -4816,6 +4915,11 @@ const server = http.createServer(async (req, res) => {
           latestReleasedSnapshotId: latestReleasedSnapshot?.id || null,
           validatorOkAgainstDefault: validator ? validator.ok : false,
           validatorRunId: validator?.id || null,
+        },
+        startupSmoke: {
+          lastAtISO: startupSmokeStatus.lastAtISO,
+          ok: startupSmokeStatus.ok,
+          lastErrorCode: startupSmokeStatus.lastErrorCode,
         },
         releaseChecklistPass: releaseChecklistState.checklist?.pass ?? false,
       });
@@ -6337,6 +6441,29 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (isDevRoutesEnabled) {
+      if (pathname === "/v1/dev/route-hits" && req.method === "GET") {
+        if (!TEST_MODE) {
+          sendError(res, 404, "not_found", "Not found");
+          return;
+        }
+        const hits = {};
+        for (const [key, value] of routeHits.entries()) {
+          hits[key] = value;
+        }
+        send(200, { ok: true, hits });
+        return;
+      }
+
+      if (pathname === "/v1/dev/route-hits/reset" && req.method === "POST") {
+        if (!TEST_MODE) {
+          sendError(res, 404, "not_found", "Not found");
+          return;
+        }
+        routeHits.clear();
+        send(200, { ok: true });
+        return;
+      }
+
       if (pathname === "/v1/dev/replay" && req.method === "POST") {
         const body = await parseJson(req);
         const validation = validateReplay(body);
@@ -6711,6 +6838,31 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   logInfo(`LiveNew server listening on http://localhost:${PORT}`);
+  const smokeEnabled = config.envMode === "alpha" || config.envMode === "prod";
+  scheduleStartupSmoke({
+    enabled: smokeEnabled,
+    delayMs: 3000,
+    runReady: async () => {
+      await checkReady();
+    },
+    runBootstrap: async () => {
+      const flags = await getFeatureFlags();
+      await buildBootstrapPayload({ userId: null, userProfile: null, userEmail: null, flags });
+    },
+    onResult: async ({ ok, errorCode }) => {
+      startupSmokeStatus.lastAtISO = new Date().toISOString();
+      startupSmokeStatus.ok = ok;
+      startupSmokeStatus.lastErrorCode = ok ? null : errorCode || "startup_smoke_failed";
+      if (!ok) {
+        try {
+          await setFeatureFlag("incident.mode.enabled", "true");
+        } catch (err) {
+          logError({ event: "startup_smoke_flag_failed", error: err?.message || String(err) });
+        }
+      }
+    },
+    log: (payload) => logError(payload),
+  });
 });
 
 server.requestTimeout = 15000;

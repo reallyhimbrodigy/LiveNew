@@ -2311,26 +2311,30 @@ export async function cleanupValidatorRuns(kind = "engine_matrix", keep = 50) {
 
 export async function listUserConsents(userId) {
   const rows = getDb()
-    .prepare("SELECT consent_key, accepted_at FROM user_consents WHERE user_id = ?")
+    .prepare("SELECT consent_key, accepted_at, consent_version FROM user_consents WHERE user_id = ?")
     .all(userId);
   const map = {};
   rows.forEach((row) => {
-    map[row.consent_key] = row.accepted_at;
+    map[row.consent_key] = {
+      acceptedAt: row.accepted_at,
+      version: Number(row.consent_version) || 1,
+    };
   });
   return map;
 }
 
-export async function upsertUserConsents(userId, consentKeys, acceptedAtISO = null) {
+export async function upsertUserConsents(userId, consentKeys, acceptedAtISO = null, consentVersion = 1) {
   const keys = Array.isArray(consentKeys) ? consentKeys.filter((key) => typeof key === "string" && key.trim()) : [];
   if (!keys.length) return { ok: false, keys: [] };
   const acceptedAt = acceptedAtISO || new Date().toISOString();
+  const version = Number(consentVersion) || 1;
   const stmt = getDb().prepare(
-    "INSERT INTO user_consents (user_id, consent_key, accepted_at) VALUES (?, ?, ?) ON CONFLICT(user_id, consent_key) DO UPDATE SET accepted_at=excluded.accepted_at"
+    "INSERT INTO user_consents (user_id, consent_key, accepted_at, consent_version) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, consent_key) DO UPDATE SET accepted_at=excluded.accepted_at, consent_version=excluded.consent_version"
   );
   keys.forEach((key) => {
-    stmt.run(userId, key.trim(), acceptedAt);
+    stmt.run(userId, key.trim(), acceptedAt, version);
   });
-  return { ok: true, acceptedAtISO: acceptedAt, keys };
+  return { ok: true, acceptedAtISO: acceptedAt, keys, version };
 }
 
 export async function missingUserConsents(userId, requiredKeys) {
@@ -2338,6 +2342,31 @@ export async function missingUserConsents(userId, requiredKeys) {
   if (!required.length) return [];
   const existing = await listUserConsents(userId);
   return required.filter((key) => !existing[key]);
+}
+
+export async function getUserConsentVersion(userId) {
+  const row = getDb()
+    .prepare("SELECT MAX(consent_version) AS version FROM user_consents WHERE user_id = ?")
+    .get(userId);
+  return Number(row?.version) || 0;
+}
+
+export async function getConsentMeta(key) {
+  if (!key) return null;
+  const row = getDb().prepare("SELECT value FROM consent_meta WHERE key = ?").get(key);
+  return row?.value ?? null;
+}
+
+export async function setConsentMeta(key, value) {
+  if (!key) return null;
+  const val = String(value ?? "");
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO consent_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value"
+    )
+    .run(key, val);
+  return { key, value: val, updatedAt: now };
 }
 
 export async function setCommunityOptIn(userId, optedIn) {

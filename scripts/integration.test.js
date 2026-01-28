@@ -101,6 +101,7 @@ async function run() {
   const env = {
     ...process.env,
     ENV_MODE: "dev",
+    TEST_MODE: "true",
     PORT,
     DATA_DIR,
     DB_PATH: path.join(DATA_DIR, "livenew.sqlite"),
@@ -122,6 +123,7 @@ async function run() {
 
   try {
     await waitForReady();
+    await fetchJson("/v1/dev/route-hits/reset", { method: "POST" });
 
     const adminEmail = "admin@example.com";
     const profile = {
@@ -191,15 +193,26 @@ async function run() {
     const accessToken = verifyRes.payload.accessToken;
     const refreshToken = verifyRes.payload.refreshToken;
 
+    const bootstrapPre = await fetchJson("/v1/bootstrap", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    assert(bootstrapPre.payload?.uiState === "consent", "bootstrap uiState should be consent");
+
+    const hitsPre = await fetchJson("/v1/dev/route-hits", { method: "GET" });
+    const planDayHits = hitsPre.payload?.hits?.["GET /v1/plan/day"] || 0;
+    const planWeekHits = hitsPre.payload?.hits?.["GET /v1/plan/week"] || 0;
+    assert(planDayHits === 0, "plan/day should not be hit before consent");
+    assert(planWeekHits === 0, "plan/week should not be hit before consent");
+
     const preConsentRes = await fetchJson(`/v1/plan/day?date=${userToday}`, {
       method: "GET",
       headers: { Authorization: `Bearer ${accessToken}` },
     });
     assert(preConsentRes.res.status === 403, "plan/day should be blocked before consent");
-    assert(preConsentRes.payload?.error?.code === "consent_required", "consent_required error expected");
     assert(
-      Array.isArray(preConsentRes.payload?.error?.required),
-      "consent_required should include required list"
+      ["consent_required", "consent_required_version"].includes(preConsentRes.payload?.error?.code),
+      "consent error expected"
     );
 
     const consentStatus = await fetchJson("/v1/consent/status", {
@@ -216,11 +229,23 @@ async function run() {
     });
     assert(consentAccept.payload?.ok, "consent/accept should return ok");
 
+    const bootstrapPost = await fetchJson("/v1/bootstrap", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    assert(bootstrapPost.payload?.uiState === "home", "bootstrap uiState should be home after consent");
+
     await fetchJson("/v1/profile", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },
       body: { userProfile: { ...profile, contentPack: "calm_reset", timezone: profile.timezone } },
     });
+
+    const railRes = await fetchJson("/v1/rail/today", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    assert(railRes.payload?.ok, "rail/today should succeed after consent");
 
     const dayRes = await fetchJson(`/v1/plan/day?date=${userToday}`, {
       method: "GET",

@@ -46,6 +46,8 @@ export const STRINGS = {
     resetUnavailable: "Reset unavailable",
     submit: "Save quick check-in",
     viewFull: "View full day",
+    doneTitle: "Done",
+    doneBody: "Nice work. Keep it gentle.",
   },
   labels: {
     workout: "Workout",

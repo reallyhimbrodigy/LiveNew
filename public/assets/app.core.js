@@ -13,7 +13,6 @@ import {
   logoutAuth,
   setDeviceName,
   getDeviceName,
-  ensureCsrf,
 } from "./app.api.js";
 import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.js";
 import { STRINGS as EN_STRINGS } from "../i18n/en.js";
@@ -51,6 +50,7 @@ const DEFAULT_APP_STATE = {
   auth: { isAuthenticated: false, isAdmin: false },
   consentComplete: false,
   envMode: null,
+  uiState: "login",
 };
 
 function getAppState() {
@@ -65,6 +65,7 @@ function setAppState(bootstrap) {
   next.auth = { ...DEFAULT_APP_STATE.auth, ...(bootstrap?.auth || {}) };
   next.envMode = bootstrap?.env?.mode || bootstrap?.envMode || DEFAULT_APP_STATE.envMode;
   next.consentComplete = Boolean(bootstrap?.consent?.isComplete);
+  next.uiState = bootstrap?.uiState || next.uiState;
   window.__APP_STATE = next;
   return next;
 }
@@ -117,7 +118,7 @@ function showErrorScreen({ title, message, requestId }) {
 
 function routeError(err, { consentGate } = {}) {
   const code = getErrorCode(err) || "unknown_error";
-  if (code === "consent_required") {
+  if (code === "consent_required" || code === "consent_required_version") {
     if (consentGate?.show) {
       consentGate.show();
       return;
@@ -199,8 +200,10 @@ async function checkConsentStatus() {
     const res = await apiGet("/v1/consent/status");
     const required = Array.isArray(res.required) ? res.required : ["terms", "privacy", "alpha_processing"];
     const accepted = res.accepted || {};
-    const ok = required.every((key) => accepted[key] === true);
-    return { ok, required, accepted };
+    const requiredVersion = Number(res.requiredVersion || 0);
+    const userVersion = Number(res.userVersion || 0);
+    const ok = required.every((key) => accepted[key] === true) && userVersion >= requiredVersion;
+    return { ok, required, accepted, requiredVersion, userVersion };
   } catch (err) {
     if (getErrorCode(err) === "auth_required") {
       return { ok: true, required: [], accepted: {} };
@@ -234,13 +237,8 @@ async function ensurePlanAccess(consentGate) {
   }
 }
 
-async function init() {
-  await ensureCsrf();
+function initBaseUi() {
   applyI18n(STRINGS);
-  window.addEventListener("unhandledrejection", (event) => {
-    routeError(event?.reason || {});
-    event.preventDefault();
-  });
   const page = document.body.dataset.page;
   const titleMap = {
     day: `${t("appName")} — ${t("nav.day")}`,
@@ -252,28 +250,6 @@ async function init() {
   if (page && titleMap[page]) {
     document.title = titleMap[page];
   }
-  bindAuth();
-  const state = await bootstrapApp();
-  await updateAdminVisibility();
-  if (page === "day" || page === "week") {
-    if (!state.auth?.isAuthenticated) {
-      routeError({ code: "auth_required" });
-      return;
-    }
-    if (!state.consentComplete) {
-      const consentGate = setupConsentGate(() => {
-        if (page === "day") initDay();
-        if (page === "week") initWeek();
-      });
-      consentGate.show();
-      return;
-    }
-  }
-  if (page === "day") initDay();
-  if (page === "week") initWeek();
-  if (page === "trends") initTrends();
-  if (page === "profile") initProfile();
-  if (page === "admin") initAdmin();
 }
 
 function bindAuth() {
@@ -422,6 +398,8 @@ function initDay() {
   const railSubmit = qs("#rail-submit");
   const railResetEl = qs("#rail-reset");
   const railViewFull = qs("#rail-view-full");
+  const railDoneEl = qs("#rail-done");
+  const railDoneView = qs("#rail-done-view");
   const communityList = qs("#community-list");
   const communityText = qs("#community-text");
   const communitySubmit = qs("#community-submit");
@@ -436,6 +414,7 @@ function initDay() {
   const renderRailReset = (reset) => {
     if (!railResetEl) return;
     clear(railResetEl);
+    if (railDoneEl) railDoneEl.classList.add("hidden");
     if (!reset) {
       railResetEl.appendChild(el("div", { class: "muted", text: t("rail.resetUnavailable") }));
       return;
@@ -544,6 +523,7 @@ function initDay() {
     try {
       const ok = await ensureConsent();
       if (!ok) return;
+      if (railDoneEl) railDoneEl.classList.add("hidden");
       const res = await apiGet("/v1/rail/today");
       const dateISO = res.day?.dateISO || todayISO();
       if (dateInput) dateInput.value = dateISO;
@@ -593,14 +573,7 @@ function initDay() {
   };
 
   loadBtn?.addEventListener("click", loadDay);
-  const state = getAppState();
-  if (state.auth?.isAuthenticated && state.consentComplete) {
-    loadDay();
-  } else if (state.auth?.isAuthenticated) {
-    consentGate.show();
-  } else {
-    routeError({ code: "auth_required" }, { consentGate });
-  }
+  loadDay();
   loadPrefs();
 
   railSubmit?.addEventListener("click", async () => {
@@ -619,6 +592,9 @@ function initDay() {
   });
 
   railViewFull?.addEventListener("click", () => {
+    qs("#day-summary")?.scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  railDoneView?.addEventListener("click", () => {
     qs("#day-summary")?.scrollIntoView({ behavior: "smooth", block: "start" });
   });
 
@@ -689,6 +665,9 @@ function initDay() {
       const part = input.dataset.part;
       const dateISO = dateInput?.value || todayISO();
       await apiPost("/v1/complete", { dateISO, part });
+      if (part === "reset" && railDoneEl && dateISO === todayISO() && input.checked) {
+        railDoneEl.classList.remove("hidden");
+      }
     });
   });
 
@@ -755,14 +734,7 @@ function initWeek() {
   const ensureConsent = async () => ensurePlanAccess(consentGate);
 
   loadBtn?.addEventListener("click", loadWeek);
-  const state = getAppState();
-  if (state.auth?.isAuthenticated && state.consentComplete) {
-    loadWeek();
-  } else if (state.auth?.isAuthenticated) {
-    consentGate.show();
-  } else {
-    routeError({ code: "auth_required" }, { consentGate });
-  }
+  loadWeek();
 }
 
 function initTrends() {
@@ -2156,4 +2128,20 @@ function initAdmin() {
   });
 }
 
-init().catch((err) => console.error(err));
+export {
+  initBaseUi,
+  bootstrapApp,
+  getAppState,
+  setAppState,
+  routeError,
+  setupConsentGate,
+  ensurePlanAccess,
+  bindAuth,
+  updateAdminVisibility,
+  initDay,
+  initWeek,
+  initTrends,
+  initProfile,
+  initAdmin,
+  t,
+};
