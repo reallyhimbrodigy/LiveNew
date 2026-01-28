@@ -105,6 +105,11 @@ import {
   listReminderIntentsByRange,
   updateReminderIntentStatus,
   listReminderIntentsAdmin,
+  getQualityMetricsRange,
+  upsertAnalyticsUserDayTimes,
+  listDay3RetentionRows,
+  listUserStatesByIds,
+  getStabilityDistribution,
   seedCohorts,
   listCohorts,
   listCohortParameters,
@@ -150,6 +155,8 @@ import {
   listContentSnapshotParams,
   getSnapshotMeta,
   upsertSnapshotMeta,
+  getUserSnapshotPin,
+  upsertUserSnapshotPin,
   insertOpsRun,
   getLatestOpsRun,
   insertOpsLog,
@@ -175,6 +182,7 @@ import { trackEvent, setDailyFlag, ensureDay3Retention, AnalyticsFlags, getFirst
 import { buildOutcomes } from "./outcomes.js";
 import { runLoadtestScript, evaluateLoadtestReport } from "./ops.js";
 import { buildReleaseChecklist } from "./releaseChecklist.js";
+import { alphaReadiness } from "./releasePolicy.js";
 import { diffSnapshots } from "./snapshotDiff.js";
 import { loadSnapshotBundle, resolveSnapshotForUser, setDefaultSnapshotId, getDefaultSnapshotId, repinUserSnapshot, clearSnapshotCache, getSnapshotCacheStats } from "./snapshots.js";
 import { scheduleStartupSmoke } from "./startupSmoke.js";
@@ -2044,6 +2052,76 @@ function pickRailReset({ dayPlan, checkIn, library, preferences }) {
   return ranked[0] || enabled[0];
 }
 
+function panicDisclaimer() {
+  return "If symptoms feel severe or unsafe, consider professional support.";
+}
+
+function buildPanicRailReset(reset) {
+  if (!reset) return null;
+  return {
+    id: reset.id || null,
+    title: reset.title || null,
+    minutes: reset.minutes ?? null,
+    steps: Array.isArray(reset.steps) ? reset.steps : [],
+  };
+}
+
+function buildPanicDayContract(day, reset, dateISO) {
+  const panicReset = buildPanicRailReset(reset);
+  const minutes = panicReset?.minutes ?? 0;
+  const disclaimer = panicDisclaimer();
+  const baseDay = day || {};
+  const baseWhy = baseDay.why || {};
+  const safety = { level: "block", reasons: ["panic"], disclaimer };
+  return {
+    dateISO: dateISO || baseDay.dateISO || null,
+    meta: {
+      ...(baseDay.meta || {}),
+      panic: true,
+    },
+    what: {
+      workout: null,
+      reset: panicReset,
+      nutrition: null,
+    },
+    why: {
+      profile: baseWhy.profile || null,
+      focus: "downshift",
+      driversTop2: [],
+      shortRationale: "Reset-only plan while safety mode is active.",
+      packMatch: baseWhy.packMatch || { packId: null, score: 0, topMatchedTags: [] },
+      confidence: null,
+      relevance: null,
+      whatWouldChange: [],
+      whyNot: ["Safety mode active."],
+      reEntry: null,
+      expanded: {
+        drivers: [],
+        appliedRules: [],
+        anchors: null,
+        safety,
+        rationale: [],
+      },
+      statement: "Reset-only plan while safety mode is active.",
+      rationale: [],
+      meta: baseWhy.meta || null,
+      safety,
+      checkInPrompt: { shouldPrompt: false, reason: null },
+    },
+    howLong: {
+      totalMinutes: minutes,
+      timeAvailableMin: null,
+    },
+    details: {
+      workoutSteps: [],
+      resetSteps: panicReset?.steps || [],
+      nutritionPriorities: [],
+      anchors: null,
+      citations: [],
+    },
+  };
+}
+
 function contentTypeForPath(filePath) {
   if (filePath.endsWith(".js")) return "text/javascript";
   if (filePath.endsWith(".css")) return "text/css";
@@ -2750,6 +2828,13 @@ function defaultDateRange(days) {
   return { fromISO, toISO };
 }
 
+function normalizeMetricDays(value, allowed = [7, 14, 30], fallback = 7) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  if (allowed.includes(parsed)) return parsed;
+  return fallback;
+}
+
 function latestUpdatedAt(entries) {
   if (!Array.isArray(entries) || !entries.length) return null;
   return entries.reduce((latest, entry) => {
@@ -2818,8 +2903,13 @@ async function computeReleaseChecklistState() {
     guards.communityEnabled;
 
   const consentFlowOk = ["terms", "privacy", "alpha_processing"].every((key) => REQUIRED_CONSENTS.includes(key));
+  const alpha = await alphaReadiness();
 
   const checklist = buildReleaseChecklist({
+    alphaReadiness: {
+      pass: alpha.pass,
+      details: { missing: alpha.missing },
+    },
     migrationsApplied: {
       pass: migrationsApplied,
       details: {
@@ -2864,6 +2954,7 @@ async function computeReleaseChecklistState() {
 
   return {
     checklist,
+    alpha,
     validator,
     loadtestRun,
     loadtestEval,
@@ -3432,7 +3523,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (pathname === "/v1/bootstrap" && req.method === "GET") {
+    if ((pathname === "/v1/bootstrap" || pathname === "/v1/mobile/bootstrap") && req.method === "GET") {
       const flags = await getFeatureFlags();
       let profile = null;
       let resolvedEmail = userEmail;
@@ -3800,6 +3891,11 @@ const server = http.createServer(async (req, res) => {
       if (!ok) return;
     }
 
+    if (pathname === "/v1/profile" && req.method === "GET") {
+      send(200, { ok: true, userProfile: state.userProfile || null });
+      return;
+    }
+
     if (pathname === "/v1/profile" && req.method === "POST") {
       const body = await parseJson(req);
       const validation = validateProfile(body);
@@ -3901,7 +3997,15 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === "/v1/onboard/complete" && req.method === "POST") {
       const body = await parseJson(req);
-      const profileValidation = validateProfile({ userProfile: body?.userProfile });
+      const baseline = body?.baseline || {};
+      const profileInput = body?.userProfile || body?.profile || {};
+      const mergedProfile = {
+        ...profileInput,
+        timezone: baseline.timezone ?? profileInput.timezone,
+        dayBoundaryHour: baseline.dayBoundaryHour ?? profileInput.dayBoundaryHour,
+        constraints: baseline.constraints ?? profileInput.constraints,
+      };
+      const profileValidation = validateProfile({ userProfile: mergedProfile });
       if (!profileValidation.ok) {
         sendError(res, 400, profileValidation.error.code, profileValidation.error.message, profileValidation.error.field);
         return;
@@ -3949,15 +4053,6 @@ const server = http.createServer(async (req, res) => {
         state = cached.state;
         version = cached.version;
       }
-      const paramsState = await getParamsForUser();
-      const checkinValidation = validateCheckIn(
-        { checkIn: body?.firstCheckIn },
-        { allowedTimes: paramsState.map?.timeBuckets?.allowed }
-      );
-      if (!checkinValidation.ok) {
-        sendError(res, 400, checkinValidation.error.code, checkinValidation.error.message, checkinValidation.error.field);
-        return;
-      }
       const requiredVersion = await getRequiredConsentVersion();
       await upsertUserConsents(userId, REQUIRED_CONSENTS, null, requiredVersion);
 
@@ -3966,6 +4061,29 @@ const server = http.createServer(async (req, res) => {
         ...profileValidation.value.userProfile,
         contentPack: packId || profileValidation.value.userProfile?.contentPack,
       });
+      const paramsState = await getParamsForUser();
+      const firstCheckInRaw =
+        body?.firstCheckIn && typeof body.firstCheckIn === "object"
+          ? body.firstCheckIn
+          : body?.checkIn && typeof body.checkIn === "object"
+            ? body.checkIn
+            : {};
+      if (firstCheckInRaw?.safety?.panic != null && firstCheckInRaw.panic == null) {
+        firstCheckInRaw.panic = firstCheckInRaw.safety.panic;
+        delete firstCheckInRaw.safety;
+      }
+      const checkInWithDate = {
+        ...firstCheckInRaw,
+        dateISO: firstCheckInRaw.dateISO || getTodayISOForProfile(userProfile),
+      };
+      const checkinValidation = validateCheckIn(
+        { checkIn: checkInWithDate },
+        { allowedTimes: paramsState.map?.timeBuckets?.allowed }
+      );
+      if (!checkinValidation.ok) {
+        sendError(res, 400, checkinValidation.error.code, checkinValidation.error.message, checkinValidation.error.field);
+        return;
+      }
       const checkIn = applyDataMinimizationToCheckIn(checkinValidation.value.checkIn, userProfile);
       const currentCohort = await getUserCohort(userId);
       if (!currentCohort || !currentCohort.overriddenByAdmin) {
@@ -4007,7 +4125,21 @@ const server = http.createServer(async (req, res) => {
             }
           : null,
       };
-      const payload = { ok: true, weekPlan: state.weekPlan, week: state.weekPlan, day: ensured.day, rail };
+      const flags = await getFeatureFlags();
+      const bootstrap = await buildBootstrapPayload({
+        userId,
+        userProfile: state.userProfile,
+        userEmail,
+        flags,
+      });
+      const payload = {
+        ok: true,
+        bootstrap,
+        weekPlan: state.weekPlan,
+        week: state.weekPlan,
+        day: ensured.day,
+        rail,
+      };
       if (issueTokens) {
         const deviceName = getDeviceName(req);
         const refresh = await issueRefreshToken({ userId, deviceName });
@@ -4089,13 +4221,24 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (pathname === "/v1/rail/today" && req.method === "GET") {
+    if ((pathname === "/v1/rail/today" || pathname === "/v1/mobile/today") && req.method === "GET") {
+      const dateISO = getTodayISOForProfile(state.userProfile);
+      const railOpenedAtISO = new Date().toISOString();
+      try {
+        await trackEvent(userId, "rail_opened", { dateISO }, railOpenedAtISO, dateISO);
+        await upsertAnalyticsUserDayTimes({
+          dateISO,
+          userId,
+          firstRailOpenedAt: railOpenedAtISO,
+        });
+      } catch (err) {
+        logError({ event: "analytics_rail_open_failed", error: err?.message || String(err) });
+      }
       const cached = getCachedResponse(userId, pathname, url.search);
       if (cached) {
         send(200, cached);
         return;
       }
-      const dateISO = getTodayISOForProfile(state.userProfile);
       await maybeStartReEntry(dateISO);
       state = await ensureWeekForDate(state, dateISO, dispatchForUser);
       const snapshotCtx = await getSnapshotContext();
@@ -4114,21 +4257,27 @@ const server = http.createServer(async (req, res) => {
       const checkIn = latestCheckInForDate(state.checkIns, dateISO);
       const prefs = await loadContentPrefs(userId);
       const railReset = pickRailReset({ dayPlan, checkIn, library, preferences: prefs });
-      const rail = {
-        checkIn: {
-          requiredFields: ["stress", "sleepQuality", "energy", "timeAvailableMin"],
-          estimatedSeconds: 10,
-        },
-        reset: railReset
-          ? {
-              id: railReset.id || null,
-              title: railReset.title || null,
-              minutes: railReset.minutes ?? null,
-              steps: Array.isArray(railReset.steps) ? railReset.steps : [],
-            }
-          : null,
-      };
-      const payload = { ok: true, rail, day: ensured.day };
+      const panicActive = Boolean(checkIn?.panic || dayPlan?.safety?.reasons?.includes?.("panic"));
+      const rail = panicActive
+        ? { checkIn: null, reset: buildPanicRailReset(railReset) }
+        : {
+            checkIn: {
+              requiredFields: ["stress", "sleepQuality", "energy", "timeAvailableMin"],
+              estimatedSeconds: 10,
+            },
+            reset: railReset
+              ? {
+                  id: railReset.id || null,
+                  title: railReset.title || null,
+                  minutes: railReset.minutes ?? null,
+                  steps: Array.isArray(railReset.steps) ? railReset.steps : [],
+                }
+              : null,
+          };
+      const day = panicActive ? buildPanicDayContract(ensured.day, railReset, dateISO) : ensured.day;
+      const payload = panicActive
+        ? { ok: true, rail, day, panic: { active: true, disclaimer: panicDisclaimer() } }
+        : { ok: true, rail, day };
       setCachedResponse(userId, pathname, url.search, payload, CACHE_TTLS.railToday);
       send(200, payload);
       return;
@@ -4163,7 +4312,17 @@ const server = http.createServer(async (req, res) => {
         { paramsState, library, snapshotId: snapshotCtx.snapshotId || null }
       );
       state = ensured.state;
-      const payload = { ok: true, day: ensured.day };
+      const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
+      const checkIn = latestCheckInForDate(state.checkIns, dateISO);
+      const panicActive = Boolean(checkIn?.panic || dayPlan?.safety?.reasons?.includes?.("panic"));
+      let day = ensured.day;
+      let payload = { ok: true, day };
+      if (panicActive) {
+        const prefs = await loadContentPrefs(userId);
+        const panicReset = pickRailReset({ dayPlan, checkIn, library, preferences: prefs });
+        day = buildPanicDayContract(ensured.day, panicReset, dateISO);
+        payload = { ok: true, day, panic: { active: true, disclaimer: panicDisclaimer() } };
+      }
       setCachedResponse(userId, pathname, url.search, payload, CACHE_TTLS.planDay);
       send(200, payload);
       return;
@@ -4281,6 +4440,30 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const body = await parseJson(req);
+      const safetyPanic = body?.safety?.panic;
+      if (body?.checkIn && body.checkIn?.safety && body.checkIn.panic == null) {
+        if (typeof body.checkIn.safety.panic === "boolean") {
+          body.checkIn.panic = body.checkIn.safety.panic;
+        }
+        delete body.checkIn.safety;
+      }
+      if ((!body.checkIn || typeof body.checkIn !== "object") && typeof safetyPanic === "boolean") {
+        const dateISO = body?.dateISO || getTodayISOForProfile(state.userProfile);
+        const existing = latestCheckInForDate(state.checkIns, dateISO);
+        body.checkIn = existing
+          ? { ...existing, dateISO, atISO: new Date().toISOString(), panic: safetyPanic }
+          : {
+              dateISO,
+              stress: 5,
+              sleepQuality: 6,
+              energy: 6,
+              timeAvailableMin: 10,
+              panic: safetyPanic,
+            };
+      }
+      if (body.checkIn && body.checkIn.panic == null && typeof safetyPanic === "boolean") {
+        body.checkIn.panic = safetyPanic;
+      }
       const paramsState = await getParamsForUser();
       const validation = validateCheckIn(body, { allowedTimes: paramsState.map?.timeBuckets?.allowed });
       if (!validation.ok) {
@@ -4456,7 +4639,23 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const { dateISO, part } = validation.value;
+      const prevCompleted = Boolean(state.partCompletionByDate?.[dateISO]?.[part]);
       await dispatchForUser({ type: "TOGGLE_PART_COMPLETION", payload: { dateISO, part } });
+      const nextCompleted = Boolean(state.partCompletionByDate?.[dateISO]?.[part]);
+      if (part === "reset" && nextCompleted && !prevCompleted) {
+        const resetId = state.weekPlan?.days?.find((day) => day.dateISO === dateISO)?.reset?.id || null;
+        const atISO = new Date().toISOString();
+        try {
+          await trackEvent(userId, "reset_completed", { resetId }, atISO, dateISO);
+          await upsertAnalyticsUserDayTimes({
+            dateISO,
+            userId,
+            firstResetCompletedAt: atISO,
+          });
+        } catch (err) {
+          logError({ event: "analytics_reset_complete_failed", error: err?.message || String(err) });
+        }
+      }
       const progress = domain.computeProgress({
         checkIns: state.checkIns || [],
         weekPlan: state.weekPlan,
@@ -5054,6 +5253,70 @@ const server = http.createServer(async (req, res) => {
       const snapshots = await listContentSnapshots({ status: status || null, limit: 50 });
       const defaultSnapshotId = await getDefaultSnapshotId();
       send(200, { ok: true, snapshots, defaultSnapshotId });
+      return;
+    }
+
+    if (pathname === "/v1/admin/alpha/readiness" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const readiness = await alphaReadiness();
+      send(200, { ok: true, readiness });
+      return;
+    }
+
+    if (pathname === "/v1/admin/ops/daily" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const dayISO = domain.isoToday();
+      const validator = await getLatestValidatorRun("engine_matrix");
+      const errors = snapshotErrorCounters(10);
+      const latencyByRoute = Array.from(LATENCY_ROUTES).reduce((acc, routeKey) => {
+        acc[routeKey] = latencyStats(routeKey);
+        return acc;
+      }, {});
+      const latencyThresholds = config.maxP95MsByRoute || {};
+      let latencyOk = true;
+      const p95ByRoute = {};
+      Object.entries(latencyByRoute).forEach(([routeKey, stats]) => {
+        const routePath = routeKey.split(" ").slice(1).join(" ");
+        const threshold = latencyThresholds[routeKey] ?? latencyThresholds[routePath] ?? null;
+        p95ByRoute[routeKey] = stats.p95;
+        if (threshold != null && (stats.p95 == null || stats.p95 > threshold)) latencyOk = false;
+      });
+      const stabilityRange = defaultDateRange(7);
+      const stability = await getStabilityDistribution(stabilityRange.fromISO, stabilityRange.toISO);
+      const unstableRate = stability.total ? stability.unstable / stability.total : null;
+      const stabilityOk = unstableRate != null ? unstableRate <= 0.25 : false;
+      const checklist = [
+        {
+          key: "validator_ok",
+          ok: Boolean(validator?.ok),
+          details: { latestRunId: validator?.id || null, latestAtISO: validator?.atISO || null },
+        },
+        {
+          key: "top_errors",
+          ok: errors.length === 0,
+          details: { top: errors.slice(0, 5) },
+        },
+        {
+          key: "p95_latency",
+          ok: latencyOk,
+          details: { p95ByRoute, thresholds: latencyThresholds },
+        },
+        {
+          key: "stability_distribution",
+          ok: stabilityOk,
+          details: {
+            range: stabilityRange,
+            stable: stability.stable,
+            mixed: stability.mixed,
+            unstable: stability.unstable,
+            total: stability.total,
+            unstableRate,
+          },
+        },
+      ];
+      send(200, { ok: true, dayISO, checklist });
       return;
     }
 
@@ -5727,6 +5990,106 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    const migrationExportMatch = pathname.match(/^\/v1\/admin\/migration\/export\/([^/]+)$/);
+    if (migrationExportMatch && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const targetUserId = sanitizeUserId(migrationExportMatch[1]);
+      if (!targetUserId || targetUserId !== migrationExportMatch[1]) {
+        sendError(res, 400, "userId_invalid", "userId is invalid", "userId");
+        return;
+      }
+      const user = await getUserById(targetUserId);
+      if (!user) {
+        sendError(res, 404, "user_not_found", "User not found");
+        return;
+      }
+      const consents = await listUserConsents(targetUserId);
+      const communityOpt = await getCommunityOptIn(targetUserId);
+      const snapshotPin = await getUserSnapshotPin(targetUserId);
+      await auditAdmin("migration.export", targetUserId, { ok: true });
+      send(200, {
+        ok: true,
+        export: {
+          userId: targetUserId,
+          generatedAtISO: new Date().toISOString(),
+          consents,
+          snapshotPins: snapshotPin ? [snapshotPin] : [],
+          outcomesHistory: [],
+          communityOptIn: communityOpt?.optedIn === true,
+          experiments: null,
+          debugBundles: null,
+        },
+      });
+      return;
+    }
+
+    if (pathname === "/v1/admin/migration/import" && req.method === "POST") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const body = await parseJson(req);
+      const payload = body?.import || body;
+      const targetUserId = typeof payload?.userId === "string" ? sanitizeUserId(payload.userId) : "";
+      if (!targetUserId || targetUserId !== payload.userId) {
+        sendError(res, 400, "userId_invalid", "userId is required", "userId");
+        return;
+      }
+      const user = await getUserById(targetUserId);
+      if (!user) {
+        sendError(res, 404, "user_not_found", "User not found");
+        return;
+      }
+      if (payload?.consents && typeof payload.consents !== "object") {
+        sendError(res, 400, "consents_invalid", "consents must be object", "consents");
+        return;
+      }
+      if (payload?.snapshotPins && !Array.isArray(payload.snapshotPins)) {
+        sendError(res, 400, "snapshotPins_invalid", "snapshotPins must be array", "snapshotPins");
+        return;
+      }
+      if (payload?.communityOptIn != null && typeof payload.communityOptIn !== "boolean") {
+        sendError(res, 400, "communityOptIn_invalid", "communityOptIn must be boolean", "communityOptIn");
+        return;
+      }
+
+      const consentKeys = payload?.consents ? Object.keys(payload.consents) : [];
+      if (consentKeys.length) {
+        await upsertUserConsents(targetUserId, consentKeys, null, await getRequiredConsentVersion());
+      }
+
+      const pins = Array.isArray(payload?.snapshotPins) ? payload.snapshotPins : [];
+      if (pins.length) {
+        const pin = pins[0];
+        if (!pin?.snapshotId || !pin?.pinExpiresAt || !pin?.reason) {
+          sendError(res, 400, "snapshotPin_invalid", "snapshot pin requires snapshotId, pinExpiresAt, reason");
+          return;
+        }
+        await upsertUserSnapshotPin({
+          userId: targetUserId,
+          snapshotId: String(pin.snapshotId),
+          pinnedAt: pin.pinnedAt || null,
+          pinExpiresAt: String(pin.pinExpiresAt),
+          reason: String(pin.reason),
+        });
+      }
+
+      if (payload?.communityOptIn != null) {
+        await setCommunityOptIn(targetUserId, payload.communityOptIn === true);
+      }
+
+      await auditAdmin("migration.import", targetUserId, { ok: true });
+      send(200, {
+        ok: true,
+        userId: targetUserId,
+        applied: {
+          consents: consentKeys.length,
+          snapshotPins: pins.length,
+          communityOptIn: payload?.communityOptIn != null,
+        },
+      });
+      return;
+    }
+
     const debugBundleMatch = pathname.match(/^\/v1\/admin\/users\/([^/]+)\/debug-bundle$/);
     if (debugBundleMatch && req.method === "POST") {
       const email = await requireAdmin();
@@ -6132,6 +6495,75 @@ const server = http.createServer(async (req, res) => {
         ...latencyStats(routeKey),
       }));
       send(200, { ok: true, metrics: entries });
+      return;
+    }
+
+    if (pathname === "/v1/admin/metrics/quality" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const days = normalizeMetricDays(url.searchParams.get("days"));
+      const range = defaultDateRange(days);
+      const counts = await getQualityMetricsRange(range.fromISO, range.toISO);
+      const numerator = counts.numerator || 0;
+      const denominator = counts.denominator || 0;
+      const rate = denominator ? numerator / denominator : 0;
+      send(200, { ok: true, days, fromISO: range.fromISO, toISO: range.toISO, numerator, denominator, rate });
+      return;
+    }
+
+    if (pathname === "/v1/admin/metrics/retention" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const days = normalizeMetricDays(url.searchParams.get("days"), [7, 14, 30], 30);
+      const range = defaultDateRange(days);
+      const rows = await listDay3RetentionRows(range.fromISO, range.toISO);
+      const numerator = rows.filter((row) => row.retained).length;
+      const denominator = rows.length;
+      const overall = { numerator, denominator, rate: denominator ? numerator / denominator : 0 };
+
+      const byCohortMap = new Map();
+      rows.forEach((row) => {
+        const key = row.cohortId || "unassigned";
+        const entry = byCohortMap.get(key) || { cohortId: row.cohortId || null, numerator: 0, denominator: 0 };
+        entry.denominator += 1;
+        if (row.retained) entry.numerator += 1;
+        byCohortMap.set(key, entry);
+      });
+      const byCohort = Array.from(byCohortMap.values()).map((entry) => ({
+        ...entry,
+        rate: entry.denominator ? entry.numerator / entry.denominator : 0,
+      }));
+
+      let byPack = [];
+      const userIds = Array.from(new Set(rows.map((row) => row.userId)));
+      const states = await listUserStatesByIds(userIds);
+      const packByUser = new Map();
+      states.forEach((entry) => {
+        const packId = entry?.state?.userProfile?.contentPack || "unknown";
+        packByUser.set(entry.userId, packId);
+      });
+      const byPackMap = new Map();
+      rows.forEach((row) => {
+        const packId = packByUser.get(row.userId) || "unknown";
+        const entry = byPackMap.get(packId) || { packId, numerator: 0, denominator: 0 };
+        entry.denominator += 1;
+        if (row.retained) entry.numerator += 1;
+        byPackMap.set(packId, entry);
+      });
+      byPack = Array.from(byPackMap.values()).map((entry) => ({
+        ...entry,
+        rate: entry.denominator ? entry.numerator / entry.denominator : 0,
+      }));
+
+      send(200, {
+        ok: true,
+        days,
+        fromISO: range.fromISO,
+        toISO: range.toISO,
+        overall,
+        byCohort,
+        byPack,
+      });
       return;
     }
 

@@ -63,6 +63,16 @@
           <button id="ops-refresh" data-i18n="admin.refresh">Refresh</button>
           <span id="ops-status" class="muted"></span>
         </div>
+        <div class="card">
+          <h3 data-i18n="admin.opsDaily">Daily ops checklist</h3>
+          <div id="ops-daily-list" class="list"></div>
+          <div class="row wrap">
+            <a class="ghost" href="/v1/admin/validator/latest" target="_blank" rel="noopener" data-i18n="admin.validatorLatest">Validator latest</a>
+            <a class="ghost" href="/v1/admin/monitoring/errors" target="_blank" rel="noopener" data-i18n="admin.monitoringErrors">Monitoring errors</a>
+            <a class="ghost" href="/v1/admin/db/top-queries" target="_blank" rel="noopener" data-i18n="admin.topQueries">Top queries</a>
+            <a class="ghost" href="/v1/outcomes?days=7" target="_blank" rel="noopener" data-i18n="admin.outcomesSummary">Outcomes stability</a>
+          </div>
+        </div>
         <div class="grid-2">
           <div class="card">
             <h3 data-i18n="admin.validatorFailures">Validator failures</h3>
@@ -92,6 +102,10 @@
         <div class="card">
           <h3 data-i18n="admin.releaseChecklist">Release checklist</h3>
           <div id="ops-release-checklist" class="list"></div>
+        </div>
+        <div class="card">
+          <h3 data-i18n="admin.metrics">Metrics</h3>
+          <div id="ops-metrics" class="list"></div>
         </div>
         <div class="card">
           <h3 data-i18n="admin.snapshots">Snapshots</h3>

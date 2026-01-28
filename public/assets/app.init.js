@@ -6,7 +6,6 @@ import {
   bootstrapApp,
   getAppState,
   routeError,
-  setupConsentGate,
 } from "./app.core.js";
 import { loadHome, loadWeek, loadTrends, loadProfile, loadAdmin } from "./controllers.js";
 
@@ -30,23 +29,6 @@ function handleUnhandledRejection(event) {
   routeError(err);
 }
 
-async function renderConsentFlow({ page }) {
-  if (page === "day" || page === "week") {
-    const consentGate = setupConsentGate(() => initApp({ page }));
-    consentGate.show();
-    return;
-  }
-  window.location.href = "/day";
-}
-
-async function renderOnboardFlow({ page }) {
-  if (page === "profile") {
-    loadProfile();
-    return;
-  }
-  window.location.href = "/profile";
-}
-
 export async function initApp({ page }) {
   await ensureCsrf();
   initBaseUi();
@@ -63,13 +45,11 @@ export async function initApp({ page }) {
     routeError({ code: "auth_required" });
     return;
   }
-  if (uiState === "consent") {
-    await renderConsentFlow({ page });
-    return;
-  }
-  if (uiState === "onboard") {
-    await renderOnboardFlow({ page });
-    return;
+  if (uiState === "consent" || uiState === "onboard") {
+    if (page !== "day") {
+      window.location.href = "/day";
+      return;
+    }
   }
 
   if (page === "home") {

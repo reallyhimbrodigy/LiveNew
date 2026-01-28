@@ -28,7 +28,7 @@ All non-2xx responses return:
 }
 ```
 
-In `ENV_MODE=dev|dogfood`, a `details` object may be included.
+In `ENV_MODE=dev|internal`, a `details` object may be included.
 
 ## Core endpoints used by clients
 
@@ -54,6 +54,19 @@ In `ENV_MODE=dev|dogfood`, a `details` object may be included.
 - `GET /v1/account/export`
 - `DELETE /v1/account` with header `x-confirm-delete: DELETE` and body `{ confirm: "LiveNew" }`
 - `GET /v1/changelog?audience=user&limit=5`
+
+## Mobile required endpoints
+
+- `GET /v1/bootstrap`
+- `GET /v1/rail/today`
+- `POST /v1/checkin` (create/update)
+- `GET /v1/profile` / `POST /v1/profile` (constraints)
+- `GET /v1/consent/status` / `POST /v1/consent/accept`
+- `GET /v1/outcomes`
+
+Optional aliases:
+- `GET /v1/mobile/bootstrap`
+- `GET /v1/mobile/today`
 
 ## DayContract schema (stable fields)
 

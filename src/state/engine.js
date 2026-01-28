@@ -1113,7 +1113,7 @@ export function reduceEvent(state, event, ctx) {
     }
 
     case "SET_RULE_TOGGLES": {
-      const allowRuleToggles = ruleConfig.envMode === "dev" || ruleConfig.envMode === "dogfood";
+      const allowRuleToggles = ruleConfig.envMode === "dev" || ruleConfig.envMode === "internal";
       if (!allowRuleToggles) {
         return { nextState, effects, logEvent, result };
       }

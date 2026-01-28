@@ -42,6 +42,70 @@
       <div id="consent-status" class="muted"></div>
     </section>
 
+    <section class="card hidden" id="onboard-card">
+      <h1 data-i18n="onboard.title">Start in under a minute</h1>
+      <p class="muted" data-i18n="onboard.subtitle">Consent + quick baseline + first check-in.</p>
+      <div class="grid-2">
+        <label><span data-i18n="onboard.timezone">Timezone</span> <input id="onboard-timezone" type="text" placeholder="America/Los_Angeles" /></label>
+        <label><span data-i18n="onboard.dayBoundary">Day boundary hour</span>
+          <select id="onboard-boundary">
+            <option value="0">0</option>
+            <option value="1">1</option>
+            <option value="2">2</option>
+            <option value="3">3</option>
+            <option value="4">4</option>
+            <option value="5">5</option>
+            <option value="6">6</option>
+          </select>
+        </label>
+      </div>
+      <details>
+        <summary data-i18n="onboard.constraints">Optional constraints</summary>
+        <div class="grid-2">
+          <label><input id="onboard-injury-knee" type="checkbox" /> <span data-i18n="profile.injuryKnee">Knee injury</span></label>
+          <label><input id="onboard-injury-shoulder" type="checkbox" /> <span data-i18n="profile.injuryShoulder">Shoulder injury</span></label>
+          <label><input id="onboard-injury-back" type="checkbox" /> <span data-i18n="profile.injuryBack">Back injury</span></label>
+          <label><input id="onboard-eq-none" type="checkbox" checked /> <span data-i18n="profile.equipmentNone">No equipment</span></label>
+          <label><input id="onboard-eq-dumbbells" type="checkbox" /> <span data-i18n="profile.equipmentDumbbells">Dumbbells</span></label>
+          <label><input id="onboard-eq-bands" type="checkbox" /> <span data-i18n="profile.equipmentBands">Bands</span></label>
+          <label><input id="onboard-eq-gym" type="checkbox" /> <span data-i18n="profile.equipmentGym">Gym access</span></label>
+          <label class="span-2"><span data-i18n="profile.timePref">Preferred time of day</span>
+            <select id="onboard-time-pref">
+              <option value="any" data-i18n="profile.timeAny">Any</option>
+              <option value="morning" data-i18n="profile.timeMorning">Morning</option>
+              <option value="midday" data-i18n="profile.timeMidday">Midday</option>
+              <option value="evening" data-i18n="profile.timeEvening">Evening</option>
+            </select>
+          </label>
+        </div>
+      </details>
+      <div class="grid-2">
+        <label><span data-i18n="checkIn.stress">Stress (1-10)</span> <input id="onboard-stress" type="number" min="1" max="10" /></label>
+        <label><span data-i18n="checkIn.sleep">Sleep quality (1-10)</span> <input id="onboard-sleep" type="number" min="1" max="10" /></label>
+        <label><span data-i18n="checkIn.energy">Energy (1-10)</span> <input id="onboard-energy" type="number" min="1" max="10" /></label>
+        <label><span data-i18n="checkIn.timeAvailable">Time available</span>
+          <select id="onboard-time">
+            <option value="5">5</option>
+            <option value="10">10</option>
+            <option value="15">15</option>
+            <option value="20" selected>20</option>
+            <option value="30">30</option>
+          </select>
+        </label>
+      </div>
+      <div class="row">
+        <label><input id="onboard-consent-terms" type="checkbox" /> <span data-i18n="consent.terms">I agree to the Terms</span> <a href="/legal/terms" target="_blank" rel="noopener">View</a></label>
+      </div>
+      <div class="row">
+        <label><input id="onboard-consent-privacy" type="checkbox" /> <span data-i18n="consent.privacy">I agree to the Privacy Policy</span> <a href="/legal/privacy" target="_blank" rel="noopener">View</a></label>
+      </div>
+      <div class="row">
+        <label><input id="onboard-consent-alpha" type="checkbox" /> <span data-i18n="consent.alpha">I agree to Alpha Data Processing</span> <a href="/legal/alpha-data-processing" target="_blank" rel="noopener">View</a></label>
+      </div>
+      <button id="onboard-submit" data-i18n="onboard.submit">Start now</button>
+      <div id="onboard-status" class="muted"></div>
+    </section>
+
     <section class="card rail-card" id="rail-card">
       <h1 data-i18n="rail.title">Quick start</h1>
       <div class="rail-grid">
@@ -67,6 +131,11 @@
           <div id="rail-reset" class="rail-reset-body"></div>
         </div>
       </div>
+      <div id="panic-banner" class="banner hidden">
+        <strong data-i18n="panic.title">Safety mode active</strong>
+        <div id="panic-disclaimer" class="muted"></div>
+        <button id="panic-clear" class="ghost" data-i18n="panic.clear">I’m okay now</button>
+      </div>
       <div class="row">
         <button id="rail-submit" data-i18n="rail.submit">Save quick check-in</button>
         <button id="rail-view-full" class="ghost" data-i18n="rail.viewFull">View full day</button>
@@ -78,7 +147,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" id="day-card">
       <h1 data-i18n="day.title">Today</h1>
       <div class="row">
         <label><span data-i18n="day.dateLabel">Date</span> <input id="day-date" type="date" /></label>
@@ -120,13 +189,13 @@
       <div class="muted" data-i18n="community.optInNote">Opt-in in Profile to share responses.</div>
     </section>
 
-    <section class="card">
+    <section class="card" id="signals-card">
       <h2 data-i18n="day.quickSignals">Quick signals</h2>
       <div id="signal-buttons" class="row wrap"></div>
       <button id="bad-day-btn" class="danger" data-i18n="day.badDay">Bad day mode</button>
     </section>
 
-    <section class="card">
+    <section class="card" id="checkin-card">
       <h2 data-i18n="day.checkIn">Check-in</h2>
       <div class="grid-2">
         <label><span data-i18n="checkIn.stress">Stress (1-10)</span> <input id="checkin-stress" type="number" min="1" max="10" /></label>
@@ -148,7 +217,7 @@
       <button id="checkin-submit" data-i18n="day.saveCheckIn">Save check-in</button>
     </section>
 
-    <section class="card">
+    <section class="card" id="completion-card">
       <h2 data-i18n="day.completion">Completion</h2>
       <div class="row wrap" id="completion-list">
         <label><input type="checkbox" data-part="workout" /> <span data-i18n="day.workoutDone">Workout done</span></label>
@@ -157,7 +226,7 @@
       </div>
     </section>
 
-    <section class="card">
+    <section class="card" id="feedback-card">
       <h2 data-i18n="day.feedback">Feedback</h2>
       <div class="row">
         <label><span data-i18n="feedback.kind">Item</span>

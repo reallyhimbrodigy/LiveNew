@@ -1,7 +1,7 @@
 import fs from "fs";
 import path from "path";
 
-const ALLOWED_MODES = new Set(["dev", "dogfood", "alpha", "prod", "test"]);
+const ALLOWED_MODES = new Set(["dev", "internal", "alpha", "prod", "test"]);
 let cachedConfig = null;
 
 function parseBool(value) {
@@ -33,9 +33,9 @@ function readAdminEmailsFile(dataDir) {
 
 export function getEnvMode() {
   const raw = (process.env.ENV_MODE || "").trim().toLowerCase();
-  if (!raw) return "dogfood";
+  if (!raw) return "internal";
   if (!ALLOWED_MODES.has(raw)) {
-    throw new Error(`ENV_MODE must be one of dev|dogfood|alpha|prod. Received: ${process.env.ENV_MODE}`);
+    throw new Error(`ENV_MODE must be one of dev|internal|alpha|prod|test. Received: ${process.env.ENV_MODE}`);
   }
   return raw;
 }
@@ -44,7 +44,7 @@ export function getConfig() {
   if (cachedConfig) return cachedConfig;
 
   const envMode = getEnvMode();
-  const isDevLike = envMode === "dev" || envMode === "dogfood" || envMode === "test";
+  const isDevLike = envMode === "dev" || envMode === "internal" || envMode === "test";
   const isAlphaLike = envMode === "alpha";
   const isProdLike = envMode === "prod";
 

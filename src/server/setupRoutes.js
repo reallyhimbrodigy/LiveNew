@@ -54,8 +54,8 @@ export async function handleSetupRoutes(req, res, config, deps) {
   }
 
   if (pathname === "/setup/complete" && req.method === "POST") {
-    if (config.envMode !== "dogfood") {
-      sendError(res, 403, "setup_not_allowed", "Setup completion is only allowed in dogfood mode.");
+    if (config.envMode !== "internal") {
+      sendError(res, 403, "setup_not_allowed", "Setup completion is only allowed in internal mode.");
       return true;
     }
     const body = await readBody(req);

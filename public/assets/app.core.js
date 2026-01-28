@@ -400,6 +400,21 @@ function initDay() {
   const railViewFull = qs("#rail-view-full");
   const railDoneEl = qs("#rail-done");
   const railDoneView = qs("#rail-done-view");
+  const railCard = qs("#rail-card");
+  const railCheckin = qs(".rail-checkin");
+  const panicBanner = qs("#panic-banner");
+  const panicDisclaimer = qs("#panic-disclaimer");
+  const panicClear = qs("#panic-clear");
+  const onboardCard = qs("#onboard-card");
+  const onboardStatus = qs("#onboard-status");
+  const onboardSubmit = qs("#onboard-submit");
+  const dayCard = qs("#day-card");
+  const prefsCard = qs("#prefs-card");
+  const communityCard = qs("#community-card");
+  const signalsCard = qs("#signals-card");
+  const checkinCard = qs("#checkin-card");
+  const completionCard = qs("#completion-card");
+  const feedbackCard = qs("#feedback-card");
   const communityList = qs("#community-list");
   const communityText = qs("#community-text");
   const communitySubmit = qs("#community-submit");
@@ -408,8 +423,33 @@ function initDay() {
   let currentResetId = null;
   let currentDay = null;
   let prefsMap = new Map();
+  let panicActive = false;
 
   if (dateInput) dateInput.value = todayISO();
+
+  const hideDaySections = (hidden) => {
+    [railCard, dayCard, prefsCard, communityCard, signalsCard, checkinCard, completionCard, feedbackCard]
+      .filter(Boolean)
+      .forEach((section) => section.classList.toggle("hidden", hidden));
+  };
+
+  const setOnboardMode = (active) => {
+    if (onboardCard) onboardCard.classList.toggle("hidden", !active);
+    hideDaySections(active);
+  };
+
+  const setPanicMode = (active, disclaimerText = "") => {
+    panicActive = Boolean(active);
+    if (railCheckin) railCheckin.classList.toggle("hidden", panicActive);
+    if (panicBanner) panicBanner.classList.toggle("hidden", !panicActive);
+    if (panicDisclaimer) panicDisclaimer.textContent = disclaimerText || "";
+    railSubmit?.classList.toggle("hidden", panicActive);
+    railViewFull?.classList.toggle("hidden", panicActive);
+    railDoneEl?.classList.toggle("hidden", panicActive);
+    [dayCard, prefsCard, communityCard, signalsCard, checkinCard, completionCard, feedbackCard]
+      .filter(Boolean)
+      .forEach((section) => section.classList.toggle("hidden", panicActive));
+  };
 
   const renderRailReset = (reset) => {
     if (!railResetEl) return;
@@ -525,6 +565,7 @@ function initDay() {
       if (!ok) return;
       if (railDoneEl) railDoneEl.classList.add("hidden");
       const res = await apiGet("/v1/rail/today");
+      setPanicMode(res?.panic?.active, res?.panic?.disclaimer || res?.day?.why?.safety?.disclaimer || "");
       const dateISO = res.day?.dateISO || todayISO();
       if (dateInput) dateInput.value = dateISO;
       await ensureCitations();
@@ -556,6 +597,7 @@ function initDay() {
         return;
       }
       const res = await apiGet(`/v1/plan/day?date=${dateISO}`);
+      setPanicMode(res?.panic?.active, res?.panic?.disclaimer || res?.day?.why?.safety?.disclaimer || "");
       await ensureCitations();
       renderDay(res.day);
       currentDay = res.day;
@@ -573,8 +615,83 @@ function initDay() {
   };
 
   loadBtn?.addEventListener("click", loadDay);
-  loadDay();
-  loadPrefs();
+  let onboardingActive = ["consent", "onboard"].includes(getAppState()?.uiState);
+  if (onboardingActive) {
+    setOnboardMode(true);
+    const state = getAppState();
+    if (qs("#onboard-timezone")) qs("#onboard-timezone").value = state?.now?.tz || "America/Los_Angeles";
+    if (qs("#onboard-boundary")) qs("#onboard-boundary").value = String(state?.now?.dayBoundaryHour ?? 0);
+    if (qs("#onboard-stress")) qs("#onboard-stress").value = "5";
+    if (qs("#onboard-sleep")) qs("#onboard-sleep").value = "6";
+    if (qs("#onboard-energy")) qs("#onboard-energy").value = "6";
+  } else {
+    setOnboardMode(false);
+    loadDay();
+    loadPrefs();
+  }
+
+  onboardSubmit?.addEventListener("click", async () => {
+    if (onboardingActive === false) return;
+    if (onboardStatus) onboardStatus.textContent = t("onboard.saving");
+    const consent = {
+      terms: Boolean(qs("#onboard-consent-terms")?.checked),
+      privacy: Boolean(qs("#onboard-consent-privacy")?.checked),
+      alphaProcessing: Boolean(qs("#onboard-consent-alpha")?.checked),
+    };
+    if (!consent.terms || !consent.privacy || !consent.alphaProcessing) {
+      if (onboardStatus) onboardStatus.textContent = t("consent.missing");
+      return;
+    }
+    const baseline = {
+      timezone: qs("#onboard-timezone")?.value?.trim() || undefined,
+      dayBoundaryHour: Number(qs("#onboard-boundary")?.value || 0),
+      constraints: {
+        injuries: {
+          knee: Boolean(qs("#onboard-injury-knee")?.checked),
+          shoulder: Boolean(qs("#onboard-injury-shoulder")?.checked),
+          back: Boolean(qs("#onboard-injury-back")?.checked),
+        },
+        equipment: {
+          none: Boolean(qs("#onboard-eq-none")?.checked),
+          dumbbells: Boolean(qs("#onboard-eq-dumbbells")?.checked),
+          bands: Boolean(qs("#onboard-eq-bands")?.checked),
+          gym: Boolean(qs("#onboard-eq-gym")?.checked),
+        },
+        timeOfDayPreference: qs("#onboard-time-pref")?.value || "any",
+      },
+    };
+    const firstCheckIn = {
+      stress: Number(qs("#onboard-stress")?.value || 5),
+      sleepQuality: Number(qs("#onboard-sleep")?.value || 6),
+      energy: Number(qs("#onboard-energy")?.value || 6),
+      timeAvailableMin: Number(qs("#onboard-time")?.value || 20),
+    };
+    try {
+      const res = await apiPost("/v1/onboard/complete", { consent, baseline, firstCheckIn });
+      if (res.accessToken || res.token) {
+        setToken(res.accessToken || res.token);
+        if (res.refreshToken) setRefreshToken(res.refreshToken);
+        updateAuthStatus();
+      }
+      await bootstrapApp();
+      await updateAdminVisibility();
+      onboardingActive = false;
+      setOnboardMode(false);
+      if (res.day) {
+        renderDay(res.day);
+        currentDay = res.day;
+      }
+      if (res.rail?.reset) {
+        renderRailReset(res.rail.reset);
+      }
+      if (onboardStatus) onboardStatus.textContent = "";
+      await loadPrefs();
+      await loadRail();
+    } catch (err) {
+      if (onboardStatus) onboardStatus.textContent = t("onboard.failed");
+      routeError(err);
+    }
+  });
 
   railSubmit?.addEventListener("click", async () => {
     const dateISO = todayISO();
@@ -669,6 +786,12 @@ function initDay() {
         railDoneEl.classList.remove("hidden");
       }
     });
+  });
+
+  panicClear?.addEventListener("click", async () => {
+    const dateISO = dateInput?.value || todayISO();
+    await apiPost("/v1/checkin", { dateISO, safety: { panic: false } });
+    await loadRail();
   });
 
   feedbackButtons.forEach((btn) => {
@@ -851,7 +974,7 @@ function initProfile() {
   if (hardResetBtn) {
     const allowHardReset =
       appState.envMode === "dev" ||
-      appState.envMode === "dogfood" ||
+      appState.envMode === "internal" ||
       appState.auth?.isAdmin === true;
     hardResetBtn.classList.toggle("hidden", !allowHardReset);
     hardResetBtn.addEventListener("click", async () => {
@@ -1088,6 +1211,8 @@ function initAdmin() {
   const opsLatencyBody = qs("#ops-latency-table tbody");
   const opsReleaseList = qs("#ops-release-checklist");
   const opsSnapshotSummary = qs("#ops-snapshot-summary");
+  const opsDailyList = qs("#ops-daily-list");
+  const opsMetricsList = qs("#ops-metrics");
   const snapshotStatus = qs("#snapshot-status");
   const snapshotDetail = qs("#snapshot-detail");
   const snapshotDiffOutput = qs("#snapshot-diff-output");
@@ -1284,6 +1409,52 @@ function initAdmin() {
           );
         });
       }
+    }
+
+    const opsDaily = await apiGet("/v1/admin/ops/daily");
+    if (opsDailyList) {
+      clear(opsDailyList);
+      (opsDaily.checklist || []).forEach((item) => {
+        const status = item.ok ? t("admin.ok") : t("admin.failed");
+        let detailText = "";
+        if (item.key === "validator_ok") {
+          detailText = item.details?.latestAtISO ? `${item.details.latestAtISO}` : "";
+        } else if (item.key === "top_errors") {
+          detailText = item.details?.top?.length ? `${item.details.top.length} ${t("admin.entries")}` : t("admin.none");
+        } else if (item.key === "p95_latency") {
+          detailText = Object.keys(item.details?.p95ByRoute || {}).length ? t("admin.viewDetails") : t("admin.none");
+        } else if (item.key === "stability_distribution") {
+          const total = item.details?.total || 0;
+          detailText = total ? `${t("admin.totalUsers")}: ${total}` : t("admin.none");
+        }
+        opsDailyList.appendChild(
+          el("div", { class: "list-item" }, [
+            el("div", { text: `${item.key} • ${status}` }),
+            el("div", { class: "muted", text: detailText }),
+          ])
+        );
+      });
+    }
+
+    if (opsMetricsList) {
+      clear(opsMetricsList);
+      const windows = [7, 14, 30];
+      const qualityCalls = windows.map((days) => apiGet(`/v1/admin/metrics/quality?days=${days}`));
+      const retentionCalls = windows.map((days) => apiGet(`/v1/admin/metrics/retention?days=${days}`));
+      const qualityResults = await Promise.all(qualityCalls);
+      const retentionResults = await Promise.all(retentionCalls);
+      windows.forEach((days, idx) => {
+        const quality = qualityResults[idx];
+        const retention = retentionResults[idx];
+        const qualityPct = formatPct(quality.rate);
+        const retentionPct = formatPct(retention.overall?.rate);
+        opsMetricsList.appendChild(
+          el("div", { class: "list-item" }, [
+            el("div", { text: `Last ${days}d • ${t("admin.qualityMetric")}: ${qualityPct}` }),
+            el("div", { class: "muted", text: `${t("admin.retentionMetric")}: ${retentionPct}` }),
+          ])
+        );
+      });
     }
   };
 

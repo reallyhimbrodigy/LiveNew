@@ -2019,6 +2019,46 @@ export async function insertAnalyticsEvent({ userId, atISO, dateISO, eventKey, p
   return { id };
 }
 
+export async function upsertAnalyticsUserDayTimes({ dateISO, userId, firstRailOpenedAt = null, firstResetCompletedAt = null }) {
+  if (!dateISO || !userId) return { ok: false };
+  if (!firstRailOpenedAt && !firstResetCompletedAt) return { ok: false };
+  getDb()
+    .prepare(
+      `INSERT INTO analytics_user_day_times (date_iso, user_id, first_rail_opened_at, first_reset_completed_at)
+       VALUES (?, ?, ?, ?)
+       ON CONFLICT(date_iso, user_id) DO UPDATE SET
+         first_rail_opened_at = COALESCE(analytics_user_day_times.first_rail_opened_at, excluded.first_rail_opened_at),
+         first_reset_completed_at = COALESCE(analytics_user_day_times.first_reset_completed_at, excluded.first_reset_completed_at)`
+    )
+    .run(dateISO, userId, firstRailOpenedAt, firstResetCompletedAt);
+  return { ok: true };
+}
+
+export async function getQualityMetricsRange(fromISO, toISO) {
+  if (!fromISO || !toISO) return { numerator: 0, denominator: 0 };
+  const row = getDb()
+    .prepare(
+      `SELECT
+        SUM(CASE WHEN first_rail_opened_at IS NOT NULL THEN 1 ELSE 0 END) AS denom,
+        SUM(
+          CASE
+            WHEN first_rail_opened_at IS NOT NULL
+              AND first_reset_completed_at IS NOT NULL
+              AND (strftime('%s', first_reset_completed_at) - strftime('%s', first_rail_opened_at)) <= 120
+            THEN 1
+            ELSE 0
+          END
+        ) AS num
+       FROM analytics_user_day_times
+       WHERE date_iso >= ? AND date_iso <= ?`
+    )
+    .get(fromISO, toISO);
+  return {
+    numerator: row?.num || 0,
+    denominator: row?.denom || 0,
+  };
+}
+
 export async function setAnalyticsDailyFlag(dateISO, userId, flagKey) {
   const info = getDb()
     .prepare("INSERT OR IGNORE INTO analytics_daily_user_flags (date_iso, user_id, flag_key) VALUES (?, ?, ?)")
@@ -2040,6 +2080,69 @@ export async function getFirstAnalyticsFlagDate(userId, flagKey) {
     )
     .get(userId, flagKey);
   return row?.date_iso || null;
+}
+
+export async function listDay3RetentionRows(fromISO, toISO) {
+  if (!fromISO || !toISO) return [];
+  const rows = getDb()
+    .prepare(
+      `SELECT
+        o.user_id AS user_id,
+        o.date_iso AS onboard_date,
+        CASE WHEN r.user_id IS NULL THEN 0 ELSE 1 END AS retained,
+        uc.cohort_id AS cohort_id
+       FROM analytics_daily_user_flags o
+       LEFT JOIN analytics_daily_user_flags r
+         ON r.user_id = o.user_id
+        AND r.flag_key = 'day3_retained'
+        AND r.date_iso = date(o.date_iso, '+3 day')
+       LEFT JOIN user_cohorts uc
+         ON uc.user_id = o.user_id
+       WHERE o.flag_key = 'onboard_completed'
+         AND o.date_iso >= ?
+         AND o.date_iso <= ?`
+    )
+    .all(fromISO, toISO);
+  return rows.map((row) => ({
+    userId: row.user_id,
+    onboardDate: row.onboard_date,
+    retained: row.retained === 1,
+    cohortId: row.cohort_id || null,
+  }));
+}
+
+export async function listUserStatesByIds(userIds) {
+  const ids = Array.isArray(userIds) ? userIds.filter(Boolean) : [];
+  if (!ids.length) return [];
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = getDb().prepare(`SELECT user_id, state_json FROM user_state WHERE user_id IN (${placeholders})`).all(...ids);
+  return rows.map((row) => ({ userId: row.user_id, state: JSON.parse(row.state_json || "{}") }));
+}
+
+export async function getStabilityDistribution(fromISO, toISO) {
+  if (!fromISO || !toISO) return { stable: 0, mixed: 0, unstable: 0, total: 0 };
+  const rows = getDb()
+    .prepare(
+      `SELECT u.id AS user_id, COUNT(p.id) AS changes
+       FROM users u
+       LEFT JOIN plan_change_summaries p
+         ON p.user_id = u.id
+        AND p.date_iso >= ?
+        AND p.date_iso <= ?
+       GROUP BY u.id`
+    )
+    .all(fromISO, toISO);
+  let stable = 0;
+  let mixed = 0;
+  let unstable = 0;
+  rows.forEach((row) => {
+    const changes = Number(row.changes || 0);
+    if (changes <= 2) stable += 1;
+    else if (changes <= 5) mixed += 1;
+    else unstable += 1;
+  });
+  const total = stable + mixed + unstable;
+  return { stable, mixed, unstable, total };
 }
 
 export async function upsertAnalyticsDailyCounts(dateISO, counts) {
@@ -2618,6 +2721,7 @@ export async function deleteUserData(userId) {
     instance.prepare("DELETE FROM analytics_active_users WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM analytics_daily_user_flags WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM analytics_events WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM analytics_user_day_times WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM reminder_intents WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM user_cohorts WHERE user_id = ?").run(userId);
