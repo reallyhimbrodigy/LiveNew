@@ -71,6 +71,9 @@ export function sendError(res, errOrStatus, code, message, field, requestId) {
   };
 
   if (res?.livenewUserId) payload.userId = res.livenewUserId;
+  if (err.code === "consent_required" && err.details?.required) {
+    payload.error.required = err.details.required;
+  }
   const exposeDetails = err.details?.expose === true || err.code === "consent_required";
   if (isDevLike() || exposeDetails) {
     const details = err.details || undefined;

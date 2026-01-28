@@ -1254,6 +1254,43 @@ function applyDataMinimizationToCheckIn(checkIn, userProfile) {
   return checkIn;
 }
 
+function extractConsentAcceptance(body = {}) {
+  const accepted = new Set();
+  const consents = Array.isArray(body?.consents)
+    ? body.consents.filter((entry) => typeof entry === "string")
+    : [];
+  consents.forEach((entry) => accepted.add(entry.trim().toLowerCase()));
+  const accept = body?.accept || body?.consent || {};
+  const acceptTerms = accept.terms === true || body?.acceptTerms === true;
+  const acceptPrivacy = accept.privacy === true || body?.acceptPrivacy === true;
+  const acceptAlpha =
+    accept.alphaProcessing === true ||
+    accept.alpha_processing === true ||
+    body?.acceptAlphaProcessing === true;
+  if (acceptTerms) accepted.add("terms");
+  if (acceptPrivacy) accepted.add("privacy");
+  if (acceptAlpha) accepted.add("alpha_processing");
+  return accepted;
+}
+
+async function handleConsentAccept(body, userId, res) {
+  const accepted = extractConsentAcceptance(body);
+  const missing = REQUIRED_CONSENTS.filter((key) => !accepted.has(key));
+  if (missing.length) {
+    sendError(
+      res,
+      badRequest("consent_required", "Missing required consent", "consents", {
+        required: missing,
+        expose: true,
+      })
+    );
+    return false;
+  }
+  await upsertUserConsents(userId, REQUIRED_CONSENTS);
+  sendJson(res, 200, { ok: true, accepted: REQUIRED_CONSENTS }, userId);
+  return true;
+}
+
 async function ensureRequiredConsents(userId, res) {
   if (!userId) return true;
   const missing = await missingUserConsents(userId, REQUIRED_CONSENTS);
@@ -1266,6 +1303,148 @@ async function ensureRequiredConsents(userId, res) {
     })
   );
   return false;
+}
+
+function consentStatusFromMap(consents) {
+  return {
+    terms: Boolean(consents?.terms),
+    privacy: Boolean(consents?.privacy),
+    alpha_processing: Boolean(consents?.alpha_processing),
+  };
+}
+
+function profileCompleteness(profile) {
+  if (!profile) return { isComplete: false, missingFields: ["userProfile"] };
+  const requiredFields = [
+    "wakeTime",
+    "bedTime",
+    "sleepRegularity",
+    "caffeineCupsPerDay",
+    "lateCaffeineDaysPerWeek",
+    "sunlightMinutesPerDay",
+    "lateScreenMinutesPerNight",
+    "alcoholNightsPerWeek",
+    "mealTimingConsistency",
+    "contentPack",
+    "timezone",
+    "dayBoundaryHour",
+  ];
+  const missingFields = requiredFields.filter((field) => profile[field] == null || profile[field] === "");
+  return { isComplete: missingFields.length === 0, missingFields };
+}
+
+async function buildBootstrapPayload({ userId, userProfile, userEmail, flags }) {
+  const isAuthenticated = Boolean(userId);
+  let consents = {};
+  if (isAuthenticated) {
+    consents = await listUserConsents(userId);
+  }
+  const accepted = consentStatusFromMap(consents);
+  const consentComplete = REQUIRED_CONSENTS.every((key) => accepted[key] === true);
+  const profileStatus = profileCompleteness(userProfile);
+  const tz = getUserTimezone(userProfile);
+  const dayBoundaryHour = getDayBoundaryHour(userProfile);
+  const dateISO = toDateISOWithBoundary(new Date(), tz, dayBoundaryHour) || domain.isoToday();
+  const incidentMode = resolveIncidentMode(flags);
+  const admin = userEmail ? isAdmin(userEmail) : false;
+  return {
+    ok: true,
+    now: { dateISO, tz, dayBoundaryHour },
+    auth: {
+      isAuthenticated,
+      userId: isAuthenticated ? userId : undefined,
+      isAdmin: admin,
+    },
+    consent: {
+      required: REQUIRED_CONSENTS.slice(),
+      accepted,
+      isComplete: consentComplete,
+    },
+    profile: {
+      isComplete: profileStatus.isComplete,
+      missingFields: profileStatus.missingFields,
+    },
+    features: {
+      incidentMode,
+      railTodayAvailable: consentComplete && !incidentMode && isAuthenticated,
+    },
+    env: { mode: config.envMode },
+  };
+}
+
+async function runSmokeChecks({ userId, userEmail }) {
+  const checks = [];
+  let ok = true;
+  try {
+    await checkDbConnection();
+    checks.push({ key: "healthz", ok: true });
+  } catch {
+    ok = false;
+    checks.push({ key: "healthz", ok: false });
+  }
+  try {
+    await checkReady();
+    checks.push({ key: "readyz", ok: true });
+  } catch {
+    ok = false;
+    checks.push({ key: "readyz", ok: false });
+  }
+  let bootstrap = null;
+  try {
+    const flags = await getFeatureFlags();
+    let profile = null;
+    let resolvedEmail = userEmail;
+    if (userId) {
+      const cached = await loadUserState(userId);
+      profile = cached?.state?.userProfile || null;
+      if (!resolvedEmail) {
+        const user = await getUserById(userId);
+        resolvedEmail = user?.email || null;
+      }
+    }
+    bootstrap = await buildBootstrapPayload({ userId, userProfile: profile, userEmail: resolvedEmail, flags });
+    checks.push({ key: "bootstrap", ok: true });
+  } catch {
+    ok = false;
+    checks.push({ key: "bootstrap", ok: false });
+  }
+  if (bootstrap?.auth?.isAuthenticated && bootstrap?.consent?.isComplete && !bootstrap?.features?.incidentMode) {
+    checks.push({ key: "rail_today", ok: true });
+  } else {
+    checks.push({ key: "rail_today", ok: false, skipped: true });
+  }
+  return { ok: ok && checks.every((c) => c.ok || c.skipped), checks };
+}
+
+function renderSmokeHtml(report) {
+  const rows = (report.checks || [])
+    .map((check) => {
+      const status = check.ok ? "ok" : check.skipped ? "skip" : "fail";
+      const label = check.skipped ? "SKIPPED" : check.ok ? "OK" : "FAIL";
+      return `<li class="${status}">${check.key}: ${label}</li>`;
+    })
+    .join("");
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>LiveNew Smoke</title>
+    <style>
+      body { font-family: system-ui, sans-serif; padding: 24px; }
+      .ok { color: #0a7a33; }
+      .fail { color: #c62828; }
+      .skip { color: #777; }
+      ul { list-style: none; padding: 0; }
+      li { margin: 6px 0; }
+    </style>
+  </head>
+  <body>
+    <h1>Smoke check</h1>
+    <p>Status: ${report.ok ? "OK" : "FAIL"}</p>
+    <ul>${rows}</ul>
+  </body>
+</html>`;
 }
 
 function daysBetweenISO(startISO, endISO) {
@@ -1390,6 +1569,12 @@ function sendJson(res, status, payload, userId) {
   if (res?.livenewApiVersion) headers["x-api-version"] = res.livenewApiVersion;
   res.writeHead(status, headers);
   res.end(JSON.stringify(body));
+}
+
+function sendHtml(res, status, html) {
+  const headers = { "Content-Type": "text/html; charset=utf-8", ...(res?.livenewExtraHeaders || {}) };
+  res.writeHead(status, headers);
+  res.end(html);
 }
 
 async function parseJson(req) {
@@ -2685,6 +2870,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && pathname.startsWith("/i18n/")) {
+    await serveFile(res, path.join(PUBLIC_DIR, pathname.slice(1)));
+    return;
+  }
+
   if (req.method === "GET" && pathname === "/app.js") {
     await serveFile(res, path.join(PUBLIC_DIR, "assets", "app.core.js"));
     return;
@@ -2714,6 +2904,11 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    let userId = null;
+    let userEmail = null;
+    let authSessionId = null;
+    let usedLegacySession = false;
+    let token = null;
     const handledSetup = await handleSetupRoutes(req, res, config, {
       url,
       sendJson,
@@ -2725,6 +2920,12 @@ const server = http.createServer(async (req, res) => {
     });
     if (handledSetup) return;
 
+    if (pathname === "/smoke" && req.method === "GET") {
+      const report = await runSmokeChecks({ userId, userEmail });
+      sendHtml(res, 200, renderSmokeHtml(report));
+      return;
+    }
+
     if (pathname === "/healthz" && req.method === "GET") {
       await checkDbConnection();
       sendJson(res, 200, {
@@ -2735,6 +2936,12 @@ const server = http.createServer(async (req, res) => {
         },
         uptimeSec: Math.round(process.uptime()),
       });
+      return;
+    }
+
+    if (pathname === "/v1/smoke" && req.method === "GET") {
+      const report = await runSmokeChecks({ userId, userEmail });
+      sendJson(res, 200, report);
       return;
     }
 
@@ -2926,11 +3133,7 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    let userId = null;
-    let userEmail = null;
-    let authSessionId = null;
-    let usedLegacySession = false;
-    const token = parseAuthToken(req);
+    token = parseAuthToken(req);
     if (token) {
       try {
         const verified = verifyAccessToken(token);
@@ -3030,6 +3233,28 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       sendJson(res, 200, { ok: true }, userId || null);
+      return;
+    }
+
+    if (pathname === "/v1/bootstrap" && req.method === "GET") {
+      const flags = await getFeatureFlags();
+      let profile = null;
+      let resolvedEmail = userEmail;
+      if (userId) {
+        const cached = await loadUserState(userId);
+        profile = cached?.state?.userProfile || null;
+        if (!resolvedEmail) {
+          const user = await getUserById(userId);
+          resolvedEmail = user?.email || null;
+        }
+      }
+      const payload = await buildBootstrapPayload({
+        userId,
+        userProfile: profile,
+        userEmail: resolvedEmail,
+        flags,
+      });
+      sendJson(res, 200, payload, userId || null);
       return;
     }
 
@@ -3356,6 +3581,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname.startsWith("/v1/plan/") || pathname === "/v1/rail/today") {
+      if (!userId) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      const guards = resolveEngineGuards(requestFlags, incidentModeEnabled);
+      if (guards.incidentMode) {
+        sendError(res, 503, "incident_mode", "Incident mode active");
+        return;
+      }
       const ok = await ensureRequiredConsents(userId, res);
       if (!ok) return;
     }
@@ -3416,31 +3650,35 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (pathname === "/v1/consents/accept" && req.method === "POST") {
-      const body = await parseJson(req);
-      const consents = Array.isArray(body?.consents)
-        ? body.consents.filter((entry) => typeof entry === "string")
-        : [];
-      const acceptTerms = body?.acceptTerms === true;
-      const acceptPrivacy = body?.acceptPrivacy === true;
-      const acceptAlpha = body?.acceptAlphaProcessing === true;
-      const accepted = new Set(consents.map((c) => c.trim().toLowerCase()).filter(Boolean));
-      if (acceptTerms) accepted.add("terms");
-      if (acceptPrivacy) accepted.add("privacy");
-      if (acceptAlpha) accepted.add("alpha_processing");
-      const missing = REQUIRED_CONSENTS.filter((key) => !accepted.has(key));
-      if (missing.length) {
-        sendError(
-          res,
-          badRequest("consent_required", "Missing required consent", "consents", {
-            required: missing,
-            expose: true,
-          })
-        );
+    if (pathname === "/v1/consent/status" && req.method === "GET") {
+      if (!userId) {
+        sendError(res, 401, "auth_required", "Authorization required");
         return;
       }
-      await upsertUserConsents(userId, REQUIRED_CONSENTS);
-      send(200, { ok: true, accepted: REQUIRED_CONSENTS });
+      const consents = await listUserConsents(userId);
+      const accepted = consentStatusFromMap(consents);
+      send(200, {
+        ok: true,
+        accepted,
+        required: REQUIRED_CONSENTS.slice(),
+        isComplete: REQUIRED_CONSENTS.every((key) => accepted[key] === true),
+      });
+      return;
+    }
+
+    if (pathname === "/v1/consent/accept" && req.method === "POST") {
+      if (!userId) {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return;
+      }
+      const body = await parseJson(req);
+      await handleConsentAccept(body, userId, res);
+      return;
+    }
+
+    if (pathname === "/v1/consents/accept" && req.method === "POST") {
+      const body = await parseJson(req);
+      await handleConsentAccept(body, userId, res);
       return;
     }
 

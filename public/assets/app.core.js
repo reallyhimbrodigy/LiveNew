@@ -47,16 +47,108 @@ async function ensureCitations() {
   return citationsById;
 }
 
+const DEFAULT_APP_STATE = {
+  auth: { isAuthenticated: false, isAdmin: false },
+  consentComplete: false,
+  envMode: null,
+};
+
+function getAppState() {
+  return window.__APP_STATE || { ...DEFAULT_APP_STATE };
+}
+
+function setAppState(bootstrap) {
+  const next = {
+    ...DEFAULT_APP_STATE,
+    ...(bootstrap || {}),
+  };
+  next.auth = { ...DEFAULT_APP_STATE.auth, ...(bootstrap?.auth || {}) };
+  next.envMode = bootstrap?.env?.mode || bootstrap?.envMode || DEFAULT_APP_STATE.envMode;
+  next.consentComplete = Boolean(bootstrap?.consent?.isComplete);
+  window.__APP_STATE = next;
+  return next;
+}
+
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
 function getErrorCode(err) {
-  return err?.payload?.error?.code || null;
+  return err?.code || err?.payload?.error?.code || null;
 }
 
 function getErrorDetails(err) {
-  return err?.payload?.details || null;
+  return err?.details || err?.payload?.details || null;
+}
+
+function ensureErrorScreen() {
+  let screen = qs("#app-error-screen");
+  if (screen) return screen;
+  const host = qs("main.container") || document.body;
+  screen = document.createElement("section");
+  screen.id = "app-error-screen";
+  screen.className = "card";
+  const title = document.createElement("h2");
+  title.id = "app-error-title";
+  const message = document.createElement("p");
+  message.id = "app-error-message";
+  const requestId = document.createElement("div");
+  requestId.id = "app-error-request";
+  requestId.className = "muted";
+  screen.appendChild(title);
+  screen.appendChild(message);
+  screen.appendChild(requestId);
+  host.prepend(screen);
+  return screen;
+}
+
+function showErrorScreen({ title, message, requestId }) {
+  const screen = ensureErrorScreen();
+  const titleEl = qs("#app-error-title");
+  const messageEl = qs("#app-error-message");
+  const requestEl = qs("#app-error-request");
+  if (titleEl) titleEl.textContent = title || t("error.genericTitle");
+  if (messageEl) messageEl.textContent = message || t("error.genericBody");
+  if (requestEl) {
+    requestEl.textContent = requestId ? `${t("error.requestId")} ${requestId}` : "";
+  }
+  screen.classList.remove("hidden");
+}
+
+function routeError(err, { consentGate } = {}) {
+  const code = getErrorCode(err) || "unknown_error";
+  if (code === "consent_required") {
+    if (consentGate?.show) {
+      consentGate.show();
+      return;
+    }
+    showErrorScreen({ title: t("error.consentTitle"), message: t("error.consentBody"), requestId: err?.requestId });
+    return;
+  }
+  if (code === "auth_required") {
+    showErrorScreen({ title: t("error.authTitle"), message: t("error.authBody"), requestId: err?.requestId });
+    qs("#auth-email")?.focus();
+    return;
+  }
+  if (code === "feature_disabled") {
+    showErrorScreen({ title: t("error.featureTitle"), message: t("error.featureBody"), requestId: err?.requestId });
+    return;
+  }
+  if (code === "incident_mode") {
+    showErrorScreen({ title: t("error.incidentTitle"), message: t("error.incidentBody"), requestId: err?.requestId });
+    return;
+  }
+  showErrorScreen({ title: t("error.genericTitle"), message: t("error.genericBody"), requestId: err?.requestId });
+}
+
+async function bootstrapApp() {
+  try {
+    const boot = await apiGet("/v1/bootstrap");
+    return setAppState(boot);
+  } catch (err) {
+    routeError(err);
+    return setAppState({});
+  }
 }
 
 function setupConsentGate(onAccepted) {
@@ -77,11 +169,10 @@ function setupConsentGate(onAccepted) {
     pending = true;
     if (status) status.textContent = t("consent.saving");
     try {
-      await apiPost("/v1/consents/accept", {
-        acceptTerms: true,
-        acceptPrivacy: true,
-        acceptAlphaProcessing: true,
+      await apiPost("/v1/consent/accept", {
+        accept: { terms: true, privacy: true, alphaProcessing: true },
       });
+      await bootstrapApp();
       card.classList.add("hidden");
       if (status) status.textContent = "";
       if (typeof onAccepted === "function") onAccepted();
@@ -100,9 +191,56 @@ function setupConsentGate(onAccepted) {
   };
 }
 
+async function checkConsentStatus() {
+  if (!getToken() && !getRefreshToken()) {
+    return { ok: true, required: [], accepted: {} };
+  }
+  try {
+    const res = await apiGet("/v1/consent/status");
+    const required = Array.isArray(res.required) ? res.required : ["terms", "privacy", "alpha_processing"];
+    const accepted = res.accepted || {};
+    const ok = required.every((key) => accepted[key] === true);
+    return { ok, required, accepted };
+  } catch (err) {
+    if (getErrorCode(err) === "auth_required") {
+      return { ok: true, required: [], accepted: {} };
+    }
+    throw err;
+  }
+}
+
+async function ensurePlanAccess(consentGate) {
+  const state = getAppState();
+  if (!state.auth?.isAuthenticated) {
+    routeError({ code: "auth_required" });
+    return false;
+  }
+  if (state.consentComplete) return true;
+  try {
+    const status = await checkConsentStatus();
+    if (status.ok) {
+      state.consentComplete = true;
+      return true;
+    }
+    if (consentGate?.show) {
+      consentGate.show();
+    } else {
+      routeError({ code: "consent_required" });
+    }
+    return false;
+  } catch (err) {
+    routeError(err, { consentGate });
+    return false;
+  }
+}
+
 async function init() {
   await ensureCsrf();
   applyI18n(STRINGS);
+  window.addEventListener("unhandledrejection", (event) => {
+    routeError(event?.reason || {});
+    event.preventDefault();
+  });
   const page = document.body.dataset.page;
   const titleMap = {
     day: `${t("appName")} — ${t("nav.day")}`,
@@ -115,6 +253,8 @@ async function init() {
     document.title = titleMap[page];
   }
   bindAuth();
+  const boot = await bootstrapApp();
+  setAppState(boot);
   await updateAdminVisibility();
   if (page === "day") initDay();
   if (page === "week") initWeek();
@@ -148,6 +288,8 @@ function bindAuth() {
       setToken(res.accessToken || res.token);
       if (res.refreshToken) setRefreshToken(res.refreshToken);
       updateAuthStatus();
+      const boot = await bootstrapApp();
+      setAppState(boot);
       await updateAdminVisibility();
     }
   });
@@ -161,6 +303,7 @@ function bindAuth() {
     clearTokens();
     updateAuthStatus();
     updateAdminVisibility();
+    setAppState({});
   });
 }
 
@@ -382,7 +525,11 @@ function initDay() {
     loadDay();
   });
 
+  const ensureConsent = async () => ensurePlanAccess(consentGate);
+
   const loadRail = async () => {
+    const ok = await ensureConsent();
+    if (!ok) return;
     try {
       const res = await apiGet("/v1/rail/today");
       const dateISO = res.day?.dateISO || todayISO();
@@ -402,15 +549,13 @@ function initDay() {
       }
       renderRailReset(res.rail?.reset || null);
     } catch (err) {
-      if (getErrorCode(err) === "consent_required") {
-        consentGate.show();
-        return;
-      }
-      throw err;
+      routeError(err, { consentGate });
     }
   };
 
   const loadDay = async () => {
+    const ok = await ensureConsent();
+    if (!ok) return;
     const dateISO = dateInput?.value || todayISO();
     if (railResetEl && dateISO === todayISO()) {
       await loadRail();
@@ -430,16 +575,19 @@ function initDay() {
         renderCommunity([]);
       }
     } catch (err) {
-      if (getErrorCode(err) === "consent_required") {
-        consentGate.show();
-        return;
-      }
-      throw err;
+      routeError(err, { consentGate });
     }
   };
 
   loadBtn?.addEventListener("click", loadDay);
-  loadDay();
+  const state = getAppState();
+  if (state.auth?.isAuthenticated && state.consentComplete) {
+    loadDay();
+  } else if (state.auth?.isAuthenticated) {
+    consentGate.show();
+  } else {
+    routeError({ code: "auth_required" }, { consentGate });
+  }
   loadPrefs();
 
   railSubmit?.addEventListener("click", async () => {
@@ -572,6 +720,8 @@ function initWeek() {
     const dateISO = dateInput?.value;
     const url = dateISO ? `/v1/plan/week?date=${dateISO}` : "/v1/plan/week";
     try {
+      const ok = await ensureConsent();
+      if (!ok) return;
       const res = await apiGet(url);
       clear(list);
       (res.weekPlan?.days || []).forEach((day) => {
@@ -584,18 +734,22 @@ function initWeek() {
         );
       });
     } catch (err) {
-      if (getErrorCode(err) === "consent_required") {
-        consentGate.show();
-        return;
-      }
-      throw err;
+      routeError(err, { consentGate });
     }
   };
 
   const consentGate = setupConsentGate(loadWeek);
+  const ensureConsent = async () => ensurePlanAccess(consentGate);
 
   loadBtn?.addEventListener("click", loadWeek);
-  loadWeek();
+  const state = getAppState();
+  if (state.auth?.isAuthenticated && state.consentComplete) {
+    loadWeek();
+  } else if (state.auth?.isAuthenticated) {
+    consentGate.show();
+  } else {
+    routeError({ code: "auth_required" }, { consentGate });
+  }
 }
 
 function initTrends() {
@@ -607,52 +761,61 @@ function initTrends() {
   const outcomesResets = qs("#outcomes-resets tbody");
 
   const loadTrends = async () => {
-    const days = select?.value || "7";
-    const res = await apiGet(`/v1/trends?days=${days}`);
-    clear(tbody);
-    (res.days || []).forEach((row) => {
-      const tr = el("tr", {}, [
-        el("td", { text: row.dateISO }),
-        el("td", { text: row.stressAvg != null ? row.stressAvg.toFixed(1) : "–" }),
-        el("td", { text: row.sleepAvg != null ? row.sleepAvg.toFixed(1) : "–" }),
-        el("td", { text: row.energyAvg != null ? row.energyAvg.toFixed(1) : "–" }),
-        el("td", { text: row.anyPart == null ? "–" : row.anyPart ? t("misc.yes") : t("misc.no") }),
-        el("td", { text: formatMinutes(row.downshiftMinutes) }),
-      ]);
-      tbody.appendChild(tr);
-    });
-    const outcomes = await apiGet(`/v1/outcomes?days=${days}`);
-    if (outcomesSummary) {
-      clear(outcomesSummary);
-      outcomesSummary.appendChild(
-        el("div", { class: "list-item" }, [
-          el("div", { text: t("outcomes.daysAny") }),
-          el("div", { class: "muted", text: String(outcomes.metrics?.daysAnyRegulationAction ?? 0) }),
-        ])
-      );
-    }
-    if (outcomesAnchors) {
-      clear(outcomesAnchors);
-      (outcomes.metrics?.anchorsCompletedTrend || []).forEach((row) => {
+    try {
+      const state = getAppState();
+      if (!state.auth?.isAuthenticated) {
+        routeError({ code: "auth_required" });
+        return;
+      }
+      const days = select?.value || "7";
+      const res = await apiGet(`/v1/trends?days=${days}`);
+      clear(tbody);
+      (res.days || []).forEach((row) => {
         const tr = el("tr", {}, [
           el("td", { text: row.dateISO }),
-          el("td", { text: row.sunlight ? t("misc.yes") : t("misc.no") }),
-          el("td", { text: row.meal ? t("misc.yes") : t("misc.no") }),
-          el("td", { text: row.downshift ? t("misc.yes") : t("misc.no") }),
+          el("td", { text: row.stressAvg != null ? row.stressAvg.toFixed(1) : "–" }),
+          el("td", { text: row.sleepAvg != null ? row.sleepAvg.toFixed(1) : "–" }),
+          el("td", { text: row.energyAvg != null ? row.energyAvg.toFixed(1) : "–" }),
+          el("td", { text: row.anyPart == null ? "–" : row.anyPart ? t("misc.yes") : t("misc.no") }),
+          el("td", { text: formatMinutes(row.downshiftMinutes) }),
         ]);
-        outcomesAnchors.appendChild(tr);
+        tbody.appendChild(tr);
       });
-    }
-    if (outcomesResets) {
-      clear(outcomesResets);
-      (outcomes.metrics?.topResets || []).forEach((entry) => {
-        const tr = el("tr", {}, [
-          el("td", { text: entry.title || entry.resetId }),
-          el("td", { text: String(entry.completedCount || 0) }),
-          el("td", { text: entry.lastUsedAtISO || "–" }),
-        ]);
-        outcomesResets.appendChild(tr);
-      });
+      const outcomes = await apiGet(`/v1/outcomes?days=${days}`);
+      if (outcomesSummary) {
+        clear(outcomesSummary);
+        outcomesSummary.appendChild(
+          el("div", { class: "list-item" }, [
+            el("div", { text: t("outcomes.daysAny") }),
+            el("div", { class: "muted", text: String(outcomes.metrics?.daysAnyRegulationAction ?? 0) }),
+          ])
+        );
+      }
+      if (outcomesAnchors) {
+        clear(outcomesAnchors);
+        (outcomes.metrics?.anchorsCompletedTrend || []).forEach((row) => {
+          const tr = el("tr", {}, [
+            el("td", { text: row.dateISO }),
+            el("td", { text: row.sunlight ? t("misc.yes") : t("misc.no") }),
+            el("td", { text: row.meal ? t("misc.yes") : t("misc.no") }),
+            el("td", { text: row.downshift ? t("misc.yes") : t("misc.no") }),
+          ]);
+          outcomesAnchors.appendChild(tr);
+        });
+      }
+      if (outcomesResets) {
+        clear(outcomesResets);
+        (outcomes.metrics?.topResets || []).forEach((entry) => {
+          const tr = el("tr", {}, [
+            el("td", { text: entry.title || entry.resetId }),
+            el("td", { text: String(entry.completedCount || 0) }),
+            el("td", { text: entry.lastUsedAtISO || "–" }),
+          ]);
+          outcomesResets.appendChild(tr);
+        });
+      }
+    } catch (err) {
+      routeError(err);
     }
   };
 
@@ -664,6 +827,7 @@ function initProfile() {
   const saveBtn = qs("#profile-save");
   const constraintsSave = qs("#constraints-save");
   const communityOptSave = qs("#community-opt-save");
+  const hardResetBtn = qs("#hard-reset");
   const sessionsList = qs("#sessions-list");
   const deviceInput = qs("#device-name");
   const deviceSave = qs("#device-name-save");
@@ -677,6 +841,24 @@ function initProfile() {
   const changesList = qs("#changes-list");
   const changelogLoad = qs("#profile-changelog-load");
   const changelogList = qs("#profile-changelog-list");
+  const appState = getAppState();
+
+  if (hardResetBtn) {
+    const allowHardReset =
+      appState.envMode === "dev" ||
+      appState.envMode === "dogfood" ||
+      appState.auth?.isAdmin === true;
+    hardResetBtn.classList.toggle("hidden", !allowHardReset);
+    hardResetBtn.addEventListener("click", async () => {
+      try {
+        await logoutAuth();
+      } catch {
+        // ignore
+      }
+      clearTokens();
+      window.location.href = "/";
+    });
+  }
 
   const loadProfile = async () => {
     try {
@@ -832,15 +1014,21 @@ function initProfile() {
 
   const loadChanges = async () => {
     if (!changesDate?.value) return;
-    const res = await apiGet(`/v1/plan/changes?date=${changesDate.value}`);
-    clear(changesList);
-    (res.items || []).forEach((item) => {
-      const row = el("div", { class: "list-item" }, [
-        el("div", { text: item.summary?.short || t("misc.planUpdated") }),
-        el("div", { class: "muted", text: item.createdAt }),
-      ]);
-      changesList.appendChild(row);
-    });
+    const ok = await ensurePlanAccess();
+    if (!ok) return;
+    try {
+      const res = await apiGet(`/v1/plan/changes?date=${changesDate.value}`);
+      clear(changesList);
+      (res.items || []).forEach((item) => {
+        const row = el("div", { class: "list-item" }, [
+          el("div", { text: item.summary?.short || t("misc.planUpdated") }),
+          el("div", { class: "muted", text: item.createdAt }),
+        ]);
+        changesList.appendChild(row);
+      });
+    } catch (err) {
+      routeError(err);
+    }
   };
 
   changesLoad?.addEventListener("click", loadChanges);

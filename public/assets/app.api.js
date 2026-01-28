@@ -119,9 +119,17 @@ async function apiFetch(path, options = {}) {
     }
   }
   if (!res.ok || payload?.ok === false) {
-    const message = payload?.error?.message || payload?.error || `Request failed (${res.status})`;
+    const errorPayload = payload?.error || {};
+    const message =
+      errorPayload.message ||
+      (typeof payload?.error === "string" ? payload.error : null) ||
+      `Request failed (${res.status})`;
     const err = new Error(message);
-    err.status = res.status;
+    err.code = errorPayload.code || (res.status === 401 ? "auth_required" : "unknown_error");
+    err.httpStatus = res.status;
+    err.requestId = errorPayload.requestId || null;
+    err.details = payload?.details || errorPayload.details || null;
+    err.required = errorPayload.required || err.details?.required || [];
     err.payload = payload;
     throw err;
   }

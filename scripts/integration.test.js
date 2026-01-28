@@ -191,6 +191,31 @@ async function run() {
     const accessToken = verifyRes.payload.accessToken;
     const refreshToken = verifyRes.payload.refreshToken;
 
+    const preConsentRes = await fetchJson(`/v1/plan/day?date=${userToday}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    assert(preConsentRes.res.status === 403, "plan/day should be blocked before consent");
+    assert(preConsentRes.payload?.error?.code === "consent_required", "consent_required error expected");
+    assert(
+      Array.isArray(preConsentRes.payload?.error?.required),
+      "consent_required should include required list"
+    );
+
+    const consentStatus = await fetchJson("/v1/consent/status", {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    assert(consentStatus.payload?.ok, "consent/status should return ok");
+    assert(consentStatus.payload?.accepted?.terms === false, "consent/status should reflect missing consent");
+
+    const consentAccept = await fetchJson("/v1/consent/accept", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: { accept: { terms: true, privacy: true, alphaProcessing: true } },
+    });
+    assert(consentAccept.payload?.ok, "consent/accept should return ok");
+
     await fetchJson("/v1/profile", {
       method: "POST",
       headers: { Authorization: `Bearer ${accessToken}` },
