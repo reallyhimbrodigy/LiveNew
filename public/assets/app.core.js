@@ -15,6 +15,7 @@ import {
   getDeviceName,
 } from "./app.api.js";
 import { getAppState } from "./app.state.js";
+export { getAppState, setAppState, resetAppState } from "./app.state.js";
 import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.js";
 import { STRINGS as EN_STRINGS } from "../i18n/en.js";
 
