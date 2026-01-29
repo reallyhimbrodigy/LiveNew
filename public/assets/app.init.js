@@ -1,13 +1,32 @@
-import { ensureCsrf } from "./app.api.js";
+import { apiGet, setToken, setRefreshToken } from "./app.api.js";
+import { getAppState, setAppState } from "./app.state.js";
 import {
   initBaseUi,
   bindAuth,
   updateAdminVisibility,
-  bootstrapApp,
-  getAppState,
-  routeError,
+  setAppErrorHandler,
+  hideGateScreens,
+  renderConsentScreen,
+  renderOnboardScreen,
+  showLoginScreen,
+  showIncidentScreen,
+  showErrorScreen,
+  t,
 } from "./app.core.js";
-import { loadHome, loadWeek, loadTrends, loadProfile, loadAdmin } from "./controllers.js";
+import { renderHome } from "./controllers.js";
+
+function getErrorCode(err) {
+  return err?.code || err?.payload?.error?.code || null;
+}
+
+function getRequestId(err) {
+  return (
+    err?.requestId ||
+    err?.payload?.requestId ||
+    err?.payload?.error?.requestId ||
+    null
+  );
+}
 
 function isProdLike() {
   const mode = getAppState()?.envMode;
@@ -15,54 +34,206 @@ function isProdLike() {
 }
 
 let unhandledHookAttached = false;
+let initInFlight = false;
+let pendingInit = false;
 
-function handleUnhandledRejection(event) {
-  const err = event?.reason || {};
-  if (isProdLike()) {
-    event.preventDefault();
-    const code = err?.code || "error";
-    const req = err?.requestId ? ` ${err.requestId}` : "";
-    console.warn(`[${code}]${req}`);
-  } else {
-    console.error(err);
-  }
-  routeError(err);
+function attachUnhandledHook() {
+  if (unhandledHookAttached) return;
+  window.addEventListener("unhandledrejection", (event) => {
+    const err = event?.reason || {};
+    if (isProdLike()) {
+      event.preventDefault();
+      const code = err?.code || "error";
+      const req = err?.requestId ? ` ${err.requestId}` : "";
+      console.warn(`[${code}]${req}`);
+    } else {
+      console.error(err);
+    }
+    handleAppError(err);
+  });
+  unhandledHookAttached = true;
 }
 
-export async function initApp({ page }) {
-  await ensureCsrf();
-  initBaseUi();
-  if (!unhandledHookAttached) {
-    window.addEventListener("unhandledrejection", handleUnhandledRejection);
-    unhandledHookAttached = true;
+function requestInit() {
+  if (initInFlight) {
+    pendingInit = true;
+    return;
   }
-  bindAuth();
-  const state = await bootstrapApp();
-  await updateAdminVisibility();
-  const uiState = state?.uiState || "login";
+  void initApp();
+}
+
+function normalizeBootState(boot) {
+  const uiState = boot?.uiState || "login";
+  return {
+    boot,
+    auth: boot?.auth || {},
+    consent: boot?.consent || {},
+    now: boot?.now || null,
+    authenticated: Boolean(boot?.auth?.isAuthenticated),
+    consentComplete: Boolean(boot?.consent?.isComplete),
+    uiState,
+    envMode: boot?.env?.mode || boot?.envMode || null,
+  };
+}
+
+async function runBootstrap() {
+  const boot = await apiGet("/v1/bootstrap");
+  const patch = normalizeBootState(boot);
+  setAppState(patch);
+  return { boot, patch };
+}
+
+function handleAppError(err) {
+  const code = getErrorCode(err);
+  const requestId = getRequestId(err);
+  if (code === "auth_required" || code === "consent_required" || code === "consent_required_version") {
+    requestInit();
+    return;
+  }
+  if (code === "incident_mode") {
+    showIncidentScreen(requestId);
+    return;
+  }
+  showErrorScreen({
+    title: t("error.genericTitle"),
+    message: t("error.genericBody"),
+    requestId,
+  });
+}
+
+function buildOnboardDefaults(boot) {
+  return {
+    timezone: boot?.now?.tz || "America/Los_Angeles",
+    dayBoundaryHour: boot?.now?.dayBoundaryHour ?? 0,
+    stress: "5",
+    sleepQuality: "6",
+    energy: "6",
+  };
+}
+
+async function routeUiState({ boot }) {
+  const uiState = boot?.uiState || "login";
+  hideGateScreens();
 
   if (uiState === "login") {
-    routeError({ code: "auth_required" });
-    return;
-  }
-  if (uiState === "consent" || uiState === "onboard") {
-    if (page !== "day") {
-      window.location.href = "/day";
-      return;
-    }
-  }
-
-  if (page === "home") {
-    window.location.href = "/day";
+    showLoginScreen();
     return;
   }
 
-  if (page === "day") loadHome();
-  if (page === "week") loadWeek();
-  if (page === "trends") loadTrends();
-  if (page === "profile") loadProfile();
-  if (page === "admin") loadAdmin();
+  if (uiState === "consent") {
+    renderConsentScreen({
+      requiredKeys: boot?.consent?.requiredKeys || boot?.consent?.required || null,
+      requiredVersion: boot?.consent?.requiredVersion ?? null,
+      onAccepted: async () => requestInit(),
+      onError: handleAppError,
+    });
+    return;
+  }
+
+  if (uiState === "onboard") {
+    renderOnboardScreen({
+      defaults: buildOnboardDefaults(boot),
+      onComplete: async (res) => {
+        if (res?.accessToken || res?.token) {
+          setToken(res.accessToken || res.token);
+        }
+        if (res?.refreshToken) setRefreshToken(res.refreshToken);
+        requestInit();
+      },
+      onError: handleAppError,
+    });
+    return;
+  }
+
+  if (uiState === "home") {
+    await renderHome();
+    return;
+  }
+
+  showErrorScreen({
+    title: t("error.genericTitle"),
+    message: t("error.genericBody"),
+  });
 }
 
-const page = document.body.dataset.page;
-initApp({ page }).catch((err) => handleUnhandledRejection({ reason: err, preventDefault() {} }));
+async function runSmoke() {
+  const results = [];
+  const add = (key, pass, details) => {
+    results.push({ key, pass: Boolean(pass), details: details || null });
+  };
+
+  add("modules_loaded", true);
+
+  let boot = null;
+  try {
+    boot = await apiGet("/v1/bootstrap");
+    add("bootstrap", true, { uiState: boot?.uiState || null });
+  } catch (err) {
+    add("bootstrap", false, { message: err?.message || "bootstrap failed" });
+  }
+
+  if (boot?.uiState === "home") {
+    try {
+      await apiGet("/v1/rail/today");
+      add("rail_today", true);
+    } catch (err) {
+      add("rail_today", false, { message: err?.message || "rail/today failed" });
+    }
+  } else {
+    add("rail_today", true, { skipped: true });
+  }
+
+  const pass = results.every((entry) => entry.pass);
+  const host = document.querySelector("main") || document.body;
+  const title = document.createElement("h1");
+  title.textContent = pass ? "Frontend smoke OK" : "Frontend smoke FAIL";
+  const list = document.createElement("ul");
+  results.forEach((entry) => {
+    const item = document.createElement("li");
+    const status = entry.pass ? "PASS" : "FAIL";
+    const details = entry.details ? ` - ${JSON.stringify(entry.details)}` : "";
+    item.textContent = `${status} ${entry.key}${details}`;
+    list.appendChild(item);
+  });
+  host.innerHTML = "";
+  host.appendChild(title);
+  host.appendChild(list);
+}
+
+export async function initApp({ mode } = {}) {
+  const resolvedMode = mode || document.body?.dataset?.mode || null;
+  if (initInFlight) {
+    pendingInit = true;
+    return;
+  }
+  initInFlight = true;
+  try {
+    initBaseUi();
+    attachUnhandledHook();
+    setAppErrorHandler(handleAppError);
+    bindAuth({
+      onAuthChange: requestInit,
+      onError: handleAppError,
+    });
+
+    if (resolvedMode === "smoke") {
+      await runSmoke();
+      return;
+    }
+
+    const { boot } = await runBootstrap();
+    await updateAdminVisibility();
+    await routeUiState({ boot });
+  } catch (err) {
+    handleAppError(err);
+  } finally {
+    initInFlight = false;
+    if (pendingInit) {
+      pendingInit = false;
+      void initApp({ mode: resolvedMode });
+    }
+  }
+}
+
+const initialMode = document.body?.dataset?.mode || null;
+initApp({ mode: initialMode }).catch((err) => handleAppError(err));

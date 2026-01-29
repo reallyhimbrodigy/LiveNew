@@ -83,6 +83,13 @@ function assert(cond, message) {
   }
 }
 
+function assertErrorPayload(payload, label) {
+  assert(payload && payload.ok === false, `${label} should return ok:false`);
+  assert(payload.error && typeof payload.error.code === "string", `${label} should include error.code`);
+  assert(payload.error && typeof payload.error.message === "string", `${label} should include error.message`);
+  assert(payload.error && typeof payload.error.requestId === "string", `${label} should include error.requestId`);
+}
+
 async function waitForReady() {
   for (let i = 0; i < 30; i += 1) {
     try {
@@ -202,8 +209,18 @@ async function run() {
     const hitsPre = await fetchJson("/v1/dev/route-hits", { method: "GET" });
     const planDayHits = hitsPre.payload?.hits?.["GET /v1/plan/day"] || 0;
     const planWeekHits = hitsPre.payload?.hits?.["GET /v1/plan/week"] || 0;
+    const railTodayHits = hitsPre.payload?.hits?.["GET /v1/rail/today"] || 0;
     assert(planDayHits === 0, "plan/day should not be hit before consent");
     assert(planWeekHits === 0, "plan/week should not be hit before consent");
+    assert(railTodayHits === 0, "rail/today should not be hit before consent");
+
+    const missingRoute = await fetchJson("/v1/does-not-exist", { method: "GET" });
+    assert(missingRoute.res.status === 404, "unknown route should return 404");
+    assertErrorPayload(missingRoute.payload, "404");
+
+    const unauthPlan = await fetchJson(`/v1/plan/day?date=${userToday}`, { method: "GET" });
+    assert(unauthPlan.res.status >= 400, "plan/day without auth should fail");
+    assertErrorPayload(unauthPlan.payload, "plan/day without auth");
 
     const preConsentRes = await fetchJson(`/v1/plan/day?date=${userToday}`, {
       method: "GET",
@@ -214,6 +231,7 @@ async function run() {
       ["consent_required", "consent_required_version"].includes(preConsentRes.payload?.error?.code),
       "consent error expected"
     );
+    assertErrorPayload(preConsentRes.payload, "plan/day pre-consent");
 
     const consentStatus = await fetchJson("/v1/consent/status", {
       method: "GET",

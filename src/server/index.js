@@ -2862,6 +2862,53 @@ async function summarizeBackups() {
   };
 }
 
+async function computeStabilityChecklist() {
+  const checks = [];
+
+  let frontendAvailable = false;
+  try {
+    await fs.access(path.join(PUBLIC_DIR, "smoke-frontend.html"));
+    frontendAvailable = true;
+  } catch {
+    frontendAvailable = false;
+  }
+  checks.push({
+    key: "frontend_smoke_available",
+    pass: frontendAvailable,
+    details: { path: "smoke-frontend.html" },
+  });
+
+  try {
+    const smokeReport = await runSmokeChecks({ userId: null, userEmail: null });
+    checks.push({
+      key: "api_smoke_ok",
+      pass: Boolean(smokeReport?.ok),
+      details: { ok: smokeReport?.ok, checks: smokeReport?.checks || [] },
+    });
+  } catch (err) {
+    checks.push({
+      key: "api_smoke_ok",
+      pass: false,
+      details: { error: err?.message || "smoke failed" },
+    });
+  }
+
+  const validator = await getLatestValidatorRun("engine_matrix");
+  const validatorPass = validator ? validator.ok : true;
+  checks.push({
+    key: "validator_ok",
+    pass: validatorPass,
+    details: {
+      latestRunId: validator?.id || null,
+      latestAtISO: validator?.atISO || null,
+      missing: !validator,
+    },
+  });
+
+  const pass = checks.every((check) => check.pass);
+  return { ok: true, pass, checks };
+}
+
 async function computeReleaseChecklistState() {
   const applied = await listAppliedMigrations();
   const migrationFiles = (await fs.readdir(path.join(process.cwd(), "src", "db", "migrations"))).filter(
@@ -2904,6 +2951,7 @@ async function computeReleaseChecklistState() {
 
   const consentFlowOk = ["terms", "privacy", "alpha_processing"].every((key) => REQUIRED_CONSENTS.includes(key));
   const alpha = await alphaReadiness();
+  const stability = await computeStabilityChecklist();
 
   const checklist = buildReleaseChecklist({
     alphaReadiness: {
@@ -2950,6 +2998,10 @@ async function computeReleaseChecklistState() {
       pass: consentFlowOk,
       details: { required: REQUIRED_CONSENTS },
     },
+    stability: {
+      pass: stability.pass,
+      details: { checks: stability.checks },
+    },
   });
 
   return {
@@ -2962,6 +3014,7 @@ async function computeReleaseChecklistState() {
     requestSnapshot,
     errorRate,
     errorRateOk,
+    stability,
   };
 }
 
@@ -3112,6 +3165,8 @@ const server = http.createServer(async (req, res) => {
     ["/index.html", "index.html"],
     ["/day", "day.html"],
     ["/day.html", "day.html"],
+    ["/smoke-frontend", "smoke-frontend.html"],
+    ["/smoke-frontend.html", "smoke-frontend.html"],
     ["/week", "week.html"],
     ["/week.html", "week.html"],
     ["/trends", "trends.html"],
@@ -5407,6 +5462,14 @@ const server = http.createServer(async (req, res) => {
       const email = await requireAdmin();
       if (!email) return;
       const { checklist } = await computeReleaseChecklistState();
+      send(200, { ok: true, pass: checklist.pass, checks: checklist.checks });
+      return;
+    }
+
+    if (pathname === "/v1/admin/stability/checklist" && req.method === "GET") {
+      const email = await requireAdmin();
+      if (!email) return;
+      const checklist = await computeStabilityChecklist();
       send(200, { ok: true, pass: checklist.pass, checks: checklist.checks });
       return;
     }

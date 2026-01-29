@@ -14,6 +14,7 @@ import {
   setDeviceName,
   getDeviceName,
 } from "./app.api.js";
+import { getAppState } from "./app.state.js";
 import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.js";
 import { STRINGS as EN_STRINGS } from "../i18n/en.js";
 
@@ -46,35 +47,21 @@ async function ensureCitations() {
   return citationsById;
 }
 
-const DEFAULT_APP_STATE = {
-  auth: { isAuthenticated: false, isAdmin: false },
-  consentComplete: false,
-  envMode: null,
-  uiState: "login",
-};
+let appErrorHandler = null;
+export function setAppErrorHandler(handler) {
+  appErrorHandler = typeof handler === "function" ? handler : null;
+}
 
-function ensureAppState() {
-  if (!window.__APP_STATE) {
-    window.__APP_STATE = { ...DEFAULT_APP_STATE };
+function reportError(err) {
+  if (appErrorHandler) {
+    try {
+      appErrorHandler(err);
+      return;
+    } catch (error) {
+      console.error(error);
+    }
   }
-  return window.__APP_STATE;
-}
-
-export function getAppState() {
-  return ensureAppState();
-}
-
-export function setAppState(bootstrap) {
-  const next = {
-    ...DEFAULT_APP_STATE,
-    ...(bootstrap || {}),
-  };
-  next.auth = { ...DEFAULT_APP_STATE.auth, ...(bootstrap?.auth || {}) };
-  next.envMode = bootstrap?.env?.mode || bootstrap?.envMode || DEFAULT_APP_STATE.envMode;
-  next.consentComplete = Boolean(bootstrap?.consent?.isComplete);
-  next.uiState = bootstrap?.uiState || next.uiState;
-  window.__APP_STATE = next;
-  return next;
+  console.error(err);
 }
 
 function todayISO() {
@@ -110,7 +97,7 @@ function ensureErrorScreen() {
   return screen;
 }
 
-function showErrorScreen({ title, message, requestId }) {
+export function showErrorScreen({ title, message, requestId }) {
   const screen = ensureErrorScreen();
   const titleEl = qs("#app-error-title");
   const messageEl = qs("#app-error-message");
@@ -123,124 +110,180 @@ function showErrorScreen({ title, message, requestId }) {
   screen.classList.remove("hidden");
 }
 
-function routeError(err, { consentGate } = {}) {
-  const code = getErrorCode(err) || "unknown_error";
-  if (code === "consent_required" || code === "consent_required_version") {
-    if (consentGate?.show) {
-      consentGate.show();
-      return;
-    }
-    showErrorScreen({ title: t("error.consentTitle"), message: t("error.consentBody"), requestId: err?.requestId });
-    return;
-  }
-  if (code === "auth_required") {
-    showErrorScreen({ title: t("error.authTitle"), message: t("error.authBody"), requestId: err?.requestId });
-    qs("#auth-email")?.focus();
-    return;
-  }
-  if (code === "feature_disabled") {
-    showErrorScreen({ title: t("error.featureTitle"), message: t("error.featureBody"), requestId: err?.requestId });
-    return;
-  }
-  if (code === "incident_mode") {
-    showErrorScreen({ title: t("error.incidentTitle"), message: t("error.incidentBody"), requestId: err?.requestId });
-    return;
-  }
-  showErrorScreen({ title: t("error.genericTitle"), message: t("error.genericBody"), requestId: err?.requestId });
+export function showLoginScreen() {
+  showErrorScreen({ title: t("error.authTitle"), message: t("error.authBody") });
+  qs("#auth-email")?.focus();
 }
 
-async function bootstrapApp() {
-  try {
-    const boot = await apiGet("/v1/bootstrap");
-    return setAppState(boot);
-  } catch (err) {
-    routeError(err);
-    return setAppState({});
-  }
+export function showIncidentScreen(requestId) {
+  showErrorScreen({ title: t("error.incidentTitle"), message: t("error.incidentBody"), requestId });
 }
 
-function setupConsentGate(onAccepted) {
+function hideGateCard(card) {
+  if (card) card.classList.add("hidden");
+}
+
+export function hideGateScreens() {
+  hideGateCard(qs("#consent-card"));
+  hideGateCard(qs("#onboard-card"));
+  const screen = qs("#app-error-screen");
+  if (screen) screen.classList.add("hidden");
+  toggleDaySections(false);
+}
+
+function toggleDaySections(hidden) {
+  const sections = [
+    qs("#rail-card"),
+    qs("#day-card"),
+    qs("#prefs-card"),
+    qs("#community-card"),
+    qs("#signals-card"),
+    qs("#checkin-card"),
+    qs("#completion-card"),
+    qs("#feedback-card"),
+  ].filter(Boolean);
+  sections.forEach((section) => section.classList.toggle("hidden", hidden));
+}
+
+let consentHandlers = { onAccepted: null, onError: null, requiredKeys: null };
+let consentBound = false;
+export function renderConsentScreen({ requiredKeys = null, requiredVersion = null, onAccepted, onError } = {}) {
   const card = qs("#consent-card");
-  if (!card) return { show: () => false };
+  if (!card) {
+    showErrorScreen({
+      title: t("error.consentTitle"),
+      message: t("error.consentBody"),
+    });
+    return;
+  }
+  consentHandlers = { onAccepted, onError, requiredKeys, requiredVersion };
+  card.classList.remove("hidden");
+  toggleDaySections(true);
   const terms = qs("#consent-terms");
   const privacy = qs("#consent-privacy");
   const alpha = qs("#consent-alpha");
   const submit = qs("#consent-submit");
   const status = qs("#consent-status");
-  let pending = false;
-  submit?.addEventListener("click", async () => {
-    if (pending) return;
-    if (!terms?.checked || !privacy?.checked || !alpha?.checked) {
-      if (status) status.textContent = t("consent.missing");
-      return;
-    }
-    pending = true;
-    if (status) status.textContent = t("consent.saving");
-    try {
-      await apiPost("/v1/consent/accept", {
-        accept: { terms: true, privacy: true, alphaProcessing: true },
-      });
-      await bootstrapApp();
-      card.classList.add("hidden");
-      if (status) status.textContent = "";
-      if (typeof onAccepted === "function") onAccepted();
-    } catch {
-      if (status) status.textContent = t("consent.failed");
-    } finally {
-      pending = false;
-    }
-  });
-  return {
-    show: () => {
-      card.classList.remove("hidden");
-      if (status) status.textContent = "";
-      return true;
-    },
-  };
+  if (status) status.textContent = "";
+  if (!consentBound) {
+    let pending = false;
+    submit?.addEventListener("click", async () => {
+      if (pending) return;
+      const required = Array.isArray(consentHandlers.requiredKeys) && consentHandlers.requiredKeys.length
+        ? consentHandlers.requiredKeys
+        : ["terms", "privacy", "alpha_processing"];
+      const accepted = {
+        terms: Boolean(terms?.checked),
+        privacy: Boolean(privacy?.checked),
+        alpha_processing: Boolean(alpha?.checked),
+      };
+      const missing = required.filter((key) => accepted[key] !== true);
+      if (missing.length) {
+        if (status) status.textContent = t("consent.missing");
+        return;
+      }
+      pending = true;
+      if (status) status.textContent = t("consent.saving");
+      try {
+        await apiPost("/v1/consent/accept", {
+          accept: { terms: true, privacy: true, alphaProcessing: true },
+        });
+        hideGateCard(card);
+        if (status) status.textContent = "";
+        if (typeof consentHandlers.onAccepted === "function") {
+          await consentHandlers.onAccepted();
+        }
+      } catch (err) {
+        if (status) status.textContent = t("consent.failed");
+        if (typeof consentHandlers.onError === "function") {
+          consentHandlers.onError(err);
+        } else {
+          reportError(err);
+        }
+      } finally {
+        pending = false;
+      }
+    });
+    consentBound = true;
+  }
+  void requiredVersion;
 }
 
-async function checkConsentStatus() {
-  if (!getToken() && !getRefreshToken()) {
-    return { ok: true, required: [], accepted: {} };
+let onboardHandlers = { onComplete: null, onError: null };
+let onboardBound = false;
+export function renderOnboardScreen({ onComplete, onError, defaults = {} } = {}) {
+  const card = qs("#onboard-card");
+  if (!card) {
+    showErrorScreen({
+      title: t("error.genericTitle"),
+      message: t("error.genericBody"),
+    });
+    return;
   }
-  try {
-    const res = await apiGet("/v1/consent/status");
-    const required = Array.isArray(res.required) ? res.required : ["terms", "privacy", "alpha_processing"];
-    const accepted = res.accepted || {};
-    const requiredVersion = Number(res.requiredVersion || 0);
-    const userVersion = Number(res.userVersion || 0);
-    const ok = required.every((key) => accepted[key] === true) && userVersion >= requiredVersion;
-    return { ok, required, accepted, requiredVersion, userVersion };
-  } catch (err) {
-    if (getErrorCode(err) === "auth_required") {
-      return { ok: true, required: [], accepted: {} };
-    }
-    throw err;
-  }
-}
-
-async function ensurePlanAccess(consentGate) {
-  const state = getAppState();
-  if (!state.auth?.isAuthenticated) {
-    routeError({ code: "auth_required" });
-    return false;
-  }
-  if (state.consentComplete) return true;
-  try {
-    const status = await checkConsentStatus();
-    if (status.ok) {
-      state.consentComplete = true;
-      return true;
-    }
-    if (consentGate?.show) {
-      consentGate.show();
-    } else {
-      routeError({ code: "consent_required" });
-    }
-    return false;
-  } catch (err) {
-    routeError(err, { consentGate });
-    return false;
+  onboardHandlers = { onComplete, onError };
+  card.classList.remove("hidden");
+  toggleDaySections(true);
+  const status = qs("#onboard-status");
+  if (status) status.textContent = "";
+  if (qs("#onboard-timezone")) qs("#onboard-timezone").value = defaults.timezone || "America/Los_Angeles";
+  if (qs("#onboard-boundary")) qs("#onboard-boundary").value = String(defaults.dayBoundaryHour ?? 0);
+  if (qs("#onboard-stress")) qs("#onboard-stress").value = defaults.stress || "5";
+  if (qs("#onboard-sleep")) qs("#onboard-sleep").value = defaults.sleepQuality || "6";
+  if (qs("#onboard-energy")) qs("#onboard-energy").value = defaults.energy || "6";
+  if (!onboardBound) {
+    const submit = qs("#onboard-submit");
+    submit?.addEventListener("click", async () => {
+      if (status) status.textContent = t("onboard.saving");
+      const consent = {
+        terms: Boolean(qs("#onboard-consent-terms")?.checked),
+        privacy: Boolean(qs("#onboard-consent-privacy")?.checked),
+        alphaProcessing: Boolean(qs("#onboard-consent-alpha")?.checked),
+      };
+      if (!consent.terms || !consent.privacy || !consent.alphaProcessing) {
+        if (status) status.textContent = t("consent.missing");
+        return;
+      }
+      const baseline = {
+        timezone: qs("#onboard-timezone")?.value?.trim() || undefined,
+        dayBoundaryHour: Number(qs("#onboard-boundary")?.value || 0),
+        constraints: {
+          injuries: {
+            knee: Boolean(qs("#onboard-injury-knee")?.checked),
+            shoulder: Boolean(qs("#onboard-injury-shoulder")?.checked),
+            back: Boolean(qs("#onboard-injury-back")?.checked),
+          },
+          equipment: {
+            none: Boolean(qs("#onboard-eq-none")?.checked),
+            dumbbells: Boolean(qs("#onboard-eq-dumbbells")?.checked),
+            bands: Boolean(qs("#onboard-eq-bands")?.checked),
+            gym: Boolean(qs("#onboard-eq-gym")?.checked),
+          },
+          timeOfDayPreference: qs("#onboard-time-pref")?.value || "any",
+        },
+      };
+      const firstCheckIn = {
+        stress: Number(qs("#onboard-stress")?.value || 5),
+        sleepQuality: Number(qs("#onboard-sleep")?.value || 6),
+        energy: Number(qs("#onboard-energy")?.value || 6),
+        timeAvailableMin: Number(qs("#onboard-time")?.value || 20),
+      };
+      try {
+        const res = await apiPost("/v1/onboard/complete", { consent, baseline, firstCheckIn });
+        if (status) status.textContent = "";
+        hideGateCard(card);
+        if (typeof onboardHandlers.onComplete === "function") {
+          await onboardHandlers.onComplete(res);
+        }
+      } catch (err) {
+        if (status) status.textContent = t("onboard.failed");
+        if (typeof onboardHandlers.onError === "function") {
+          onboardHandlers.onError(err);
+        } else {
+          reportError(err);
+        }
+      }
+    });
+    onboardBound = true;
   }
 }
 
@@ -259,7 +302,10 @@ function initBaseUi() {
   }
 }
 
-function bindAuth() {
+let authHandlers = { onAuthChange: null, onError: null };
+let authBound = false;
+function bindAuth({ onAuthChange, onError } = {}) {
+  authHandlers = { onAuthChange, onError };
   const emailInput = qs("#auth-email");
   const codeInput = qs("#auth-code");
   const requestBtn = qs("#auth-request");
@@ -268,39 +314,54 @@ function bindAuth() {
 
   updateAuthStatus();
 
-  requestBtn?.addEventListener("click", async () => {
-    const email = emailInput?.value?.trim();
-    if (!email) return;
-    await requestAuth(email);
-    setText(qs("#auth-status"), t("auth.codeSent"));
-  });
+  if (!authBound) {
+    requestBtn?.addEventListener("click", async () => {
+      const email = emailInput?.value?.trim();
+      if (!email) return;
+      try {
+        await requestAuth(email);
+        setText(qs("#auth-status"), t("auth.codeSent"));
+      } catch (err) {
+        if (typeof authHandlers.onError === "function") authHandlers.onError(err);
+        else reportError(err);
+      }
+    });
 
-  verifyBtn?.addEventListener("click", async () => {
-    const email = emailInput?.value?.trim();
-    const code = codeInput?.value?.trim();
-    if (!email || !code) return;
-    const res = await verifyAuth(email, code);
-    if (res?.accessToken || res?.token) {
-      setToken(res.accessToken || res.token);
-      if (res.refreshToken) setRefreshToken(res.refreshToken);
+    verifyBtn?.addEventListener("click", async () => {
+      const email = emailInput?.value?.trim();
+      const code = codeInput?.value?.trim();
+      if (!email || !code) return;
+      try {
+        const res = await verifyAuth(email, code);
+        if (res?.accessToken || res?.token) {
+          setToken(res.accessToken || res.token);
+          if (res.refreshToken) setRefreshToken(res.refreshToken);
+          updateAuthStatus();
+          if (typeof authHandlers.onAuthChange === "function") {
+            await authHandlers.onAuthChange({ reason: "login" });
+          }
+        }
+      } catch (err) {
+        if (typeof authHandlers.onError === "function") authHandlers.onError(err);
+        else reportError(err);
+      }
+    });
+
+    logoutBtn?.addEventListener("click", async () => {
+      try {
+        if (getRefreshToken()) await logoutAuth();
+      } catch {
+        // ignore
+      }
+      clearTokens();
       updateAuthStatus();
-      const boot = await bootstrapApp();
-      setAppState(boot);
-      await updateAdminVisibility();
-    }
-  });
-
-  logoutBtn?.addEventListener("click", async () => {
-    try {
-      if (getRefreshToken()) await logoutAuth();
-    } catch {
-      // ignore
-    }
-    clearTokens();
-    updateAuthStatus();
-    updateAdminVisibility();
-    setAppState({});
-  });
+      updateAdminVisibility();
+      if (typeof authHandlers.onAuthChange === "function") {
+        await authHandlers.onAuthChange({ reason: "logout" });
+      }
+    });
+    authBound = true;
+  }
 }
 
 function updateAuthStatus() {
@@ -391,7 +452,7 @@ function renderDay(day) {
   }
 }
 
-function initDay() {
+function initDay({ initialDateISO } = {}) {
   const dateInput = qs("#day-date");
   const loadBtn = qs("#day-load");
   const detailsToggle = qs("#day-details-toggle");
@@ -407,14 +468,10 @@ function initDay() {
   const railViewFull = qs("#rail-view-full");
   const railDoneEl = qs("#rail-done");
   const railDoneView = qs("#rail-done-view");
-  const railCard = qs("#rail-card");
   const railCheckin = qs(".rail-checkin");
   const panicBanner = qs("#panic-banner");
   const panicDisclaimer = qs("#panic-disclaimer");
   const panicClear = qs("#panic-clear");
-  const onboardCard = qs("#onboard-card");
-  const onboardStatus = qs("#onboard-status");
-  const onboardSubmit = qs("#onboard-submit");
   const dayCard = qs("#day-card");
   const prefsCard = qs("#prefs-card");
   const communityCard = qs("#community-card");
@@ -432,18 +489,7 @@ function initDay() {
   let prefsMap = new Map();
   let panicActive = false;
 
-  if (dateInput) dateInput.value = todayISO();
-
-  const hideDaySections = (hidden) => {
-    [railCard, dayCard, prefsCard, communityCard, signalsCard, checkinCard, completionCard, feedbackCard]
-      .filter(Boolean)
-      .forEach((section) => section.classList.toggle("hidden", hidden));
-  };
-
-  const setOnboardMode = (active) => {
-    if (onboardCard) onboardCard.classList.toggle("hidden", !active);
-    hideDaySections(active);
-  };
+  if (dateInput) dateInput.value = initialDateISO || dateInput.value || todayISO();
 
   const setPanicMode = (active, disclaimerText = "") => {
     panicActive = Boolean(active);
@@ -556,20 +602,14 @@ function initDay() {
     } catch (err) {
       if (getErrorCode(err) === "feature_disabled") {
         if (communityList) clear(communityList);
+      } else {
+        reportError(err);
       }
     }
   };
 
-  const consentGate = setupConsentGate(() => {
-    loadDay();
-  });
-
-  const ensureConsent = async () => ensurePlanAccess(consentGate);
-
   const loadRail = async () => {
     try {
-      const ok = await ensureConsent();
-      if (!ok) return;
       if (railDoneEl) railDoneEl.classList.add("hidden");
       const res = await apiGet("/v1/rail/today");
       setPanicMode(res?.panic?.active, res?.panic?.disclaimer || res?.day?.why?.safety?.disclaimer || "");
@@ -590,14 +630,12 @@ function initDay() {
       }
       renderRailReset(res.rail?.reset || null);
     } catch (err) {
-      routeError(err, { consentGate });
+      reportError(err);
     }
   };
 
   const loadDay = async () => {
     try {
-      const ok = await ensureConsent();
-      if (!ok) return;
       const dateISO = dateInput?.value || todayISO();
       if (railResetEl && dateISO === todayISO()) {
         await loadRail();
@@ -617,102 +655,33 @@ function initDay() {
         renderCommunity([]);
       }
     } catch (err) {
-      routeError(err, { consentGate });
+      reportError(err);
     }
   };
 
-  loadBtn?.addEventListener("click", loadDay);
-  let onboardingActive = ["consent", "onboard"].includes(getAppState()?.uiState);
-  if (onboardingActive) {
-    setOnboardMode(true);
-    const state = getAppState();
-    if (qs("#onboard-timezone")) qs("#onboard-timezone").value = state?.now?.tz || "America/Los_Angeles";
-    if (qs("#onboard-boundary")) qs("#onboard-boundary").value = String(state?.now?.dayBoundaryHour ?? 0);
-    if (qs("#onboard-stress")) qs("#onboard-stress").value = "5";
-    if (qs("#onboard-sleep")) qs("#onboard-sleep").value = "6";
-    if (qs("#onboard-energy")) qs("#onboard-energy").value = "6";
-  } else {
-    setOnboardMode(false);
+  loadBtn?.addEventListener("click", () => {
     loadDay();
-    loadPrefs();
-  }
-
-  onboardSubmit?.addEventListener("click", async () => {
-    if (onboardingActive === false) return;
-    if (onboardStatus) onboardStatus.textContent = t("onboard.saving");
-    const consent = {
-      terms: Boolean(qs("#onboard-consent-terms")?.checked),
-      privacy: Boolean(qs("#onboard-consent-privacy")?.checked),
-      alphaProcessing: Boolean(qs("#onboard-consent-alpha")?.checked),
-    };
-    if (!consent.terms || !consent.privacy || !consent.alphaProcessing) {
-      if (onboardStatus) onboardStatus.textContent = t("consent.missing");
-      return;
-    }
-    const baseline = {
-      timezone: qs("#onboard-timezone")?.value?.trim() || undefined,
-      dayBoundaryHour: Number(qs("#onboard-boundary")?.value || 0),
-      constraints: {
-        injuries: {
-          knee: Boolean(qs("#onboard-injury-knee")?.checked),
-          shoulder: Boolean(qs("#onboard-injury-shoulder")?.checked),
-          back: Boolean(qs("#onboard-injury-back")?.checked),
-        },
-        equipment: {
-          none: Boolean(qs("#onboard-eq-none")?.checked),
-          dumbbells: Boolean(qs("#onboard-eq-dumbbells")?.checked),
-          bands: Boolean(qs("#onboard-eq-bands")?.checked),
-          gym: Boolean(qs("#onboard-eq-gym")?.checked),
-        },
-        timeOfDayPreference: qs("#onboard-time-pref")?.value || "any",
-      },
-    };
-    const firstCheckIn = {
-      stress: Number(qs("#onboard-stress")?.value || 5),
-      sleepQuality: Number(qs("#onboard-sleep")?.value || 6),
-      energy: Number(qs("#onboard-energy")?.value || 6),
-      timeAvailableMin: Number(qs("#onboard-time")?.value || 20),
-    };
-    try {
-      const res = await apiPost("/v1/onboard/complete", { consent, baseline, firstCheckIn });
-      if (res.accessToken || res.token) {
-        setToken(res.accessToken || res.token);
-        if (res.refreshToken) setRefreshToken(res.refreshToken);
-        updateAuthStatus();
-      }
-      await bootstrapApp();
-      await updateAdminVisibility();
-      onboardingActive = false;
-      setOnboardMode(false);
-      if (res.day) {
-        renderDay(res.day);
-        currentDay = res.day;
-      }
-      if (res.rail?.reset) {
-        renderRailReset(res.rail.reset);
-      }
-      if (onboardStatus) onboardStatus.textContent = "";
-      await loadPrefs();
-      await loadRail();
-    } catch (err) {
-      if (onboardStatus) onboardStatus.textContent = t("onboard.failed");
-      routeError(err);
-    }
   });
+  loadDay();
+  loadPrefs();
 
   railSubmit?.addEventListener("click", async () => {
-    const dateISO = todayISO();
-    if (dateInput) dateInput.value = dateISO;
-    const checkIn = {
-      dateISO,
-      stress: Number(qs("#rail-stress")?.value || 5),
-      sleepQuality: Number(qs("#rail-sleep")?.value || 6),
-      energy: Number(qs("#rail-energy")?.value || 6),
-      timeAvailableMin: Number(qs("#rail-time")?.value || 10),
-    };
-    const res = await apiPost("/v1/checkin", { checkIn });
-    void res;
-    await loadRail();
+    try {
+      const dateISO = todayISO();
+      if (dateInput) dateInput.value = dateISO;
+      const checkIn = {
+        dateISO,
+        stress: Number(qs("#rail-stress")?.value || 5),
+        sleepQuality: Number(qs("#rail-sleep")?.value || 6),
+        energy: Number(qs("#rail-energy")?.value || 6),
+        timeAvailableMin: Number(qs("#rail-time")?.value || 10),
+      };
+      const res = await apiPost("/v1/checkin", { checkIn });
+      void res;
+      await loadRail();
+    } catch (err) {
+      reportError(err);
+    }
   });
 
   railViewFull?.addEventListener("click", () => {
@@ -735,15 +704,19 @@ function initDay() {
     SIGNALS.forEach((signal) => {
       const btn = el("button", { text: signal.label });
       btn.addEventListener("click", async () => {
-        const dateISO = dateInput?.value || todayISO();
-        const res = await apiPost("/v1/signal", { dateISO, signal: signal.id });
-        if (res.day) {
-          if (railResetEl && dateISO === todayISO()) {
-            await loadRail();
-          } else {
-            await ensureCitations();
-            renderDay(res.day);
+        try {
+          const dateISO = dateInput?.value || todayISO();
+          const res = await apiPost("/v1/signal", { dateISO, signal: signal.id });
+          if (res.day) {
+            if (railResetEl && dateISO === todayISO()) {
+              await loadRail();
+            } else {
+              await ensureCitations();
+              renderDay(res.day);
+            }
           }
+        } catch (err) {
+          reportError(err);
         }
       });
       signalButtons.appendChild(btn);
@@ -751,66 +724,86 @@ function initDay() {
   }
 
   badDayBtn?.addEventListener("click", async () => {
-    const dateISO = dateInput?.value || todayISO();
-    const res = await apiPost("/v1/bad-day", { dateISO });
-    if (res.day) {
-      if (railResetEl && dateISO === todayISO()) {
-        await loadRail();
-      } else {
-        await ensureCitations();
-        renderDay(res.day);
+    try {
+      const dateISO = dateInput?.value || todayISO();
+      const res = await apiPost("/v1/bad-day", { dateISO });
+      if (res.day) {
+        if (railResetEl && dateISO === todayISO()) {
+          await loadRail();
+        } else {
+          await ensureCitations();
+          renderDay(res.day);
+        }
       }
+    } catch (err) {
+      reportError(err);
     }
   });
 
   checkinBtn?.addEventListener("click", async () => {
-    const dateISO = dateInput?.value || todayISO();
-    const checkIn = {
-      dateISO,
-      stress: Number(qs("#checkin-stress")?.value || 5),
-      sleepQuality: Number(qs("#checkin-sleep")?.value || 6),
-      energy: Number(qs("#checkin-energy")?.value || 6),
-      timeAvailableMin: Number(qs("#checkin-time")?.value || 20),
-      notes: qs("#checkin-notes")?.value || "",
-    };
-    const res = await apiPost("/v1/checkin", { checkIn });
-    if (res.day) {
-      if (railResetEl && dateISO === todayISO()) {
-        await loadRail();
-      } else {
-        await ensureCitations();
-        renderDay(res.day);
+    try {
+      const dateISO = dateInput?.value || todayISO();
+      const checkIn = {
+        dateISO,
+        stress: Number(qs("#checkin-stress")?.value || 5),
+        sleepQuality: Number(qs("#checkin-sleep")?.value || 6),
+        energy: Number(qs("#checkin-energy")?.value || 6),
+        timeAvailableMin: Number(qs("#checkin-time")?.value || 20),
+        notes: qs("#checkin-notes")?.value || "",
+      };
+      const res = await apiPost("/v1/checkin", { checkIn });
+      if (res.day) {
+        if (railResetEl && dateISO === todayISO()) {
+          await loadRail();
+        } else {
+          await ensureCitations();
+          renderDay(res.day);
+        }
       }
+    } catch (err) {
+      reportError(err);
     }
   });
 
   completionInputs.forEach((input) => {
     input.addEventListener("change", async () => {
-      const part = input.dataset.part;
-      const dateISO = dateInput?.value || todayISO();
-      await apiPost("/v1/complete", { dateISO, part });
-      if (part === "reset" && railDoneEl && dateISO === todayISO() && input.checked) {
-        railDoneEl.classList.remove("hidden");
+      try {
+        const part = input.dataset.part;
+        const dateISO = dateInput?.value || todayISO();
+        await apiPost("/v1/complete", { dateISO, part });
+        if (part === "reset" && railDoneEl && dateISO === todayISO() && input.checked) {
+          railDoneEl.classList.remove("hidden");
+        }
+      } catch (err) {
+        reportError(err);
       }
     });
   });
 
   panicClear?.addEventListener("click", async () => {
-    const dateISO = dateInput?.value || todayISO();
-    await apiPost("/v1/checkin", { dateISO, safety: { panic: false } });
-    await loadRail();
+    try {
+      const dateISO = dateInput?.value || todayISO();
+      await apiPost("/v1/checkin", { dateISO, safety: { panic: false } });
+      await loadRail();
+    } catch (err) {
+      reportError(err);
+    }
   });
 
   feedbackButtons.forEach((btn) => {
     btn.addEventListener("click", async () => {
-      const dateISO = dateInput?.value || todayISO();
-      const helped = btn.dataset.helped === "true";
-      const reasonCode = btn.dataset.reason || null;
-      const kind = feedbackKind?.value || "reset";
-      const itemId = currentDay?.what?.[kind]?.id || null;
-      const payload = { dateISO, helped, kind, itemId };
-      if (!helped) payload.reasonCode = reasonCode;
-      await apiPost("/v1/feedback", payload);
+      try {
+        const dateISO = dateInput?.value || todayISO();
+        const helped = btn.dataset.helped === "true";
+        const reasonCode = btn.dataset.reason || null;
+        const kind = feedbackKind?.value || "reset";
+        const itemId = currentDay?.what?.[kind]?.id || null;
+        const payload = { dateISO, helped, kind, itemId };
+        if (!helped) payload.reasonCode = reasonCode;
+        await apiPost("/v1/feedback", payload);
+      } catch (err) {
+        reportError(err);
+      }
     });
   });
 
@@ -828,6 +821,9 @@ function initDay() {
         communityStatus.textContent =
           code === "opt_in_required" ? t("community.optInRequired") : t("community.submitFailed");
       }
+      if (code === "auth_required" || code === "consent_required" || code === "consent_required_version") {
+        reportError(err);
+      }
     }
   });
 }
@@ -842,8 +838,6 @@ function initWeek() {
     const dateISO = dateInput?.value;
     const url = dateISO ? `/v1/plan/week?date=${dateISO}` : "/v1/plan/week";
     try {
-      const ok = await ensureConsent();
-      if (!ok) return;
       const res = await apiGet(url);
       clear(list);
       (res.weekPlan?.days || []).forEach((day) => {
@@ -856,14 +850,13 @@ function initWeek() {
         );
       });
     } catch (err) {
-      routeError(err, { consentGate });
+      reportError(err);
     }
   };
 
-  const consentGate = setupConsentGate(loadWeek);
-  const ensureConsent = async () => ensurePlanAccess(consentGate);
-
-  loadBtn?.addEventListener("click", loadWeek);
+  loadBtn?.addEventListener("click", () => {
+    loadWeek();
+  });
   loadWeek();
 }
 
@@ -877,11 +870,6 @@ function initTrends() {
 
   const loadTrends = async () => {
     try {
-      const state = getAppState();
-      if (!state.auth?.isAuthenticated) {
-        routeError({ code: "auth_required" });
-        return;
-      }
       const days = select?.value || "7";
       const res = await apiGet(`/v1/trends?days=${days}`);
       clear(tbody);
@@ -950,11 +938,13 @@ function initTrends() {
         });
       }
     } catch (err) {
-      routeError(err);
+      reportError(err);
     }
   };
 
-  loadBtn?.addEventListener("click", loadTrends);
+  loadBtn?.addEventListener("click", () => {
+    loadTrends();
+  });
   loadTrends();
 }
 
@@ -1149,8 +1139,6 @@ function initProfile() {
 
   const loadChanges = async () => {
     if (!changesDate?.value) return;
-    const ok = await ensurePlanAccess();
-    if (!ok) return;
     try {
       const res = await apiGet(`/v1/plan/changes?date=${changesDate.value}`);
       clear(changesList);
@@ -1162,7 +1150,7 @@ function initProfile() {
         changesList.appendChild(row);
       });
     } catch (err) {
-      routeError(err);
+      reportError(err);
     }
   };
 
@@ -2345,10 +2333,6 @@ function initAdmin() {
 
 export {
   initBaseUi,
-  bootstrapApp,
-  routeError,
-  setupConsentGate,
-  ensurePlanAccess,
   bindAuth,
   updateAdminVisibility,
   initDay,

@@ -1,33 +1,30 @@
-import { getAppState, initDay, initWeek, initTrends, initProfile, initAdmin } from "./app.core.js";
+import { initDay, initWeek, initTrends, initProfile, initAdmin } from "./app.core.js";
 
-function consentOk() {
-  const state = getAppState();
-  return Boolean(state?.consentComplete);
+export function renderHome() {
+  const page = document.body?.dataset?.page || "day";
+  if (page === "week") return initWeek();
+  if (page === "trends") return initTrends();
+  if (page === "profile") return initProfile();
+  if (page === "admin") return initAdmin();
+  return initDay();
 }
 
-export function loadHome() {
-  if (!consentOk()) return;
-  initDay();
+export function renderDay(dateISO) {
+  return initDay({ initialDateISO: dateISO });
 }
 
-export function loadDay() {
-  if (!consentOk()) return;
-  initDay();
+export function renderWeek() {
+  return initWeek();
 }
 
-export function loadWeek() {
-  if (!consentOk()) return;
-  initWeek();
+export function renderTrends() {
+  return initTrends();
 }
 
-export function loadTrends() {
-  initTrends();
+export function renderProfile() {
+  return initProfile();
 }
 
-export function loadProfile() {
-  initProfile();
-}
-
-export function loadAdmin() {
-  initAdmin();
+export function renderAdmin() {
+  return initAdmin();
 }
