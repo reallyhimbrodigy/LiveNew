@@ -37,6 +37,10 @@ function assertErrorPayload(payload, label) {
   assert(payload.error && typeof payload.error.requestId === "string", `${label} should include error.requestId`);
 }
 
+function assertErrorCode(payload, expected, label) {
+  assert(payload && payload.error === expected, `${label} should return error:${expected}`);
+}
+
 async function waitForReady() {
   for (let i = 0; i < 30; i += 1) {
     try {
@@ -118,8 +122,7 @@ async function run() {
 
     const railPreOnboard = await fetchJson("/v1/rail/today", { headers: authHeaders });
     assert(railPreOnboard.res.status >= 403, "rail/today should be blocked before onboard");
-    assertErrorPayload(railPreOnboard.payload, "rail/today pre-onboard");
-    assert(railPreOnboard.payload?.error?.code === "BOOTSTRAP_NOT_HOME", "should return BOOTSTRAP_NOT_HOME");
+    assertErrorCode(railPreOnboard.payload, "BOOTSTRAP_NOT_HOME", "rail/today pre-onboard");
 
     const baseline = {
       timezone: "America/Los_Angeles",
@@ -191,7 +194,7 @@ async function run() {
       body: { checkIn: { stress: "bad" }, dateKey },
     });
     assert(invalidCheckIn.res.status === 400, "invalid checkin should return 400");
-    assert(invalidCheckIn.payload?.error?.code === "INVALID_CHECKIN", "invalid checkin should return INVALID_CHECKIN");
+    assertErrorCode(invalidCheckIn.payload, "INVALID_CHECKIN", "invalid checkin");
 
     const quickRes = await fetchJson("/v1/quick", {
       method: "POST",

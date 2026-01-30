@@ -1611,13 +1611,7 @@ async function buildBootstrapPayload({ userId, userProfile, userBaseline, userEm
 async function ensureHomeUiState({ userId, userProfile, userBaseline, userEmail, flags }, res) {
   const bootstrap = await buildBootstrapPayload({ userId, userProfile, userBaseline, userEmail, flags });
   if (bootstrap.uiState !== "home") {
-    sendError(
-      res,
-      forbidden("BOOTSTRAP_NOT_HOME", "Complete login, consent, and onboarding first", null, {
-        uiState: bootstrap.uiState,
-        expose: true,
-      })
-    );
+    sendErrorCodeOnly(res, 403, "BOOTSTRAP_NOT_HOME");
     return { ok: false, uiState: bootstrap.uiState };
   }
   return { ok: true, uiState: bootstrap.uiState };
@@ -1627,7 +1621,7 @@ function ensureTodayContract(contract, res) {
   try {
     return assertTodayContract(contract);
   } catch (err) {
-    sendError(res, 500, err.code || "TODAY_CONTRACT_INVALID", err.message || "Today contract invalid");
+    sendErrorCodeOnly(res, 500, err.code || "TODAY_CONTRACT_INVALID");
     return null;
   }
 }
@@ -1839,6 +1833,15 @@ function attachDbStats(res) {
 function sendError(res, errOrStatus, code, message, field) {
   attachDbStats(res);
   baseSendError(res, errOrStatus, code, message, field, res?.livenewRequestId);
+}
+
+function sendErrorCodeOnly(res, status, code) {
+  attachDbStats(res);
+  const headers = { "Content-Type": "application/json", ...(res?.livenewExtraHeaders || {}) };
+  if (res?.livenewApiVersion) headers["x-api-version"] = res.livenewApiVersion;
+  res.writeHead(status, headers);
+  res.errorCode = code;
+  res.end(JSON.stringify({ error: code }));
 }
 
 function sendJson(res, status, payload, userId) {
@@ -4644,7 +4647,7 @@ const server = http.createServer(async (req, res) => {
       const checkInRaw = body?.checkIn && typeof body.checkIn === "object" ? body.checkIn : body;
       const checkinValidation = validateCheckInPayload(checkInRaw);
       if (!checkinValidation.ok) {
-        sendError(res, 400, "INVALID_CHECKIN", checkinValidation.error.message, checkinValidation.error.field);
+        sendErrorCodeOnly(res, 400, "INVALID_CHECKIN");
         return;
       }
       const checkIn = normalizeCheckInInput(checkInRaw, dateKey);
@@ -4693,7 +4696,7 @@ const server = http.createServer(async (req, res) => {
       const signal = typeof body?.signal === "string" ? body.signal : null;
       const allowed = ["stressed", "exhausted", "ten_minutes", "more_energy"];
       if (!signal || !allowed.includes(signal)) {
-        sendError(res, 400, "INVALID_SIGNAL", "signal must be stressed, exhausted, ten_minutes, or more_energy", "signal");
+        sendErrorCodeOnly(res, 400, "INVALID_SIGNAL");
         return;
       }
       const baseline = await getUserBaseline(userId);
