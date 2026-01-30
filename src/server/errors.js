@@ -67,6 +67,7 @@ export function sendError(res, errOrStatus, code, message, field, requestId) {
       requestId: resolvedRequestId,
     },
   };
+  payload.errorCode = err.code || "error";
 
   if (res?.livenewUserId) payload.userId = res.livenewUserId;
   if (err.code === "consent_required" && err.details?.required) {

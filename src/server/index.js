@@ -16,6 +16,11 @@ import { validateWorkoutItem, validateResetItem, validateNutritionItem } from ".
 import { runContentChecks } from "../domain/content/checks.js";
 import { hashJSON, sanitizeContentItem, sanitizePack } from "../domain/content/snapshotHash.js";
 import { buildModelStamp } from "../domain/planning/modelStamp.js";
+import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
+import { applyQuickSignal } from "../domain/swap.js";
+import { LIB_VERSION } from "../domain/libraryVersion.js";
+import { assertTodayContract } from "../contracts/todayContract.js";
+import { assertBootstrapContract } from "../contracts/bootstrapContract.js";
 import {
   validateProfile,
   validateCheckIn,
@@ -132,6 +137,15 @@ import {
   missingUserConsents,
   listUserConsents,
   getUserConsentVersion,
+  getUserBaseline,
+  upsertUserBaseline,
+  getDailyCheckIn,
+  upsertDailyCheckIn,
+  insertDailyEvent,
+  insertDailyEventOnce,
+  listDailyEvents,
+  getDayState,
+  upsertDayState,
   getConsentMeta,
   setConsentMeta,
   setCommunityOptIn,
@@ -179,7 +193,6 @@ import { signAccessToken, verifyAccessToken, issueRefreshToken, rotateRefreshTok
 import { diffDayContracts } from "./diff.js";
 import { toDateISOWithBoundary, validateTimeZone } from "../domain/utils/time.js";
 import { trackEvent, setDailyFlag, ensureDay3Retention, AnalyticsFlags, getFirstFlagDate } from "./analytics.js";
-import { buildOutcomes } from "./outcomes.js";
 import { runLoadtestScript, evaluateLoadtestReport } from "./ops.js";
 import { buildReleaseChecklist } from "./releaseChecklist.js";
 import { alphaReadiness } from "./releasePolicy.js";
@@ -187,6 +200,7 @@ import { diffSnapshots } from "./snapshotDiff.js";
 import { loadSnapshotBundle, resolveSnapshotForUser, setDefaultSnapshotId, getDefaultSnapshotId, repinUserSnapshot, clearSnapshotCache, getSnapshotCacheStats } from "./snapshots.js";
 import { scheduleStartupSmoke } from "./startupSmoke.js";
 import { getEnvPolicy } from "./envPolicy.js";
+import { getDateKey, getDateRangeKeys } from "../utils/dateKey.js";
 
 const NODE_ENV = process.env.NODE_ENV || "development";
 const config = getConfig();
@@ -574,6 +588,78 @@ function getTodayISOForProfile(profile) {
   const tz = getUserTimezone(profile);
   const boundary = getDayBoundaryHour(profile);
   return toDateISOWithBoundary(new Date(), tz, boundary) || domain.isoToday();
+}
+
+function normalizeBaselineInput(input) {
+  const source = input && typeof input === "object" ? input : {};
+  const timezone = typeof source.timezone === "string" ? source.timezone.trim() : "";
+  const dayBoundaryHour = source.dayBoundaryHour ?? source.day_boundary_hour ?? source.boundaryHour ?? source.boundary;
+  const constraints = source.constraints && typeof source.constraints === "object" ? source.constraints : null;
+  return { timezone, dayBoundaryHour, constraints };
+}
+
+function validateBaselineInput(baseline) {
+  if (!baseline?.timezone || !validateTimeZone(baseline.timezone)) {
+    return { ok: false, error: { code: "timezone_invalid", message: "Valid timezone required", field: "timezone" } };
+  }
+  const hour = Number(baseline.dayBoundaryHour);
+  if (!Number.isFinite(hour) || hour < 0 || hour > 6) {
+    return { ok: false, error: { code: "day_boundary_invalid", message: "Valid day boundary required", field: "dayBoundaryHour" } };
+  }
+  return {
+    ok: true,
+    value: {
+      timezone: baseline.timezone,
+      dayBoundaryHour: Math.floor(hour),
+      constraints: baseline.constraints || null,
+    },
+  };
+}
+
+function clampInt(value, min, max, fallback) {
+  const num = Number(value);
+  if (!Number.isFinite(num)) return fallback;
+  return Math.max(min, Math.min(max, Math.round(num)));
+}
+
+function normalizeCheckInInput(raw, dateISO) {
+  const source = raw && typeof raw === "object" ? raw : {};
+  const panic =
+    typeof source?.panic === "boolean"
+      ? source.panic
+      : typeof source?.safety?.panic === "boolean"
+        ? source.safety.panic
+        : false;
+  return {
+    dateISO,
+    stress: clampInt(source.stress, 1, 10, 5),
+    sleepQuality: clampInt(source.sleepQuality, 1, 10, 6),
+    energy: clampInt(source.energy, 1, 10, 6),
+    timeAvailableMin: clampInt(source.timeAvailableMin, 5, 60, 10),
+    safety: { panic },
+  };
+}
+
+function validateCheckInPayload(raw) {
+  if (!raw || typeof raw !== "object") {
+    return { ok: false, error: { code: "INVALID_CHECKIN", message: "checkIn payload required" } };
+  }
+  const rules = [
+    { field: "stress", min: 1, max: 10 },
+    { field: "sleepQuality", min: 1, max: 10 },
+    { field: "energy", min: 1, max: 10 },
+    { field: "timeAvailableMin", min: 5, max: 60 },
+  ];
+  for (const rule of rules) {
+    const value = Number(raw[rule.field]);
+    if (!Number.isFinite(value)) {
+      return { ok: false, error: { code: "INVALID_CHECKIN", message: `checkIn.${rule.field} must be a number`, field: rule.field } };
+    }
+    if (value < rule.min || value > rule.max) {
+      return { ok: false, error: { code: "INVALID_CHECKIN", message: `checkIn.${rule.field} out of range`, field: rule.field } };
+    }
+  }
+  return { ok: true };
 }
 
 async function getFeatureFlags() {
@@ -1444,26 +1530,13 @@ function consentStatusFromMap(consents) {
 }
 
 function profileCompleteness(profile) {
-  if (!profile) return { isComplete: false, missingFields: ["userProfile"] };
-  const requiredFields = [
-    "wakeTime",
-    "bedTime",
-    "sleepRegularity",
-    "caffeineCupsPerDay",
-    "lateCaffeineDaysPerWeek",
-    "sunlightMinutesPerDay",
-    "lateScreenMinutesPerNight",
-    "alcoholNightsPerWeek",
-    "mealTimingConsistency",
-    "contentPack",
-    "timezone",
-    "dayBoundaryHour",
-  ];
+  if (!profile) return { isComplete: false, missingFields: ["timezone", "dayBoundaryHour"] };
+  const requiredFields = ["timezone", "dayBoundaryHour"];
   const missingFields = requiredFields.filter((field) => profile[field] == null || profile[field] === "");
   return { isComplete: missingFields.length === 0, missingFields };
 }
 
-async function buildBootstrapPayload({ userId, userProfile, userEmail, flags }) {
+async function buildBootstrapPayload({ userId, userProfile, userBaseline, userEmail, flags }) {
   const isAuthenticated = Boolean(userId);
   let consents = {};
   let userVersion = 0;
@@ -1476,9 +1549,18 @@ async function buildBootstrapPayload({ userId, userProfile, userEmail, flags }) 
   const requiredVersion = await getRequiredConsentVersion();
   const consentComplete = REQUIRED_CONSENTS.every((key) => accepted[key] === true);
   const consentVersionOk = userVersion >= requiredVersion;
-  const profileStatus = profileCompleteness(userProfile);
-  const tz = getUserTimezone(userProfile);
-  const dayBoundaryHour = getDayBoundaryHour(userProfile);
+  const baseline =
+    userBaseline ||
+    (userProfile
+      ? {
+          timezone: getUserTimezone(userProfile),
+          dayBoundaryHour: getDayBoundaryHour(userProfile),
+          constraints: userProfile?.constraints || null,
+        }
+      : null);
+  const profileStatus = profileCompleteness(baseline);
+  const tz = getUserTimezone(baseline);
+  const dayBoundaryHour = getDayBoundaryHour(baseline);
   const dateISO = toDateISOWithBoundary(new Date(), tz, dayBoundaryHour) || domain.isoToday();
   const incidentMode = resolveIncidentMode(flags);
   const admin = userEmail ? isAdmin(userEmail) : false;
@@ -1510,6 +1592,13 @@ async function buildBootstrapPayload({ userId, userProfile, userEmail, flags }) 
       isComplete: profileStatus.isComplete,
       missingFields: profileStatus.missingFields,
     },
+    baseline: baseline
+      ? {
+          timezone: tz,
+          dayBoundaryHour,
+          constraints: baseline.constraints || null,
+        }
+      : null,
     features: {
       incidentMode,
       railTodayAvailable: consentComplete && consentVersionOk && !incidentMode && isAuthenticated,
@@ -1517,6 +1606,41 @@ async function buildBootstrapPayload({ userId, userProfile, userEmail, flags }) 
     env: { mode: config.envMode },
     uiState,
   };
+}
+
+async function ensureHomeUiState({ userId, userProfile, userBaseline, userEmail, flags }, res) {
+  const bootstrap = await buildBootstrapPayload({ userId, userProfile, userBaseline, userEmail, flags });
+  if (bootstrap.uiState !== "home") {
+    sendError(
+      res,
+      forbidden("BOOTSTRAP_NOT_HOME", "Complete login, consent, and onboarding first", null, {
+        uiState: bootstrap.uiState,
+        expose: true,
+      })
+    );
+    return { ok: false, uiState: bootstrap.uiState };
+  }
+  return { ok: true, uiState: bootstrap.uiState };
+}
+
+function ensureTodayContract(contract, res) {
+  try {
+    return assertTodayContract(contract);
+  } catch (err) {
+    sendError(res, 500, err.code || "TODAY_CONTRACT_INVALID", err.message || "Today contract invalid");
+    return null;
+  }
+}
+
+function shouldUpdateDayState(prev, next) {
+  if (!prev) return true;
+  return !(
+    prev.resetId === next.resetId &&
+    prev.movementId === next.movementId &&
+    prev.nutritionId === next.nutritionId &&
+    prev.lastQuickSignal === next.lastQuickSignal &&
+    prev.lastInputHash === next.lastInputHash
+  );
 }
 
 async function runSmokeChecks({ userId, userEmail }) {
@@ -1540,16 +1664,25 @@ async function runSmokeChecks({ userId, userEmail }) {
   try {
     const flags = await getFeatureFlags();
     let profile = null;
+    let baseline = null;
     let resolvedEmail = userEmail;
     if (userId) {
       const cached = await loadUserState(userId);
       profile = cached?.state?.userProfile || null;
+      baseline = await getUserBaseline(userId);
       if (!resolvedEmail) {
         const user = await getUserById(userId);
         resolvedEmail = user?.email || null;
       }
     }
-    bootstrap = await buildBootstrapPayload({ userId, userProfile: profile, userEmail: resolvedEmail, flags });
+    bootstrap = await buildBootstrapPayload({
+      userId,
+      userProfile: profile,
+      userBaseline: baseline,
+      userEmail: resolvedEmail,
+      flags,
+    });
+    assertBootstrapContract(bootstrap);
     checks.push({ key: "bootstrap", ok: true });
   } catch {
     ok = false;
@@ -2873,7 +3006,7 @@ async function computeStabilityChecklist() {
     frontendAvailable = false;
   }
   checks.push({
-    key: "frontend_smoke_available",
+    key: "frontend_smoke_exists",
     pass: frontendAvailable,
     details: { path: "smoke-frontend.html" },
   });
@@ -3581,10 +3714,12 @@ const server = http.createServer(async (req, res) => {
     if ((pathname === "/v1/bootstrap" || pathname === "/v1/mobile/bootstrap") && req.method === "GET") {
       const flags = await getFeatureFlags();
       let profile = null;
+      let baseline = null;
       let resolvedEmail = userEmail;
       if (userId) {
         const cached = await loadUserState(userId);
         profile = cached?.state?.userProfile || null;
+        baseline = await getUserBaseline(userId);
         if (!resolvedEmail) {
           const user = await getUserById(userId);
           resolvedEmail = user?.email || null;
@@ -3593,9 +3728,11 @@ const server = http.createServer(async (req, res) => {
       const payload = await buildBootstrapPayload({
         userId,
         userProfile: profile,
+        userBaseline: baseline,
         userEmail: resolvedEmail,
         flags,
       });
+      assertBootstrapContract(payload);
       sendJson(res, 200, payload, userId || null);
       return;
     }
@@ -3932,7 +4069,15 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    if (pathname.startsWith("/v1/plan/") || pathname === "/v1/rail/today") {
+    if (
+      pathname.startsWith("/v1/plan/") ||
+      pathname === "/v1/rail/today" ||
+      pathname === "/v1/mobile/today" ||
+      pathname === "/v1/checkin" ||
+      pathname === "/v1/quick" ||
+      pathname === "/v1/reset/complete" ||
+      pathname === "/v1/outcomes"
+    ) {
       if (!userId) {
         sendError(res, 401, "auth_required", "Authorization required");
         return;
@@ -3944,6 +4089,16 @@ const server = http.createServer(async (req, res) => {
       }
       const ok = await ensureRequiredConsents(userId, res);
       if (!ok) return;
+      const flags = await getFeatureFlags();
+      const baseline = await getUserBaseline(userId);
+      const home = await ensureHomeUiState({
+        userId,
+        userProfile: state.userProfile,
+        userBaseline: baseline,
+        userEmail,
+        flags,
+      }, res);
+      if (!home.ok) return;
     }
 
     if (pathname === "/v1/profile" && req.method === "GET") {
@@ -4052,19 +4207,6 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === "/v1/onboard/complete" && req.method === "POST") {
       const body = await parseJson(req);
-      const baseline = body?.baseline || {};
-      const profileInput = body?.userProfile || body?.profile || {};
-      const mergedProfile = {
-        ...profileInput,
-        timezone: baseline.timezone ?? profileInput.timezone,
-        dayBoundaryHour: baseline.dayBoundaryHour ?? profileInput.dayBoundaryHour,
-        constraints: baseline.constraints ?? profileInput.constraints,
-      };
-      const profileValidation = validateProfile({ userProfile: mergedProfile });
-      if (!profileValidation.ok) {
-        sendError(res, 400, profileValidation.error.code, profileValidation.error.message, profileValidation.error.field);
-        return;
-      }
       const consent = body?.consent || {};
       const acceptTerms = consent.terms === true || body?.acceptTerms === true;
       const acceptPrivacy = consent.privacy === true || body?.acceptPrivacy === true;
@@ -4103,97 +4245,74 @@ const server = http.createServer(async (req, res) => {
         userId = targetUserId;
         userEmail = targetEmail;
         res.livenewUserId = userId;
-        snapshotContext = null;
-        const cached = await loadUserState(userId);
-        state = cached.state;
-        version = cached.version;
       }
       const requiredVersion = await getRequiredConsentVersion();
       await upsertUserConsents(userId, REQUIRED_CONSENTS, null, requiredVersion);
 
-      const packId = typeof body?.packId === "string" ? body.packId.trim() : null;
-      const userProfile = normalizeUserProfile({
-        ...profileValidation.value.userProfile,
-        contentPack: packId || profileValidation.value.userProfile?.contentPack,
-      });
-      const paramsState = await getParamsForUser();
+      const baselineInput = normalizeBaselineInput(body?.baseline || body?.userProfile || body?.profile || {});
+      const baselineValidation = validateBaselineInput(baselineInput);
+      if (!baselineValidation.ok) {
+        sendError(res, 400, baselineValidation.error.code, baselineValidation.error.message, baselineValidation.error.field);
+        return;
+      }
+      const baseline = baselineValidation.value;
+      await upsertUserBaseline(userId, baseline);
+
       const firstCheckInRaw =
         body?.firstCheckIn && typeof body.firstCheckIn === "object"
           ? body.firstCheckIn
           : body?.checkIn && typeof body.checkIn === "object"
             ? body.checkIn
             : {};
-      if (firstCheckInRaw?.safety?.panic != null && firstCheckInRaw.panic == null) {
-        firstCheckInRaw.panic = firstCheckInRaw.safety.panic;
-        delete firstCheckInRaw.safety;
-      }
-      const checkInWithDate = {
-        ...firstCheckInRaw,
-        dateISO: firstCheckInRaw.dateISO || getTodayISOForProfile(userProfile),
-      };
-      const checkinValidation = validateCheckIn(
-        { checkIn: checkInWithDate },
-        { allowedTimes: paramsState.map?.timeBuckets?.allowed }
-      );
-      if (!checkinValidation.ok) {
-        sendError(res, 400, checkinValidation.error.code, checkinValidation.error.message, checkinValidation.error.field);
+      let dateISO = firstCheckInRaw?.dateISO || body?.dateISO || getTodayISOForProfile(baseline);
+      const dateValidation = validateDateParam(dateISO, "dateISO");
+      if (!dateValidation.ok) {
+        sendError(res, 400, dateValidation.error.code, dateValidation.error.message, dateValidation.error.field);
         return;
       }
-      const checkIn = applyDataMinimizationToCheckIn(checkinValidation.value.checkIn, userProfile);
-      const currentCohort = await getUserCohort(userId);
-      if (!currentCohort || !currentCohort.overriddenByAdmin) {
-        await setUserCohort(userId, cohortForCheckIn(checkIn), false);
-      }
-      await dispatchForUser({ type: "BASELINE_SAVED", payload: { userProfile } });
-      await dispatchForUser({ type: "CHECKIN_SAVED", payload: { checkIn } });
-      await dispatchForUser({ type: "ENSURE_WEEK", payload: {} });
-      const onboardDateISO = checkIn?.dateISO || getTodayISOForProfile(userProfile);
-      await setDailyFlag(onboardDateISO, userId, AnalyticsFlags.onboardCompleted);
-      await trackEvent(userId, AnalyticsFlags.onboardCompleted, { dateISO: onboardDateISO }, new Date().toISOString(), onboardDateISO);
-      const dateISO = checkIn?.dateISO || getTodayISOForProfile(userProfile);
-      state = await ensureWeekForDate(state, dateISO, dispatchForUser);
-      const snapshotCtx = await getSnapshotContext();
-      const library = snapshotCtx.library || domain.defaultLibrary;
-      const ensured = await ensureValidDayContract(
+      dateISO = dateValidation.value;
+      const checkIn = normalizeCheckInInput(firstCheckInRaw, dateISO);
+      await upsertDailyCheckIn(userId, dateISO, checkIn);
+      await insertDailyEventOnce({
         userId,
-        state,
         dateISO,
-        "onboard_day_invariant",
-        requestId,
-        { paramsState, library, snapshotId: snapshotCtx.snapshotId || null }
-      );
-      state = ensured.state;
-      const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
-      const prefs = await loadContentPrefs(userId);
-      const railReset = pickRailReset({ dayPlan, checkIn, library, preferences: prefs });
-      const rail = {
-        checkIn: {
-          requiredFields: ["stress", "sleepQuality", "energy", "timeAvailableMin"],
-          estimatedSeconds: 10,
-        },
-        reset: railReset
-          ? {
-              id: railReset.id || null,
-              title: railReset.title || null,
-              minutes: railReset.minutes ?? null,
-              steps: Array.isArray(railReset.steps) ? railReset.steps : [],
-            }
-          : null,
-      };
+        type: "checkin_submitted",
+        atISO: new Date().toISOString(),
+        props: { source: "onboard" },
+      });
+      const today = buildToday({
+        userId,
+        dateKey: dateISO,
+        timezone: baseline.timezone,
+        dayBoundaryHour: baseline.dayBoundaryHour,
+        baseline,
+        latestCheckin: checkIn,
+        dayState: null,
+        eventsToday: [],
+        panicMode: checkIn?.safety?.panic === true,
+        libVersion: LIB_VERSION,
+      });
+      const normalizedToday = ensureTodayContract(today, res);
+      if (!normalizedToday) return;
+      await upsertDayState(userId, dateISO, {
+        resetId: normalizedToday.reset?.id || null,
+        movementId: normalizedToday.movement?.id || null,
+        nutritionId: normalizedToday.nutrition?.id || null,
+        lastQuickSignal: null,
+        lastInputHash: normalizedToday.meta?.inputHash || null,
+      });
+
       const flags = await getFeatureFlags();
       const bootstrap = await buildBootstrapPayload({
         userId,
-        userProfile: state.userProfile,
+        userBaseline: baseline,
         userEmail,
         flags,
       });
       const payload = {
         ok: true,
         bootstrap,
-        weekPlan: state.weekPlan,
-        week: state.weekPlan,
-        day: ensured.day,
-        rail,
+        today: normalizedToday,
       };
       if (issueTokens) {
         const deviceName = getDeviceName(req);
@@ -4277,64 +4396,74 @@ const server = http.createServer(async (req, res) => {
     }
 
     if ((pathname === "/v1/rail/today" || pathname === "/v1/mobile/today") && req.method === "GET") {
-      const dateISO = getTodayISOForProfile(state.userProfile);
-      const railOpenedAtISO = new Date().toISOString();
+      const baseline = await getUserBaseline(userId);
+      if (!baseline) {
+        sendError(res, 400, "baseline_required", "Baseline required before loading today");
+        return;
+      }
+      const now = new Date();
+      const dateKey = getDateKey({
+        now,
+        timezone: baseline.timezone,
+        dayBoundaryHour: baseline.dayBoundaryHour,
+      });
+      if (!dateKey) {
+        sendError(res, 400, "date_invalid", "Unable to resolve date key");
+        return;
+      }
+      const railOpenedAtISO = now.toISOString();
       try {
-        await trackEvent(userId, "rail_opened", { dateISO }, railOpenedAtISO, dateISO);
+        await insertDailyEventOnce({ userId, dateISO: dateKey, type: "rail_opened", atISO: railOpenedAtISO, props: {} });
+      } catch (err) {
+        logError({ event: "daily_event_rail_open_failed", error: err?.message || String(err) });
+      }
+      try {
+        await trackEvent(userId, "rail_opened", { dateISO: dateKey }, railOpenedAtISO, dateKey);
         await upsertAnalyticsUserDayTimes({
-          dateISO,
+          dateISO: dateKey,
           userId,
           firstRailOpenedAt: railOpenedAtISO,
         });
       } catch (err) {
         logError({ event: "analytics_rail_open_failed", error: err?.message || String(err) });
       }
-      const cached = getCachedResponse(userId, pathname, url.search);
-      if (cached) {
-        send(200, cached);
-        return;
-      }
-      await maybeStartReEntry(dateISO);
-      state = await ensureWeekForDate(state, dateISO, dispatchForUser);
-      const snapshotCtx = await getSnapshotContext();
-      const paramsState = snapshotCtx.paramsState || (await getParamsForUser());
-      const library = snapshotCtx.library || domain.defaultLibrary;
-      const ensured = await ensureValidDayContract(
+      const stored = await getDailyCheckIn(userId, dateKey);
+      const checkIn = normalizeCheckInInput(stored?.checkIn || {}, dateKey);
+      const dayState = await getDayState(userId, dateKey);
+      const eventsToday = await listDailyEvents(userId, dateKey, dateKey);
+      const today = buildToday({
         userId,
-        state,
-        dateISO,
-        "rail_today_invariant",
-        requestId,
-        { paramsState, library, snapshotId: snapshotCtx.snapshotId || null }
-      );
-      state = ensured.state;
-      const dayPlan = state.weekPlan?.days?.find((day) => day.dateISO === dateISO) || null;
-      const checkIn = latestCheckInForDate(state.checkIns, dateISO);
-      const prefs = await loadContentPrefs(userId);
-      const railReset = pickRailReset({ dayPlan, checkIn, library, preferences: prefs });
-      const panicActive = Boolean(checkIn?.panic || dayPlan?.safety?.reasons?.includes?.("panic"));
-      const rail = panicActive
-        ? { checkIn: null, reset: buildPanicRailReset(railReset) }
-        : {
-            checkIn: {
-              requiredFields: ["stress", "sleepQuality", "energy", "timeAvailableMin"],
-              estimatedSeconds: 10,
-            },
-            reset: railReset
-              ? {
-                  id: railReset.id || null,
-                  title: railReset.title || null,
-                  minutes: railReset.minutes ?? null,
-                  steps: Array.isArray(railReset.steps) ? railReset.steps : [],
-                }
-              : null,
-          };
-      const day = panicActive ? buildPanicDayContract(ensured.day, railReset, dateISO) : ensured.day;
-      const payload = panicActive
-        ? { ok: true, rail, day, panic: { active: true, disclaimer: panicDisclaimer() } }
-        : { ok: true, rail, day };
-      setCachedResponse(userId, pathname, url.search, payload, CACHE_TTLS.railToday);
-      send(200, payload);
+        dateKey,
+        timezone: baseline.timezone,
+        dayBoundaryHour: baseline.dayBoundaryHour,
+        baseline,
+        latestCheckin: checkIn,
+        dayState,
+        eventsToday,
+        panicMode: checkIn?.safety?.panic === true,
+        libVersion: LIB_VERSION,
+      });
+      const normalizedToday = ensureTodayContract(today, res);
+      if (!normalizedToday) return;
+      const nextState = {
+        resetId: normalizedToday.reset?.id || null,
+        movementId: normalizedToday.movement?.id || null,
+        nutritionId: normalizedToday.nutrition?.id || null,
+        lastQuickSignal: dayState?.lastQuickSignal || null,
+        lastInputHash: normalizedToday.meta?.inputHash || null,
+      };
+      if (
+        !dayState ||
+        dayState.resetId !== nextState.resetId ||
+        dayState.movementId !== nextState.movementId ||
+        dayState.nutritionId !== nextState.nutritionId ||
+        dayState.lastQuickSignal !== nextState.lastQuickSignal ||
+        dayState.lastInputHash !== nextState.lastInputHash
+      ) {
+        await upsertDayState(userId, dateKey, nextState);
+      }
+      logInfo({ event: "today_contract", requestId, userId, dateKey, inputHash: normalizedToday.meta?.inputHash });
+      send(200, normalizedToday);
       return;
     }
 
@@ -4494,52 +4623,164 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 403, "feature_disabled", "Check-ins are disabled");
         return;
       }
+      const now = new Date();
       const body = await parseJson(req);
-      const safetyPanic = body?.safety?.panic;
-      if (body?.checkIn && body.checkIn?.safety && body.checkIn.panic == null) {
-        if (typeof body.checkIn.safety.panic === "boolean") {
-          body.checkIn.panic = body.checkIn.safety.panic;
-        }
-        delete body.checkIn.safety;
-      }
-      if ((!body.checkIn || typeof body.checkIn !== "object") && typeof safetyPanic === "boolean") {
-        const dateISO = body?.dateISO || getTodayISOForProfile(state.userProfile);
-        const existing = latestCheckInForDate(state.checkIns, dateISO);
-        body.checkIn = existing
-          ? { ...existing, dateISO, atISO: new Date().toISOString(), panic: safetyPanic }
-          : {
-              dateISO,
-              stress: 5,
-              sleepQuality: 6,
-              energy: 6,
-              timeAvailableMin: 10,
-              panic: safetyPanic,
-            };
-      }
-      if (body.checkIn && body.checkIn.panic == null && typeof safetyPanic === "boolean") {
-        body.checkIn.panic = safetyPanic;
-      }
-      const paramsState = await getParamsForUser();
-      const validation = validateCheckIn(body, { allowedTimes: paramsState.map?.timeBuckets?.allowed });
-      if (!validation.ok) {
-        sendError(res, 400, validation.error.code, validation.error.message, validation.error.field);
+      const baseline = await getUserBaseline(userId);
+      if (!baseline) {
+        sendError(res, 400, "baseline_required", "Baseline required before check-in");
         return;
       }
-      const checkIn = applyDataMinimizationToCheckIn(validation.value.checkIn, state.userProfile);
-      const isBackdated = checkIn.dateISO < requestTodayISO;
-      const { result } = await dispatchForUser({ type: "CHECKIN_SAVED", payload: { checkIn } });
-      const tomorrowISO = checkIn?.dateISO ? domain.addDaysISO(checkIn.dateISO, 1) : null;
-      const day = checkIn?.dateISO ? toDayContract(state, checkIn.dateISO, domain) : null;
-      const tomorrow = tomorrowISO ? toDayContract(state, tomorrowISO, domain) : null;
-      send(200, {
-        ok: true,
-        changedDayISO: result?.changedDayISO || checkIn?.dateISO || null,
-        notes: result?.notes || [],
-        day,
-        tomorrow: !isBackdated && checkIn?.stress >= 7 && checkIn?.sleepQuality <= 5 ? tomorrow : null,
-        backdated: isBackdated,
-        rebuiltDates: isBackdated ? [checkIn.dateISO] : [],
+      let dateKey =
+        body?.dateKey ||
+        body?.dateISO ||
+        body?.checkIn?.dateISO ||
+        getDateKey({ now, timezone: baseline.timezone, dayBoundaryHour: baseline.dayBoundaryHour });
+      const dateValidation = validateDateParam(dateKey, "dateISO");
+      if (!dateValidation.ok) {
+        sendError(res, 400, dateValidation.error.code, dateValidation.error.message, dateValidation.error.field);
+        return;
+      }
+      dateKey = dateValidation.value;
+      const checkInRaw = body?.checkIn && typeof body.checkIn === "object" ? body.checkIn : body;
+      const checkinValidation = validateCheckInPayload(checkInRaw);
+      if (!checkinValidation.ok) {
+        sendError(res, 400, "INVALID_CHECKIN", checkinValidation.error.message, checkinValidation.error.field);
+        return;
+      }
+      const checkIn = normalizeCheckInInput(checkInRaw, dateKey);
+      await upsertDailyCheckIn(userId, dateKey, checkIn);
+      await insertDailyEvent({
+        userId,
+        dateISO: dateKey,
+        type: "checkin_submitted",
+        atISO: now.toISOString(),
+        props: { source: "checkin" },
       });
+      const dayState = await getDayState(userId, dateKey);
+      const eventsToday = await listDailyEvents(userId, dateKey, dateKey);
+      const today = buildToday({
+        userId,
+        dateKey,
+        timezone: baseline.timezone,
+        dayBoundaryHour: baseline.dayBoundaryHour,
+        baseline,
+        latestCheckin: checkIn,
+        dayState,
+        eventsToday,
+        panicMode: checkIn?.safety?.panic === true,
+        libVersion: LIB_VERSION,
+      });
+      const normalizedToday = ensureTodayContract(today, res);
+      if (!normalizedToday) return;
+      const nextState = {
+        resetId: normalizedToday.reset?.id || null,
+        movementId: normalizedToday.movement?.id || null,
+        nutritionId: normalizedToday.nutrition?.id || null,
+        lastQuickSignal: dayState?.lastQuickSignal || null,
+        lastInputHash: normalizedToday.meta?.inputHash || null,
+      };
+      if (shouldUpdateDayState(dayState, nextState)) {
+        await upsertDayState(userId, dateKey, nextState);
+      }
+      logInfo({ event: "checkin_contract", requestId, userId, dateKey, inputHash: normalizedToday.meta?.inputHash });
+      send(200, normalizedToday);
+      return;
+    }
+
+    if (pathname === "/v1/quick" && req.method === "POST") {
+      const now = new Date();
+      const body = await parseJson(req);
+      const signal = typeof body?.signal === "string" ? body.signal : null;
+      const allowed = ["stressed", "exhausted", "ten_minutes", "more_energy"];
+      if (!signal || !allowed.includes(signal)) {
+        sendError(res, 400, "INVALID_SIGNAL", "signal must be stressed, exhausted, ten_minutes, or more_energy", "signal");
+        return;
+      }
+      const baseline = await getUserBaseline(userId);
+      if (!baseline) {
+        sendError(res, 400, "baseline_required", "Baseline required before quick adjust");
+        return;
+      }
+      let dateKey =
+        body?.dateKey ||
+        body?.dateISO ||
+        getDateKey({ now, timezone: baseline.timezone, dayBoundaryHour: baseline.dayBoundaryHour });
+      const dateValidation = validateDateParam(dateKey, "dateISO");
+      if (!dateValidation.ok) {
+        sendError(res, 400, dateValidation.error.code, dateValidation.error.message, dateValidation.error.field);
+        return;
+      }
+      dateKey = dateValidation.value;
+      const existing = await getDailyCheckIn(userId, dateKey);
+      const baseCheckIn = normalizeCheckInInput(existing?.checkIn || {}, dateKey);
+      const dayState = await getDayState(userId, dateKey);
+      const eventsToday = await listDailyEvents(userId, dateKey, dateKey);
+      const currentToday = buildToday({
+        userId,
+        dateKey,
+        timezone: baseline.timezone,
+        dayBoundaryHour: baseline.dayBoundaryHour,
+        baseline,
+        latestCheckin: baseCheckIn,
+        dayState,
+        eventsToday,
+        panicMode: baseCheckIn?.safety?.panic === true,
+        libVersion: LIB_VERSION,
+      });
+      const normalizedCurrent = ensureTodayContract(currentToday, res);
+      if (!normalizedCurrent) return;
+      const libraries = getLibrarySnapshot();
+      const selection = {
+        resetId: normalizedCurrent.reset?.id || null,
+        movementId: normalizedCurrent.movement?.id || null,
+        nutritionId: normalizedCurrent.nutrition?.id || null,
+      };
+      const updatedSelection = applyQuickSignal({
+        signal,
+        todaySelection: selection,
+        scored: normalizedCurrent.scores,
+        profile: normalizedCurrent.profile,
+        constraints: baseline.constraints || {},
+        libraries,
+      });
+      await insertDailyEvent({
+        userId,
+        dateISO: dateKey,
+        type: "quick_adjusted",
+        atISO: now.toISOString(),
+        props: { signal },
+      });
+      const nextDayState = {
+        resetId: updatedSelection.resetId || null,
+        movementId: updatedSelection.movementId || null,
+        nutritionId: updatedSelection.nutritionId || null,
+        lastQuickSignal: signal,
+        lastInputHash: dayState?.lastInputHash || null,
+      };
+      const eventsAfter = await listDailyEvents(userId, dateKey, dateKey);
+      const refreshed = buildToday({
+        userId,
+        dateKey,
+        timezone: baseline.timezone,
+        dayBoundaryHour: baseline.dayBoundaryHour,
+        baseline,
+        latestCheckin: baseCheckIn,
+        dayState: { ...nextDayState },
+        eventsToday: eventsAfter,
+        panicMode: baseCheckIn?.safety?.panic === true,
+        libVersion: LIB_VERSION,
+      });
+      const normalizedRefreshed = ensureTodayContract(refreshed, res);
+      if (!normalizedRefreshed) return;
+      const finalState = {
+        ...nextDayState,
+        lastInputHash: normalizedRefreshed.meta?.inputHash || null,
+      };
+      if (shouldUpdateDayState(dayState, finalState)) {
+        await upsertDayState(userId, dateKey, finalState);
+      }
+      logInfo({ event: "quick_contract", requestId, userId, dateKey, inputHash: normalizedRefreshed.meta?.inputHash });
+      send(200, normalizedRefreshed);
       return;
     }
 
@@ -4683,6 +4924,70 @@ const server = http.createServer(async (req, res) => {
       invalidateContentPrefs(userId);
       invalidateUserCache(userId);
       send(200, { ok: true, removed });
+      return;
+    }
+
+    if (pathname === "/v1/reset/complete" && req.method === "POST") {
+      const now = new Date();
+      const body = await parseJson(req);
+      const baseline = await getUserBaseline(userId);
+      if (!baseline) {
+        sendError(res, 400, "baseline_required", "Baseline required before reset completion");
+        return;
+      }
+      const resetId = typeof body?.resetId === "string" ? body.resetId : null;
+      if (!resetId) {
+        sendError(res, 400, "reset_id_required", "resetId is required", "resetId");
+        return;
+      }
+      let dateKey =
+        body?.dateKey ||
+        body?.dateISO ||
+        getDateKey({ now, timezone: baseline.timezone, dayBoundaryHour: baseline.dayBoundaryHour });
+      const dateValidation = validateDateParam(dateKey, "dateISO");
+      if (!dateValidation.ok) {
+        sendError(res, 400, dateValidation.error.code, dateValidation.error.message, dateValidation.error.field);
+        return;
+      }
+      dateKey = dateValidation.value;
+      const completedAtISO = now.toISOString();
+      await insertDailyEventOnce({
+        userId,
+        dateISO: dateKey,
+        type: "reset_completed",
+        atISO: completedAtISO,
+        props: { resetId },
+      });
+      const stored = await getDailyCheckIn(userId, dateKey);
+      const checkIn = normalizeCheckInInput(stored?.checkIn || {}, dateKey);
+      const dayState = await getDayState(userId, dateKey);
+      const eventsToday = await listDailyEvents(userId, dateKey, dateKey);
+      const today = buildToday({
+        userId,
+        dateKey,
+        timezone: baseline.timezone,
+        dayBoundaryHour: baseline.dayBoundaryHour,
+        baseline,
+        latestCheckin: checkIn,
+        dayState,
+        eventsToday,
+        panicMode: checkIn?.safety?.panic === true,
+        libVersion: LIB_VERSION,
+      });
+      const normalizedToday = ensureTodayContract(today, res);
+      if (!normalizedToday) return;
+      const nextState = {
+        resetId: normalizedToday.reset?.id || null,
+        movementId: normalizedToday.movement?.id || null,
+        nutritionId: normalizedToday.nutrition?.id || null,
+        lastQuickSignal: dayState?.lastQuickSignal || null,
+        lastInputHash: normalizedToday.meta?.inputHash || null,
+      };
+      if (shouldUpdateDayState(dayState, nextState)) {
+        await upsertDayState(userId, dateKey, nextState);
+      }
+      logInfo({ event: "reset_complete", requestId, userId, dateKey, inputHash: normalizedToday.meta?.inputHash });
+      send(200, normalizedToday);
       return;
     }
 
@@ -4830,11 +5135,6 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/outcomes" && req.method === "GET") {
-      const cached = getCachedResponse(userId, pathname, url.search);
-      if (cached) {
-        send(200, cached);
-        return;
-      }
       const daysParam = url.searchParams.get("days") || "7";
       const daysNum = Number(daysParam);
       const allowed = [7, 14, 30];
@@ -4842,28 +5142,43 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "days_invalid", "days must be 7, 14, or 30", "days");
         return;
       }
-      const toISO = requestTodayISO;
-      const fromISO = domain.addDaysISO(toISO, -(daysNum - 1));
-      const historyList = await listLatestDayPlanHistoryByRange(userId, fromISO, toISO);
-      const historyByDate = new Map();
-      historyList.forEach((entry) => historyByDate.set(entry.dateISO, entry.day));
-      const reminderIntents = await listReminderIntentsByRange(userId, fromISO, toISO);
-      const planChanges7d = await countPlanChangeSummariesInRange(
-        userId,
-        domain.addDaysISO(requestTodayISO, -6),
-        requestTodayISO
-      );
-      const outcomes = buildOutcomes({
-        state,
+      const baseline = await getUserBaseline(userId);
+      if (!baseline) {
+        sendError(res, 400, "baseline_required", "Baseline required before outcomes");
+        return;
+      }
+      const now = new Date();
+      const range = getDateRangeKeys({
+        timezone: baseline.timezone,
+        dayBoundaryHour: baseline.dayBoundaryHour,
         days: daysNum,
-        todayISO: requestTodayISO,
-        reminderIntents,
-        historyByDate,
-        planChanges7d,
-        stabilityLimit: config.planChangeLimit7d,
+        endNow: now,
       });
-      const payload = { ok: true, ...outcomes };
-      setCachedResponse(userId, pathname, url.search, payload, CACHE_TTLS.outcomes);
+      if (!range.toKey) {
+        sendError(res, 400, "date_invalid", "Unable to resolve date range");
+        return;
+      }
+      const events = await listDailyEvents(userId, range.fromKey, range.toKey);
+
+      const railDays = new Set();
+      const resetDays = new Set();
+      const checkinDays = new Set();
+      events.forEach((event) => {
+        if (event.type === "rail_opened") railDays.add(event.dateISO);
+        if (event.type === "reset_completed") resetDays.add(event.dateISO);
+        if (event.type === "checkin_submitted") checkinDays.add(event.dateISO);
+      });
+
+      const payload = {
+        ok: true,
+        range: { days: daysNum, fromISO: range.fromKey, toISO: range.toKey },
+        metrics: {
+          railOpenedDays: railDays.size,
+          resetCompletedDays: resetDays.size,
+          checkinSubmittedDays: checkinDays.size,
+          resetCompletionRate: railDays.size ? resetDays.size / railDays.size : 0,
+        },
+      };
       send(200, payload);
       return;
     }

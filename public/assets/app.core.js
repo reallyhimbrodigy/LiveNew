@@ -15,7 +15,6 @@ import {
   getDeviceName,
 } from "./app.api.js";
 import { getAppState } from "./app.state.js";
-export { getAppState, setAppState, resetAppState } from "./app.state.js";
 import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.js";
 import { STRINGS as EN_STRINGS } from "../i18n/en.js";
 
@@ -24,13 +23,10 @@ const STRINGS = { en: EN_STRINGS }[LOCALE] || EN_STRINGS;
 
 const t = (key, fallback = "") => getDictValue(STRINGS, key, fallback);
 const SIGNALS = [
-  { id: "im_stressed", label: t("signals.im_stressed") },
-  { id: "im_exhausted", label: t("signals.im_exhausted") },
-  { id: "i_have_10_min", label: t("signals.i_have_10_min") },
-  { id: "i_have_more_energy", label: t("signals.i_have_more_energy") },
-  { id: "poor_sleep", label: t("signals.poor_sleep") },
-  { id: "anxious", label: t("signals.anxious") },
-  { id: "wired", label: t("signals.wired") },
+  { id: "stressed", label: "I'm stressed" },
+  { id: "exhausted", label: "I'm exhausted" },
+  { id: "ten_minutes", label: "I have 10 minutes" },
+  { id: "more_energy", label: "I have more energy" },
 ];
 
 let citationsById = new Map();
@@ -385,71 +381,43 @@ async function updateAdminVisibility() {
   }
 }
 
-function renderDay(day) {
+function renderDay(contract) {
+  if (!contract) return;
+  const resetMinutes = contract.reset?.seconds ? Math.max(1, Math.round(contract.reset.seconds / 60)) : "–";
   setText(
     qs("#day-what"),
-    `${t("labels.workout")}: ${day.what.workout?.title || "–"} (${day.what.workout?.minutes || "–"} min)\n` +
-      `${t("labels.reset")}: ${day.what.reset.title || "–"} (${day.what.reset.minutes || "–"} min)\n` +
-      `${t("labels.nutrition")}: ${day.what.nutrition.title || "–"}`
+    `${t("labels.reset")}: ${contract.reset?.title || "–"} (${resetMinutes} min)\n` +
+      `${t("labels.workout")}: ${contract.movement?.title || "–"} (${contract.movement?.minutes ?? "–"} min)\n` +
+      `${t("labels.nutrition")}: ${contract.nutrition?.title || "–"}`
   );
   const whyEl = qs("#day-why");
-  const short = day.why?.shortRationale || day.why?.statement || "";
-  const whyNot = (day.why?.whyNot || []).join(" ");
-  const reEntryMsg = day.why?.reEntry?.active ? `${t("labels.reEntry")}: ${day.why.reEntry.message}` : "";
+  const loadPct = Math.round((contract.scores?.load || 0) * 100);
+  const capacityPct = Math.round((contract.scores?.capacity || 0) * 100);
+  const rationale = Array.isArray(contract.rationale?.bullets) ? contract.rationale.bullets.join(" ") : "";
   setText(
     whyEl,
-    `${t("labels.profile")}: ${day.why.profile || "–"}\n` +
-      `${t("labels.focus")}: ${day.why.focus || "–"}\n` +
-      `${short}\n` +
-      `${whyNot}${reEntryMsg ? `\n${reEntryMsg}` : ""}`
+    `${t("labels.profile")}: ${contract.profile || "–"}\n` +
+      `Load ${loadPct}%, capacity ${capacityPct}%\n` +
+      `${rationale}`
   );
-  if (day.why?.safety?.level && day.why.safety.level !== "ok" && whyEl) {
-    setText(
-      whyEl,
-      `${whyEl.textContent}\n${t("labels.safety")}: ${day.why.safety.level} (${(day.why.safety.reasons || []).join(", ")})`
-    );
-  }
   setText(
     qs("#day-howlong"),
-    `${t("labels.total")}: ${formatMinutes(day.howLong.totalMinutes)}\n` +
-      `${t("labels.available")}: ${day.howLong.timeAvailableMin || "–"} min`
+    `Reset: ${resetMinutes} min\nMovement: ${contract.movement?.minutes ?? "–"} min`
   );
 
   const details = qs("#day-details");
   if (!details) return;
   clear(details);
-  const workoutSteps = (day.details.workoutSteps || []).join(" • ") || "–";
-  const resetSteps = (day.details.resetSteps || []).join(" • ") || "–";
-  const nutrition = (day.details.nutritionPriorities || []).join(" • ") || "–";
-  const anchors = day.details.anchors;
-  const citationIds = Array.isArray(day.details.citations) ? day.details.citations : [];
-  const anchorLines = [];
-  if (anchors?.sunlightAnchor) anchorLines.push(`${t("labels.sunlight")}: ${anchors.sunlightAnchor.instruction}`);
-  if (anchors?.mealTimingAnchor) anchorLines.push(`${t("labels.meals")}: ${anchors.mealTimingAnchor.instruction}`);
-
-  details.appendChild(el("div", { text: `${t("labels.workoutSteps")}: ${workoutSteps}` }));
+  const resetSteps = Array.isArray(contract.reset?.steps) ? contract.reset.steps.join(" • ") : "–";
+  const nutrition = Array.isArray(contract.nutrition?.bullets) ? contract.nutrition.bullets.join(" • ") : "–";
   details.appendChild(el("div", { text: `${t("labels.resetSteps")}: ${resetSteps}` }));
   details.appendChild(el("div", { text: `${t("labels.nutritionPriorities")}: ${nutrition}` }));
-  if (anchorLines.length) {
-    details.appendChild(el("div", { text: `${t("labels.anchors")}: ${anchorLines.join(" | ")}` }));
-  }
-  if (citationIds.length) {
-    const citationLines = citationIds.map((id) => citationsById.get(id)?.title || id);
-    details.appendChild(el("div", { text: `${t("labels.citations")}: ${citationLines.join(" • ")}` }));
-  }
-  const expanded = day.why?.expanded;
-  if (expanded) {
-    if (expanded.drivers?.length) {
-      details.appendChild(el("div", { text: `${t("labels.whyDetails")}: ${expanded.drivers.join(" • ")}` }));
-    }
-    if (expanded.appliedRules?.length) {
-      details.appendChild(
-        el("div", { text: `${t("labels.appliedRules")}: ${expanded.appliedRules.join(", ")}` })
-      );
-    }
-  }
-  if (day.why?.safety?.disclaimer) {
-    details.appendChild(el("div", { text: day.why.safety.disclaimer }));
+  if (contract.movement) {
+    details.appendChild(
+      el("div", {
+        text: `${t("labels.workout")}: ${contract.movement.title} (${contract.movement.intensity}/3)`,
+      })
+    );
   }
 }
 
@@ -461,48 +429,33 @@ function initDay({ initialDateISO } = {}) {
   const signalButtons = qs("#signal-buttons");
   const badDayBtn = qs("#bad-day-btn");
   const checkinBtn = qs("#checkin-submit");
-  const feedbackButtons = qsa("#feedback-buttons button");
-  const feedbackKind = qs("#feedback-kind");
-  const completionInputs = qsa("#completion-list input");
   const railSubmit = qs("#rail-submit");
   const railResetEl = qs("#rail-reset");
   const railViewFull = qs("#rail-view-full");
   const railDoneEl = qs("#rail-done");
   const railDoneView = qs("#rail-done-view");
-  const railCheckin = qs(".rail-checkin");
   const panicBanner = qs("#panic-banner");
   const panicDisclaimer = qs("#panic-disclaimer");
   const panicClear = qs("#panic-clear");
-  const dayCard = qs("#day-card");
+  const completionList = qs("#completion-list");
   const prefsCard = qs("#prefs-card");
   const communityCard = qs("#community-card");
-  const signalsCard = qs("#signals-card");
-  const checkinCard = qs("#checkin-card");
-  const completionCard = qs("#completion-card");
   const feedbackCard = qs("#feedback-card");
-  const communityList = qs("#community-list");
-  const communityText = qs("#community-text");
-  const communitySubmit = qs("#community-submit");
-  const communityStatus = qs("#community-status");
-  const prefsList = qs("#prefs-list");
-  let currentResetId = null;
-  let currentDay = null;
-  let prefsMap = new Map();
-  let panicActive = false;
+  let currentContract = null;
 
   if (dateInput) dateInput.value = initialDateISO || dateInput.value || todayISO();
+  if (loadBtn) {
+    loadBtn.classList.add("hidden");
+    loadBtn.setAttribute("disabled", "true");
+  }
+  if (badDayBtn) badDayBtn.classList.add("hidden");
+  if (prefsCard) prefsCard.classList.add("hidden");
+  if (communityCard) communityCard.classList.add("hidden");
+  if (feedbackCard) feedbackCard.classList.add("hidden");
 
-  const setPanicMode = (active, disclaimerText = "") => {
-    panicActive = Boolean(active);
-    if (railCheckin) railCheckin.classList.toggle("hidden", panicActive);
-    if (panicBanner) panicBanner.classList.toggle("hidden", !panicActive);
-    if (panicDisclaimer) panicDisclaimer.textContent = disclaimerText || "";
-    railSubmit?.classList.toggle("hidden", panicActive);
-    railViewFull?.classList.toggle("hidden", panicActive);
-    railDoneEl?.classList.toggle("hidden", panicActive);
-    [dayCard, prefsCard, communityCard, signalsCard, checkinCard, completionCard, feedbackCard]
-      .filter(Boolean)
-      .forEach((section) => section.classList.toggle("hidden", panicActive));
+  const setPanicMode = (active) => {
+    if (panicBanner) panicBanner.classList.toggle("hidden", !active);
+    if (panicDisclaimer) panicDisclaimer.textContent = active ? "Take the smallest safe step first." : "";
   };
 
   const renderRailReset = (reset) => {
@@ -510,12 +463,13 @@ function initDay({ initialDateISO } = {}) {
     clear(railResetEl);
     if (railDoneEl) railDoneEl.classList.add("hidden");
     if (!reset) {
-      railResetEl.appendChild(el("div", { class: "muted", text: t("rail.resetUnavailable") }));
+      railResetEl.appendChild(el("div", { class: "muted", text: "Reset unavailable" }));
       return;
     }
+    const minutes = reset.seconds ? Math.max(1, Math.round(reset.seconds / 60)) : 2;
     railResetEl.appendChild(el("div", { class: "rail-title", text: t("rail.resetTitle") }));
     railResetEl.appendChild(
-      el("div", { class: "rail-reset-name", text: `${reset.title || "Reset"} (${reset.minutes || 2} min)` })
+      el("div", { class: "rail-reset-name", text: `${reset.title || "Reset"} (${minutes} min)` })
     );
     const steps = Array.isArray(reset.steps) ? reset.steps : [];
     if (steps.length) {
@@ -523,153 +477,65 @@ function initDay({ initialDateISO } = {}) {
     }
   };
 
-  const renderCommunity = (responses) => {
-    if (!communityList) return;
-    clear(communityList);
-    const list = Array.isArray(responses) ? responses : [];
-    if (!list.length) {
-      communityList.appendChild(el("div", { class: "list-item muted", text: t("community.none") }));
-      return;
-    }
-    list.forEach((entry) => {
-      communityList.appendChild(el("div", { class: "list-item", text: entry.text }));
-    });
-  };
-
-  const renderPrefs = (day) => {
-    if (!prefsList) return;
-    clear(prefsList);
-    if (!day) {
-      prefsList.appendChild(el("div", { class: "list-item muted", text: t("prefs.none") }));
-      return;
-    }
-    const items = [
-      { kind: "workout", item: day.what?.workout },
-      { kind: "reset", item: day.what?.reset },
-      { kind: "nutrition", item: day.what?.nutrition },
-    ];
-    items.forEach(({ kind, item }) => {
-      if (!item?.id) return;
-      const currentPref = prefsMap.get(item.id) || null;
-      const row = el("div", { class: "list-item prefs-row" }, [
-        el("div", { text: `${t(`labels.${kind}`)}: ${item.title || item.id}` }),
-      ]);
-      const favActive = currentPref === "favorite";
-      const avoidActive = currentPref === "avoid";
-      const favBtn = el("button", { text: favActive ? t("prefs.unfavorite") : t("prefs.favorite"), class: favActive ? "" : "ghost" });
-      const avoidBtn = el("button", { text: avoidActive ? t("prefs.unavoid") : t("prefs.avoid"), class: avoidActive ? "" : "ghost" });
-      favBtn.addEventListener("click", async () => {
-        if (favActive) {
-          await apiDelete(`/v1/content/prefs/${encodeURIComponent(item.id)}`);
-          prefsMap.delete(item.id);
-        } else {
-          await apiPost("/v1/content/prefs", { itemId: item.id, pref: "favorite" });
-          prefsMap.set(item.id, "favorite");
-        }
-        renderPrefs(currentDay);
-      });
-      avoidBtn.addEventListener("click", async () => {
-        if (avoidActive) {
-          await apiDelete(`/v1/content/prefs/${encodeURIComponent(item.id)}`);
-          prefsMap.delete(item.id);
-        } else {
-          await apiPost("/v1/content/prefs", { itemId: item.id, pref: "avoid" });
-          prefsMap.set(item.id, "avoid");
-        }
-        renderPrefs(currentDay);
-      });
-      row.appendChild(favBtn);
-      row.appendChild(avoidBtn);
-      prefsList.appendChild(row);
-    });
-  };
-
-  const loadPrefs = async () => {
-    try {
-      const res = await apiGet("/v1/content/prefs");
-      prefsMap = new Map((res.prefs || []).map((entry) => [entry.itemId, entry.pref]));
-    } catch {
-      prefsMap = new Map();
-    }
-    renderPrefs(currentDay);
-  };
-
-  const loadCommunity = async (resetId) => {
-    if (!resetId) return;
-    currentResetId = resetId;
-    try {
-      const res = await apiGet(`/v1/community/resets/${encodeURIComponent(resetId)}`);
-      renderCommunity(res.responses || []);
-    } catch (err) {
-      if (getErrorCode(err) === "feature_disabled") {
-        if (communityList) clear(communityList);
-      } else {
+  const renderCompletion = () => {
+    if (!completionList) return;
+    clear(completionList);
+    const btn = el("button", { text: "Reset completed", type: "button" });
+    btn.addEventListener("click", async () => {
+      if (!currentContract?.reset?.id) return;
+      try {
+        await apiPost("/v1/reset/complete", {
+          dateISO: currentContract.dateISO,
+          resetId: currentContract.reset.id,
+        });
+        if (railDoneEl) railDoneEl.classList.remove("hidden");
+      } catch (err) {
         reportError(err);
       }
-    }
+    });
+    completionList.appendChild(btn);
   };
 
-  const loadRail = async () => {
+  const renderSignals = () => {
+    if (!signalButtons) return;
+    clear(signalButtons);
+    SIGNALS.forEach((signal) => {
+      const btn = el("button", { text: signal.label, type: "button" });
+      btn.addEventListener("click", async () => {
+        if (!currentContract) return;
+        try {
+          const res = await apiPost("/v1/quick", { dateISO: currentContract.dateISO, signal: signal.id });
+          renderContract(res);
+        } catch (err) {
+          reportError(err);
+        }
+      });
+      signalButtons.appendChild(btn);
+    });
+  };
+
+  const renderContract = (contract) => {
+    currentContract = contract;
+    if (dateInput) dateInput.value = contract?.dateISO || todayISO();
+    setPanicMode(Boolean(contract?.panicMode));
+    renderDay(contract);
+    renderRailReset(contract?.reset || null);
+    renderCompletion();
+  };
+
+  const loadToday = async () => {
     try {
       if (railDoneEl) railDoneEl.classList.add("hidden");
       const res = await apiGet("/v1/rail/today");
-      setPanicMode(res?.panic?.active, res?.panic?.disclaimer || res?.day?.why?.safety?.disclaimer || "");
-      const dateISO = res.day?.dateISO || todayISO();
-      if (dateInput) dateInput.value = dateISO;
-      await ensureCitations();
-      if (res.day) {
-        renderDay(res.day);
-        currentDay = res.day;
-        renderPrefs(currentDay);
-        const resetId = res.day?.what?.reset?.id;
-        if (resetId) {
-          await loadCommunity(resetId);
-        } else {
-          currentResetId = null;
-          renderCommunity([]);
-        }
-      }
-      renderRailReset(res.rail?.reset || null);
+      renderContract(res);
     } catch (err) {
       reportError(err);
     }
   };
-
-  const loadDay = async () => {
-    try {
-      const dateISO = dateInput?.value || todayISO();
-      if (railResetEl && dateISO === todayISO()) {
-        await loadRail();
-        return;
-      }
-      const res = await apiGet(`/v1/plan/day?date=${dateISO}`);
-      setPanicMode(res?.panic?.active, res?.panic?.disclaimer || res?.day?.why?.safety?.disclaimer || "");
-      await ensureCitations();
-      renderDay(res.day);
-      currentDay = res.day;
-      renderPrefs(currentDay);
-      const resetId = res.day?.what?.reset?.id;
-      if (resetId) {
-        await loadCommunity(resetId);
-      } else {
-        currentResetId = null;
-        renderCommunity([]);
-      }
-    } catch (err) {
-      reportError(err);
-    }
-  };
-
-  loadBtn?.addEventListener("click", () => {
-    loadDay();
-  });
-  loadDay();
-  loadPrefs();
 
   railSubmit?.addEventListener("click", async () => {
     try {
-      const dateISO = todayISO();
-      if (dateInput) dateInput.value = dateISO;
+      const dateISO = currentContract?.dateISO || todayISO();
       const checkIn = {
         dateISO,
         stress: Number(qs("#rail-stress")?.value || 5),
@@ -678,8 +544,24 @@ function initDay({ initialDateISO } = {}) {
         timeAvailableMin: Number(qs("#rail-time")?.value || 10),
       };
       const res = await apiPost("/v1/checkin", { checkIn });
-      void res;
-      await loadRail();
+      renderContract(res);
+    } catch (err) {
+      reportError(err);
+    }
+  });
+
+  checkinBtn?.addEventListener("click", async () => {
+    try {
+      const dateISO = currentContract?.dateISO || todayISO();
+      const checkIn = {
+        dateISO,
+        stress: Number(qs("#checkin-stress")?.value || 5),
+        sleepQuality: Number(qs("#checkin-sleep")?.value || 6),
+        energy: Number(qs("#checkin-energy")?.value || 6),
+        timeAvailableMin: Number(qs("#checkin-time")?.value || 20),
+      };
+      const res = await apiPost("/v1/checkin", { checkIn });
+      renderContract(res);
     } catch (err) {
       reportError(err);
     }
@@ -700,133 +582,18 @@ function initDay({ initialDateISO } = {}) {
     }
   });
 
-  if (signalButtons) {
-    clear(signalButtons);
-    SIGNALS.forEach((signal) => {
-      const btn = el("button", { text: signal.label });
-      btn.addEventListener("click", async () => {
-        try {
-          const dateISO = dateInput?.value || todayISO();
-          const res = await apiPost("/v1/signal", { dateISO, signal: signal.id });
-          if (res.day) {
-            if (railResetEl && dateISO === todayISO()) {
-              await loadRail();
-            } else {
-              await ensureCitations();
-              renderDay(res.day);
-            }
-          }
-        } catch (err) {
-          reportError(err);
-        }
-      });
-      signalButtons.appendChild(btn);
-    });
-  }
-
-  badDayBtn?.addEventListener("click", async () => {
-    try {
-      const dateISO = dateInput?.value || todayISO();
-      const res = await apiPost("/v1/bad-day", { dateISO });
-      if (res.day) {
-        if (railResetEl && dateISO === todayISO()) {
-          await loadRail();
-        } else {
-          await ensureCitations();
-          renderDay(res.day);
-        }
-      }
-    } catch (err) {
-      reportError(err);
-    }
-  });
-
-  checkinBtn?.addEventListener("click", async () => {
-    try {
-      const dateISO = dateInput?.value || todayISO();
-      const checkIn = {
-        dateISO,
-        stress: Number(qs("#checkin-stress")?.value || 5),
-        sleepQuality: Number(qs("#checkin-sleep")?.value || 6),
-        energy: Number(qs("#checkin-energy")?.value || 6),
-        timeAvailableMin: Number(qs("#checkin-time")?.value || 20),
-        notes: qs("#checkin-notes")?.value || "",
-      };
-      const res = await apiPost("/v1/checkin", { checkIn });
-      if (res.day) {
-        if (railResetEl && dateISO === todayISO()) {
-          await loadRail();
-        } else {
-          await ensureCitations();
-          renderDay(res.day);
-        }
-      }
-    } catch (err) {
-      reportError(err);
-    }
-  });
-
-  completionInputs.forEach((input) => {
-    input.addEventListener("change", async () => {
-      try {
-        const part = input.dataset.part;
-        const dateISO = dateInput?.value || todayISO();
-        await apiPost("/v1/complete", { dateISO, part });
-        if (part === "reset" && railDoneEl && dateISO === todayISO() && input.checked) {
-          railDoneEl.classList.remove("hidden");
-        }
-      } catch (err) {
-        reportError(err);
-      }
-    });
-  });
-
   panicClear?.addEventListener("click", async () => {
     try {
-      const dateISO = dateInput?.value || todayISO();
-      await apiPost("/v1/checkin", { dateISO, safety: { panic: false } });
-      await loadRail();
+      const dateISO = currentContract?.dateISO || todayISO();
+      const res = await apiPost("/v1/checkin", { dateISO, safety: { panic: false } });
+      renderContract(res);
     } catch (err) {
       reportError(err);
     }
   });
 
-  feedbackButtons.forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      try {
-        const dateISO = dateInput?.value || todayISO();
-        const helped = btn.dataset.helped === "true";
-        const reasonCode = btn.dataset.reason || null;
-        const kind = feedbackKind?.value || "reset";
-        const itemId = currentDay?.what?.[kind]?.id || null;
-        const payload = { dateISO, helped, kind, itemId };
-        if (!helped) payload.reasonCode = reasonCode;
-        await apiPost("/v1/feedback", payload);
-      } catch (err) {
-        reportError(err);
-      }
-    });
-  });
-
-  communitySubmit?.addEventListener("click", async () => {
-    if (!currentResetId) return;
-    const text = communityText?.value || "";
-    if (communityStatus) communityStatus.textContent = "";
-    try {
-      await apiPost(`/v1/community/resets/${encodeURIComponent(currentResetId)}/respond`, { text });
-      if (communityText) communityText.value = "";
-      if (communityStatus) communityStatus.textContent = t("community.thanks");
-    } catch (err) {
-      const code = getErrorCode(err);
-      if (communityStatus) {
-        communityStatus.textContent =
-          code === "opt_in_required" ? t("community.optInRequired") : t("community.submitFailed");
-      }
-      if (code === "auth_required" || code === "consent_required" || code === "consent_required_version") {
-        reportError(err);
-      }
-    }
-  });
+  renderSignals();
+  loadToday();
 }
 
 function initWeek() {
@@ -890,42 +657,35 @@ function initTrends() {
         clear(outcomesSummary);
         outcomesSummary.appendChild(
           el("div", { class: "list-item" }, [
-            el("div", { text: t("outcomes.daysAny") }),
-            el("div", { class: "muted", text: String(outcomes.metrics?.daysAnyRegulationAction ?? 0) }),
-          ])
-        );
-        const stabilityScore = outcomes.metrics?.stabilityScore;
-        const planChanges7d = outcomes.metrics?.planChanges7d;
-        let stabilityLabel = "–";
-        if (stabilityScore != null && Number.isFinite(stabilityScore)) {
-          if (stabilityScore >= 0.75) stabilityLabel = t("outcomes.stabilityHigh");
-          else if (stabilityScore >= 0.4) stabilityLabel = t("outcomes.stabilityMedium");
-          else stabilityLabel = t("outcomes.stabilityLow");
-        }
-        outcomesSummary.appendChild(
-          el("div", { class: "list-item" }, [
-            el("div", { text: t("outcomes.stability") }),
-            el("div", { class: "muted", text: stabilityLabel }),
+            el("div", { text: "Rail opened days" }),
+            el("div", { class: "muted", text: String(outcomes.metrics?.railOpenedDays ?? 0) }),
           ])
         );
         outcomesSummary.appendChild(
           el("div", { class: "list-item" }, [
-            el("div", { text: t("outcomes.planChanges") }),
-            el("div", { class: "muted", text: planChanges7d != null ? String(planChanges7d) : "–" }),
+            el("div", { text: "Reset completed days" }),
+            el("div", { class: "muted", text: String(outcomes.metrics?.resetCompletedDays ?? 0) }),
+          ])
+        );
+        outcomesSummary.appendChild(
+          el("div", { class: "list-item" }, [
+            el("div", { text: "Check-in submitted days" }),
+            el("div", { class: "muted", text: String(outcomes.metrics?.checkinSubmittedDays ?? 0) }),
+          ])
+        );
+        const resetRate = outcomes.metrics?.resetCompletionRate ?? 0;
+        outcomesSummary.appendChild(
+          el("div", { class: "list-item" }, [
+            el("div", { text: "Reset completion rate" }),
+            el("div", { class: "muted", text: `${Math.round(resetRate * 100)}%` }),
           ])
         );
       }
       if (outcomesAnchors) {
         clear(outcomesAnchors);
-        (outcomes.metrics?.anchorsCompletedTrend || []).forEach((row) => {
-          const tr = el("tr", {}, [
-            el("td", { text: row.dateISO }),
-            el("td", { text: row.sunlight ? t("misc.yes") : t("misc.no") }),
-            el("td", { text: row.meal ? t("misc.yes") : t("misc.no") }),
-            el("td", { text: row.downshift ? t("misc.yes") : t("misc.no") }),
-          ]);
-          outcomesAnchors.appendChild(tr);
-        });
+        outcomesAnchors.appendChild(
+          el("tr", {}, [el("td", { text: "–" }), el("td", { text: "–" }), el("td", { text: "–" }), el("td", { text: "–" })])
+        );
       }
       if (outcomesResets) {
         clear(outcomesResets);
@@ -2334,6 +2094,13 @@ function initAdmin() {
 
 export {
   initBaseUi,
+  setAppErrorHandler,
+  hideGateScreens,
+  renderConsentScreen,
+  renderOnboardScreen,
+  showLoginScreen,
+  showIncidentScreen,
+  showErrorScreen,
   bindAuth,
   updateAdminVisibility,
   initDay,

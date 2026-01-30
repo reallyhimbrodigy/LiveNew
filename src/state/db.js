@@ -2611,6 +2611,222 @@ export async function getCommunityOptIn(userId) {
   return { userId, optedIn: row.opted_in === 1, updatedAt: row.updated_at };
 }
 
+function safeParseJson(value, fallback) {
+  if (value == null) return fallback;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return fallback;
+  }
+}
+
+export async function getUserBaseline(userId) {
+  if (!userId) return null;
+  const row = getDb()
+    .prepare(
+      "SELECT user_id, timezone, day_boundary_hour, constraints_json, created_at, updated_at FROM users_profile WHERE user_id = ?"
+    )
+    .get(userId);
+  if (!row) return null;
+  return {
+    userId: row.user_id,
+    timezone: row.timezone || null,
+    dayBoundaryHour: row.day_boundary_hour ?? null,
+    constraints: safeParseJson(row.constraints_json, null),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function upsertUserBaseline(userId, baseline = {}) {
+  if (!userId) return null;
+  const now = new Date().toISOString();
+  const timezone = typeof baseline.timezone === "string" ? baseline.timezone : null;
+  const dayBoundaryHour =
+    baseline.dayBoundaryHour == null || Number.isNaN(Number(baseline.dayBoundaryHour))
+      ? null
+      : Number(baseline.dayBoundaryHour);
+  const constraintsJson = baseline.constraints ? JSON.stringify(baseline.constraints) : null;
+  getDb()
+    .prepare(
+      "INSERT INTO users_profile (user_id, timezone, day_boundary_hour, constraints_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET timezone=excluded.timezone, day_boundary_hour=excluded.day_boundary_hour, constraints_json=excluded.constraints_json, updated_at=excluded.updated_at"
+    )
+    .run(userId, timezone, dayBoundaryHour, constraintsJson, now, now);
+  return getUserBaseline(userId);
+}
+
+export async function getDailyCheckIn(userId, dateISO) {
+  if (!userId || !dateISO) return null;
+  const row = getDb()
+    .prepare("SELECT user_id, date_iso, checkin_json, created_at, updated_at FROM daily_checkins WHERE user_id = ? AND date_iso = ?")
+    .get(userId, dateISO);
+  if (!row) return null;
+  return {
+    userId: row.user_id,
+    dateISO: row.date_iso,
+    checkIn: safeParseJson(row.checkin_json, {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function upsertDailyCheckIn(userId, dateISO, checkIn = {}) {
+  if (!userId || !dateISO) return null;
+  const now = new Date().toISOString();
+  const payload = JSON.stringify(checkIn || {});
+  getDb()
+    .prepare(
+      "INSERT INTO daily_checkins (user_id, date_iso, checkin_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id, date_iso) DO UPDATE SET checkin_json=excluded.checkin_json, updated_at=excluded.updated_at"
+    )
+    .run(userId, dateISO, payload, now, now);
+  return getDailyCheckIn(userId, dateISO);
+}
+
+export async function listDailyCheckIns(userId, fromISO, toISO) {
+  if (!userId || !fromISO || !toISO) return [];
+  const rows = getDb()
+    .prepare(
+      "SELECT user_id, date_iso, checkin_json, created_at, updated_at FROM daily_checkins WHERE user_id = ? AND date_iso >= ? AND date_iso <= ? ORDER BY date_iso ASC"
+    )
+    .all(userId, fromISO, toISO);
+  return rows.map((row) => ({
+    userId: row.user_id,
+    dateISO: row.date_iso,
+    checkIn: safeParseJson(row.checkin_json, {}),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function getDailyEventByType(userId, dateISO, type) {
+  if (!userId || !dateISO || !type) return null;
+  const row = getDb()
+    .prepare(
+      "SELECT id, user_id, date_iso, type, at_iso, props_json FROM daily_events WHERE user_id = ? AND date_iso = ? AND type = ? ORDER BY at_iso ASC LIMIT 1"
+    )
+    .get(userId, dateISO, type);
+  if (!row) return null;
+  return {
+    id: row.id,
+    userId: row.user_id,
+    dateISO: row.date_iso,
+    type: row.type,
+    atISO: row.at_iso,
+    props: safeParseJson(row.props_json, null),
+  };
+}
+
+export async function insertDailyEvent({ id, userId, dateISO, type, atISO, props }) {
+  if (!userId || !dateISO || !type) return null;
+  const eventId = id || crypto.randomUUID();
+  const at = atISO || new Date().toISOString();
+  const propsJson = props ? JSON.stringify(props) : null;
+  getDb()
+    .prepare(
+      "INSERT INTO daily_events (id, user_id, date_iso, type, at_iso, props_json) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .run(eventId, userId, dateISO, type, at, propsJson);
+  return { id: eventId, userId, dateISO, type, atISO: at, props: props || null };
+}
+
+export async function insertDailyEventOnce({ userId, dateISO, type, atISO, props }) {
+  if (!userId || !dateISO || !type) return null;
+  const eventId = crypto.randomUUID();
+  const at = atISO || new Date().toISOString();
+  const propsJson = props ? JSON.stringify(props) : null;
+  getDb()
+    .prepare(
+      "INSERT OR IGNORE INTO daily_events (id, user_id, date_iso, type, at_iso, props_json) VALUES (?, ?, ?, ?, ?, ?)"
+    )
+    .run(eventId, userId, dateISO, type, at, propsJson);
+  return getDailyEventByType(userId, dateISO, type);
+}
+
+export async function listDailyEvents(userId, fromISO, toISO) {
+  if (!userId || !fromISO || !toISO) return [];
+  const rows = getDb()
+    .prepare(
+      "SELECT id, user_id, date_iso, type, at_iso, props_json FROM daily_events WHERE user_id = ? AND date_iso >= ? AND date_iso <= ? ORDER BY at_iso ASC"
+    )
+    .all(userId, fromISO, toISO);
+  return rows.map((row) => ({
+    id: row.id,
+    userId: row.user_id,
+    dateISO: row.date_iso,
+    type: row.type,
+    atISO: row.at_iso,
+    props: safeParseJson(row.props_json, null),
+  }));
+}
+
+export async function upsertResetCompletion(userId, dateISO, resetId, completedAtISO = null) {
+  if (!userId || !dateISO || !resetId) return null;
+  const atISO = completedAtISO || new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO reset_completions (user_id, date_iso, reset_id, completed_at_iso) VALUES (?, ?, ?, ?) ON CONFLICT(user_id, date_iso) DO UPDATE SET reset_id=excluded.reset_id, completed_at_iso=excluded.completed_at_iso"
+    )
+    .run(userId, dateISO, resetId, atISO);
+  return { userId, dateISO, resetId, completedAtISO: atISO };
+}
+
+export async function listResetCompletions(userId, fromISO, toISO) {
+  if (!userId || !fromISO || !toISO) return [];
+  const rows = getDb()
+    .prepare(
+      "SELECT user_id, date_iso, reset_id, completed_at_iso FROM reset_completions WHERE user_id = ? AND date_iso >= ? AND date_iso <= ? ORDER BY completed_at_iso ASC"
+    )
+    .all(userId, fromISO, toISO);
+  return rows.map((row) => ({
+    userId: row.user_id,
+    dateISO: row.date_iso,
+    resetId: row.reset_id,
+    completedAtISO: row.completed_at_iso,
+  }));
+}
+
+export async function getDayState(userId, dateKey) {
+  if (!userId || !dateKey) return null;
+  const row = getDb()
+    .prepare(
+      "SELECT user_id, date_key, reset_id, movement_id, nutrition_id, last_quick_signal, last_input_hash, created_at, updated_at FROM day_state WHERE user_id = ? AND date_key = ?"
+    )
+    .get(userId, dateKey);
+  if (!row) return null;
+  return {
+    userId: row.user_id,
+    dateKey: row.date_key,
+    resetId: row.reset_id || null,
+    movementId: row.movement_id || null,
+    nutritionId: row.nutrition_id || null,
+    lastQuickSignal: row.last_quick_signal || null,
+    lastInputHash: row.last_input_hash || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function upsertDayState(userId, dateKey, state = {}) {
+  if (!userId || !dateKey) return null;
+  const now = new Date().toISOString();
+  getDb()
+    .prepare(
+      "INSERT INTO day_state (user_id, date_key, reset_id, movement_id, nutrition_id, last_quick_signal, last_input_hash, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, date_key) DO UPDATE SET reset_id=excluded.reset_id, movement_id=excluded.movement_id, nutrition_id=excluded.nutrition_id, last_quick_signal=excluded.last_quick_signal, last_input_hash=excluded.last_input_hash, updated_at=excluded.updated_at"
+    )
+    .run(
+      userId,
+      dateKey,
+      state.resetId || null,
+      state.movementId || null,
+      state.nutritionId || null,
+      state.lastQuickSignal || null,
+      state.lastInputHash || null,
+      now,
+      now
+    );
+  return getDayState(userId, dateKey);
+}
+
 export async function insertCommunityResponse({ resetItemId, userId, text, status = "pending" }) {
   const id = crypto.randomUUID();
   const createdAt = new Date().toISOString();
@@ -2722,6 +2938,11 @@ export async function deleteUserData(userId) {
     instance.prepare("DELETE FROM analytics_daily_user_flags WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM analytics_events WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM analytics_user_day_times WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM users_profile WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM daily_checkins WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM daily_events WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM reset_completions WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM day_state WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM reminder_intents WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM user_cohorts WHERE user_id = ?").run(userId);

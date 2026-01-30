@@ -1,4 +1,4 @@
-import { apiGet, setToken, setRefreshToken } from "./app.api.js";
+import { apiGet, apiPost, setToken, setRefreshToken } from "./app.api.js";
 import { getAppState, setAppState } from "./app.state.js";
 import {
   initBaseUi,
@@ -13,7 +13,7 @@ import {
   showErrorScreen,
   t,
 } from "./app.core.js";
-import { renderHome } from "./controllers.js";
+import { renderHome, renderDay, renderWeek, renderTrends, renderProfile, renderAdmin } from "./controllers.js";
 
 function getErrorCode(err) {
   return err?.code || err?.payload?.error?.code || null;
@@ -36,6 +36,20 @@ function isProdLike() {
 let unhandledHookAttached = false;
 let initInFlight = false;
 let pendingInit = false;
+
+function resolvePage() {
+  const declared = document.body?.dataset?.page;
+  if (declared) return declared;
+  const path = window.location?.pathname || "/";
+  if (path === "/" || path === "/index.html") return "home";
+  if (path === "/day" || path === "/day.html") return "day";
+  if (path === "/week" || path === "/week.html") return "week";
+  if (path === "/trends" || path === "/trends.html") return "trends";
+  if (path === "/profile" || path === "/profile.html") return "profile";
+  if (path === "/admin" || path === "/admin.html") return "admin";
+  if (path === "/smoke-frontend" || path === "/smoke-frontend.html") return "smoke";
+  return "home";
+}
 
 function attachUnhandledHook() {
   if (unhandledHookAttached) return;
@@ -103,15 +117,15 @@ function handleAppError(err) {
 
 function buildOnboardDefaults(boot) {
   return {
-    timezone: boot?.now?.tz || "America/Los_Angeles",
-    dayBoundaryHour: boot?.now?.dayBoundaryHour ?? 0,
+    timezone: boot?.baseline?.timezone || boot?.now?.tz || "America/Los_Angeles",
+    dayBoundaryHour: boot?.baseline?.dayBoundaryHour ?? boot?.now?.dayBoundaryHour ?? 0,
     stress: "5",
     sleepQuality: "6",
     energy: "6",
   };
 }
 
-async function routeUiState({ boot }) {
+async function routeUiState({ boot, page }) {
   const uiState = boot?.uiState || "login";
   hideGateScreens();
 
@@ -146,7 +160,19 @@ async function routeUiState({ boot }) {
   }
 
   if (uiState === "home") {
-    await renderHome();
+    if (page === "day") {
+      await renderDay();
+    } else if (page === "week") {
+      await renderWeek();
+    } else if (page === "trends") {
+      await renderTrends();
+    } else if (page === "profile") {
+      await renderProfile();
+    } else if (page === "admin") {
+      await renderAdmin();
+    } else {
+      await renderHome();
+    }
     return;
   }
 
@@ -200,8 +226,8 @@ async function runSmoke() {
   host.appendChild(list);
 }
 
-export async function initApp({ mode } = {}) {
-  const resolvedMode = mode || document.body?.dataset?.mode || null;
+export async function initApp({ page } = {}) {
+  const resolvedPage = page || resolvePage();
   if (initInFlight) {
     pendingInit = true;
     return;
@@ -216,24 +242,26 @@ export async function initApp({ mode } = {}) {
       onError: handleAppError,
     });
 
-    if (resolvedMode === "smoke") {
+    if (resolvedPage === "smoke") {
       await runSmoke();
       return;
     }
 
     const { boot } = await runBootstrap();
     await updateAdminVisibility();
-    await routeUiState({ boot });
+    await routeUiState({ boot, page: resolvedPage });
   } catch (err) {
     handleAppError(err);
   } finally {
     initInFlight = false;
     if (pendingInit) {
       pendingInit = false;
-      void initApp({ mode: resolvedMode });
+      void initApp({ page: resolvedPage });
     }
   }
 }
 
-const initialMode = document.body?.dataset?.mode || null;
-initApp({ mode: initialMode }).catch((err) => handleAppError(err));
+const initialPage = resolvePage();
+initApp({ page: initialPage }).catch((err) => handleAppError(err));
+
+void apiPost;
