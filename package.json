@@ -16,7 +16,21 @@
     "test:load": "node scripts/loadtest.js",
     "test:migrations": "node scripts/migrations.test.js",
     "test:mvp": "node scripts/mvp.unit.test.js",
-    "test": "npm run test:mvp && npm run test:integration && npm run test:golden && npm run test:migrations"
+    "test:constraints": "node scripts/constraints.coverage.test.js",
+    "test:safeguards": "node scripts/safeguards.test.js",
+    "test:smoke": "node scripts/smoke.loop.js",
+    "test": "npm run test:mvp && npm run test:integration && npm run test:golden && npm run test:migrations && npm run test:constraints && npm run test:safeguards",
+    "simulate": "node scripts/simulate.js",
+    "db:profile": "node scripts/db-profile.js",
+    "retention:dry-run": "node scripts/retention-dry-run.js",
+    "launch:check": "node scripts/launch-check.js",
+    "nightly:canary": "node scripts/nightly-canary.js",
+    "maintenance:weekly": "node scripts/maintenance-weekly.js",
+    "load:test": "node scripts/load-test.js",
+    "canary:lift": "node scripts/canary-lift.js",
+    "kill-switch:verify": "node scripts/kill-switch-verify.js",
+    "maintenance:verify": "node scripts/maintenance-verify.js",
+    "launch:gate": "node scripts/launch-gate.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "^2.2.0",

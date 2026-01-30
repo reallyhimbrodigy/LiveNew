@@ -4,7 +4,7 @@ export const MOVEMENT_LIBRARY = [
     title: "Easy walk",
     durationMin: 10,
     intensity: 1,
-    tags: ["light", "downshift", "eq:none"],
+    tags: ["light", "downshift", "eq:none", "intensity:low", "demand:low"],
     contraTags: ["injury:knee", "injury:back"],
   },
   {
@@ -12,7 +12,7 @@ export const MOVEMENT_LIBRARY = [
     title: "Gentle mobility",
     durationMin: 8,
     intensity: 1,
-    tags: ["light", "downshift", "eq:none"],
+    tags: ["light", "downshift", "eq:none", "intensity:low", "demand:low"],
     contraTags: ["injury:back"],
   },
   {
@@ -20,7 +20,7 @@ export const MOVEMENT_LIBRARY = [
     title: "Stretch flow",
     durationMin: 12,
     intensity: 1,
-    tags: ["light", "downshift", "eq:none"],
+    tags: ["light", "downshift", "eq:none", "intensity:low", "demand:low"],
     contraTags: ["injury:shoulder"],
   },
   {
@@ -28,7 +28,7 @@ export const MOVEMENT_LIBRARY = [
     title: "Light strength circuit",
     durationMin: 15,
     intensity: 2,
-    tags: ["light", "neutral", "eq:none"],
+    tags: ["light", "neutral", "eq:none", "intensity:med", "demand:med"],
     contraTags: ["injury:shoulder", "injury:knee"],
   },
   {
@@ -36,7 +36,7 @@ export const MOVEMENT_LIBRARY = [
     title: "Band activation",
     durationMin: 12,
     intensity: 2,
-    tags: ["light", "neutral", "eq:bands"],
+    tags: ["light", "neutral", "eq:bands", "intensity:med", "demand:med"],
     contraTags: ["injury:shoulder"],
   },
   {
@@ -44,7 +44,7 @@ export const MOVEMENT_LIBRARY = [
     title: "Dumbbell carry",
     durationMin: 12,
     intensity: 2,
-    tags: ["neutral", "eq:dumbbells"],
+    tags: ["neutral", "eq:dumbbells", "intensity:med", "demand:med"],
     contraTags: ["injury:back", "injury:shoulder"],
   },
   {
@@ -52,7 +52,7 @@ export const MOVEMENT_LIBRARY = [
     title: "Brisk walk",
     durationMin: 20,
     intensity: 3,
-    tags: ["upswing", "eq:none"],
+    tags: ["upswing", "eq:none", "intensity:high", "demand:high"],
     contraTags: ["injury:knee", "injury:back"],
   },
   {
@@ -60,7 +60,7 @@ export const MOVEMENT_LIBRARY = [
     title: "Low-impact cardio",
     durationMin: 18,
     intensity: 3,
-    tags: ["upswing", "eq:none"],
+    tags: ["upswing", "eq:none", "intensity:high", "demand:high"],
     contraTags: ["injury:knee"],
   },
 ];

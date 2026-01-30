@@ -1,0 +1,31 @@
+{
+  "id": "vegan",
+  "name": "Vegan",
+  "baseline": {
+    "timezone": "America/Los_Angeles",
+    "dayBoundaryHour": 4,
+    "constraints": {
+      "diet": {
+        "avoidTags": ["protein"]
+      },
+      "equipment": {
+        "none": true,
+        "dumbbells": false,
+        "bands": false,
+        "gym": false
+      },
+      "injuries": {
+        "knee": false,
+        "shoulder": false,
+        "back": false
+      },
+      "timeOfDayPreference": "any"
+    }
+  },
+  "checkIn": {
+    "stress": 4,
+    "sleepQuality": 7,
+    "energy": 7,
+    "timeAvailableMin": 20
+  }
+}

@@ -18,6 +18,15 @@ function parseAdminEmails(input) {
     .filter(Boolean);
 }
 
+function parseAllowlist(input) {
+  return new Set(
+    (input || "")
+      .split(",")
+      .map((entry) => entry.trim().toLowerCase())
+      .filter(Boolean)
+  );
+}
+
 function readAdminEmailsFile(dataDir) {
   const filePath = path.join(dataDir, "admin_emails.json");
   if (!fs.existsSync(filePath)) return [];
@@ -73,6 +82,11 @@ export function getConfig() {
     mutating: 10,
     auth: 5,
   };
+  if (process.env.TEST_MODE === "true") {
+    rateLimits.userGeneral = 1000;
+    rateLimits.userMutating = 1000;
+    rateLimits.ipGeneral = 1000;
+  }
 
   const cacheTTLSeconds = isAlphaLike || isProdLike ? 20 : 10;
   const featureFreeze = process.env.FEATURE_FREEZE === "true";
@@ -83,6 +97,15 @@ export function getConfig() {
   const rulesFrozen = rulesFrozenOverride !== undefined ? rulesFrozenOverride : isAlphaLike || isProdLike;
   const contentStageMode = process.env.CONTENT_STAGE_MODE === "true";
   const alertWebhookUrl = (process.env.ALERT_WEBHOOK_URL || "").trim();
+  const canaryAllowlist = parseAllowlist(process.env.CANARY_ALLOWLIST);
+  const writesDisabled = parseBool(process.env.WRITES_DISABLED) === true;
+  const disableCheckinWrites = parseBool(process.env.DISABLE_CHECKIN_WRITES) === true;
+  const disableQuickWrites = parseBool(process.env.DISABLE_QUICK_WRITES) === true;
+  const disableResetWrites = parseBool(process.env.DISABLE_RESET_WRITES) === true;
+  const writeStormLimitRaw = Number(process.env.WRITE_STORM_LIMIT || 6);
+  const writeStormLimit = Number.isFinite(writeStormLimitRaw) ? Math.max(0, writeStormLimitRaw) : 6;
+  const writeStormWindowRaw = Number(process.env.WRITE_STORM_WINDOW_SEC || 10);
+  const writeStormWindowSec = Number.isFinite(writeStormWindowRaw) ? Math.max(1, writeStormWindowRaw) : 10;
   const maxP95MsByRoute = {
     "/v1/rail/today": Number(process.env.MAX_P95_RAIL_MS || 300),
     "/v1/plan/day": Number(process.env.MAX_P95_PLAN_DAY_MS || 300),
@@ -113,6 +136,13 @@ export function getConfig() {
     rulesFrozen,
     contentStageMode,
     alertWebhookUrl,
+    canaryAllowlist,
+    writesDisabled,
+    disableCheckinWrites,
+    disableQuickWrites,
+    disableResetWrites,
+    writeStormLimit,
+    writeStormWindowMs: writeStormWindowSec * 1000,
     maxP95MsByRoute,
     maxErrorRate,
     backupWindowHours,

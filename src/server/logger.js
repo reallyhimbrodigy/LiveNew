@@ -1,5 +1,5 @@
 const REDACTED = "[REDACTED]";
-const SENSITIVE_KEYS = ["email", "token", "refresh", "authorization", "notes"];
+const SENSITIVE_KEYS = ["email", "token", "refresh", "authorization", "notes", "checkin", "check_in", "signal", "quick"];
 
 function shouldRedactKey(key) {
   const lower = String(key || "").toLowerCase();
@@ -54,5 +54,14 @@ export function logError(entry) {
     console.error(formatted);
   } else {
     console.error(JSON.stringify(formatted));
+  }
+}
+
+export function logDebug(entry) {
+  const formatted = formatEntry(entry);
+  if (typeof formatted === "string") {
+    console.debug(formatted);
+  } else {
+    console.debug(JSON.stringify(formatted));
   }
 }

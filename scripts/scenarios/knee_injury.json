@@ -1,0 +1,28 @@
+{
+  "id": "knee_injury",
+  "name": "Knee injury",
+  "baseline": {
+    "timezone": "America/Los_Angeles",
+    "dayBoundaryHour": 4,
+    "constraints": {
+      "injuries": {
+        "knee": true,
+        "shoulder": false,
+        "back": false
+      },
+      "equipment": {
+        "none": true,
+        "dumbbells": false,
+        "bands": false,
+        "gym": false
+      },
+      "timeOfDayPreference": "any"
+    }
+  },
+  "checkIn": {
+    "stress": 6,
+    "sleepQuality": 6,
+    "energy": 5,
+    "timeAvailableMin": 15
+  }
+}

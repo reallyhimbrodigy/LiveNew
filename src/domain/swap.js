@@ -25,6 +25,23 @@ function pickEasiestMovement(list) {
     )[0];
 }
 
+function isResetDemandIncrease(current, next) {
+  if (!current || !next) return false;
+  const currentSec = Number(current.durationSec || 0);
+  const nextSec = Number(next.durationSec || 0);
+  return nextSec > currentSec;
+}
+
+function isMovementDemandIncrease(current, next) {
+  if (!current || !next) return false;
+  const currentIntensity = Number(current.intensity || 0);
+  const nextIntensity = Number(next.intensity || 0);
+  if (nextIntensity > currentIntensity) return true;
+  const currentMin = Number(current.durationMin || 0);
+  const nextMin = Number(next.durationMin || 0);
+  return nextMin > currentMin;
+}
+
 export function applyQuickSignal({ signal, todaySelection, scored, profile, constraints, libraries }) {
   const resets = libraries?.resets || [];
   const movement = libraries?.movement || [];
@@ -46,31 +63,38 @@ export function applyQuickSignal({ signal, todaySelection, scored, profile, cons
 
   if (signal === "stressed") {
     const preferred = pickByTag(resets, "downshift");
-    if (nextReset?.tags?.includes("downshift") !== true) nextReset = preferred;
+    if (nextReset?.tags?.includes("downshift") !== true) {
+      if (!isResetDemandIncrease(nextReset, preferred)) nextReset = preferred;
+    }
     if ((scored?.capacity || 0) < 70) nextMovement = null;
   }
 
   if (signal === "exhausted") {
     const preferred = pickByTag(resets, "downshift");
-    if (nextReset?.tags?.includes("downshift") !== true) nextReset = preferred;
+    const resetChanged = nextReset?.tags?.includes("downshift") !== true && !isResetDemandIncrease(nextReset, preferred);
+    if (resetChanged) nextReset = preferred;
     nextMovement = null;
-    if (!nextNutrition?.tags?.includes("simple")) {
+    const exhaustedSatisfied = nextReset?.tags?.includes("downshift") === true && nextMovement == null;
+    if (!resetChanged && !exhaustedSatisfied && !nextNutrition?.tags?.includes("simple")) {
       nextNutrition = pickByTag(nutrition, "simple");
     }
   }
 
   if (signal === "ten_minutes") {
     const shortest = pickShortest(resets);
-    if (nextReset?.id !== shortest?.id) nextReset = shortest;
+    const resetChanged = nextReset?.id !== shortest?.id && !isResetDemandIncrease(nextReset, shortest);
+    if (resetChanged) nextReset = shortest;
     nextMovement = null;
-    if (!nextNutrition?.tags?.includes("simple")) {
+    const tenSatisfied = nextReset?.id === shortest?.id && nextMovement == null;
+    if (!resetChanged && !tenSatisfied && !nextNutrition?.tags?.includes("simple")) {
       nextNutrition = pickByTag(nutrition, "simple");
     }
   }
 
   if (signal === "more_energy") {
     if (!nextMovement && (scored?.capacity || 0) >= 70) {
-      nextMovement = pickByTag(movement, "light") || pickEasiestMovement(movement);
+      const candidate = pickByTag(movement, "light") || pickEasiestMovement(movement);
+      if (!isMovementDemandIncrease(nextMovement, candidate)) nextMovement = candidate;
     }
   }
 

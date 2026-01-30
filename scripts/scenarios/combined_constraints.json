@@ -1,0 +1,34 @@
+{
+  "id": "combined_constraints",
+  "name": "Combined constraints",
+  "baseline": {
+    "timezone": "America/Los_Angeles",
+    "dayBoundaryHour": 4,
+    "constraints": {
+      "injuries": {
+        "knee": true,
+        "shoulder": false,
+        "back": true
+      },
+      "equipment": {
+        "none": true,
+        "dumbbells": false,
+        "bands": false,
+        "gym": false
+      },
+      "diet": {
+        "avoidTags": ["protein", "balanced"]
+      },
+      "timeOfDayPreference": "evening"
+    }
+  },
+  "profile": {
+    "busyDays": ["__TODAY__", "__TODAY__+2"]
+  },
+  "checkIn": {
+    "stress": 7,
+    "sleepQuality": 4,
+    "energy": 4,
+    "timeAvailableMin": 10
+  }
+}

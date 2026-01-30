@@ -10,17 +10,23 @@ import { runSnapshotCheck, SNAPSHOT_IDS } from "../dev/snapshot.js";
 import { toDayContract } from "./dayContract.js";
 import { getUserId, sanitizeUserId } from "./userId.js";
 import { AppError, badRequest, forbidden, internal, sendError as baseSendError } from "./errors.js";
-import { logInfo, logError } from "./logger.js";
+import { logInfo, logWarn, logError, logDebug } from "./logger.js";
 import { assertDayContract, assertWeekPlan } from "./invariants.js";
 import { validateWorkoutItem, validateResetItem, validateNutritionItem } from "../domain/content/validateContent.js";
 import { runContentChecks } from "../domain/content/checks.js";
 import { hashJSON, sanitizeContentItem, sanitizePack } from "../domain/content/snapshotHash.js";
 import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
+import { buildWeekSkeleton } from "../domain/weekPlanner.js";
+import { computeContinuityMeta } from "../domain/continuity.js";
 import { applyQuickSignal } from "../domain/swap.js";
 import { LIB_VERSION } from "../domain/libraryVersion.js";
+import { weekStartMonday, addDaysISO } from "../domain/utils/date.js";
+import { computeLoadCapacity } from "../domain/scoring.js";
+import { assignProfile } from "../domain/profiles.js";
 import { assertTodayContract } from "../contracts/todayContract.js";
 import { assertBootstrapContract } from "../contracts/bootstrapContract.js";
+import { unwrapTodayEnvelope } from "../contracts/protocol.js";
 import {
   validateProfile,
   validateCheckIn,
@@ -37,6 +43,7 @@ import {
   checkDbConnection,
   checkReady,
   getDbPath,
+  getDbConfig,
   getUserState,
   saveUserState,
   appendUserEvent,
@@ -146,6 +153,12 @@ import {
   listDailyEvents,
   getDayState,
   upsertDayState,
+  getWeekState,
+  getWeekDaySeed,
+  replaceWeekState,
+  getIdempotencyRecord,
+  insertIdempotencyRecord,
+  setIdempotencyResponse,
   getConsentMeta,
   setConsentMeta,
   setCommunityOptIn,
@@ -201,9 +214,13 @@ import { loadSnapshotBundle, resolveSnapshotForUser, setDefaultSnapshotId, getDe
 import { scheduleStartupSmoke } from "./startupSmoke.js";
 import { getEnvPolicy } from "./envPolicy.js";
 import { getDateKey, getDateRangeKeys } from "../utils/dateKey.js";
+import { createParityCounters } from "./parityCounters.js";
+import { CONTRACT_LOCK_HASHES, DOMAIN_LOCK_HASHES } from "./lockHashes.js";
+import { verifyHashes } from "./lockChecks.js";
 
 const NODE_ENV = process.env.NODE_ENV || "development";
 const config = getConfig();
+const canaryAllowlist = config.canaryAllowlist || new Set();
 const envPolicy = getEnvPolicy(config.envMode);
 const PORT = config.port;
 const isDevRoutesEnabled = envPolicy.allowDevRoutes && config.devRoutesEnabled;
@@ -215,6 +232,60 @@ const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || "")
   .split(",")
   .map((entry) => entry.trim())
   .filter(Boolean);
+const PARITY_LOG_EVERY_RAW = Number(process.env.PARITY_LOG_EVERY || 200);
+const PARITY_LOG_EVERY = Number.isFinite(PARITY_LOG_EVERY_RAW) ? Math.max(0, PARITY_LOG_EVERY_RAW) : 200;
+const PARITY_LOG_INTERVAL_RAW = Number(process.env.PARITY_LOG_INTERVAL_MS || 5 * 60 * 1000);
+const PARITY_LOG_INTERVAL_MS = Number.isFinite(PARITY_LOG_INTERVAL_RAW) ? Math.max(0, PARITY_LOG_INTERVAL_RAW) : 5 * 60 * 1000;
+const REQUIRED_EVIDENCE_ENV = "REQUIRED_EVIDENCE_ID";
+
+function enforceLibVersionFreeze() {
+  if (process.env.FREEZE_LIB_VERSION !== "true") return;
+  const expected = (process.env.EXPECTED_LIB_VERSION || "").trim();
+  if (!expected) {
+    logError({ event: "lib_version_freeze_missing", message: "EXPECTED_LIB_VERSION is required when FREEZE_LIB_VERSION=true" });
+    process.exit(1);
+  }
+  if (String(LIB_VERSION) !== expected) {
+    logError({
+      event: "lib_version_mismatch",
+      expected,
+      actual: String(LIB_VERSION),
+    });
+    process.exit(1);
+  }
+}
+
+async function enforceLaunchLocks() {
+  const rootDir = process.cwd();
+  const evidence = process.env[REQUIRED_EVIDENCE_ENV] || null;
+
+  const check = async (kind, expected) => {
+    const result = await verifyHashes({ rootDir, expected, kind });
+    if (result.ok) return;
+    logError({
+      event: `${kind}_lock_mismatch`,
+      requiredEvidenceEnv: REQUIRED_EVIDENCE_ENV,
+      evidenceProvided: evidence,
+      mismatches: result.mismatches,
+    });
+    if (!evidence) {
+      process.exit(1);
+    }
+    logWarn({
+      event: `${kind}_lock_override`,
+      requiredEvidenceEnv: REQUIRED_EVIDENCE_ENV,
+      evidenceProvided: evidence,
+      mismatchCount: result.mismatches.length,
+    });
+  };
+
+  if (process.env.CONTRACT_LOCK === "true") {
+    await check("contract", CONTRACT_LOCK_HASHES);
+  }
+  if (process.env.DOMAIN_LOCK === "true") {
+    await check("domain", DOMAIN_LOCK_HASHES);
+  }
+}
 
 const PUBLIC_DIR = path.join(process.cwd(), "public");
 const CITATIONS_PATH = path.join(PUBLIC_DIR, "citations.json");
@@ -288,6 +359,32 @@ function recordRouteHit(method, pathname) {
   routeHits.set(key, count + 1);
 }
 
+function bumpMonitoringCounter(key, inc = 1) {
+  if (!key) return;
+  const next = (monitoringCounters.get(key) || 0) + (Number(inc) || 0);
+  monitoringCounters.set(key, next);
+}
+
+function flushMonitoringCounters(reason = "interval") {
+  if (!monitoringCounters.size) return;
+  const snapshot = {};
+  for (const [key, value] of monitoringCounters.entries()) {
+    if (value) snapshot[key] = value;
+  }
+  if (!Object.keys(snapshot).length) return;
+  monitoringCounters.clear();
+  logInfo({
+    event: "monitoring_counters",
+    reason,
+    windowMs: MONITOR_LOG_INTERVAL_MS,
+    counts: snapshot,
+  });
+}
+
+if (MONITOR_LOG_INTERVAL_MS > 0) {
+  setInterval(() => flushMonitoringCounters("interval"), MONITOR_LOG_INTERVAL_MS).unref();
+}
+
 let consentVersionCache = { value: 1, atMs: 0 };
 async function getRequiredConsentVersion() {
   if (Number.isFinite(REQUIRED_CONSENT_VERSION_ENV) && REQUIRED_CONSENT_VERSION_ENV > 0) {
@@ -317,12 +414,25 @@ let shuttingDown = false;
 const authEmailRateLimiters = new Map();
 const authIpRateLimiters = new Map();
 const readCache = new Map();
+const outcomesCache = new Map();
 const contentPrefsCache = new Map();
 const routeHits = new Map();
 const startupSmokeStatus = { lastAtISO: null, ok: null, lastErrorCode: null };
 const latencySamples = new Map();
 const errorCounters = new Map();
 const requestCounters = new Map();
+let etagNotModifiedCount = 0;
+const determinismCache = new Map();
+const DETERMINISM_TTL_MS = 5 * 60 * 1000;
+const idempotencyWarnCache = new Map();
+const IDEMPOTENCY_WARN_WINDOW_MS = 60 * 1000;
+const writeStormBuckets = new Map();
+const MONITOR_LOG_INTERVAL_MS = Math.max(0, Number(process.env.MONITOR_LOG_INTERVAL_MS || 60_000));
+const monitoringCounters = new Map();
+const parityCounters =
+  PARITY_LOG_EVERY > 0 || PARITY_LOG_INTERVAL_MS > 0
+    ? createParityCounters({ logEveryCount: PARITY_LOG_EVERY, logIntervalMs: PARITY_LOG_INTERVAL_MS, logFn: logInfo })
+    : createParityCounters({ logEveryCount: 0, logIntervalMs: 0, logFn: null });
 const recent5xx = [];
 const featureFlagsCache = { data: null, loadedAt: 0 };
 const FEATURE_FLAGS_TTL_MS = 10 * 1000;
@@ -370,8 +480,17 @@ if (config.isDevLike) {
 
 const secretState = ensureSecretKey(config);
 
+enforceLibVersionFreeze();
+await enforceLaunchLocks();
 await ensureDataDirWritable(config);
 await initDb();
+const dbConfig = getDbConfig();
+logInfo({
+  event: "db_config",
+  path: getDbPath(),
+  busyTimeoutMs: dbConfig.busyTimeoutMs,
+  maxConnections: dbConfig.maxConnections,
+});
 try {
   const existingConsentVersion = await getConsentMeta("required_version");
   if (!existingConsentVersion) {
@@ -429,6 +548,9 @@ async function runEngineValidatorTask(options = {}) {
 const bootSummary = await computeBootSummary(config);
 enforceGuardrails(config, bootSummary);
 logInfo({ boot: bootSummary });
+if (bootSummary.indexes && !bootSummary.indexes.ok) {
+  logWarn({ event: "missing_indexes", missing: bootSummary.indexes.missing || [] });
+}
 const taskScheduler = createTaskScheduler({
   config,
   createBackup,
@@ -449,6 +571,7 @@ function enforceGuardrails(runtimeConfig, summary) {
   if (summary.devRoutes.enabled) failures.push("DEV_ROUTES_ENABLED");
   if (!summary.csrf.enabled) failures.push("CSRF");
   if (runtimeConfig.requireAuth && !summary.storage.ok) failures.push("DB");
+  if (runtimeConfig.requireAuth && summary.indexes && !summary.indexes.ok) failures.push("DB_INDEXES");
   if (failures.length) {
     throw new Error(
       `ENV_MODE=${runtimeConfig.envMode} requires SECRET_KEY (32+ chars) and ADMIN_EMAILS and CSRF enabled. Refusing to boot.`
@@ -660,6 +783,95 @@ function validateCheckInPayload(raw) {
     }
   }
   return { ok: true };
+}
+
+function hasUnexpectedKeys(payload, allowed) {
+  if (!payload || typeof payload !== "object") return false;
+  return Object.keys(payload).some((key) => !allowed.includes(key));
+}
+
+function validateEventPayload(type, payload) {
+  if (type === "rail_opened") {
+    const allowed = ["v"];
+    if (hasUnexpectedKeys(payload, allowed)) {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "unexpected fields" } };
+    }
+    const body = payload && typeof payload === "object" ? payload : {};
+    return { ok: true, payload: { v: Number(body.v || 1) || 1 } };
+  }
+  if (type === "reset_completed") {
+    if (!payload || typeof payload !== "object") return { ok: true, payload: {} };
+    const allowed = ["v", "resetId"];
+    if (hasUnexpectedKeys(payload, allowed)) {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "unexpected fields" } };
+    }
+    if (payload.resetId && typeof payload.resetId !== "string") {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "resetId invalid" } };
+    }
+    return { ok: true, payload: payload.resetId ? { v: 1, resetId: payload.resetId } : { v: 1 } };
+  }
+  if (type === "checkin_submitted") {
+    if (!payload || typeof payload !== "object") {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "checkin payload required" } };
+    }
+    const allowed = ["v", "stress", "sleep", "energy", "timeMin"];
+    if (hasUnexpectedKeys(payload, allowed)) {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "unexpected fields" } };
+    }
+    const required = ["stress", "sleep", "energy", "timeMin"];
+    for (const field of required) {
+      const value = Number(payload[field]);
+      if (!Number.isFinite(value)) {
+        return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: `${field} invalid` } };
+      }
+    }
+    if (payload.stress < 1 || payload.stress > 10) {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "stress out of range" } };
+    }
+    if (payload.sleep < 1 || payload.sleep > 10) {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "sleep out of range" } };
+    }
+    if (payload.energy < 1 || payload.energy > 10) {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "energy out of range" } };
+    }
+    if (payload.timeMin < 5 || payload.timeMin > 60) {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "timeMin out of range" } };
+    }
+    return {
+      ok: true,
+      payload: {
+        v: 1,
+        stress: payload.stress,
+        sleep: payload.sleep,
+        energy: payload.energy,
+        timeMin: payload.timeMin,
+      },
+    };
+  }
+  if (type === "quick_adjusted") {
+    if (!payload || typeof payload !== "object" || typeof payload.signal !== "string") {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "signal invalid" } };
+    }
+    const allowedKeys = ["v", "signal"];
+    if (hasUnexpectedKeys(payload, allowedKeys)) {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "unexpected fields" } };
+    }
+    const allowedSignals = ["stressed", "exhausted", "ten_minutes", "more_energy"];
+    if (!allowedSignals.includes(payload.signal)) {
+      return { ok: false, error: { code: "INVALID_EVENT_PAYLOAD", message: "signal invalid" } };
+    }
+    return { ok: true, payload: { v: 1, signal: payload.signal } };
+  }
+  return { ok: true, payload: payload && typeof payload === "object" ? payload : {} };
+}
+
+function ensureEventPayload(type, payload, res) {
+  const validation = validateEventPayload(type, payload);
+  if (!validation.ok) {
+    sendErrorCodeOnly(res, 400, "INVALID_EVENT_PAYLOAD");
+    return null;
+  }
+  return validation.payload;
 }
 
 async function getFeatureFlags() {
@@ -1536,6 +1748,15 @@ function profileCompleteness(profile) {
   return { isComplete: missingFields.length === 0, missingFields };
 }
 
+function isCanaryAllowed({ userId, userEmail }) {
+  if (!canaryAllowlist.size) return true;
+  const id = userId ? String(userId).toLowerCase() : "";
+  const email = userEmail ? String(userEmail).toLowerCase() : "";
+  if (id && canaryAllowlist.has(id)) return true;
+  if (email && canaryAllowlist.has(email)) return true;
+  return false;
+}
+
 async function buildBootstrapPayload({ userId, userProfile, userBaseline, userEmail, flags }) {
   const isAuthenticated = Boolean(userId);
   let consents = {};
@@ -1564,13 +1785,17 @@ async function buildBootstrapPayload({ userId, userProfile, userBaseline, userEm
   const dateISO = toDateISOWithBoundary(new Date(), tz, dayBoundaryHour) || domain.isoToday();
   const incidentMode = resolveIncidentMode(flags);
   const admin = userEmail ? isAdmin(userEmail) : false;
-  const uiState = !isAuthenticated
+  const canaryAllowed = isCanaryAllowed({ userId, userEmail });
+  let uiState = !isAuthenticated
     ? "login"
     : !consentComplete || !consentVersionOk
       ? "consent"
       : !profileStatus.isComplete
         ? "onboard"
         : "home";
+  if (isAuthenticated && canaryAllowlist.size && !canaryAllowed) {
+    uiState = "consent";
+  }
   return {
     ok: true,
     now: { dateISO, tz, dayBoundaryHour },
@@ -1601,16 +1826,35 @@ async function buildBootstrapPayload({ userId, userProfile, userBaseline, userEm
       : null,
     features: {
       incidentMode,
-      railTodayAvailable: consentComplete && consentVersionOk && !incidentMode && isAuthenticated,
+      railTodayAvailable: consentComplete && consentVersionOk && !incidentMode && isAuthenticated && canaryAllowed,
     },
     env: { mode: config.envMode },
     uiState,
   };
 }
 
-async function ensureHomeUiState({ userId, userProfile, userBaseline, userEmail, flags }, res) {
-  const bootstrap = await buildBootstrapPayload({ userId, userProfile, userBaseline, userEmail, flags });
+async function ensureHomeUiState({ userId, userProfile, userBaseline, userEmail, flags, pathname }, res) {
+  let resolvedEmail = userEmail;
+  if (canaryAllowlist.size && userId && !resolvedEmail) {
+    const user = await getUserById(userId);
+    resolvedEmail = user?.email || null;
+  }
+  const bootstrap = await buildBootstrapPayload({ userId, userProfile, userBaseline, userEmail: resolvedEmail, flags });
+  const canaryAllowed = isCanaryAllowed({ userId, userEmail: resolvedEmail });
+  const shouldWarn = pathname && pathname.startsWith("/v1/plan/");
+  if (canaryAllowlist.size && !canaryAllowed) {
+    if (shouldWarn) {
+      logWarn({ event: "bootstrap_not_home", requestId: res?.livenewRequestId, userId, route: pathname, uiState: "canary" });
+    }
+    bumpMonitoringCounter("gating_violation");
+    sendErrorCodeOnly(res, 403, "CANARY_GATED");
+    return { ok: false, uiState: "consent" };
+  }
   if (bootstrap.uiState !== "home") {
+    if (shouldWarn) {
+      logWarn({ event: "bootstrap_not_home", requestId: res?.livenewRequestId, userId, route: pathname, uiState: bootstrap.uiState });
+    }
+    bumpMonitoringCounter("gating_violation");
     sendErrorCodeOnly(res, 403, "BOOTSTRAP_NOT_HOME");
     return { ok: false, uiState: bootstrap.uiState };
   }
@@ -1621,6 +1865,8 @@ function ensureTodayContract(contract, res) {
   try {
     return assertTodayContract(contract);
   } catch (err) {
+    logError({ event: "today_contract_invalid", error: err?.message || String(err) });
+    bumpMonitoringCounter("contract_invalid");
     sendErrorCodeOnly(res, 500, err.code || "TODAY_CONTRACT_INVALID");
     return null;
   }
@@ -1635,6 +1881,116 @@ function shouldUpdateDayState(prev, next) {
     prev.lastQuickSignal === next.lastQuickSignal &&
     prev.lastInputHash === next.lastInputHash
   );
+}
+
+async function loadContinuityMeta(userId, dateKey, timezone, dayBoundaryHour, now) {
+  const recentRange = getDateRangeKeys({
+    timezone,
+    dayBoundaryHour,
+    days: 7,
+    endNow: now,
+  });
+  if (!recentRange?.fromKey) {
+    return { continuity: computeContinuityMeta({ dateKey, recentEventsByDateKey: {} }), eventsToday: [] };
+  }
+  const recentEvents = await listDailyEvents(userId, recentRange.fromKey, recentRange.toKey);
+  const recentByDate = {};
+  recentEvents.forEach((event) => {
+    if (!event?.dateISO) return;
+    if (!recentByDate[event.dateISO]) recentByDate[event.dateISO] = [];
+    recentByDate[event.dateISO].push(event);
+  });
+  return {
+    continuity: computeContinuityMeta({ dateKey, recentEventsByDateKey: recentByDate }),
+    eventsToday: (recentByDate[dateKey] || []).slice(),
+  };
+}
+
+async function ensureWeekSeed(userId, dateKey, baseline, requestId) {
+  const weekStartDateKey = weekStartMonday(dateKey);
+  let weekState = await getWeekState(userId, weekStartDateKey);
+  if (!weekState || weekState.libVersion !== LIB_VERSION) {
+    const libraries = getLibrarySnapshot();
+    const skeleton = buildWeekSkeleton({
+      userId,
+      startDateKey: weekStartDateKey,
+      timezone: baseline.timezone,
+      dayBoundaryHour: baseline.dayBoundaryHour,
+      baseline,
+      libVersion: LIB_VERSION,
+      libraries,
+    });
+    await replaceWeekState(
+      userId,
+      weekStartDateKey,
+      {
+        timezone: baseline.timezone,
+        dayBoundaryHour: baseline.dayBoundaryHour,
+        libVersion: LIB_VERSION,
+      },
+      skeleton
+    );
+    logInfo({
+      event: "week_state_seeded",
+      requestId,
+      userId,
+      weekStartDateKey,
+      libVersion: LIB_VERSION,
+      days: skeleton.length,
+    });
+    weekState = await getWeekState(userId, weekStartDateKey);
+  }
+  let weekSeed = await getWeekDaySeed(userId, dateKey);
+  if (!weekSeed) {
+    const libraries = getLibrarySnapshot();
+    const skeleton = buildWeekSkeleton({
+      userId,
+      startDateKey: weekStartDateKey,
+      timezone: baseline.timezone,
+      dayBoundaryHour: baseline.dayBoundaryHour,
+      baseline,
+      libVersion: LIB_VERSION,
+      libraries,
+    });
+    await replaceWeekState(
+      userId,
+      weekStartDateKey,
+      {
+        timezone: baseline.timezone,
+        dayBoundaryHour: baseline.dayBoundaryHour,
+        libVersion: LIB_VERSION,
+      },
+      skeleton
+    );
+    logInfo({
+      event: "week_state_repaired",
+      requestId,
+      userId,
+      weekStartDateKey,
+      dateKey,
+    });
+    weekSeed = await getWeekDaySeed(userId, dateKey);
+  }
+  return weekSeed;
+}
+
+async function resolvePriorProfile(userId, dateKey) {
+  const prevDateKey = addDaysISO(dateKey, -1);
+  const previous = await getDailyCheckIn(userId, prevDateKey);
+  if (!previous?.checkIn) return null;
+  const prevCheckIn = normalizeCheckInInput(previous.checkIn, prevDateKey);
+  const scores = computeLoadCapacity({
+    stress: prevCheckIn.stress,
+    sleepQuality: prevCheckIn.sleepQuality,
+    energy: prevCheckIn.energy,
+    timeMin: prevCheckIn.timeAvailableMin,
+  });
+  return assignProfile({
+    load: scores.load,
+    capacity: scores.capacity,
+    sleep: prevCheckIn.sleepQuality,
+    energy: prevCheckIn.energy,
+  });
 }
 
 async function runSmokeChecks({ userId, userEmail }) {
@@ -1852,6 +2208,116 @@ function sendJson(res, status, payload, userId) {
   if (res?.livenewApiVersion) headers["x-api-version"] = res.livenewApiVersion;
   res.writeHead(status, headers);
   res.end(JSON.stringify(body));
+}
+
+function sendNotModified(res, etag) {
+  attachDbStats(res);
+  const headers = { ...(res?.livenewExtraHeaders || {}) };
+  if (etag) headers["ETag"] = etag;
+  if (res?.livenewApiVersion) headers["x-api-version"] = res.livenewApiVersion;
+  res.writeHead(304, headers);
+  res.end();
+}
+
+function stableStringify(value) {
+  if (value == null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableStringify(item)).join(",")}]`;
+  }
+  const keys = Object.keys(value).sort();
+  return `{${keys.map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`).join(",")}}`;
+}
+
+function buildDeterminismKey(input) {
+  return stableStringify(input);
+}
+
+function trackDeterminism(inputKey, inputHash, ctx) {
+  const now = Date.now();
+  for (const [key, value] of determinismCache.entries()) {
+    if (now - value.at > DETERMINISM_TTL_MS) determinismCache.delete(key);
+  }
+  const existing = determinismCache.get(inputKey);
+  if (existing && existing.hash !== inputHash) {
+    logError({
+      event: "nondeterminism_detected",
+      requestId: ctx?.requestId,
+      userId: ctx?.userId,
+      dateKey: ctx?.dateKey,
+      prevHash: existing.hash,
+      inputHash,
+    });
+    bumpMonitoringCounter("nondeterminism");
+  }
+  determinismCache.set(inputKey, { hash: inputHash, at: now });
+}
+
+function trackMissingIdempotency({ userId, route, requestHash, requestId }) {
+  if (!userId || !route || !requestHash) return;
+  const now = Date.now();
+  for (const [key, value] of idempotencyWarnCache.entries()) {
+    if (now - value.atMs > IDEMPOTENCY_WARN_WINDOW_MS) idempotencyWarnCache.delete(key);
+  }
+  const cacheKey = `${userId}|${route}|${requestHash}`;
+  const existing = idempotencyWarnCache.get(cacheKey);
+  if (existing && now - existing.atMs < IDEMPOTENCY_WARN_WINDOW_MS) {
+    logWarn({ event: "idempotency_missing", requestId, userId, route, windowMs: IDEMPOTENCY_WARN_WINDOW_MS });
+    bumpMonitoringCounter("idempotency_missing");
+  }
+  idempotencyWarnCache.set(cacheKey, { atMs: now });
+}
+
+function isWriteStorm({ userId, dateKey, route, requestId }) {
+  const limit = Number(config.writeStormLimit || 0);
+  const windowMs = Number(config.writeStormWindowMs || 0);
+  if (!userId || !dateKey || !route) return false;
+  if (!Number.isFinite(limit) || limit <= 0) return false;
+  if (!Number.isFinite(windowMs) || windowMs <= 0) return false;
+  const now = Date.now();
+  const cutoff = now - windowMs;
+  const cacheKey = `${userId}|${dateKey}|${route}`;
+  const entry = writeStormBuckets.get(cacheKey) || { timestamps: [] };
+  entry.timestamps = entry.timestamps.filter((ts) => ts >= cutoff);
+  if (entry.timestamps.length >= limit) {
+    entry.timestamps.push(now);
+    writeStormBuckets.set(cacheKey, entry);
+    logWarn({
+      event: "write_storm",
+      requestId,
+      userId,
+      route,
+      dateKey,
+      limit,
+      windowMs,
+      count: entry.timestamps.length,
+    });
+    bumpMonitoringCounter("write_storm");
+    return true;
+  }
+  entry.timestamps.push(now);
+  if (entry.timestamps.length) {
+    writeStormBuckets.set(cacheKey, entry);
+  } else {
+    writeStormBuckets.delete(cacheKey);
+  }
+  return false;
+}
+
+function getIdempotencyKey(req) {
+  const header = req.headers["idempotency-key"] || req.headers["x-idempotency-key"];
+  const value = Array.isArray(header) ? header[0] : header;
+  if (value && String(value).trim()) return String(value).trim().slice(0, 128);
+  const reqHeader = req.headers["x-request-id"];
+  const reqValue = Array.isArray(reqHeader) ? reqHeader[0] : reqHeader;
+  if (reqValue && String(reqValue).trim()) return String(reqValue).trim().slice(0, 128);
+  return null;
+}
+
+function hashRequestPayload(payload) {
+  const input = stableStringify(payload);
+  return crypto.createHash("sha256").update(input).digest("hex");
 }
 
 function sendHtml(res, status, html) {
@@ -2629,6 +3095,48 @@ function getCachedResponse(userId, reqPath, query) {
 function setCachedResponse(userId, reqPath, query, payload, ttlMs = config.cacheTTLSeconds * 1000) {
   const key = readCacheKey(userId, reqPath, query);
   readCache.set(key, { payload, expiresAt: Date.now() + ttlMs });
+}
+
+function outcomesCacheKey(userId, days, toKey) {
+  return `${userId || "anon"}|${days}|${toKey || "unknown"}`;
+}
+
+function getOutcomesCache(userId, days, toKey) {
+  const key = outcomesCacheKey(userId, days, toKey);
+  const entry = outcomesCache.get(key);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    outcomesCache.delete(key);
+    return null;
+  }
+  return entry.payload;
+}
+
+function setOutcomesCache(userId, days, fromKey, toKey, payload, ttlMs = CACHE_TTLS.outcomes) {
+  const key = outcomesCacheKey(userId, days, toKey);
+  outcomesCache.set(key, {
+    payload,
+    fromKey,
+    toKey,
+    expiresAt: Date.now() + ttlMs,
+  });
+}
+
+function invalidateOutcomesCache(userId, dateKey) {
+  if (!userId || !dateKey) return;
+  const prefix = `${userId}|`;
+  for (const [key, entry] of outcomesCache.entries()) {
+    if (!key.startsWith(prefix)) continue;
+    const fromKey = entry?.fromKey;
+    const toKey = entry?.toKey;
+    if (!fromKey || !toKey) {
+      outcomesCache.delete(key);
+      continue;
+    }
+    if (dateKey >= fromKey && dateKey <= toKey) {
+      outcomesCache.delete(key);
+    }
+  }
 }
 
 function invalidateUserCache(userId) {
@@ -4100,6 +4608,7 @@ const server = http.createServer(async (req, res) => {
         userBaseline: baseline,
         userEmail,
         flags,
+        pathname,
       }, res);
       if (!home.ok) return;
     }
@@ -4276,13 +4785,25 @@ const server = http.createServer(async (req, res) => {
       dateISO = dateValidation.value;
       const checkIn = normalizeCheckInInput(firstCheckInRaw, dateISO);
       await upsertDailyCheckIn(userId, dateISO, checkIn);
+      const checkinEventPayload = ensureEventPayload(
+        "checkin_submitted",
+        {
+          stress: checkIn.stress,
+          sleep: checkIn.sleepQuality,
+          energy: checkIn.energy,
+          timeMin: checkIn.timeAvailableMin,
+        },
+        res
+      );
+      if (!checkinEventPayload) return;
       await insertDailyEventOnce({
         userId,
         dateISO,
         type: "checkin_submitted",
         atISO: new Date().toISOString(),
-        props: { source: "onboard" },
+        props: checkinEventPayload,
       });
+      invalidateOutcomesCache(userId, dateISO);
       const today = buildToday({
         userId,
         dateKey: dateISO,
@@ -4399,6 +4920,8 @@ const server = http.createServer(async (req, res) => {
     }
 
     if ((pathname === "/v1/rail/today" || pathname === "/v1/mobile/today") && req.method === "GET") {
+      const ifNoneMatch = req.headers["if-none-match"];
+      parityCounters.recordTodayRequest(Boolean(ifNoneMatch));
       const baseline = await getUserBaseline(userId);
       if (!baseline) {
         sendError(res, 400, "baseline_required", "Baseline required before loading today");
@@ -4414,9 +4937,30 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "date_invalid", "Unable to resolve date key");
         return;
       }
+      // Week key is Monday-start based on the local dateKey (timezone + boundary already applied).
+      const weekSeed = await ensureWeekSeed(userId, dateKey, baseline, requestId);
       const railOpenedAtISO = now.toISOString();
+      const railPayload = ensureEventPayload("rail_opened", { v: 1 }, res);
+      if (!railPayload) return;
       try {
-        await insertDailyEventOnce({ userId, dateISO: dateKey, type: "rail_opened", atISO: railOpenedAtISO, props: {} });
+        const inserted = await insertDailyEventOnce({
+          userId,
+          dateISO: dateKey,
+          type: "rail_opened",
+          atISO: railOpenedAtISO,
+          props: railPayload,
+        });
+        logInfo({
+          event: "daily_event_insert",
+          requestId,
+          userId,
+          dateKey,
+          type: "rail_opened",
+          inserted: inserted?.inserted === true,
+        });
+        if (inserted?.inserted === true) {
+          invalidateOutcomesCache(userId, dateKey);
+        }
       } catch (err) {
         logError({ event: "daily_event_rail_open_failed", error: err?.message || String(err) });
       }
@@ -4433,7 +4977,14 @@ const server = http.createServer(async (req, res) => {
       const stored = await getDailyCheckIn(userId, dateKey);
       const checkIn = normalizeCheckInInput(stored?.checkIn || {}, dateKey);
       const dayState = await getDayState(userId, dateKey);
-      const eventsToday = await listDailyEvents(userId, dateKey, dateKey);
+      const { continuity, eventsToday } = await loadContinuityMeta(
+        userId,
+        dateKey,
+        baseline.timezone,
+        baseline.dayBoundaryHour,
+        now
+      );
+      const priorProfile = await resolvePriorProfile(userId, dateKey);
       const today = buildToday({
         userId,
         dateKey,
@@ -4442,12 +4993,32 @@ const server = http.createServer(async (req, res) => {
         baseline,
         latestCheckin: checkIn,
         dayState,
+        weekSeed,
         eventsToday,
         panicMode: checkIn?.safety?.panic === true,
         libVersion: LIB_VERSION,
+        continuity,
+        priorProfile,
       });
       const normalizedToday = ensureTodayContract(today, res);
       if (!normalizedToday) return;
+      const etag = normalizedToday.meta?.inputHash || null;
+      if (etag) {
+        res.livenewExtraHeaders = { ...(res.livenewExtraHeaders || {}), ETag: etag };
+        if (ifNoneMatch && String(ifNoneMatch) === String(etag)) {
+          etagNotModifiedCount += 1;
+          logDebug({
+            event: "etag_not_modified",
+            requestId,
+            userId,
+            route: "/v1/rail/today",
+            count: etagNotModifiedCount,
+          });
+          parityCounters.recordTodayNotModified();
+          sendNotModified(res, etag);
+          return;
+        }
+      }
       const nextState = {
         resetId: normalizedToday.reset?.id || null,
         movementId: normalizedToday.movement?.id || null,
@@ -4455,17 +5026,41 @@ const server = http.createServer(async (req, res) => {
         lastQuickSignal: dayState?.lastQuickSignal || null,
         lastInputHash: normalizedToday.meta?.inputHash || null,
       };
-      if (
-        !dayState ||
-        dayState.resetId !== nextState.resetId ||
-        dayState.movementId !== nextState.movementId ||
-        dayState.nutritionId !== nextState.nutritionId ||
-        dayState.lastQuickSignal !== nextState.lastQuickSignal ||
-        dayState.lastInputHash !== nextState.lastInputHash
-      ) {
+      const selectionChanged = shouldUpdateDayState(dayState, nextState);
+      if (selectionChanged) {
         await upsertDayState(userId, dateKey, nextState);
       }
-      logInfo({ event: "today_contract", requestId, userId, dateKey, inputHash: normalizedToday.meta?.inputHash });
+      logInfo({
+        event: "today_contract",
+        requestId,
+        userId,
+        dateKey,
+        inputHash: normalizedToday.meta?.inputHash,
+      });
+      trackDeterminism(
+        buildDeterminismKey({
+          userId,
+          dateKey,
+          checkIn,
+          dayState: nextState,
+          weekSeed,
+          libVersion: LIB_VERSION,
+          priorProfile,
+        }),
+        normalizedToday.meta?.inputHash,
+        { requestId, userId, dateKey }
+      );
+      logInfo({
+        event: "today_selection",
+        requestId,
+        userId,
+        dateKey,
+        inputHash: normalizedToday.meta?.inputHash,
+        changed: selectionChanged,
+        resetId: nextState.resetId,
+        movementId: nextState.movementId,
+        nutritionId: nextState.nutritionId,
+      });
       send(200, normalizedToday);
       return;
     }
@@ -4621,6 +5216,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/checkin" && req.method === "POST") {
+      if (config.writesDisabled) {
+        bumpMonitoringCounter("writes_disabled");
+        sendErrorCodeOnly(res, 503, "WRITES_DISABLED");
+        return;
+      }
+      if (config.disableCheckinWrites) {
+        bumpMonitoringCounter("checkin_disabled");
+        sendErrorCodeOnly(res, 503, "CHECKIN_DISABLED");
+        return;
+      }
       const guards = getEngineGuardsSnapshot();
       if (guards.checkinsEnabled === false) {
         sendError(res, 403, "feature_disabled", "Check-ins are disabled");
@@ -4651,16 +5256,81 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const checkIn = normalizeCheckInInput(checkInRaw, dateKey);
+      const idempotencyKey = getIdempotencyKey(req);
+      parityCounters.recordCheckin(Boolean(idempotencyKey));
+      const idempotencyRoute = res.livenewRouteKey;
+      let idempotencyHash = null;
+      if (!idempotencyKey) {
+        const requestHash = hashRequestPayload({ dateKey, checkIn });
+        trackMissingIdempotency({ userId, route: idempotencyRoute, requestHash, requestId });
+      }
+      if (idempotencyKey) {
+        idempotencyHash = hashRequestPayload({ dateKey, checkIn });
+        const existing = await getIdempotencyRecord(userId, idempotencyRoute, idempotencyKey);
+        if (existing && existing.requestHash !== idempotencyHash) {
+          sendErrorCodeOnly(res, 409, "IDEMPOTENCY_CONFLICT");
+          return;
+        }
+        if (existing?.response) {
+          send(200, existing.response);
+          return;
+        }
+        if (existing) {
+          sendErrorCodeOnly(res, 409, "IDEMPOTENCY_IN_PROGRESS");
+          return;
+        }
+      }
+      if (isWriteStorm({ userId, dateKey, route: idempotencyRoute, requestId })) {
+        sendErrorCodeOnly(res, 429, "WRITE_STORM");
+        return;
+      }
+      if (idempotencyKey) {
+        const inserted = await insertIdempotencyRecord(userId, idempotencyRoute, idempotencyKey, idempotencyHash);
+        if (!inserted) {
+          const existing = await getIdempotencyRecord(userId, idempotencyRoute, idempotencyKey);
+          if (existing && existing.requestHash !== idempotencyHash) {
+            sendErrorCodeOnly(res, 409, "IDEMPOTENCY_CONFLICT");
+            return;
+          }
+          if (existing?.response) {
+            send(200, existing.response);
+            return;
+          }
+          sendErrorCodeOnly(res, 409, "IDEMPOTENCY_IN_PROGRESS");
+          return;
+        }
+        logInfo({ event: "idempotency_inserted", requestId, userId, route: idempotencyRoute });
+      }
       await upsertDailyCheckIn(userId, dateKey, checkIn);
+      const checkinEventPayload = ensureEventPayload(
+        "checkin_submitted",
+        {
+          stress: checkIn.stress,
+          sleep: checkIn.sleepQuality,
+          energy: checkIn.energy,
+          timeMin: checkIn.timeAvailableMin,
+        },
+        res
+      );
+      if (!checkinEventPayload) return;
       await insertDailyEvent({
         userId,
         dateISO: dateKey,
         type: "checkin_submitted",
         atISO: now.toISOString(),
-        props: { source: "checkin" },
+        props: checkinEventPayload,
       });
+      invalidateOutcomesCache(userId, dateKey);
       const dayState = await getDayState(userId, dateKey);
-      const eventsToday = await listDailyEvents(userId, dateKey, dateKey);
+      const weekSeed = await ensureWeekSeed(userId, dateKey, baseline, requestId);
+      const { continuity, eventsToday } = await loadContinuityMeta(
+        userId,
+        dateKey,
+        baseline.timezone,
+        baseline.dayBoundaryHour,
+        now
+      );
+      const priorProfile = await resolvePriorProfile(userId, dateKey);
       const today = buildToday({
         userId,
         dateKey,
@@ -4669,9 +5339,12 @@ const server = http.createServer(async (req, res) => {
         baseline,
         latestCheckin: checkIn,
         dayState,
+        weekSeed,
         eventsToday,
         panicMode: checkIn?.safety?.panic === true,
         libVersion: LIB_VERSION,
+        continuity,
+        priorProfile,
       });
       const normalizedToday = ensureTodayContract(today, res);
       if (!normalizedToday) return;
@@ -4682,15 +5355,63 @@ const server = http.createServer(async (req, res) => {
         lastQuickSignal: dayState?.lastQuickSignal || null,
         lastInputHash: normalizedToday.meta?.inputHash || null,
       };
-      if (shouldUpdateDayState(dayState, nextState)) {
+      const selectionChanged = shouldUpdateDayState(dayState, nextState);
+      if (selectionChanged) {
         await upsertDayState(userId, dateKey, nextState);
       }
       logInfo({ event: "checkin_contract", requestId, userId, dateKey, inputHash: normalizedToday.meta?.inputHash });
+      if (idempotencyKey && idempotencyHash) {
+        const responsePayload = unwrapTodayEnvelope(normalizedToday);
+        const saved = await setIdempotencyResponse(
+          userId,
+          idempotencyRoute,
+          idempotencyKey,
+          idempotencyHash,
+          responsePayload
+        );
+        if (!saved) {
+          logError({ event: "idempotency_response_failed", requestId, userId, route: idempotencyRoute });
+        }
+      }
+      trackDeterminism(
+        buildDeterminismKey({
+          userId,
+          dateKey,
+          checkIn,
+          dayState,
+          weekSeed,
+          libVersion: LIB_VERSION,
+          priorProfile,
+        }),
+        normalizedToday.meta?.inputHash,
+        { requestId, userId, dateKey }
+      );
+      logInfo({
+        event: "checkin_selection",
+        requestId,
+        userId,
+        dateKey,
+        inputHash: normalizedToday.meta?.inputHash,
+        changed: selectionChanged,
+        resetId: nextState.resetId,
+        movementId: nextState.movementId,
+        nutritionId: nextState.nutritionId,
+      });
       send(200, normalizedToday);
       return;
     }
 
     if (pathname === "/v1/quick" && req.method === "POST") {
+      if (config.writesDisabled) {
+        bumpMonitoringCounter("writes_disabled");
+        sendErrorCodeOnly(res, 503, "WRITES_DISABLED");
+        return;
+      }
+      if (config.disableQuickWrites) {
+        bumpMonitoringCounter("quick_disabled");
+        sendErrorCodeOnly(res, 503, "QUICK_DISABLED");
+        return;
+      }
       const now = new Date();
       const body = await parseJson(req);
       const signal = typeof body?.signal === "string" ? body.signal : null;
@@ -4714,10 +5435,63 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       dateKey = dateValidation.value;
+      const idempotencyKey = getIdempotencyKey(req);
+      parityCounters.recordQuick(Boolean(idempotencyKey));
+      const idempotencyRoute = res.livenewRouteKey;
+      let idempotencyHash = null;
+      if (!idempotencyKey) {
+        const requestHash = hashRequestPayload({ dateKey, signal });
+        trackMissingIdempotency({ userId, route: idempotencyRoute, requestHash, requestId });
+      }
+      if (idempotencyKey) {
+        idempotencyHash = hashRequestPayload({ dateKey, signal });
+        const existing = await getIdempotencyRecord(userId, idempotencyRoute, idempotencyKey);
+        if (existing && existing.requestHash !== idempotencyHash) {
+          sendErrorCodeOnly(res, 409, "IDEMPOTENCY_CONFLICT");
+          return;
+        }
+        if (existing?.response) {
+          send(200, existing.response);
+          return;
+        }
+        if (existing) {
+          sendErrorCodeOnly(res, 409, "IDEMPOTENCY_IN_PROGRESS");
+          return;
+        }
+      }
+      if (isWriteStorm({ userId, dateKey, route: idempotencyRoute, requestId })) {
+        sendErrorCodeOnly(res, 429, "WRITE_STORM");
+        return;
+      }
+      if (idempotencyKey) {
+        const inserted = await insertIdempotencyRecord(userId, idempotencyRoute, idempotencyKey, idempotencyHash);
+        if (!inserted) {
+          const existing = await getIdempotencyRecord(userId, idempotencyRoute, idempotencyKey);
+          if (existing && existing.requestHash !== idempotencyHash) {
+            sendErrorCodeOnly(res, 409, "IDEMPOTENCY_CONFLICT");
+            return;
+          }
+          if (existing?.response) {
+            send(200, existing.response);
+            return;
+          }
+          sendErrorCodeOnly(res, 409, "IDEMPOTENCY_IN_PROGRESS");
+          return;
+        }
+        logInfo({ event: "idempotency_inserted", requestId, userId, route: idempotencyRoute });
+      }
       const existing = await getDailyCheckIn(userId, dateKey);
       const baseCheckIn = normalizeCheckInInput(existing?.checkIn || {}, dateKey);
       const dayState = await getDayState(userId, dateKey);
-      const eventsToday = await listDailyEvents(userId, dateKey, dateKey);
+      const weekSeed = await ensureWeekSeed(userId, dateKey, baseline, requestId);
+      const { continuity, eventsToday } = await loadContinuityMeta(
+        userId,
+        dateKey,
+        baseline.timezone,
+        baseline.dayBoundaryHour,
+        now
+      );
+      const priorProfile = await resolvePriorProfile(userId, dateKey);
       const currentToday = buildToday({
         userId,
         dateKey,
@@ -4726,9 +5500,12 @@ const server = http.createServer(async (req, res) => {
         baseline,
         latestCheckin: baseCheckIn,
         dayState,
+        weekSeed,
         eventsToday,
         panicMode: baseCheckIn?.safety?.panic === true,
         libVersion: LIB_VERSION,
+        continuity,
+        priorProfile,
       });
       const normalizedCurrent = ensureTodayContract(currentToday, res);
       if (!normalizedCurrent) return;
@@ -4738,20 +5515,25 @@ const server = http.createServer(async (req, res) => {
         movementId: normalizedCurrent.movement?.id || null,
         nutritionId: normalizedCurrent.nutrition?.id || null,
       };
-      const updatedSelection = applyQuickSignal({
-        signal,
-        todaySelection: selection,
-        scored: normalizedCurrent.scores,
-        profile: normalizedCurrent.profile,
-        constraints: baseline.constraints || {},
-        libraries,
-      });
+      const updatedSelection =
+        dayState?.lastQuickSignal === signal
+          ? selection
+          : applyQuickSignal({
+              signal,
+              todaySelection: selection,
+              scored: normalizedCurrent.scores,
+              profile: normalizedCurrent.profile,
+              constraints: baseline.constraints || {},
+              libraries,
+            });
+      const quickPayload = ensureEventPayload("quick_adjusted", { signal }, res);
+      if (!quickPayload) return;
       await insertDailyEvent({
         userId,
         dateISO: dateKey,
         type: "quick_adjusted",
         atISO: now.toISOString(),
-        props: { signal },
+        props: quickPayload,
       });
       const nextDayState = {
         resetId: updatedSelection.resetId || null,
@@ -4760,7 +5542,13 @@ const server = http.createServer(async (req, res) => {
         lastQuickSignal: signal,
         lastInputHash: dayState?.lastInputHash || null,
       };
-      const eventsAfter = await listDailyEvents(userId, dateKey, dateKey);
+      const { continuity: continuityAfter, eventsToday: eventsAfter } = await loadContinuityMeta(
+        userId,
+        dateKey,
+        baseline.timezone,
+        baseline.dayBoundaryHour,
+        now
+      );
       const refreshed = buildToday({
         userId,
         dateKey,
@@ -4769,9 +5557,12 @@ const server = http.createServer(async (req, res) => {
         baseline,
         latestCheckin: baseCheckIn,
         dayState: { ...nextDayState },
+        weekSeed,
         eventsToday: eventsAfter,
         panicMode: baseCheckIn?.safety?.panic === true,
         libVersion: LIB_VERSION,
+        continuity: continuityAfter,
+        priorProfile,
       });
       const normalizedRefreshed = ensureTodayContract(refreshed, res);
       if (!normalizedRefreshed) return;
@@ -4779,10 +5570,49 @@ const server = http.createServer(async (req, res) => {
         ...nextDayState,
         lastInputHash: normalizedRefreshed.meta?.inputHash || null,
       };
-      if (shouldUpdateDayState(dayState, finalState)) {
+      const selectionChanged = shouldUpdateDayState(dayState, finalState);
+      if (selectionChanged) {
         await upsertDayState(userId, dateKey, finalState);
       }
       logInfo({ event: "quick_contract", requestId, userId, dateKey, inputHash: normalizedRefreshed.meta?.inputHash });
+      if (idempotencyKey && idempotencyHash) {
+        const responsePayload = unwrapTodayEnvelope(normalizedRefreshed);
+        const saved = await setIdempotencyResponse(
+          userId,
+          idempotencyRoute,
+          idempotencyKey,
+          idempotencyHash,
+          responsePayload
+        );
+        if (!saved) {
+          logError({ event: "idempotency_response_failed", requestId, userId, route: idempotencyRoute });
+        }
+      }
+      trackDeterminism(
+        buildDeterminismKey({
+          userId,
+          dateKey,
+          checkIn: baseCheckIn,
+          dayState: finalState,
+          weekSeed,
+          libVersion: LIB_VERSION,
+          priorProfile,
+        }),
+        normalizedRefreshed.meta?.inputHash,
+        { requestId, userId, dateKey }
+      );
+      logInfo({
+        event: "quick_selection",
+        requestId,
+        userId,
+        dateKey,
+        inputHash: normalizedRefreshed.meta?.inputHash,
+        changed: selectionChanged,
+        resetId: finalState.resetId,
+        movementId: finalState.movementId,
+        nutritionId: finalState.nutritionId,
+        signal,
+      });
       send(200, normalizedRefreshed);
       return;
     }
@@ -4931,6 +5761,16 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/reset/complete" && req.method === "POST") {
+      if (config.writesDisabled) {
+        bumpMonitoringCounter("writes_disabled");
+        sendErrorCodeOnly(res, 503, "WRITES_DISABLED");
+        return;
+      }
+      if (config.disableResetWrites) {
+        bumpMonitoringCounter("reset_disabled");
+        sendErrorCodeOnly(res, 503, "RESET_DISABLED");
+        return;
+      }
       const now = new Date();
       const body = await parseJson(req);
       const baseline = await getUserBaseline(userId);
@@ -4953,18 +5793,43 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       dateKey = dateValidation.value;
+      if (isWriteStorm({ userId, dateKey, route: res.livenewRouteKey, requestId })) {
+        sendErrorCodeOnly(res, 429, "WRITE_STORM");
+        return;
+      }
       const completedAtISO = now.toISOString();
-      await insertDailyEventOnce({
+      const resetPayload = ensureEventPayload("reset_completed", { resetId }, res);
+      if (!resetPayload) return;
+      const inserted = await insertDailyEventOnce({
         userId,
         dateISO: dateKey,
         type: "reset_completed",
         atISO: completedAtISO,
-        props: { resetId },
+        props: resetPayload,
       });
+      logInfo({
+        event: "daily_event_insert",
+        requestId,
+        userId,
+        dateKey,
+        type: "reset_completed",
+        inserted: inserted?.inserted === true,
+      });
+      if (inserted?.inserted === true) {
+        invalidateOutcomesCache(userId, dateKey);
+      }
       const stored = await getDailyCheckIn(userId, dateKey);
       const checkIn = normalizeCheckInInput(stored?.checkIn || {}, dateKey);
       const dayState = await getDayState(userId, dateKey);
-      const eventsToday = await listDailyEvents(userId, dateKey, dateKey);
+      const weekSeed = await ensureWeekSeed(userId, dateKey, baseline, requestId);
+      const { continuity, eventsToday } = await loadContinuityMeta(
+        userId,
+        dateKey,
+        baseline.timezone,
+        baseline.dayBoundaryHour,
+        now
+      );
+      const priorProfile = await resolvePriorProfile(userId, dateKey);
       const today = buildToday({
         userId,
         dateKey,
@@ -4973,9 +5838,12 @@ const server = http.createServer(async (req, res) => {
         baseline,
         latestCheckin: checkIn,
         dayState,
+        weekSeed,
         eventsToday,
         panicMode: checkIn?.safety?.panic === true,
         libVersion: LIB_VERSION,
+        continuity,
+        priorProfile,
       });
       const normalizedToday = ensureTodayContract(today, res);
       if (!normalizedToday) return;
@@ -4986,10 +5854,35 @@ const server = http.createServer(async (req, res) => {
         lastQuickSignal: dayState?.lastQuickSignal || null,
         lastInputHash: normalizedToday.meta?.inputHash || null,
       };
-      if (shouldUpdateDayState(dayState, nextState)) {
+      const selectionChanged = shouldUpdateDayState(dayState, nextState);
+      if (selectionChanged) {
         await upsertDayState(userId, dateKey, nextState);
       }
       logInfo({ event: "reset_complete", requestId, userId, dateKey, inputHash: normalizedToday.meta?.inputHash });
+      trackDeterminism(
+        buildDeterminismKey({
+          userId,
+          dateKey,
+          checkIn,
+          dayState: nextState,
+          weekSeed,
+          libVersion: LIB_VERSION,
+          priorProfile,
+        }),
+        normalizedToday.meta?.inputHash,
+        { requestId, userId, dateKey }
+      );
+      logInfo({
+        event: "reset_selection",
+        requestId,
+        userId,
+        dateKey,
+        inputHash: normalizedToday.meta?.inputHash,
+        changed: selectionChanged,
+        resetId: nextState.resetId,
+        movementId: nextState.movementId,
+        nutritionId: nextState.nutritionId,
+      });
       send(200, normalizedToday);
       return;
     }
@@ -5161,6 +6054,11 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "date_invalid", "Unable to resolve date range");
         return;
       }
+      const cached = getOutcomesCache(userId, daysNum, range.toKey);
+      if (cached) {
+        send(200, cached);
+        return;
+      }
       const events = await listDailyEvents(userId, range.fromKey, range.toKey);
 
       const railDays = new Set();
@@ -5182,6 +6080,7 @@ const server = http.createServer(async (req, res) => {
           resetCompletionRate: railDays.size ? resetDays.size / railDays.size : 0,
         },
       };
+      setOutcomesCache(userId, daysNum, range.fromKey, range.toKey, payload, CACHE_TTLS.outcomes);
       send(200, payload);
       return;
     }

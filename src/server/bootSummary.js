@@ -1,6 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
-import { checkDbConnection, getDbPath } from "../state/db.js";
+import { checkDbConnection, checkRequiredIndexes, getDbPath } from "../state/db.js";
 import { getSecretKeyStatus } from "./env.js";
 
 async function checkDataDirWritable(dir) {
@@ -25,6 +25,21 @@ export async function computeBootSummary(config) {
     storageOk = false;
     storageDetails = err?.message || "db_unavailable";
   }
+  let indexesOk = true;
+  let missingIndexes = [];
+  if (storageOk) {
+    try {
+      const indexCheck = await checkRequiredIndexes();
+      indexesOk = indexCheck.ok;
+      missingIndexes = indexCheck.missing || [];
+    } catch {
+      indexesOk = false;
+      missingIndexes = ["index_check_failed"];
+    }
+  } else {
+    indexesOk = false;
+    missingIndexes = ["db_unavailable"];
+  }
 
   const dataDirWritable = await checkDataDirWritable(config.dataDir);
   const secretStatus = getSecretKeyStatus();
@@ -36,6 +51,7 @@ export async function computeBootSummary(config) {
     node: process.version,
     port: config.port,
     storage: { kind: "db", ok: storageOk, details: storageDetails },
+    indexes: { ok: indexesOk, missing: missingIndexes },
     dataDir: { path: config.dataDir, writable: dataDirWritable },
     secretKey: { present: secretStatus.secretKeyPresent, ephemeral: secretStatus.secretKeyEphemeral },
     auth: { required: config.requireAuth },

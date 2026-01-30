@@ -13,6 +13,8 @@ import {
 } from "../security/crypto.js";
 
 const DB_PATH = process.env.DB_PATH || "data/livenew.sqlite";
+const DB_BUSY_TIMEOUT_RAW = Number(process.env.DB_BUSY_TIMEOUT_MS || 5000);
+const DB_BUSY_TIMEOUT_MS = Number.isFinite(DB_BUSY_TIMEOUT_RAW) ? Math.max(0, DB_BUSY_TIMEOUT_RAW) : 5000;
 let db = null;
 const columnCache = new Map();
 const queryTracker = new AsyncLocalStorage();
@@ -128,6 +130,13 @@ export function getDbPath() {
   return DB_PATH;
 }
 
+export function getDbConfig() {
+  return {
+    busyTimeoutMs: DB_BUSY_TIMEOUT_MS,
+    maxConnections: 1,
+  };
+}
+
 export function getDb() {
   if (!db) throw new Error("DB not initialized");
   return db;
@@ -149,6 +158,9 @@ export async function initDb() {
   instrumentDb(db);
   db.exec("PRAGMA journal_mode = WAL;");
   db.exec("PRAGMA synchronous = NORMAL;");
+  if (Number.isFinite(DB_BUSY_TIMEOUT_MS)) {
+    db.exec(`PRAGMA busy_timeout = ${Math.max(0, Math.floor(DB_BUSY_TIMEOUT_MS))};`);
+  }
   db.exec("PRAGMA foreign_keys = ON;");
   await runMigrations(db);
   return db;
@@ -163,6 +175,28 @@ export async function closeDb() {
 
 export async function checkDbConnection() {
   getDb().prepare("SELECT 1").get();
+}
+
+const REQUIRED_INDEXES = [
+  "idx_daily_events_unique_rail_opened",
+  "idx_daily_events_unique_reset_completed",
+  "idx_daily_events_user_date",
+  "idx_daily_events_type_date",
+  "idx_daily_events_user_date_type",
+  "idx_week_state_user_week",
+  "idx_week_days_user_week",
+  "idx_week_days_user_date",
+  "idx_day_state_user_date",
+  "idx_idempotency_user_key",
+];
+
+export async function checkRequiredIndexes() {
+  const rows = getDb()
+    .prepare("SELECT name FROM sqlite_master WHERE type = 'index'")
+    .all();
+  const existing = new Set(rows.map((row) => row.name));
+  const missing = REQUIRED_INDEXES.filter((name) => !existing.has(name));
+  return { ok: missing.length === 0, missing };
 }
 
 export async function checkReady() {
@@ -906,6 +940,12 @@ export async function cleanupOldEvents(retentionDays = 90) {
     instance.exec("ROLLBACK;");
     throw err;
   }
+}
+
+export async function cleanupIdempotencyKeys(retentionDays = 30) {
+  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const result = getDb().prepare("DELETE FROM idempotency_keys WHERE created_at < ?").run(cutoff);
+  return { ok: true, cutoff, deleted: result?.changes ?? 0 };
 }
 
 export async function upsertDecisionTrace(userId, dateISO, trace) {
@@ -2734,12 +2774,14 @@ export async function insertDailyEventOnce({ userId, dateISO, type, atISO, props
   const eventId = crypto.randomUUID();
   const at = atISO || new Date().toISOString();
   const propsJson = props ? JSON.stringify(props) : null;
-  getDb()
+  const result = getDb()
     .prepare(
       "INSERT OR IGNORE INTO daily_events (id, user_id, date_iso, type, at_iso, props_json) VALUES (?, ?, ?, ?, ?, ?)"
     )
     .run(eventId, userId, dateISO, type, at, propsJson);
-  return getDailyEventByType(userId, dateISO, type);
+  const inserted = Number(result?.changes || 0) > 0;
+  const event = getDailyEventByType(userId, dateISO, type);
+  return { event, inserted };
 }
 
 export async function listDailyEvents(userId, fromISO, toISO) {
@@ -2825,6 +2867,129 @@ export async function upsertDayState(userId, dateKey, state = {}) {
       now
     );
   return getDayState(userId, dateKey);
+}
+
+export async function getWeekState(userId, weekStartDateKey) {
+  if (!userId || !weekStartDateKey) return null;
+  const row = getDb()
+    .prepare(
+      "SELECT user_id, week_start_date_key, timezone, day_boundary_hour, lib_version, created_at, updated_at FROM week_state WHERE user_id = ? AND week_start_date_key = ?"
+    )
+    .get(userId, weekStartDateKey);
+  if (!row) return null;
+  return {
+    userId: row.user_id,
+    weekStartDateKey: row.week_start_date_key,
+    timezone: row.timezone || null,
+    dayBoundaryHour: row.day_boundary_hour ?? null,
+    libVersion: row.lib_version || null,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export async function getWeekDaySeed(userId, dateKey) {
+  if (!userId || !dateKey) return null;
+  const row = getDb()
+    .prepare(
+      "SELECT user_id, week_start_date_key, date_key, reset_id, movement_id, nutrition_id FROM week_days WHERE user_id = ? AND date_key = ?"
+    )
+    .get(userId, dateKey);
+  if (!row) return null;
+  return {
+    userId: row.user_id,
+    weekStartDateKey: row.week_start_date_key,
+    dateKey: row.date_key,
+    resetId: row.reset_id || null,
+    movementId: row.movement_id || null,
+    nutritionId: row.nutrition_id || null,
+  };
+}
+
+export async function replaceWeekState(userId, weekStartDateKey, meta = {}, days = []) {
+  if (!userId || !weekStartDateKey) return null;
+  const now = new Date().toISOString();
+  const instance = getDb();
+  instance.exec("BEGIN IMMEDIATE;");
+  try {
+    instance
+      .prepare(
+        "INSERT INTO week_state (user_id, week_start_date_key, timezone, day_boundary_hour, lib_version, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(user_id, week_start_date_key) DO UPDATE SET timezone=excluded.timezone, day_boundary_hour=excluded.day_boundary_hour, lib_version=excluded.lib_version, updated_at=excluded.updated_at"
+      )
+      .run(
+        userId,
+        weekStartDateKey,
+        meta.timezone || null,
+        meta.dayBoundaryHour ?? null,
+        meta.libVersion || null,
+        now,
+        now
+      );
+    instance
+      .prepare("DELETE FROM week_days WHERE user_id = ? AND week_start_date_key = ?")
+      .run(userId, weekStartDateKey);
+    if (Array.isArray(days) && days.length) {
+      const stmt = instance.prepare(
+        "INSERT INTO week_days (user_id, week_start_date_key, date_key, reset_id, movement_id, nutrition_id) VALUES (?, ?, ?, ?, ?, ?)"
+      );
+      days.forEach((day) => {
+        if (!day?.dateKey) return;
+        stmt.run(
+          userId,
+          weekStartDateKey,
+          day.dateKey,
+          day.resetId || null,
+          day.movementId || null,
+          day.nutritionId || null
+        );
+      });
+    }
+    instance.exec("COMMIT;");
+    return getWeekState(userId, weekStartDateKey);
+  } catch (err) {
+    instance.exec("ROLLBACK;");
+    throw err;
+  }
+}
+
+export async function getIdempotencyRecord(userId, route, key) {
+  if (!userId || !route || !key) return null;
+  const row = getDb()
+    .prepare(
+      "SELECT user_id, route, idempotency_key, request_hash, response_json, created_at FROM idempotency_keys WHERE user_id = ? AND route = ? AND idempotency_key = ?"
+    )
+    .get(userId, route, key);
+  if (!row) return null;
+  return {
+    userId: row.user_id,
+    route: row.route,
+    key: row.idempotency_key,
+    requestHash: row.request_hash,
+    response: row.response_json ? safeParseJson(row.response_json, null) : null,
+    createdAt: row.created_at,
+  };
+}
+
+export async function insertIdempotencyRecord(userId, route, key, requestHash) {
+  if (!userId || !route || !key || !requestHash) return false;
+  const now = new Date().toISOString();
+  const result = getDb()
+    .prepare(
+      "INSERT OR IGNORE INTO idempotency_keys (user_id, route, idempotency_key, request_hash, response_json, created_at) VALUES (?, ?, ?, ?, NULL, ?)"
+    )
+    .run(userId, route, key, requestHash, now);
+  return Number(result?.changes || 0) > 0;
+}
+
+export async function setIdempotencyResponse(userId, route, key, requestHash, response) {
+  if (!userId || !route || !key || !requestHash) return false;
+  const responseJson = JSON.stringify(response ?? null);
+  const result = getDb()
+    .prepare(
+      "UPDATE idempotency_keys SET response_json = ? WHERE user_id = ? AND route = ? AND idempotency_key = ? AND request_hash = ?"
+    )
+    .run(responseJson, userId, route, key, requestHash);
+  return Number(result?.changes || 0) > 0;
 }
 
 export async function insertCommunityResponse({ resetItemId, userId, text, status = "pending" }) {
@@ -2943,6 +3108,8 @@ export async function deleteUserData(userId) {
     instance.prepare("DELETE FROM daily_events WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM reset_completions WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM day_state WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM week_days WHERE user_id = ?").run(userId);
+    instance.prepare("DELETE FROM week_state WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM refresh_tokens WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM reminder_intents WHERE user_id = ?").run(userId);
     instance.prepare("DELETE FROM user_cohorts WHERE user_id = ?").run(userId);

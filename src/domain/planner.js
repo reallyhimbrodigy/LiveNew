@@ -185,10 +185,17 @@ export function buildToday(input) {
     energy: checkin.energy,
     timeMin: checkin.timeMin,
   });
-  const profile = assignProfile({ load: scores.load, capacity: scores.capacity, sleep: checkin.sleep, energy: checkin.energy });
+  const profile = assignProfile({
+    load: scores.load,
+    capacity: scores.capacity,
+    sleep: checkin.sleep,
+    energy: checkin.energy,
+    priorProfile: input?.priorProfile || null,
+  });
   const panicMode = Boolean(input?.panicMode || checkin.safety?.panic);
   const dayState = input?.dayState || {};
   const lastQuickSignal = dayState.lastQuickSignal || "";
+  const weekSeed = input?.weekSeed || {};
 
   const resetPool = filterResets({ checkin, constraints });
   const movementPool = panicMode ? [] : filterMovement({ scores, checkin, constraints, profile });
@@ -203,19 +210,26 @@ export function buildToday(input) {
     `${checkin.stress}-${checkin.sleep}-${checkin.energy}-${checkin.timeMin}`,
   ].join("|");
 
-  let reset = keepIfEligible(resetPool, dayState.resetId) || pickBySeed(resetPool, `${seedBase}|reset`);
+  let reset =
+    keepIfEligible(resetPool, dayState.resetId) ||
+    keepIfEligible(resetPool, weekSeed.resetId) ||
+    pickBySeed(resetPool, `${seedBase}|reset`);
   if (!reset) reset = RESET_LIBRARY[0];
 
   let movement = null;
   if (!panicMode) {
     const kept = keepIfEligible(movementPool, dayState.movementId);
     if (kept) movement = kept;
+    else if (weekSeed.movementId) movement = keepIfEligible(movementPool, weekSeed.movementId);
     else if (scores.capacity >= 55 && checkin.timeMin >= 10) {
       movement = pickBySeed(movementPool, `${seedBase}|movement`);
     }
   }
 
-  let nutrition = keepIfEligible(nutritionPool, dayState.nutritionId) || pickBySeed(nutritionPool, `${seedBase}|nutrition`);
+  let nutrition =
+    keepIfEligible(nutritionPool, dayState.nutritionId) ||
+    keepIfEligible(nutritionPool, weekSeed.nutritionId) ||
+    pickBySeed(nutritionPool, `${seedBase}|nutrition`);
   if (!nutrition) nutrition = simpleNutrition(NUTRITION_LIBRARY) || { id: "nutrition_simple", title: "Simple fuel", bullets: [] };
 
   if (panicMode) {
@@ -258,6 +272,10 @@ export function buildToday(input) {
     dayStateSnapshot.movementId || "",
     dayStateSnapshot.nutritionId || "",
     dayStateSnapshot.lastQuickSignal || "",
+    weekSeed.resetId || "",
+    weekSeed.movementId || "",
+    weekSeed.nutritionId || "",
+    input?.priorProfile || "",
     stableStringify(normalizedConstraints),
     input?.libVersion || LIB_VERSION,
   ];
@@ -295,6 +313,7 @@ export function buildToday(input) {
     meta: {
       inputHash,
       completed: { reset: resetCompleted },
+      continuity: input?.continuity || null,
     },
   };
 }

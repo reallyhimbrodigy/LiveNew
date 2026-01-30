@@ -12,7 +12,7 @@ export const RESET_LIBRARY = [
       "Exhale slowly for 4 counts",
       "Hold for 4 counts",
     ],
-    tags: ["downshift", "breath", "steady"],
+    tags: ["downshift", "breath", "steady", "demand:med"],
     contraTags: [],
   },
   {
@@ -26,7 +26,7 @@ export const RESET_LIBRARY = [
       "Long, slow exhale",
       "Repeat for 6 to 8 rounds",
     ],
-    tags: ["downshift", "breath", "quick"],
+    tags: ["downshift", "breath", "quick", "demand:low"],
     contraTags: [],
   },
   {
@@ -41,7 +41,7 @@ export const RESET_LIBRARY = [
       "Name 2 things you can smell",
       "Name 1 thing you can taste",
     ],
-    tags: ["grounding", "sensory"],
+    tags: ["grounding", "sensory", "demand:med"],
     contraTags: [],
   },
   {
@@ -55,7 +55,7 @@ export const RESET_LIBRARY = [
       "Keep shoulders relaxed",
       "Repeat for 2 to 3 minutes",
     ],
-    tags: ["downshift", "breath"],
+    tags: ["downshift", "breath", "demand:low"],
     contraTags: [],
   },
   {
@@ -69,7 +69,7 @@ export const RESET_LIBRARY = [
       "Relax jaw and shoulders",
       "Take 3 slow breaths",
     ],
-    tags: ["downshift", "body"],
+    tags: ["downshift", "body", "demand:high"],
     contraTags: [],
   },
   {
@@ -82,7 +82,7 @@ export const RESET_LIBRARY = [
       "Breathe slowly and evenly",
       "Notice the rise and fall",
     ],
-    tags: ["downshift", "body"],
+    tags: ["downshift", "body", "demand:low"],
     contraTags: [],
   },
   {
@@ -95,7 +95,7 @@ export const RESET_LIBRARY = [
       "Soften your gaze",
       "Take 6 slow breaths",
     ],
-    tags: ["downshift", "sensory"],
+    tags: ["downshift", "sensory", "demand:low"],
     contraTags: [],
   },
   {
@@ -108,7 +108,7 @@ export const RESET_LIBRARY = [
       "Hold for 3 breaths",
       "Switch sides",
     ],
-    tags: ["downshift", "mobility"],
+    tags: ["downshift", "mobility", "demand:low"],
     contraTags: ["injury:neck"],
   },
   {
@@ -121,7 +121,7 @@ export const RESET_LIBRARY = [
       "Keep your breathing steady",
       "Shake out hands and shoulders",
     ],
-    tags: ["downshift", "movement", "light"],
+    tags: ["downshift", "movement", "light", "demand:low"],
     contraTags: ["injury:knee", "injury:back"],
   },
   {
@@ -134,7 +134,7 @@ export const RESET_LIBRARY = [
       "Stretch calves and hamstrings",
       "Take 3 slow breaths",
     ],
-    tags: ["downshift", "movement", "light"],
+    tags: ["downshift", "movement", "light", "demand:med"],
     contraTags: ["injury:back"],
   },
   {
@@ -148,7 +148,7 @@ export const RESET_LIBRARY = [
       "Continue up to ten",
       "Start again if you lose track",
     ],
-    tags: ["downshift", "breath"],
+    tags: ["downshift", "breath", "demand:low"],
     contraTags: [],
   },
   {
@@ -161,7 +161,7 @@ export const RESET_LIBRARY = [
       "Name one safe detail",
       "Slow your exhale",
     ],
-    tags: ["downshift", "short"],
+    tags: ["downshift", "short", "demand:low"],
     contraTags: [],
   },
 ];

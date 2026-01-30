@@ -1,0 +1,31 @@
+{
+  "id": "travel_week",
+  "name": "Travel week",
+  "baseline": {
+    "timezone": "America/Los_Angeles",
+    "dayBoundaryHour": 4,
+    "constraints": {
+      "equipment": {
+        "none": true,
+        "dumbbells": false,
+        "bands": false,
+        "gym": false
+      },
+      "injuries": {
+        "knee": false,
+        "shoulder": false,
+        "back": false
+      },
+      "timeOfDayPreference": "morning"
+    }
+  },
+  "profile": {
+    "busyDays": ["__TODAY__", "__TODAY__+1", "__TODAY__+2", "__TODAY__+3", "__TODAY__+4", "__TODAY__+5", "__TODAY__+6"]
+  },
+  "checkIn": {
+    "stress": 6,
+    "sleepQuality": 5,
+    "energy": 5,
+    "timeAvailableMin": 10
+  }
+}
