@@ -2735,6 +2735,21 @@ function contentTypeForPath(filePath) {
   return "application/octet-stream";
 }
 
+function isHashedAssetName(name) {
+  return /[a-f0-9]{8,}/i.test(name);
+}
+
+function cacheControlForPath(filePath) {
+  const baseName = path.basename(filePath);
+  if (isHashedAssetName(baseName)) {
+    return "public, max-age=31536000, immutable";
+  }
+  if (filePath.endsWith(".js")) {
+    return "no-cache";
+  }
+  return null;
+}
+
 function applyCors(req, res) {
   if (!ALLOWED_ORIGINS.length) return false;
   const origin = req.headers.origin;
@@ -3744,7 +3759,10 @@ async function serveFile(res, filePath, { replaceDevFlag } = {}) {
     const raw = await fs.readFile(filePath, isText ? "utf8" : undefined);
     const body =
       replaceDevFlag && isText ? raw.replace("__IS_DEV__", isDevRoutesEnabled ? "true" : "false") : raw;
-    res.writeHead(200, { "Content-Type": contentTypeForPath(filePath) });
+    const headers = { "Content-Type": contentTypeForPath(filePath) };
+    const cacheControl = cacheControlForPath(filePath);
+    if (cacheControl) headers["Cache-Control"] = cacheControl;
+    res.writeHead(200, headers);
     res.end(body);
   } catch (err) {
     sendError(res, 404, "not_found", "Not found");

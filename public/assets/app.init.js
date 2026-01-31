@@ -13,7 +13,14 @@ import {
   showErrorScreen,
   t,
 } from "./app.core.js";
-import { renderHome, renderDay, renderWeek, renderTrends, renderProfile, renderAdmin } from "./controllers.js";
+
+let controllersModule = null;
+async function loadControllers() {
+  if (!controllersModule) {
+    controllersModule = import("./controllers.js");
+  }
+  return controllersModule;
+}
 
 function getErrorCode(err) {
   return err?.code || err?.payload?.error?.code || null;
@@ -160,6 +167,7 @@ async function routeUiState({ boot, page }) {
   }
 
   if (uiState === "home") {
+    const { renderHome, renderDay, renderWeek, renderTrends, renderProfile, renderAdmin } = await loadControllers();
     if (page === "day") {
       await renderDay();
     } else if (page === "week") {

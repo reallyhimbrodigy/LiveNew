@@ -100,7 +100,19 @@ async function main() {
         {
           ok: true,
           dryRun: true,
-          steps: ["golden.snapshots", "mvp.unit", "simulate_short", "simulate_long", "simulate_concurrency", "db-profile"],
+          steps: [
+            "golden.snapshots",
+            "mvp.unit",
+            "verify_static_esm",
+            "cache_headers",
+            "export_surface",
+            "bootstrap_gate",
+            "static_smoke",
+            "simulate_short",
+            "simulate_long",
+            "simulate_concurrency",
+            "db-profile",
+          ],
         },
         null,
         2
@@ -119,6 +131,11 @@ async function main() {
   const results = [];
   results.push({ step: "golden.snapshots", ...(await runNode(path.join(ROOT, "scripts", "golden.snapshots.js"))) });
   results.push({ step: "mvp.unit", ...(await runNode(path.join(ROOT, "scripts", "mvp.unit.test.js"))) });
+  results.push({ step: "verify_static_esm", ...(await runNode(path.join(ROOT, "scripts", "verify-static-esm.js"))) });
+  results.push({ step: "cache_headers", ...(await runNode(path.join(ROOT, "scripts", "cache-headers.test.js"))) });
+  results.push({ step: "export_surface", ...(await runNode(path.join(ROOT, "scripts", "export-surface.test.js"))) });
+  results.push({ step: "bootstrap_gate", ...(await runNode(path.join(ROOT, "scripts", "bootstrap-gate.test.js"))) });
+  results.push({ step: "static_smoke", ...(await runNode(path.join(ROOT, "scripts", "static-smoke.test.js"))) });
 
   results.push({ step: "simulate_short", ...(await runSim("simulate_short", { days: 3, concurrency: false })) });
   results.push({ step: "simulate_long", ...(await runSim("simulate_long", { days: 7, concurrency: false })) });

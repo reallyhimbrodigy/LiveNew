@@ -38,8 +38,31 @@ async function run() {
     ...(await runNode(path.join(ROOT, "scripts", "constraints.coverage.test.js"))),
   });
 
+  results.push({
+    step: "cache_headers",
+    ...(await runNode(path.join(ROOT, "scripts", "cache-headers.test.js"))),
+  });
+
+  results.push({
+    step: "export_surface",
+    ...(await runNode(path.join(ROOT, "scripts", "export-surface.test.js"))),
+  });
+
+  results.push({
+    step: "bootstrap_gate",
+    ...(await runNode(path.join(ROOT, "scripts", "bootstrap-gate.test.js"))),
+  });
+
   const baseUrl = process.env.SIM_BASE_URL || process.env.BASE_URL || "";
   if (baseUrl) {
+    results.push({
+      step: "verify_static_esm",
+      ...(await runNode(path.join(ROOT, "scripts", "verify-static-esm.js"), { BASE_URL: baseUrl })),
+    });
+    results.push({
+      step: "static_smoke",
+      ...(await runNode(path.join(ROOT, "scripts", "static-smoke.test.js"), { BASE_URL: baseUrl })),
+    });
     results.push({
       step: "simulate",
       ...(await runNode(path.join(ROOT, "scripts", "simulate.js"), {
@@ -49,6 +72,20 @@ async function run() {
       })),
     });
   } else {
+    results.push({
+      step: "verify_static_esm",
+      ok: true,
+      code: 0,
+      stdout: "Skipped: set SIM_BASE_URL to run static ESM check",
+      stderr: "",
+    });
+    results.push({
+      step: "static_smoke",
+      ok: true,
+      code: 0,
+      stdout: "Skipped: set SIM_BASE_URL to run static smoke",
+      stderr: "",
+    });
     results.push({
       step: "simulate",
       ok: true,
