@@ -2094,6 +2094,7 @@ function initAdmin() {
 
 export {
   initBaseUi,
+  getAppState,
   setAppErrorHandler,
   hideGateScreens,
   renderConsentScreen,

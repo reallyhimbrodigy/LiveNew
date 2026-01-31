@@ -359,6 +359,8 @@ function recordRouteHit(method, pathname) {
   routeHits.set(key, count + 1);
 }
 
+const MONITOR_LOG_INTERVAL_MS = Math.max(0, Number(process.env.MONITOR_LOG_INTERVAL_MS || 60_000));
+
 function bumpMonitoringCounter(key, inc = 1) {
   if (!key) return;
   const next = (monitoringCounters.get(key) || 0) + (Number(inc) || 0);
@@ -427,7 +429,6 @@ const DETERMINISM_TTL_MS = 5 * 60 * 1000;
 const idempotencyWarnCache = new Map();
 const IDEMPOTENCY_WARN_WINDOW_MS = 60 * 1000;
 const writeStormBuckets = new Map();
-const MONITOR_LOG_INTERVAL_MS = Math.max(0, Number(process.env.MONITOR_LOG_INTERVAL_MS || 60_000));
 const monitoringCounters = new Map();
 const parityCounters =
   PARITY_LOG_EVERY > 0 || PARITY_LOG_INTERVAL_MS > 0
