@@ -1,3 +1,4 @@
+// Runbook: set BASE_URL or SIM_BASE_URL to target a running server; STATIC_ROOTS to override static roots.
 import fs from "fs/promises";
 import { existsSync } from "fs";
 import path from "path";
@@ -174,7 +175,18 @@ async function main() {
     console.log(JSON.stringify({ ok: true, urls: result.urls, warnings: result.warnings }, null, 2));
     return;
   }
-  console.error(JSON.stringify({ ok: false, issues: result.issues, warnings: result.warnings }, null, 2));
+  console.error(
+    JSON.stringify(
+      {
+        ok: false,
+        issues: result.issues,
+        warnings: result.warnings,
+        monitoringCounters: { esm_integrity_fail: result.issues.length || 1 },
+      },
+      null,
+      2
+    )
+  );
   process.exit(1);
 }
 

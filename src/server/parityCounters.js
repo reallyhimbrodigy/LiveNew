@@ -1,10 +1,26 @@
+import fs from "fs";
+
 function percent(numerator, denominator) {
   if (!denominator) return null;
   const value = (numerator / denominator) * 100;
   return Math.round(value * 10) / 10;
 }
 
-export function createParityCounters({ logEveryCount = 200, logIntervalMs = 5 * 60 * 1000, logFn = null } = {}) {
+function appendJsonLine(pathname, payload) {
+  if (!pathname) return;
+  try {
+    fs.appendFileSync(pathname, `${JSON.stringify(payload)}\n`);
+  } catch {
+    // ignore log write failures
+  }
+}
+
+export function createParityCounters({
+  logEveryCount = 200,
+  logIntervalMs = 5 * 60 * 1000,
+  logFn = null,
+  logPath = "",
+} = {}) {
   const state = {
     checkinTotal: 0,
     checkinWithKey: 0,
@@ -40,14 +56,16 @@ export function createParityCounters({ logEveryCount = 200, logIntervalMs = 5 * 
   }
 
   function maybeLog(reason = "interval", force = false) {
-    if (!logFn) return;
+    if (!logFn && !logPath) return;
     const now = Date.now();
     const dueByCount = logEveryCount > 0 && state.sinceLastLog >= logEveryCount;
     const dueByTime = logIntervalMs > 0 && now - state.lastLogAt >= logIntervalMs;
     if (!force && !dueByCount && !dueByTime) return;
     state.sinceLastLog = 0;
     state.lastLogAt = now;
-    logFn({ event: "client_parity", reason, ...snapshot() });
+    const payload = { event: "client_parity", reason, ...snapshot() };
+    if (logFn) logFn(payload);
+    if (logPath) appendJsonLine(logPath, payload);
   }
 
   function recordCheckin(hasKey) {

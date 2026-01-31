@@ -1,7 +1,26 @@
+// Runbook: set BASE_URL and AUTH_TOKEN. Optional: USERS, JITTER_MS, P95_*_MAX_MS thresholds.
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
-const USERS = Math.max(1, Number(process.env.USERS || 50));
-const JITTER_MS = Math.max(0, Number(process.env.JITTER_MS || 25));
+const PRESET = process.env.LOAD_TEST_PRESET || "";
+const USERS = Math.max(1, Number(process.env.USERS || (PRESET === "prod" ? 200 : 50)));
+const JITTER_MS = Math.max(0, Number(process.env.JITTER_MS || (PRESET === "prod" ? 10 : 25)));
 const AUTH_TOKEN = process.env.AUTH_TOKEN || "";
+const ROUNDS = Math.max(1, Number(process.env.LOAD_TEST_ROUNDS || (PRESET === "prod" ? 3 : 1)));
+const P95_THRESHOLDS = {
+  "GET /v1/rail/today": Number(process.env.P95_TODAY_MAX_MS || ""),
+  "GET /v1/outcomes": Number(process.env.P95_OUTCOMES_MAX_MS || ""),
+  "GET /v1/plan/day": Number(process.env.P95_PLAN_DAY_MAX_MS || ""),
+  "POST /v1/checkin": Number(process.env.P95_CHECKIN_MAX_MS || ""),
+};
+const P99_THRESHOLDS = {
+  "GET /v1/rail/today": Number(process.env.P99_TODAY_MAX_MS || ""),
+  "GET /v1/outcomes": Number(process.env.P99_OUTCOMES_MAX_MS || ""),
+  "GET /v1/plan/day": Number(process.env.P99_PLAN_DAY_MAX_MS || ""),
+  "POST /v1/checkin": Number(process.env.P99_CHECKIN_MAX_MS || ""),
+};
+
+function normalizeThreshold(value) {
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -157,17 +176,42 @@ async function main() {
   const startedAt = new Date().toISOString();
   const start = Date.now();
   const users = Array.from({ length: USERS }, (_, i) => i + 1);
-  await Promise.all(users.map((i) => simulateUser(i)));
+  for (let round = 0; round < ROUNDS; round += 1) {
+    await Promise.all(users.map((i) => simulateUser(i)));
+  }
   const durationMs = Date.now() - start;
+  const metricsSummary = summarize();
+  const regressions = [];
+  Object.entries(P95_THRESHOLDS).forEach(([endpoint, limitRaw]) => {
+    const limit = normalizeThreshold(limitRaw);
+    if (!limit) return;
+    const p95 = metricsSummary?.[endpoint]?.p95Ms;
+    if (Number.isFinite(p95) && p95 > limit) {
+      regressions.push({ endpoint, p95Ms: p95, limitMs: limit });
+    }
+  });
+  Object.entries(P99_THRESHOLDS).forEach(([endpoint, limitRaw]) => {
+    const limit = normalizeThreshold(limitRaw);
+    if (!limit) return;
+    const p99 = metricsSummary?.[endpoint]?.p99Ms;
+    if (Number.isFinite(p99) && p99 > limit) {
+      regressions.push({ endpoint, p99Ms: p99, limitMs: limit });
+    }
+  });
+  const ok = regressions.length === 0;
   const summary = {
-    ok: true,
+    ok,
     baseUrl: BASE_URL,
     users: USERS,
+    rounds: ROUNDS,
+    preset: PRESET || null,
     startedAt,
     durationMs,
-    metrics: summarize(),
+    metrics: metricsSummary,
+    regressions,
   };
   console.log(JSON.stringify(summary, null, 2));
+  if (!ok) process.exitCode = 1;
 }
 
 main().catch((err) => {

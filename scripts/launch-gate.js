@@ -1,3 +1,4 @@
+// Runbook: set BASE_URL or SIM_BASE_URL and SIM_AUTH_TOKEN for remote runs; optionally set LOG_PATHS for log scans.
 import { spawn } from "child_process";
 import fs from "fs/promises";
 import path from "path";
@@ -85,7 +86,7 @@ async function scanLogs(paths) {
       if (event === "today_contract_invalid") counts.contractInvalid += 1;
       if (event === "monitoring_counters") {
         const c = entry?.counts || {};
-        counts.nondeterminism += Number(c.nondeterminism || 0);
+        counts.nondeterminism += Number(c.nondeterminism_detected || c.nondeterminism || 0);
         counts.contractInvalid += Number(c.contract_invalid || 0);
       }
     });
@@ -101,16 +102,29 @@ async function main() {
           ok: true,
           dryRun: true,
           steps: [
+            "operate_mode_check",
             "golden.snapshots",
             "mvp.unit",
+            "verify_static_root",
             "verify_static_esm",
             "cache_headers",
             "export_surface",
             "bootstrap_gate",
             "static_smoke",
+            "monitoring_counters",
+            "launch_toggles",
+            "canary_rollout_test",
+            "perf_gate_test",
+            "maintenance_gate_test",
+            "launch_finalize_test",
+            "evidence_scripts_test",
+            "check_client_parity_test",
+            "check_lib_version_bump_test",
+            "operate_mode_check_test",
             "simulate_short",
             "simulate_long",
             "simulate_concurrency",
+            "lib_version_bump",
             "db-profile",
           ],
         },
@@ -121,6 +135,12 @@ async function main() {
     return;
   }
 
+  const operateCheck = await runNode(path.join(ROOT, "scripts", "operate-mode-check.js"));
+  if (!operateCheck.ok) {
+    console.error(operateCheck.stderr || operateCheck.stdout || "operate-mode-check failed");
+    process.exit(1);
+  }
+
   if (!BASE_URL) {
     console.error(JSON.stringify({ ok: false, error: "SIM_BASE_URL or BASE_URL required" }));
     process.exit(1);
@@ -129,18 +149,31 @@ async function main() {
   await fs.mkdir(OUTPUT_DIR, { recursive: true });
 
   const results = [];
+  results.push({ step: "operate_mode_check", ...operateCheck });
   results.push({ step: "golden.snapshots", ...(await runNode(path.join(ROOT, "scripts", "golden.snapshots.js"))) });
   results.push({ step: "mvp.unit", ...(await runNode(path.join(ROOT, "scripts", "mvp.unit.test.js"))) });
+  results.push({ step: "verify_static_root", ...(await runNode(path.join(ROOT, "scripts", "verify-static-root.js"))) });
   results.push({ step: "verify_static_esm", ...(await runNode(path.join(ROOT, "scripts", "verify-static-esm.js"))) });
   results.push({ step: "cache_headers", ...(await runNode(path.join(ROOT, "scripts", "cache-headers.test.js"))) });
   results.push({ step: "export_surface", ...(await runNode(path.join(ROOT, "scripts", "export-surface.test.js"))) });
   results.push({ step: "bootstrap_gate", ...(await runNode(path.join(ROOT, "scripts", "bootstrap-gate.test.js"))) });
   results.push({ step: "static_smoke", ...(await runNode(path.join(ROOT, "scripts", "static-smoke.test.js"))) });
+  results.push({ step: "monitoring_counters", ...(await runNode(path.join(ROOT, "scripts", "monitoring-counters.test.js"))) });
+  results.push({ step: "launch_toggles", ...(await runNode(path.join(ROOT, "scripts", "launch-toggles.test.js"))) });
+  results.push({ step: "canary_rollout_test", ...(await runNode(path.join(ROOT, "scripts", "canary-rollout.test.js"))) });
+  results.push({ step: "perf_gate_test", ...(await runNode(path.join(ROOT, "scripts", "perf-gate.test.js"))) });
+  results.push({ step: "maintenance_gate_test", ...(await runNode(path.join(ROOT, "scripts", "maintenance-gate.test.js"))) });
+  results.push({ step: "launch_finalize_test", ...(await runNode(path.join(ROOT, "scripts", "launch-finalize.test.js"))) });
+  results.push({ step: "evidence_scripts_test", ...(await runNode(path.join(ROOT, "scripts", "evidence-scripts.test.js"))) });
+  results.push({ step: "check_client_parity_test", ...(await runNode(path.join(ROOT, "scripts", "check-client-parity.test.js"))) });
+  results.push({ step: "check_lib_version_bump_test", ...(await runNode(path.join(ROOT, "scripts", "check-lib-version-bump.test.js"))) });
+  results.push({ step: "operate_mode_check_test", ...(await runNode(path.join(ROOT, "scripts", "operate-mode-check.test.js"))) });
 
   results.push({ step: "simulate_short", ...(await runSim("simulate_short", { days: 3, concurrency: false })) });
   results.push({ step: "simulate_long", ...(await runSim("simulate_long", { days: 7, concurrency: false })) });
   results.push({ step: "simulate_concurrency", ...(await runSim("simulate_concurrency", { days: 3, concurrency: true })) });
 
+  results.push({ step: "lib_version_bump", ...(await runNode(path.join(ROOT, "scripts", "check-lib-version-bump.js"))) });
   results.push({ step: "db-profile", ...(await runNode(path.join(ROOT, "scripts", "db-profile.js"))) });
 
   const nondeterminism = results

@@ -67,9 +67,9 @@ function initInvariantCounters() {
 function applyMonitoringCounters(counts, entry) {
   const counters = entry?.counts || {};
   counts.gatingViolations += Number(counters.gating_violation || 0);
-  counts.nondeterminism += Number(counters.nondeterminism || 0);
+  counts.nondeterminism += Number(counters.nondeterminism_detected || counters.nondeterminism || 0);
   counts.contractInvalid += Number(counters.contract_invalid || 0);
-  counts.writeStorm += Number(counters.write_storm || 0);
+  counts.writeStorm += Number(counters.write_storm_429 || counters.write_storm || 0);
   counts.idempotencyMissing += Number(counters.idempotency_missing || 0);
 }
 

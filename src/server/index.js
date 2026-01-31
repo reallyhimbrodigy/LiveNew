@@ -27,6 +27,7 @@ import { assignProfile } from "../domain/profiles.js";
 import { assertTodayContract } from "../contracts/todayContract.js";
 import { assertBootstrapContract } from "../contracts/bootstrapContract.js";
 import { unwrapTodayEnvelope } from "../contracts/protocol.js";
+import { createMonitoringCounters } from "./monitoring/counters.js";
 import {
   validateProfile,
   validateCheckIn,
@@ -236,7 +237,10 @@ const PARITY_LOG_EVERY_RAW = Number(process.env.PARITY_LOG_EVERY || 200);
 const PARITY_LOG_EVERY = Number.isFinite(PARITY_LOG_EVERY_RAW) ? Math.max(0, PARITY_LOG_EVERY_RAW) : 200;
 const PARITY_LOG_INTERVAL_RAW = Number(process.env.PARITY_LOG_INTERVAL_MS || 5 * 60 * 1000);
 const PARITY_LOG_INTERVAL_MS = Number.isFinite(PARITY_LOG_INTERVAL_RAW) ? Math.max(0, PARITY_LOG_INTERVAL_RAW) : 5 * 60 * 1000;
+const PARITY_LOG_PATH = (process.env.PARITY_LOG_PATH || "").trim();
 const REQUIRED_EVIDENCE_ENV = "REQUIRED_EVIDENCE_ID";
+const ALLOW_OVERRIDE_WITH_EVIDENCE = process.env.ALLOW_OVERRIDE_WITH_EVIDENCE === "true";
+const LAUNCH_WINDOW = process.env.LAUNCH_WINDOW === "true";
 
 function enforceLibVersionFreeze() {
   if (process.env.FREEZE_LIB_VERSION !== "true") return;
@@ -255,6 +259,19 @@ function enforceLibVersionFreeze() {
   }
 }
 
+function enforceLaunchWindowLocks() {
+  if (!LAUNCH_WINDOW) return;
+  const missing = [];
+  if (process.env.FREEZE_LIB_VERSION !== "true") missing.push("FREEZE_LIB_VERSION");
+  if (process.env.CONTRACT_LOCK !== "true") missing.push("CONTRACT_LOCK");
+  if (process.env.DOMAIN_LOCK !== "true") missing.push("DOMAIN_LOCK");
+  if (process.env.STATIC_ROOT_LOCK !== "true") missing.push("STATIC_ROOT_LOCK");
+  if (missing.length) {
+    logError({ event: "launch_window_lock_missing", missing });
+    process.exit(1);
+  }
+}
+
 async function enforceLaunchLocks() {
   const rootDir = process.cwd();
   const evidence = process.env[REQUIRED_EVIDENCE_ENV] || null;
@@ -266,9 +283,10 @@ async function enforceLaunchLocks() {
       event: `${kind}_lock_mismatch`,
       requiredEvidenceEnv: REQUIRED_EVIDENCE_ENV,
       evidenceProvided: evidence,
+      allowOverride: ALLOW_OVERRIDE_WITH_EVIDENCE,
       mismatches: result.mismatches,
     });
-    if (!evidence) {
+    if (!ALLOW_OVERRIDE_WITH_EVIDENCE || !evidence) {
       process.exit(1);
     }
     logWarn({
@@ -288,6 +306,8 @@ async function enforceLaunchLocks() {
 }
 
 const PUBLIC_DIR = path.join(process.cwd(), "public");
+const STATIC_ROOT_LOCK = process.env.STATIC_ROOT_LOCK === "true";
+const EXPECTED_STATIC_ROOT = (process.env.EXPECTED_STATIC_ROOT || "public").trim();
 const CITATIONS_PATH = path.join(PUBLIC_DIR, "citations.json");
 const REQUIRED_CONTENT_IDS = new Set(["r_panic_mode"]);
 const REQUIRED_CONSENTS = ["terms", "privacy", "alpha_processing"];
@@ -329,6 +349,62 @@ const ROUTE_REGEX_PATTERNS = [
   "^/v1/admin/content/(workout|nutrition|reset)/([^/]+)$",
 ];
 
+async function fileExists(filePath) {
+  try {
+    await fs.access(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function enforceStaticRootLock() {
+  if (!STATIC_ROOT_LOCK) return;
+  if (!EXPECTED_STATIC_ROOT) {
+    logError({ event: "static_root_lock_missing", message: "EXPECTED_STATIC_ROOT is required when STATIC_ROOT_LOCK=true" });
+    process.exit(1);
+  }
+  const expectedPath = path.resolve(process.cwd(), EXPECTED_STATIC_ROOT);
+  if (path.resolve(PUBLIC_DIR) !== expectedPath) {
+    logError({
+      event: "static_root_mismatch",
+      expectedRoot: EXPECTED_STATIC_ROOT,
+      expectedPath,
+      publicDir: PUBLIC_DIR,
+    });
+    process.exit(1);
+  }
+  const rootCandidates = ["public", "dist", "build", "static", "assets", "src"]
+    .map((root) => root.trim())
+    .filter(Boolean)
+    .filter((root, idx, arr) => arr.indexOf(root) === idx);
+  const keyFiles = ["assets/controllers.js", "assets/app.core.js", "assets/app.init.js"];
+  const conflicts = [];
+  const missing = [];
+  for (const relPath of keyFiles) {
+    const rootsWithFile = [];
+    for (const root of rootCandidates) {
+      const target = path.join(process.cwd(), root, relPath);
+      if (await fileExists(target)) rootsWithFile.push(root);
+    }
+    if (!rootsWithFile.includes(EXPECTED_STATIC_ROOT)) {
+      missing.push({ path: relPath, expectedRoot: EXPECTED_STATIC_ROOT, foundRoots: rootsWithFile });
+    }
+    if (rootsWithFile.length > 1) {
+      conflicts.push({ path: relPath, roots: rootsWithFile });
+    }
+  }
+  if (missing.length || conflicts.length) {
+    logError({
+      event: "static_root_shadow",
+      expectedRoot: EXPECTED_STATIC_ROOT,
+      missing,
+      conflicts,
+    });
+    process.exit(1);
+  }
+}
+
 let citationsCache = null;
 async function loadCitations() {
   if (citationsCache) return citationsCache;
@@ -360,32 +436,8 @@ function recordRouteHit(method, pathname) {
 }
 
 const MONITOR_LOG_INTERVAL_MS = Math.max(0, Number(process.env.MONITOR_LOG_INTERVAL_MS || 60_000));
-
-function bumpMonitoringCounter(key, inc = 1) {
-  if (!key) return;
-  const next = (monitoringCounters.get(key) || 0) + (Number(inc) || 0);
-  monitoringCounters.set(key, next);
-}
-
-function flushMonitoringCounters(reason = "interval") {
-  if (!monitoringCounters.size) return;
-  const snapshot = {};
-  for (const [key, value] of monitoringCounters.entries()) {
-    if (value) snapshot[key] = value;
-  }
-  if (!Object.keys(snapshot).length) return;
-  monitoringCounters.clear();
-  logInfo({
-    event: "monitoring_counters",
-    reason,
-    windowMs: MONITOR_LOG_INTERVAL_MS,
-    counts: snapshot,
-  });
-}
-
-if (MONITOR_LOG_INTERVAL_MS > 0) {
-  setInterval(() => flushMonitoringCounters("interval"), MONITOR_LOG_INTERVAL_MS).unref();
-}
+const monitoring = createMonitoringCounters({ logFn: logInfo, intervalMs: MONITOR_LOG_INTERVAL_MS });
+monitoring.start();
 
 let consentVersionCache = { value: 1, atMs: 0 };
 async function getRequiredConsentVersion() {
@@ -429,11 +481,15 @@ const DETERMINISM_TTL_MS = 5 * 60 * 1000;
 const idempotencyWarnCache = new Map();
 const IDEMPOTENCY_WARN_WINDOW_MS = 60 * 1000;
 const writeStormBuckets = new Map();
-const monitoringCounters = new Map();
 const parityCounters =
-  PARITY_LOG_EVERY > 0 || PARITY_LOG_INTERVAL_MS > 0
-    ? createParityCounters({ logEveryCount: PARITY_LOG_EVERY, logIntervalMs: PARITY_LOG_INTERVAL_MS, logFn: logInfo })
-    : createParityCounters({ logEveryCount: 0, logIntervalMs: 0, logFn: null });
+  PARITY_LOG_EVERY > 0 || PARITY_LOG_INTERVAL_MS > 0 || PARITY_LOG_PATH
+    ? createParityCounters({
+        logEveryCount: PARITY_LOG_EVERY,
+        logIntervalMs: PARITY_LOG_INTERVAL_MS,
+        logFn: logInfo,
+        logPath: PARITY_LOG_PATH,
+      })
+    : createParityCounters({ logEveryCount: 0, logIntervalMs: 0, logFn: null, logPath: PARITY_LOG_PATH });
 const recent5xx = [];
 const featureFlagsCache = { data: null, loadedAt: 0 };
 const FEATURE_FLAGS_TTL_MS = 10 * 1000;
@@ -482,7 +538,9 @@ if (config.isDevLike) {
 const secretState = ensureSecretKey(config);
 
 enforceLibVersionFreeze();
+enforceLaunchWindowLocks();
 await enforceLaunchLocks();
+await enforceStaticRootLock();
 await ensureDataDirWritable(config);
 await initDb();
 const dbConfig = getDbConfig();
@@ -1847,7 +1905,7 @@ async function ensureHomeUiState({ userId, userProfile, userBaseline, userEmail,
     if (shouldWarn) {
       logWarn({ event: "bootstrap_not_home", requestId: res?.livenewRequestId, userId, route: pathname, uiState: "canary" });
     }
-    bumpMonitoringCounter("gating_violation");
+    monitoring.increment("gating_violation", { route: pathname, status: 403 });
     sendErrorCodeOnly(res, 403, "CANARY_GATED");
     return { ok: false, uiState: "consent" };
   }
@@ -1855,7 +1913,7 @@ async function ensureHomeUiState({ userId, userProfile, userBaseline, userEmail,
     if (shouldWarn) {
       logWarn({ event: "bootstrap_not_home", requestId: res?.livenewRequestId, userId, route: pathname, uiState: bootstrap.uiState });
     }
-    bumpMonitoringCounter("gating_violation");
+    monitoring.increment("gating_violation", { route: pathname, status: 403 });
     sendErrorCodeOnly(res, 403, "BOOTSTRAP_NOT_HOME");
     return { ok: false, uiState: bootstrap.uiState };
   }
@@ -1867,7 +1925,7 @@ function ensureTodayContract(contract, res) {
     return assertTodayContract(contract);
   } catch (err) {
     logError({ event: "today_contract_invalid", error: err?.message || String(err) });
-    bumpMonitoringCounter("contract_invalid");
+    monitoring.increment("contract_invalid", { status: 500 });
     sendErrorCodeOnly(res, 500, err.code || "TODAY_CONTRACT_INVALID");
     return null;
   }
@@ -2250,7 +2308,7 @@ function trackDeterminism(inputKey, inputHash, ctx) {
       prevHash: existing.hash,
       inputHash,
     });
-    bumpMonitoringCounter("nondeterminism");
+    monitoring.increment("nondeterminism_detected", { dateKey: ctx?.dateKey });
   }
   determinismCache.set(inputKey, { hash: inputHash, at: now });
 }
@@ -2265,7 +2323,7 @@ function trackMissingIdempotency({ userId, route, requestHash, requestId }) {
   const existing = idempotencyWarnCache.get(cacheKey);
   if (existing && now - existing.atMs < IDEMPOTENCY_WARN_WINDOW_MS) {
     logWarn({ event: "idempotency_missing", requestId, userId, route, windowMs: IDEMPOTENCY_WARN_WINDOW_MS });
-    bumpMonitoringCounter("idempotency_missing");
+    monitoring.increment("idempotency_missing", { route });
   }
   idempotencyWarnCache.set(cacheKey, { atMs: now });
 }
@@ -2294,7 +2352,7 @@ function isWriteStorm({ userId, dateKey, route, requestId }) {
       windowMs,
       count: entry.timestamps.length,
     });
-    bumpMonitoringCounter("write_storm");
+    monitoring.increment("write_storm_429", { route, dateKey, status: 429 });
     return true;
   }
   entry.timestamps.push(now);
@@ -3895,6 +3953,7 @@ const server = http.createServer(async (req, res) => {
   if (pathname.startsWith("/v1") && pathname !== "/healthz" && pathname !== "/readyz") {
     const ipCheck = checkIpRateLimit(clientIp);
     if (!ipCheck.ok) {
+      monitoring.increment("rate_limit_429", { route: pathname, status: 429 });
       sendError(res, 429, "rate_limited_ip", "Too many requests");
       return;
     }
@@ -4055,10 +4114,12 @@ const server = http.createServer(async (req, res) => {
       }
       const emailKey = email.toLowerCase();
       if (!checkAuthIpRateLimit(authLimiterKey("ip", clientIp))) {
+        monitoring.increment("rate_limit_429", { route: pathname, status: 429 });
         sendError(res, 429, "rate_limited_auth", "Too many auth attempts");
         return;
       }
       if (!checkAuthEmailRateLimit(authLimiterKey("email", emailKey))) {
+        monitoring.increment("rate_limit_429", { route: pathname, status: 429 });
         sendError(res, 429, "rate_limited_auth", "Too many auth attempts");
         return;
       }
@@ -4095,15 +4156,18 @@ const server = http.createServer(async (req, res) => {
       }
       const emailKey = email.toLowerCase();
       if (!checkAuthIpRateLimit(authLimiterKey("ip", clientIp))) {
+        monitoring.increment("rate_limit_429", { route: pathname, status: 429 });
         sendError(res, 429, "rate_limited_auth", "Too many auth attempts");
         return;
       }
       if (!checkAuthEmailRateLimit(authLimiterKey("email", emailKey))) {
+        monitoring.increment("rate_limit_429", { route: pathname, status: 429 });
         sendError(res, 429, "rate_limited_auth", "Too many auth attempts");
         return;
       }
       const lockStatus = await isAuthLocked(emailKey);
       if (lockStatus.locked) {
+        monitoring.increment("rate_limit_429", { route: pathname, status: 429 });
         sendError(res, 429, "auth_locked", "Too many attempts. Try again later.");
         return;
       }
@@ -4320,6 +4384,7 @@ const server = http.createServer(async (req, res) => {
     if (userId) {
       const userCheck = checkUserRateLimit(userId, isMutating);
       if (!userCheck.ok) {
+        monitoring.increment("rate_limit_429", { route: pathname, status: 429 });
         sendError(res, 429, "rate_limited_user", "Too many requests");
         return;
       }
@@ -5236,12 +5301,12 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === "/v1/checkin" && req.method === "POST") {
       if (config.writesDisabled) {
-        bumpMonitoringCounter("writes_disabled");
+        monitoring.increment("writes_disabled");
         sendErrorCodeOnly(res, 503, "WRITES_DISABLED");
         return;
       }
       if (config.disableCheckinWrites) {
-        bumpMonitoringCounter("checkin_disabled");
+        monitoring.increment("checkin_disabled");
         sendErrorCodeOnly(res, 503, "CHECKIN_DISABLED");
         return;
       }
@@ -5287,14 +5352,17 @@ const server = http.createServer(async (req, res) => {
         idempotencyHash = hashRequestPayload({ dateKey, checkIn });
         const existing = await getIdempotencyRecord(userId, idempotencyRoute, idempotencyKey);
         if (existing && existing.requestHash !== idempotencyHash) {
+          monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
           sendErrorCodeOnly(res, 409, "IDEMPOTENCY_CONFLICT");
           return;
         }
         if (existing?.response) {
+          monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 200 });
           send(200, existing.response);
           return;
         }
         if (existing) {
+          monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
           sendErrorCodeOnly(res, 409, "IDEMPOTENCY_IN_PROGRESS");
           return;
         }
@@ -5308,12 +5376,17 @@ const server = http.createServer(async (req, res) => {
         if (!inserted) {
           const existing = await getIdempotencyRecord(userId, idempotencyRoute, idempotencyKey);
           if (existing && existing.requestHash !== idempotencyHash) {
+            monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
             sendErrorCodeOnly(res, 409, "IDEMPOTENCY_CONFLICT");
             return;
           }
           if (existing?.response) {
+            monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 200 });
             send(200, existing.response);
             return;
+          }
+          if (existing) {
+            monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
           }
           sendErrorCodeOnly(res, 409, "IDEMPOTENCY_IN_PROGRESS");
           return;
@@ -5422,12 +5495,12 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === "/v1/quick" && req.method === "POST") {
       if (config.writesDisabled) {
-        bumpMonitoringCounter("writes_disabled");
+        monitoring.increment("writes_disabled");
         sendErrorCodeOnly(res, 503, "WRITES_DISABLED");
         return;
       }
       if (config.disableQuickWrites) {
-        bumpMonitoringCounter("quick_disabled");
+        monitoring.increment("quick_disabled");
         sendErrorCodeOnly(res, 503, "QUICK_DISABLED");
         return;
       }
@@ -5466,14 +5539,17 @@ const server = http.createServer(async (req, res) => {
         idempotencyHash = hashRequestPayload({ dateKey, signal });
         const existing = await getIdempotencyRecord(userId, idempotencyRoute, idempotencyKey);
         if (existing && existing.requestHash !== idempotencyHash) {
+          monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
           sendErrorCodeOnly(res, 409, "IDEMPOTENCY_CONFLICT");
           return;
         }
         if (existing?.response) {
+          monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 200 });
           send(200, existing.response);
           return;
         }
         if (existing) {
+          monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
           sendErrorCodeOnly(res, 409, "IDEMPOTENCY_IN_PROGRESS");
           return;
         }
@@ -5487,12 +5563,17 @@ const server = http.createServer(async (req, res) => {
         if (!inserted) {
           const existing = await getIdempotencyRecord(userId, idempotencyRoute, idempotencyKey);
           if (existing && existing.requestHash !== idempotencyHash) {
+            monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
             sendErrorCodeOnly(res, 409, "IDEMPOTENCY_CONFLICT");
             return;
           }
           if (existing?.response) {
+            monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 200 });
             send(200, existing.response);
             return;
+          }
+          if (existing) {
+            monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
           }
           sendErrorCodeOnly(res, 409, "IDEMPOTENCY_IN_PROGRESS");
           return;
@@ -5781,12 +5862,12 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === "/v1/reset/complete" && req.method === "POST") {
       if (config.writesDisabled) {
-        bumpMonitoringCounter("writes_disabled");
+        monitoring.increment("writes_disabled");
         sendErrorCodeOnly(res, 503, "WRITES_DISABLED");
         return;
       }
       if (config.disableResetWrites) {
-        bumpMonitoringCounter("reset_disabled");
+        monitoring.increment("reset_disabled");
         sendErrorCodeOnly(res, 503, "RESET_DISABLED");
         return;
       }

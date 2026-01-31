@@ -157,7 +157,7 @@ async function main() {
   const preCounts = countEventsForUser(db, userId);
   db.close();
 
-  const maintenance = await runNode(path.join(ROOT, "scripts", "maintenance-weekly.js"));
+  const maintenance = await runNode(path.join(ROOT, "scripts", "maintenance-run.js"));
   assertOk(maintenance.ok, `maintenance-weekly failed: ${maintenance.stderr || maintenance.stdout}`);
 
   const post = {

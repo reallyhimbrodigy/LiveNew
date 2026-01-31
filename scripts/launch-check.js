@@ -22,6 +22,19 @@ function runNode(scriptPath, env = {}) {
 
 async function run() {
   const results = [];
+  results.push({
+    step: "operate_mode_check",
+    ...(await runNode(path.join(ROOT, "scripts", "operate-mode-check.js"))),
+  });
+  if (!results[0].ok) {
+    console.log(JSON.stringify({ ok: false, steps: results }, null, 2));
+    process.exit(1);
+  }
+
+  results.push({
+    step: "lib_version_bump",
+    ...(await runNode(path.join(ROOT, "scripts", "check-lib-version-bump.js"))),
+  });
 
   results.push({
     step: "migrations",
@@ -39,6 +52,11 @@ async function run() {
   });
 
   results.push({
+    step: "verify_static_root",
+    ...(await runNode(path.join(ROOT, "scripts", "verify-static-root.js"))),
+  });
+
+  results.push({
     step: "cache_headers",
     ...(await runNode(path.join(ROOT, "scripts", "cache-headers.test.js"))),
   });
@@ -51,6 +69,56 @@ async function run() {
   results.push({
     step: "bootstrap_gate",
     ...(await runNode(path.join(ROOT, "scripts", "bootstrap-gate.test.js"))),
+  });
+
+  results.push({
+    step: "monitoring_counters",
+    ...(await runNode(path.join(ROOT, "scripts", "monitoring-counters.test.js"))),
+  });
+
+  results.push({
+    step: "launch_toggles",
+    ...(await runNode(path.join(ROOT, "scripts", "launch-toggles.test.js"))),
+  });
+
+  results.push({
+    step: "canary_rollout_test",
+    ...(await runNode(path.join(ROOT, "scripts", "canary-rollout.test.js"))),
+  });
+
+  results.push({
+    step: "perf_gate_test",
+    ...(await runNode(path.join(ROOT, "scripts", "perf-gate.test.js"))),
+  });
+
+  results.push({
+    step: "maintenance_gate_test",
+    ...(await runNode(path.join(ROOT, "scripts", "maintenance-gate.test.js"))),
+  });
+
+  results.push({
+    step: "launch_finalize_test",
+    ...(await runNode(path.join(ROOT, "scripts", "launch-finalize.test.js"))),
+  });
+
+  results.push({
+    step: "evidence_scripts_test",
+    ...(await runNode(path.join(ROOT, "scripts", "evidence-scripts.test.js"))),
+  });
+
+  results.push({
+    step: "check_client_parity_test",
+    ...(await runNode(path.join(ROOT, "scripts", "check-client-parity.test.js"))),
+  });
+
+  results.push({
+    step: "check_lib_version_bump_test",
+    ...(await runNode(path.join(ROOT, "scripts", "check-lib-version-bump.test.js"))),
+  });
+
+  results.push({
+    step: "operate_mode_check_test",
+    ...(await runNode(path.join(ROOT, "scripts", "operate-mode-check.test.js"))),
   });
 
   const baseUrl = process.env.SIM_BASE_URL || process.env.BASE_URL || "";

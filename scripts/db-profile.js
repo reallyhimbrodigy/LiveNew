@@ -1,4 +1,9 @@
+import fs from "fs/promises";
+import path from "path";
 import { initDb, closeDb, explainQueryPlan, checkRequiredIndexes } from "../src/state/db.js";
+
+const ROOT = process.cwd();
+const BASELINE_PATH = process.env.DB_PROFILE_BASELINE || path.join(ROOT, "test", "db-profile.baseline.json");
 
 const SAMPLE_USER = "profile_user";
 const SAMPLE_DATE = "2026-01-30";
@@ -26,6 +31,15 @@ async function explain(label, sql) {
   const indexed = usesIndex(plan);
   const fullScan = hasFullScan(plan);
   return { label, sql, indexed, fullScan, plan };
+}
+
+async function loadBaseline() {
+  try {
+    const raw = await fs.readFile(BASELINE_PATH, "utf8");
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 async function run() {
@@ -69,9 +83,30 @@ async function run() {
   }
 
   const missingIndexes = indexCheck.missing || [];
+  const baseline = await loadBaseline();
+  const baselineRegressions = [];
+  if (baseline) {
+    const requiredIndexes = Array.isArray(baseline.requiredIndexes) ? baseline.requiredIndexes : [];
+    const missingRequired = requiredIndexes.filter((idx) => missingIndexes.includes(idx));
+    if (missingRequired.length) {
+      baselineRegressions.push({ type: "missing_indexes", indexes: missingRequired });
+    }
+    const expectedQueries = baseline.queries || {};
+    plans.forEach((plan) => {
+      const expected = expectedQueries[plan.label];
+      if (!expected) return;
+      if (expected.indexed === true && !plan.indexed) {
+        baselineRegressions.push({ type: "missing_index_usage", label: plan.label });
+      }
+      if (expected.fullScan === false && plan.fullScan) {
+        baselineRegressions.push({ type: "full_scan_detected", label: plan.label });
+      }
+    });
+  }
+
   const queryIssues = plans.filter((plan) => !plan.indexed).map((plan) => plan.label);
   const fullScans = plans.filter((plan) => plan.fullScan).map((plan) => plan.label);
-  const ok = indexCheck.ok && queryIssues.length === 0 && fullScans.length === 0;
+  const ok = indexCheck.ok && queryIssues.length === 0 && fullScans.length === 0 && baselineRegressions.length === 0;
 
   console.log(
     JSON.stringify(
@@ -86,6 +121,7 @@ async function run() {
         })),
         queryIssues,
         fullScans,
+        baseline: baseline ? { path: BASELINE_PATH, regressions: baselineRegressions } : null,
       },
       null,
       2

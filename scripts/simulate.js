@@ -1,3 +1,4 @@
+// Runbook: set SIM_BASE_URL and SIM_AUTH_TOKEN for remote runs. Optional: SIM_DAYS, SIM_CONCURRENCY.
 import fs from "fs/promises";
 import path from "path";
 import assert from "node:assert";
