@@ -1,37 +1,43 @@
 // Runbook: set SIM_BASE_URL (or BASE_URL) and SIM_AUTH_TOKEN for remote sims.
-import { spawn } from "child_process";
 import path from "path";
+import { runNode } from "./lib/exec.js";
 
 const ROOT = process.cwd();
-const STRICT = process.env.RUNBOOK_STRICT !== "false";
+const USE_JSON = process.argv.includes("--json");
+const STRICT = process.argv.includes("--strict") ? true : process.env.RUNBOOK_STRICT !== "false";
+const LIB_CHECK_ARGS = process.argv.includes("--strict") ? ["--strict"] : [];
+const BASE_URL = process.env.SIM_BASE_URL || process.env.BASE_URL || "";
 
-function runNode(scriptPath, env = {}) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [scriptPath], { cwd: ROOT, env: { ...process.env, ...env } });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("close", (code) => {
-      resolve({ ok: code === 0, code, stdout: stdout.trim(), stderr: stderr.trim() });
-    });
-  });
+function summarizeLine(summary) {
+  const failed = summary.steps.filter((entry) => !entry.ok).map((entry) => entry.step);
+  return `run_nightly ok=${summary.ok} failed=${failed.length ? failed.join(",") : "none"}`;
 }
 
-async function run() {
-  const results = [];
-  results.push({ step: "operate_mode_check", ...(await runNode(path.join(ROOT, "scripts", "operate-mode-check.js"))) });
-  if (!results[0].ok) {
-    console.log(JSON.stringify({ ok: false, steps: results }, null, 2));
-    process.exit(1);
+function run() {
+  if (!BASE_URL) {
+    console.error(JSON.stringify({ ok: false, error: "missing_base_url" }));
+    process.exit(2);
   }
 
-  results.push({ step: "nightly_canary", ...(await runNode(path.join(ROOT, "scripts", "nightly-canary.js"))) });
-  results.push({ step: "perf_gate", ...(await runNode(path.join(ROOT, "scripts", "perf-gate.js"))) });
+  const results = [];
+  results.push({ step: "operate_mode_check", ...runNode(path.join(ROOT, "scripts", "operate-mode-check.js")) });
+  if (!results[0].ok) {
+    const summary = { ok: false, steps: results };
+    console.log(USE_JSON ? JSON.stringify(summary) : summarizeLine(summary));
+    process.exit(results[0].code === 2 ? 2 : 1);
+  }
+
+  const libCheck = runNode(path.join(ROOT, "scripts", "check-lib-version-bump.js"), { args: LIB_CHECK_ARGS });
+  results.push({ step: "lib_version_bump", ...libCheck });
+  if (libCheck.parsed?.libraries?.length) {
+    results.push({ step: "catalog_coverage", ...runNode(path.join(ROOT, "scripts", "constraints.coverage.test.js")) });
+  }
+
+  results.push({
+    step: "nightly_canary",
+    ...runNode(path.join(ROOT, "scripts", "nightly-canary.js"), { SIM_BASE_URL: BASE_URL, SIM_CONCURRENCY: "true" }),
+  });
+  results.push({ step: "perf_gate", ...runNode(path.join(ROOT, "scripts", "perf-gate.js"), { BASE_URL }) });
 
   const ok = results.every((entry) => entry.ok);
   const summary = {
@@ -45,11 +51,13 @@ async function run() {
     })),
   };
 
-  console.log(JSON.stringify(summary, null, 2));
-  if (!ok && STRICT) process.exit(1);
+  console.log(USE_JSON ? JSON.stringify(summary) : summarizeLine(summary));
+  if (!ok) process.exit(1);
 }
 
-run().catch((err) => {
+try {
+  run();
+} catch (err) {
   console.error(JSON.stringify({ ok: false, error: err?.message || String(err) }));
   process.exit(1);
-});
+}

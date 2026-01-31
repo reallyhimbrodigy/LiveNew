@@ -121,6 +121,16 @@ async function run() {
     ...(await runNode(path.join(ROOT, "scripts", "operate-mode-check.test.js"))),
   });
 
+  results.push({
+    step: "require_evidence_test",
+    ...(await runNode(path.join(ROOT, "scripts", "require-evidence.test.js"))),
+  });
+
+  results.push({
+    step: "full_traffic_gate_test",
+    ...(await runNode(path.join(ROOT, "scripts", "full-traffic-gate.test.js"))),
+  });
+
   const baseUrl = process.env.SIM_BASE_URL || process.env.BASE_URL || "";
   if (baseUrl) {
     results.push({

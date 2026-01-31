@@ -1,7 +1,7 @@
 // Runbook: set BASE_URL or SIM_BASE_URL and SIM_AUTH_TOKEN for remote runs; optionally set LOG_PATHS for log scans.
-import { spawn } from "child_process";
 import fs from "fs/promises";
 import path from "path";
+import { runNode as execRunNode } from "./lib/exec.js";
 
 const ROOT = process.cwd();
 const BASE_URL = process.env.SIM_BASE_URL || process.env.BASE_URL || "";
@@ -13,42 +13,8 @@ const LOG_PATHS = (process.env.LAUNCH_GATE_LOG_PATHS || process.env.LOG_PATHS ||
   .map((entry) => entry.trim())
   .filter(Boolean);
 
-function parseJsonLine(output) {
-  if (!output) return null;
-  const trimmed = output.trim();
-  if (!trimmed) return null;
-  const lines = trimmed.split("\n").filter(Boolean).reverse();
-  for (const line of lines) {
-    try {
-      return JSON.parse(line);
-    } catch {
-      // next
-    }
-  }
-  return null;
-}
-
 function runNode(scriptPath, env = {}) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [scriptPath], { cwd: ROOT, env: { ...process.env, ...env } });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("close", (code) => {
-      resolve({
-        ok: code === 0,
-        code,
-        stdout: stdout.trim(),
-        stderr: stderr.trim(),
-        parsed: parseJsonLine(stdout) || parseJsonLine(stderr),
-      });
-    });
-  });
+  return Promise.resolve(execRunNode(scriptPath, { env }));
 }
 
 async function runSim(label, { days, concurrency }) {
@@ -121,6 +87,8 @@ async function main() {
             "check_client_parity_test",
             "check_lib_version_bump_test",
             "operate_mode_check_test",
+            "require_evidence_test",
+            "full_traffic_gate_test",
             "simulate_short",
             "simulate_long",
             "simulate_concurrency",
@@ -138,7 +106,7 @@ async function main() {
   const operateCheck = await runNode(path.join(ROOT, "scripts", "operate-mode-check.js"));
   if (!operateCheck.ok) {
     console.error(operateCheck.stderr || operateCheck.stdout || "operate-mode-check failed");
-    process.exit(1);
+    process.exit(operateCheck.code === 2 ? 2 : 1);
   }
 
   if (!BASE_URL) {
@@ -168,6 +136,8 @@ async function main() {
   results.push({ step: "check_client_parity_test", ...(await runNode(path.join(ROOT, "scripts", "check-client-parity.test.js"))) });
   results.push({ step: "check_lib_version_bump_test", ...(await runNode(path.join(ROOT, "scripts", "check-lib-version-bump.test.js"))) });
   results.push({ step: "operate_mode_check_test", ...(await runNode(path.join(ROOT, "scripts", "operate-mode-check.test.js"))) });
+  results.push({ step: "require_evidence_test", ...(await runNode(path.join(ROOT, "scripts", "require-evidence.test.js"))) });
+  results.push({ step: "full_traffic_gate_test", ...(await runNode(path.join(ROOT, "scripts", "full-traffic-gate.test.js"))) });
 
   results.push({ step: "simulate_short", ...(await runSim("simulate_short", { days: 3, concurrency: false })) });
   results.push({ step: "simulate_long", ...(await runSim("simulate_long", { days: 7, concurrency: false })) });

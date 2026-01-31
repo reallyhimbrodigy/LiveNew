@@ -9,7 +9,7 @@ const failRes = spawnSync(process.execPath, ["scripts/operate-mode-check.js"], {
   env: { ...process.env, LAUNCH_WINDOW: "true" },
   encoding: "utf8",
 });
-assert(failRes.status !== 0, "operate-mode-check should fail when locks missing in launch window");
+assert(failRes.status === 2, "operate-mode-check should exit 2 when locks missing in launch window");
 
 const okRes = spawnSync(process.execPath, ["scripts/operate-mode-check.js"], {
   cwd: process.cwd(),

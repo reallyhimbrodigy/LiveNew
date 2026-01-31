@@ -1,39 +1,35 @@
 // Runbook: set LOG_PATHS/REPORT_PATHS and PARITY_LOG_PATH before running.
-import { spawn } from "child_process";
 import path from "path";
+import { runNode } from "./lib/exec.js";
 
 const ROOT = process.cwd();
-const STRICT = process.env.RUNBOOK_STRICT !== "false";
+const USE_JSON = process.argv.includes("--json");
+const STRICT = process.argv.includes("--strict") ? true : process.env.RUNBOOK_STRICT !== "false";
+const EVIDENCE_STRICT = process.argv.includes("--strict") ? true : process.env.EVIDENCE_STRICT === "true";
 
-function runNode(scriptPath, env = {}) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [scriptPath], { cwd: ROOT, env: { ...process.env, ...env } });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("close", (code) => {
-      resolve({ ok: code === 0, code, stdout: stdout.trim(), stderr: stderr.trim() });
-    });
-  });
+function summarizeLine(summary) {
+  const failed = summary.steps.filter((entry) => !entry.ok).map((entry) => entry.step);
+  return `run_daily ok=${summary.ok} failed=${failed.length ? failed.join(",") : "none"}`;
 }
 
-async function run() {
+function run() {
   const results = [];
-  results.push({ step: "operate_mode_check", ...(await runNode(path.join(ROOT, "scripts", "operate-mode-check.js"))) });
+  results.push({ step: "operate_mode_check", ...runNode(path.join(ROOT, "scripts", "operate-mode-check.js")) });
   if (!results[0].ok) {
-    console.log(JSON.stringify({ ok: false, steps: results }, null, 2));
-    process.exit(1);
+    const summary = { ok: false, steps: results };
+    console.log(USE_JSON ? JSON.stringify(summary) : summarizeLine(summary));
+    process.exit(results[0].code === 2 ? 2 : 1);
   }
 
-  results.push({ step: "collect_evidence", ...(await runNode(path.join(ROOT, "scripts", "collect-evidence.js"))) });
-  results.push({ step: "check_client_parity", ...(await runNode(path.join(ROOT, "scripts", "check-client-parity.js"))) });
+  results.push({ step: "check_client_parity", ...runNode(path.join(ROOT, "scripts", "check-client-parity.js")) });
+  results.push({ step: "collect_evidence", ...runNode(path.join(ROOT, "scripts", "collect-evidence.js")) });
 
-  const ok = results.every((entry) => entry.ok);
+  const parityEntry = results.find((entry) => entry.step === "check_client_parity");
+  const parityOk = parityEntry?.ok === true;
+  const ok =
+    results.find((entry) => entry.step === "operate_mode_check")?.ok !== false &&
+    parityOk &&
+    (EVIDENCE_STRICT ? results.find((entry) => entry.step === "collect_evidence")?.ok === true : true);
   const summary = {
     ok,
     strict: STRICT,
@@ -45,11 +41,14 @@ async function run() {
     })),
   };
 
-  console.log(JSON.stringify(summary, null, 2));
+  console.log(USE_JSON ? JSON.stringify(summary) : summarizeLine(summary));
+  if (!parityOk) process.exit(parityEntry?.code === 2 ? 2 : 1);
   if (!ok && STRICT) process.exit(1);
 }
 
-run().catch((err) => {
+try {
+  run();
+} catch (err) {
   console.error(JSON.stringify({ ok: false, error: err?.message || String(err) }));
   process.exit(1);
-});
+}

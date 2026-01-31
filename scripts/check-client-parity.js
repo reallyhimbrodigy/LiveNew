@@ -3,6 +3,9 @@ import fs from "fs/promises";
 import fsSync from "fs";
 
 const PARITY_LOG_PATH = (process.env.PARITY_LOG_PATH || "").trim();
+const PARITY_REPORT_PATH = (process.env.PARITY_REPORT_PATH || process.env.PARITY_OUTPUT_PATH || "").trim();
+const PARITY_TAIL_LINES_RAW = Number(process.env.PARITY_TAIL_LINES || 2000);
+const PARITY_TAIL_LINES = Number.isFinite(PARITY_TAIL_LINES_RAW) ? Math.max(1, PARITY_TAIL_LINES_RAW) : 2000;
 const LOG_PATHS = (process.env.LOG_PATHS || "")
   .split(",")
   .map((entry) => entry.trim())
@@ -15,10 +18,16 @@ function parseThreshold(value, fallback) {
   return parsed > 1 ? parsed / 100 : parsed;
 }
 
+function thresholdFrom(envKey, fallbackKey, fallbackValue) {
+  const primary = parseThreshold(process.env[envKey], null);
+  if (primary != null) return primary;
+  return parseThreshold(process.env[fallbackKey], fallbackValue);
+}
+
 const THRESHOLDS = {
-  checkin: parseThreshold(process.env.CHECKIN_IDEMPOTENCY_MIN, 0.98),
-  quick: parseThreshold(process.env.QUICK_IDEMPOTENCY_MIN, 0.98),
-  today: parseThreshold(process.env.TODAY_ETAG_MIN, 0.9),
+  checkin: thresholdFrom("CHECKIN_IDEMPOTENCY_RATE", "CHECKIN_IDEMPOTENCY_MIN", 0.98),
+  quick: thresholdFrom("QUICK_IDEMPOTENCY_RATE", "QUICK_IDEMPOTENCY_MIN", 0.98),
+  today: thresholdFrom("TODAY_IF_NONE_MATCH_RATE", "TODAY_ETAG_MIN", 0.9),
 };
 
 function normalizeRatio(value) {
@@ -47,7 +56,8 @@ async function readLatestParity(filePath) {
     return null;
   }
   const lines = raw.split("\n");
-  for (let i = lines.length - 1; i >= 0; i -= 1) {
+  const start = Math.max(0, lines.length - PARITY_TAIL_LINES);
+  for (let i = lines.length - 1; i >= start; i -= 1) {
     const line = lines[i].trim();
     if (!line) continue;
     try {
@@ -80,17 +90,28 @@ async function findLatestParity(paths) {
   return entries[0];
 }
 
+function summarizeLine(summary) {
+  const parts = [
+    `client_parity ok=${summary.ok}`,
+    `source=${summary.source}`,
+    `checkin=${summary.actual.checkin ?? "na"}`,
+    `quick=${summary.actual.quick ?? "na"}`,
+    `today=${summary.actual.today ?? "na"}`,
+  ];
+  return parts.join(" ");
+}
+
 async function run() {
-  const sources = PARITY_LOG_PATH ? [PARITY_LOG_PATH] : LOG_PATHS;
+  const sources = PARITY_LOG_PATH ? [PARITY_LOG_PATH] : PARITY_REPORT_PATH ? [PARITY_REPORT_PATH] : LOG_PATHS;
   if (!sources.length) {
     console.error(JSON.stringify({ ok: false, error: "missing_parity_logs", message: "Set PARITY_LOG_PATH or LOG_PATHS" }));
-    process.exit(1);
+    process.exit(2);
   }
 
   const latest = await findLatestParity(sources);
   if (!latest) {
     console.error(JSON.stringify({ ok: false, error: "missing_parity_data" }));
-    process.exit(1);
+    process.exit(2);
   }
 
   const parity = latest.parity || {};
@@ -122,7 +143,12 @@ async function run() {
     failures,
   };
 
-  console.log(JSON.stringify(summary, null, 2));
+  const useJson = process.argv.includes("--json");
+  if (useJson) {
+    console.log(JSON.stringify(summary, null, 2));
+  } else {
+    console.log(summarizeLine(summary));
+  }
   if (!ok) process.exit(1);
 }
 

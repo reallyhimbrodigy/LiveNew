@@ -1,14 +1,16 @@
 // Runbook: set BASE_URL (or SIM_BASE_URL), SIM_AUTH_TOKEN, and lock env vars before full traffic.
-import { spawn } from "child_process";
 import path from "path";
 import { LIB_VERSION } from "../src/domain/libraryVersion.js";
 import { verifyHashes } from "../src/server/lockChecks.js";
 import { CONTRACT_LOCK_HASHES, DOMAIN_LOCK_HASHES } from "../src/server/lockHashes.js";
+import { runNode } from "./lib/exec.js";
 
 const ROOT = process.cwd();
 const BASE_URL = process.env.SIM_BASE_URL || process.env.BASE_URL || "";
 const CANARY_ALLOWLIST = (process.env.CANARY_ALLOWLIST || "").trim();
 const SKIP_PERF = process.env.SKIP_PERF_GATE === "true";
+const USE_JSON = process.argv.includes("--json");
+const STRICT = process.argv.includes("--strict");
 
 function requireLock(flag) {
   return process.env[flag] === "true";
@@ -19,28 +21,15 @@ async function verifyLockHashes(kind, expected) {
   return result;
 }
 
-function runNode(scriptPath, env = {}) {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [scriptPath], { cwd: ROOT, env: { ...process.env, ...env } });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk.toString();
-    });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk.toString();
-    });
-    child.on("close", (code) => {
-      resolve({ ok: code === 0, code, stdout: stdout.trim(), stderr: stderr.trim() });
-    });
-  });
+function runScript(scriptName, env = {}, args = []) {
+  return runNode(path.join(ROOT, "scripts", scriptName), { env, args });
 }
 
 async function run() {
-  const operateCheck = await runNode(path.join(ROOT, "scripts", "operate-mode-check.js"));
+  const operateCheck = runScript("operate-mode-check.js");
   if (!operateCheck.ok) {
     console.error(operateCheck.stderr || operateCheck.stdout || "operate-mode-check failed");
-    process.exit(1);
+    process.exit(operateCheck.code === 2 ? 2 : 1);
   }
   const missingLocks = [];
   if (!requireLock("FREEZE_LIB_VERSION")) missingLocks.push("FREEZE_LIB_VERSION");
@@ -52,7 +41,7 @@ async function run() {
 
   if (missingLocks.length) {
     console.error(JSON.stringify({ ok: false, error: "missing_locks", missing: missingLocks }));
-    process.exit(1);
+    process.exit(2);
   }
 
   if (String(LIB_VERSION) !== String(process.env.EXPECTED_LIB_VERSION || "")) {
@@ -86,25 +75,29 @@ async function run() {
 
   if (!BASE_URL) {
     console.error(JSON.stringify({ ok: false, error: "SIM_BASE_URL or BASE_URL required" }));
-    process.exit(1);
+    process.exit(2);
   }
 
   const results = [];
   results.push({ step: "operate_mode_check", ...operateCheck });
-  results.push({ step: "lib_version_bump", ...(await runNode(path.join(ROOT, "scripts", "check-lib-version-bump.js"))) });
-  results.push({ step: "client_parity", ...(await runNode(path.join(ROOT, "scripts", "check-client-parity.js"))) });
-  results.push({ step: "verify_static_root", ...(await runNode(path.join(ROOT, "scripts", "verify-static-root.js"))) });
-  results.push({ step: "verify_static_esm", ...(await runNode(path.join(ROOT, "scripts", "verify-static-esm.js"), { BASE_URL })) });
+  const libCheck = runScript("check-lib-version-bump.js", {}, STRICT ? ["--strict"] : []);
+  results.push({ step: "lib_version_bump", ...libCheck });
+  if (libCheck.parsed?.libraries?.length) {
+    results.push({ step: "catalog_coverage", ...runScript("constraints.coverage.test.js") });
+  }
+  results.push({ step: "verify_static_root", ...runScript("verify-static-root.js") });
+  results.push({ step: "verify_static_esm", ...runScript("verify-static-esm.js", { BASE_URL }) });
   results.push({
     step: "simulate_short",
-    ...(await runNode(path.join(ROOT, "scripts", "simulate.js"), {
+    ...runScript("simulate.js", {
       SIM_BASE_URL: BASE_URL,
       SIM_DAYS: "3",
       SIM_CONCURRENCY: "false",
-    })),
+    }),
   });
+  results.push({ step: "client_parity", ...runScript("check-client-parity.js") });
   if (!SKIP_PERF) {
-    results.push({ step: "perf_gate", ...(await runNode(path.join(ROOT, "scripts", "perf-gate.js"), { BASE_URL })) });
+    results.push({ step: "perf_gate", ...runScript("perf-gate.js", { BASE_URL }) });
   }
 
   const ok = results.every((entry) => entry.ok);
@@ -119,7 +112,12 @@ async function run() {
     })),
   };
 
-  console.log(JSON.stringify(summary, null, 2));
+  if (USE_JSON) {
+    console.log(JSON.stringify(summary));
+  } else {
+    const failed = summary.steps.filter((entry) => !entry.ok).map((entry) => entry.step);
+    console.log(`full_traffic_gate ok=${summary.ok} failed=${failed.length ? failed.join(",") : "none"}`);
+  }
   if (!ok) process.exit(1);
 }
 
