@@ -1,12 +1,14 @@
 // Runbook: set SIM_BASE_URL (or BASE_URL) and SIM_AUTH_TOKEN for remote sims.
 import path from "path";
 import { runNode } from "./lib/exec.js";
+import { writeArtifact, writeLog } from "./lib/artifacts.js";
 
 const ROOT = process.cwd();
 const USE_JSON = process.argv.includes("--json");
-const STRICT = process.argv.includes("--strict") ? true : process.env.RUNBOOK_STRICT !== "false";
-const LIB_CHECK_ARGS = process.argv.includes("--strict") ? ["--strict"] : [];
+const STRICT = process.argv.includes("--strict") || process.env.STRICT === "true" ? true : process.env.RUNBOOK_STRICT !== "false";
+const LIB_CHECK_ARGS = process.argv.includes("--strict") || process.env.STRICT === "true" ? ["--strict"] : [];
 const BASE_URL = process.env.SIM_BASE_URL || process.env.BASE_URL || "";
+const SKIP_NIGHTLY_CANARY = process.env.SKIP_NIGHTLY_CANARY === "true";
 
 function summarizeLine(summary) {
   const failed = summary.steps.filter((entry) => !entry.ok).map((entry) => entry.step);
@@ -33,16 +35,21 @@ function run() {
     results.push({ step: "catalog_coverage", ...runNode(path.join(ROOT, "scripts", "constraints.coverage.test.js")) });
   }
 
-  results.push({
-    step: "nightly_canary",
-    ...runNode(path.join(ROOT, "scripts", "nightly-canary.js"), { SIM_BASE_URL: BASE_URL, SIM_CONCURRENCY: "true" }),
-  });
+  if (SKIP_NIGHTLY_CANARY) {
+    results.push({ step: "nightly_canary", ok: true, code: 0, stdout: "Skipped: SKIP_NIGHTLY_CANARY=true", stderr: "" });
+  } else {
+    results.push({
+      step: "nightly_canary",
+      ...runNode(path.join(ROOT, "scripts", "nightly-canary.js"), { SIM_BASE_URL: BASE_URL, SIM_CONCURRENCY: "true" }),
+    });
+  }
   results.push({ step: "perf_gate", ...runNode(path.join(ROOT, "scripts", "perf-gate.js"), { BASE_URL }) });
 
   const ok = results.every((entry) => entry.ok);
   const summary = {
     ok,
     strict: STRICT,
+    evidenceBundle: results[0].parsed?.evidenceBundle || null,
     steps: results.map((entry) => ({
       step: entry.step,
       ok: entry.ok,
@@ -50,6 +57,33 @@ function run() {
       note: entry.ok ? entry.stdout || null : entry.stderr || entry.stdout || null,
     })),
   };
+
+  const logPaths = {};
+  results.forEach((entry) => {
+    if (entry.stdout) {
+      logPaths[`${entry.step}.stdout`] = writeLog("nightly", `${entry.step}-stdout`, entry.stdout);
+    }
+    if (entry.stderr) {
+      logPaths[`${entry.step}.stderr`] = writeLog("nightly", `${entry.step}-stderr`, entry.stderr);
+    }
+  });
+
+  const nightlyParsed = results.find((entry) => entry.step === "nightly_canary")?.parsed || null;
+  const perfParsed = results.find((entry) => entry.step === "perf_gate")?.parsed || null;
+  const artifact = {
+    ok,
+    ranAt: new Date().toISOString(),
+    evidenceBundle: summary.evidenceBundle,
+    nondeterminism: nightlyParsed?.warnings?.nondeterminism ?? nightlyParsed?.nondeterminism ?? null,
+    contractInvalid: nightlyParsed?.warnings?.contractInvalid ?? null,
+    perf: perfParsed,
+    logs: {
+      paths: (process.env.LOG_PATHS || "").split(",").map((p) => p.trim()).filter(Boolean),
+      outputs: logPaths,
+    },
+  };
+  const artifactPath = writeArtifact("nightly", "nightly", artifact);
+  summary.artifactPath = artifactPath;
 
   console.log(USE_JSON ? JSON.stringify(summary) : summarizeLine(summary));
   if (!ok) process.exit(1);

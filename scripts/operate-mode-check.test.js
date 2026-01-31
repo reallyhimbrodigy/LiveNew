@@ -20,6 +20,7 @@ const okRes = spawnSync(process.execPath, ["scripts/operate-mode-check.js"], {
     CONTRACT_LOCK: "true",
     DOMAIN_LOCK: "true",
     STATIC_ROOT_LOCK: "true",
+    CATALOG_FREEZE: "true",
     REQUIRED_EVIDENCE_ID: "EV123",
     OVERRIDE_REASON: "incident-123",
   },

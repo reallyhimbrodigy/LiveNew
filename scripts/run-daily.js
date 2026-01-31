@@ -1,11 +1,12 @@
 // Runbook: set LOG_PATHS/REPORT_PATHS and PARITY_LOG_PATH before running.
 import path from "path";
 import { runNode } from "./lib/exec.js";
+import { writeArtifact, writeLog } from "./lib/artifacts.js";
 
 const ROOT = process.cwd();
 const USE_JSON = process.argv.includes("--json");
-const STRICT = process.argv.includes("--strict") ? true : process.env.RUNBOOK_STRICT !== "false";
-const EVIDENCE_STRICT = process.argv.includes("--strict") ? true : process.env.EVIDENCE_STRICT === "true";
+const STRICT = process.argv.includes("--strict") || process.env.STRICT === "true" ? true : process.env.RUNBOOK_STRICT !== "false";
+const EVIDENCE_STRICT = process.argv.includes("--strict") || process.env.STRICT === "true" ? true : process.env.EVIDENCE_STRICT === "true";
 
 function summarizeLine(summary) {
   const failed = summary.steps.filter((entry) => !entry.ok).map((entry) => entry.step);
@@ -21,7 +22,10 @@ function run() {
     process.exit(results[0].code === 2 ? 2 : 1);
   }
 
-  results.push({ step: "check_client_parity", ...runNode(path.join(ROOT, "scripts", "check-client-parity.js")) });
+  results.push({
+    step: "check_client_parity",
+    ...runNode(path.join(ROOT, "scripts", "check-client-parity.js"), { args: ["--json"] }),
+  });
   results.push({ step: "collect_evidence", ...runNode(path.join(ROOT, "scripts", "collect-evidence.js")) });
 
   const parityEntry = results.find((entry) => entry.step === "check_client_parity");
@@ -33,6 +37,7 @@ function run() {
   const summary = {
     ok,
     strict: STRICT,
+    evidenceBundle: results[0].parsed?.evidenceBundle || null,
     steps: results.map((entry) => ({
       step: entry.step,
       ok: entry.ok,
@@ -40,6 +45,30 @@ function run() {
       note: entry.ok ? entry.stdout || null : entry.stderr || entry.stdout || null,
     })),
   };
+
+  const logPaths = {};
+  results.forEach((entry) => {
+    if (entry.stdout) {
+      logPaths[`${entry.step}.stdout`] = writeLog("daily", `${entry.step}-stdout`, entry.stdout);
+    }
+    if (entry.stderr) {
+      logPaths[`${entry.step}.stderr`] = writeLog("daily", `${entry.step}-stderr`, entry.stderr);
+    }
+  });
+
+  const artifact = {
+    ok,
+    ranAt: new Date().toISOString(),
+    evidenceBundle: summary.evidenceBundle,
+    parity: parityEntry?.parsed || null,
+    counters: results.find((entry) => entry.step === "collect_evidence")?.parsed?.counters || null,
+    logs: {
+      paths: (process.env.LOG_PATHS || "").split(",").map((p) => p.trim()).filter(Boolean),
+      outputs: logPaths,
+    },
+  };
+  const artifactPath = writeArtifact("daily", "daily", artifact);
+  summary.artifactPath = artifactPath;
 
   console.log(USE_JSON ? JSON.stringify(summary) : summarizeLine(summary));
   if (!parityOk) process.exit(parityEntry?.code === 2 ? 2 : 1);

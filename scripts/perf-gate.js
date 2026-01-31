@@ -1,6 +1,9 @@
 // Runbook: set BASE_URL and optional LOAD_TEST_PRESET, P95/P99 thresholds.
 import { spawn } from "child_process";
 import path from "path";
+import { writeArtifact } from "./lib/artifacts.js";
+import { writeEvidenceBundle } from "./lib/evidence-bundle.js";
+import { parseJsonLine } from "./lib/exec.js";
 
 const ROOT = process.cwd();
 const MOCK = process.env.PERF_GATE_MOCK === "true";
@@ -28,8 +31,26 @@ async function run() {
     const loadOk = process.env.PERF_GATE_LOAD_OK !== "false";
     const dbOk = process.env.PERF_GATE_DB_OK !== "false";
     const ok = loadOk && dbOk;
-    console.log(JSON.stringify({ ok, mock: true, loadTest: { ok: loadOk }, dbProfile: { ok: dbOk } }, null, 2));
-    if (!ok) process.exit(1);
+    const preset = process.env.PERF_PRESET || process.env.LOAD_TEST_PRESET || null;
+    const summary = {
+      ok,
+      mock: true,
+      preset,
+      loadTest: { ok: loadOk, preset },
+      dbProfile: { ok: dbOk },
+    };
+    console.log(JSON.stringify(summary, null, 2));
+    if (!ok) {
+      const artifactPath = writeArtifact("incidents/perf", "perf", summary);
+      writeEvidenceBundle({
+        evidenceId: (process.env.REQUIRED_EVIDENCE_ID || "").trim(),
+        type: "perf",
+        requestId: (process.env.REQUEST_ID || "").trim(),
+        scenarioPack: (process.env.SCENARIO_PACK || "").trim(),
+        extra: { artifactPath, mock: true },
+      });
+      process.exit(1);
+    }
     return;
   }
 
@@ -39,11 +60,10 @@ async function run() {
   }
 
   const results = [];
-  results.push({ step: "db_profile", ...(await runNode(path.join(ROOT, "scripts", "db-profile.js"))) });
-  results.push({
-    step: "load_test",
-    ...(await runNode(path.join(ROOT, "scripts", "load-test.js"), { BASE_URL })),
-  });
+  const dbProfile = await runNode(path.join(ROOT, "scripts", "db-profile.js"));
+  const loadTest = await runNode(path.join(ROOT, "scripts", "load-test.js"), { BASE_URL });
+  results.push({ step: "db_profile", ...dbProfile, parsed: parseJsonLine(dbProfile.stdout) || parseJsonLine(dbProfile.stderr) });
+  results.push({ step: "load_test", ...loadTest, parsed: parseJsonLine(loadTest.stdout) || parseJsonLine(loadTest.stderr) });
 
   const ok = results.every((entry) => entry.ok);
   const summary = {
@@ -54,10 +74,22 @@ async function run() {
       code: entry.code,
       note: entry.ok ? entry.stdout || null : entry.stderr || entry.stdout || null,
     })),
+    loadTest: results.find((entry) => entry.step === "load_test")?.parsed || null,
+    dbProfile: results.find((entry) => entry.step === "db_profile")?.parsed || null,
   };
 
   console.log(JSON.stringify(summary, null, 2));
-  if (!ok) process.exit(1);
+  if (!ok) {
+    const artifactPath = writeArtifact("incidents/perf", "perf", summary);
+    writeEvidenceBundle({
+      evidenceId: (process.env.REQUIRED_EVIDENCE_ID || "").trim(),
+      type: "perf",
+      requestId: (process.env.REQUEST_ID || "").trim(),
+      scenarioPack: (process.env.SCENARIO_PACK || "").trim(),
+      extra: { artifactPath },
+    });
+    process.exit(1);
+  }
 }
 
 run().catch((err) => {

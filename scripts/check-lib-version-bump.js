@@ -6,6 +6,8 @@ const STRICT_GIT_CHECK = process.env.STRICT_GIT_CHECK === "true" || process.argv
 const USE_JSON = process.argv.includes("--json");
 const LIBRARY_PREFIX = "src/domain/libraries/";
 const VERSION_FILE = "src/domain/libraryVersion.js";
+const CATALOG_FREEZE = process.env.CATALOG_FREEZE === "true";
+const CATALOG_RELEASE_MODE = process.env.CATALOG_RELEASE_MODE === "true";
 
 function parseList(value) {
   if (!value) return [];
@@ -55,6 +57,16 @@ function run() {
   }
   const libraryChanges = files.filter((file) => file.startsWith(LIBRARY_PREFIX));
   const versionChanged = files.includes(VERSION_FILE);
+  if (libraryChanges.length && CATALOG_FREEZE && !CATALOG_RELEASE_MODE) {
+    const err = {
+      ok: false,
+      error: "catalog_freeze_active",
+      libraries: libraryChanges,
+      releaseRequired: true,
+    };
+    console.error(JSON.stringify(err));
+    process.exit(1);
+  }
   if (libraryChanges.length && !versionChanged) {
     const err = {
       ok: false,

@@ -1,6 +1,6 @@
 // Runbook: set BASE_URL and AUTH_TOKEN. Optional: USERS, JITTER_MS, P95_*_MAX_MS thresholds.
 const BASE_URL = process.env.BASE_URL || "http://localhost:3000";
-const PRESET = process.env.LOAD_TEST_PRESET || "";
+const PRESET = process.env.LOAD_TEST_PRESET || process.env.PERF_PRESET || "";
 const USERS = Math.max(1, Number(process.env.USERS || (PRESET === "prod" ? 200 : 50)));
 const JITTER_MS = Math.max(0, Number(process.env.JITTER_MS || (PRESET === "prod" ? 10 : 25)));
 const AUTH_TOKEN = process.env.AUTH_TOKEN || "";

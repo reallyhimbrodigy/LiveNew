@@ -1,10 +1,11 @@
 // Runbook: set SIM_BASE_URL (or BASE_URL) and SMOKE_TOKEN for maintenance verify.
 import path from "path";
 import { runNode } from "./lib/exec.js";
+import { writeArtifact, writeLog } from "./lib/artifacts.js";
 
 const ROOT = process.cwd();
 const USE_JSON = process.argv.includes("--json");
-const STRICT = process.argv.includes("--strict") ? true : process.env.RUNBOOK_STRICT !== "false";
+const STRICT = process.argv.includes("--strict") || process.env.STRICT === "true" ? true : process.env.RUNBOOK_STRICT !== "false";
 
 function summarizeLine(summary) {
   const failed = summary.steps.filter((entry) => !entry.ok).map((entry) => entry.step);
@@ -27,6 +28,7 @@ function run() {
   const summary = {
     ok,
     strict: STRICT,
+    evidenceBundle: results[0].parsed?.evidenceBundle || null,
     steps: results.map((entry) => ({
       step: entry.step,
       ok: entry.ok,
@@ -34,6 +36,30 @@ function run() {
       note: entry.ok ? entry.stdout || null : entry.stderr || entry.stdout || null,
     })),
   };
+
+  const logPaths = {};
+  results.forEach((entry) => {
+    if (entry.stdout) {
+      logPaths[`${entry.step}.stdout`] = writeLog("weekly", `${entry.step}-stdout`, entry.stdout);
+    }
+    if (entry.stderr) {
+      logPaths[`${entry.step}.stderr`] = writeLog("weekly", `${entry.step}-stderr`, entry.stderr);
+    }
+  });
+
+  const dbParsed = results.find((entry) => entry.step === "db_profile")?.parsed || null;
+  const artifact = {
+    ok,
+    ranAt: new Date().toISOString(),
+    evidenceBundle: summary.evidenceBundle,
+    dbProfile: dbParsed,
+    logs: {
+      paths: (process.env.LOG_PATHS || "").split(",").map((p) => p.trim()).filter(Boolean),
+      outputs: logPaths,
+    },
+  };
+  const artifactPath = writeArtifact("weekly", "weekly", artifact);
+  summary.artifactPath = artifactPath;
 
   console.log(USE_JSON ? JSON.stringify(summary) : summarizeLine(summary));
   if (!ok) process.exit(1);

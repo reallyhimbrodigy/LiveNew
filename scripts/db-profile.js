@@ -1,6 +1,8 @@
 import fs from "fs/promises";
 import path from "path";
 import { initDb, closeDb, explainQueryPlan, checkRequiredIndexes } from "../src/state/db.js";
+import { writeArtifact } from "./lib/artifacts.js";
+import { writeEvidenceBundle } from "./lib/evidence-bundle.js";
 
 const ROOT = process.cwd();
 const BASELINE_PATH = process.env.DB_PROFILE_BASELINE || path.join(ROOT, "test", "db-profile.baseline.json");
@@ -108,28 +110,34 @@ async function run() {
   const fullScans = plans.filter((plan) => plan.fullScan).map((plan) => plan.label);
   const ok = indexCheck.ok && queryIssues.length === 0 && fullScans.length === 0 && baselineRegressions.length === 0;
 
-  console.log(
-    JSON.stringify(
-      {
-        ok,
-        indexes: { ok: indexCheck.ok, missing: missingIndexes },
-        queries: plans.map((plan) => ({
-          label: plan.label,
-          indexed: plan.indexed,
-          fullScan: plan.fullScan,
-          suggestions: suggestions[plan.label] || [],
-        })),
-        queryIssues,
-        fullScans,
-        baseline: baseline ? { path: BASELINE_PATH, regressions: baselineRegressions } : null,
-      },
-      null,
-      2
-    )
-  );
+  const summary = {
+    ok,
+    indexes: { ok: indexCheck.ok, missing: missingIndexes },
+    queries: plans.map((plan) => ({
+      label: plan.label,
+      indexed: plan.indexed,
+      fullScan: plan.fullScan,
+      suggestions: suggestions[plan.label] || [],
+    })),
+    queryIssues,
+    fullScans,
+    baseline: baseline ? { path: BASELINE_PATH, regressions: baselineRegressions } : null,
+  };
+
+  console.log(JSON.stringify(summary, null, 2));
 
   await closeDb();
-  if (!ok) process.exit(1);
+  if (!ok) {
+    const artifactPath = writeArtifact("incidents/perf", "db-profile", summary);
+    writeEvidenceBundle({
+      evidenceId: (process.env.REQUIRED_EVIDENCE_ID || "").trim(),
+      type: "perf",
+      requestId: (process.env.REQUEST_ID || "").trim(),
+      scenarioPack: (process.env.SCENARIO_PACK || "").trim(),
+      extra: { artifactPath, kind: "db-profile" },
+    });
+    process.exit(1);
+  }
 }
 
 run().catch((err) => {

@@ -20,23 +20,34 @@ export function evaluateEvidence({ env = process.env } = {}) {
     Boolean(String(env.OVERRIDE_REASON || "").trim()) ||
     Boolean(String(env.EVIDENCE_FILE || "").trim());
 
+  const evidenceBundleTemplate = {
+    requiredEvidenceId: (env.REQUIRED_EVIDENCE_ID || "").trim() || null,
+    requestId: (env.REQUEST_ID || "").trim(),
+    scenarioPack: (env.SCENARIO_PACK || "").trim(),
+  };
+
   if (!overrideRequested) {
-    return { ok: true, launchWindow: true, override: false };
+    return { ok: true, launchWindow: true, override: false, evidenceBundle: evidenceBundleTemplate };
   }
 
   const evidenceId = (env.REQUIRED_EVIDENCE_ID || "").trim();
   if (!evidenceId) {
-    return { ok: false, error: "missing_required_evidence_id" };
+    return { ok: false, error: "missing_required_evidence_id", evidenceBundle: evidenceBundleTemplate };
   }
 
   const overrideReason = (env.OVERRIDE_REASON || "").trim();
   const evidenceFile = (env.EVIDENCE_FILE || "").trim();
   if (!overrideReason && !evidenceFile) {
-    return { ok: false, error: "missing_override_reason", required: "OVERRIDE_REASON or EVIDENCE_FILE" };
+    return {
+      ok: false,
+      error: "missing_override_reason",
+      required: "OVERRIDE_REASON or EVIDENCE_FILE",
+      evidenceBundle: evidenceBundleTemplate,
+    };
   }
 
   if (evidenceFile && !fs.existsSync(evidenceFile)) {
-    return { ok: false, error: "evidence_file_missing", evidenceFile };
+    return { ok: false, error: "evidence_file_missing", evidenceFile, evidenceBundle: evidenceBundleTemplate };
   }
 
   return {
@@ -47,5 +58,6 @@ export function evaluateEvidence({ env = process.env } = {}) {
     evidenceId,
     overrideReason: overrideReason || null,
     evidenceFile: evidenceFile || null,
+    evidenceBundle: evidenceBundleTemplate,
   };
 }
