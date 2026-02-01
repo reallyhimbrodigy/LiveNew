@@ -58,10 +58,13 @@ function run() {
 
   const fileEnv = parseEnvFile(envFile);
   const mergedEnv = { ...fileEnv, ...process.env };
+  const mockGate = (process.env.GO_FULL_TRAFFIC_GATE_JSON || "").trim();
   const gateArgs = ["--json"];
   if (envFile) gateArgs.push("--env-file", envFile);
 
-  const gate = runNode(path.join(ROOT, "scripts", "run-prod-gate.js"), { env: mergedEnv, args: gateArgs });
+  const gate = mockGate
+    ? { ok: true, code: 0, parsed: JSON.parse(mockGate) }
+    : runNode(path.join(ROOT, "scripts", "run-prod-gate.js"), { env: mergedEnv, args: gateArgs });
   if (!gate.ok) {
     const artifactPath = writeArtifact("rollouts", "full-traffic", {
       ok: false,
@@ -75,26 +78,50 @@ function run() {
   }
 
   const canaryEnabled = isCanaryEnabled(mergedEnv);
-  if (canaryEnabled) {
+  const gateCanaryEnabled = gate.parsed?.gate?.canary_enabled ?? gate.parsed?.canary_enabled ?? null;
+  if (gateCanaryEnabled === null) {
+    const artifactPath = writeArtifact("rollouts", "canary-off-verify", {
+      ok: false,
+      step: "canary_verification",
+      error: "missing_gate_canary_flag",
+      ranAt: new Date().toISOString(),
+    });
+    console.log(JSON.stringify({ ok: false, error: "missing_gate_canary_flag", artifactPath }));
+    process.exit(2);
+  }
+
+  if (canaryEnabled || gateCanaryEnabled) {
     const required = 'Set CANARY_ALLOWLIST="" (or unset) before declaring full traffic';
-    const artifactPath = writeArtifact("rollouts", "full-traffic", {
+    const artifactPath = writeArtifact("rollouts", "canary-off-verify", {
       ok: false,
       step: "canary_removal",
       exitCode: 2,
       required,
+      canaryEnabled,
+      gateCanaryEnabled,
       ranAt: new Date().toISOString(),
       gate: gate.parsed || null,
     });
-    console.log(JSON.stringify({ ok: false, error: "canary_still_enabled", required, artifactPath }));
+    console.log(
+      JSON.stringify({ ok: false, error: "canary_still_enabled", required, canaryEnabled, gateCanaryEnabled, artifactPath })
+    );
     process.exit(2);
   }
 
+  const verifyPath = writeArtifact("rollouts", "canary-off-verify", {
+    ok: true,
+    step: "canary_removal",
+    canaryEnabled,
+    gateCanaryEnabled,
+    ranAt: new Date().toISOString(),
+    gate: gate.parsed || null,
+  });
   const artifactPath = writeArtifact("rollouts", "full-traffic", {
     ok: true,
     ranAt: new Date().toISOString(),
     gate: gate.parsed || null,
   });
-  console.log(JSON.stringify({ ok: true, artifactPath }));
+  console.log(JSON.stringify({ ok: true, artifactPath, verifyPath }));
 }
 
 run();

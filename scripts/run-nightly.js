@@ -31,6 +31,11 @@ function run() {
 
   const libCheck = runNode(path.join(ROOT, "scripts", "check-lib-version-bump.js"), { args: LIB_CHECK_ARGS });
   results.push({ step: "lib_version_bump", ...libCheck });
+  if (!libCheck.ok) {
+    const summary = { ok: false, steps: results };
+    console.log(USE_JSON ? JSON.stringify(summary) : summarizeLine(summary));
+    process.exit(libCheck.code === 2 ? 2 : 1);
+  }
   if (libCheck.parsed?.libraries?.length) {
     results.push({ step: "catalog_coverage", ...runNode(path.join(ROOT, "scripts", "constraints.coverage.test.js")) });
   }

@@ -74,6 +74,12 @@ async function run() {
   assert(driftRes.status !== 0, "check-client-parity should fail on trend drop");
   const parityArtifacts = await fs.readdir(path.join(artifactDir, "incidents", "parity"));
   assert(parityArtifacts.length > 0, "parity artifact should be written on failure");
+  const remediationName = parityArtifacts.find((name) => name.includes("remediation"));
+  assert(remediationName, "parity remediation artifact should be written");
+  const remediation = JSON.parse(
+    await fs.readFile(path.join(artifactDir, "incidents", "parity", remediationName), "utf8")
+  );
+  assert(remediation.missingHeaders, "remediation should include missingHeaders");
 
   const maPath = path.join(tmpDir, "parity-ma.log");
   const maEvents = [

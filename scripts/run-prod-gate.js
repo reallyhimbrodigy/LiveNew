@@ -80,13 +80,19 @@ function run() {
     ok: gate.ok,
     code: gate.code,
     baseUrl: mergedEnv.BASE_URL || mergedEnv.SIM_BASE_URL || null,
+    gate: gate.parsed || null,
     stdoutPath,
     stderrPath,
     ranAt: new Date().toISOString(),
   };
   const artifactPath = writeArtifact("gates", "prod", artifact);
 
-  const summary = { ok: gate.ok, code: gate.code, artifactPath };
+  const summary = {
+    ok: gate.ok,
+    code: gate.code,
+    canary_enabled: gate.parsed?.canary_enabled ?? null,
+    artifactPath,
+  };
   console.log(useJson ? JSON.stringify(summary) : `prod_gate ok=${summary.ok} artifact=${artifactPath}`);
   process.exit(gate.code);
 }

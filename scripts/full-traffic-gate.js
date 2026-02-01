@@ -106,6 +106,9 @@ async function run() {
 
   const libCheck = runScript("check-lib-version-bump.js", {}, STRICT ? ["--strict"] : []);
   results.push({ step: "lib_version_bump", ...libCheck });
+  if (!libCheck.ok) {
+    outputAndExit({ ok: false, error: "lib_version_bump_failed", steps: results, evidenceBundle }, libCheck.code === 2 ? 2 : 1);
+  }
   if (libCheck.parsed?.libraries?.length) {
     const releaseCheck = runScript("catalog-release-check.js", {}, STRICT ? ["--strict"] : []);
     results.push({ step: "catalog_release_check", ...releaseCheck });
@@ -140,6 +143,8 @@ async function run() {
   const ok = results.every((entry) => entry.ok);
   const summary = {
     ok,
+    canary_enabled: isCanaryEnabled(),
+    canary_mode: CANARY_MODE,
     evidenceBundle,
     steps: results.map((entry) => ({
       step: entry.step,

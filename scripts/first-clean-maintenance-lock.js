@@ -1,7 +1,7 @@
 // Runbook: lock retention config after first clean maintenance run.
 import fs from "fs";
 import path from "path";
-import { artifactsBaseDir, ensureDir } from "./lib/artifacts.js";
+import { artifactsBaseDir, ensureDir, writeArtifact } from "./lib/artifacts.js";
 
 const BASE = artifactsBaseDir();
 const MAINT_DIR = path.join(BASE, "maintenance");
@@ -55,6 +55,7 @@ function run() {
   }
 
   const retention = currentRetentionConfig();
+  const capturedEnvVars = ["RETENTION_DAYS", "EVENT_RETENTION_DAYS", "IDEMPOTENCY_RETENTION_DAYS"];
   ensureDir(MAINT_DIR);
   const payload = {
     ok: true,
@@ -62,8 +63,11 @@ function run() {
     lockedAt: new Date().toISOString(),
     sourceArtifact: latest.filePath,
     retention,
+    capturedEnvVars,
+    summary: `locked retentionDays=${retention.retentionDays} eventRetentionDays=${retention.eventRetentionDays} idempotencyRetentionDays=${retention.idempotencyRetentionDays}`,
   };
   fs.writeFileSync(LOCK_PATH, JSON.stringify(payload, null, 2));
+  writeArtifact("maintenance", "retention-lock", payload);
   console.log(JSON.stringify(payload));
 }
 

@@ -8,8 +8,10 @@ function listOverrideEnvs(env) {
 
 export function evaluateEvidence({ env = process.env } = {}) {
   const launchWindow = env.LAUNCH_WINDOW === "true";
-  if (!launchWindow) {
-    return { ok: true, launchWindow: false, override: false };
+  const stabilityWindow = env.STABILITY_WINDOW === "true";
+  const enforceWindow = launchWindow || stabilityWindow;
+  if (!enforceWindow) {
+    return { ok: true, launchWindow: false, stabilityWindow: false, override: false };
   }
 
   const overrideEnvKeys = listOverrideEnvs(env);
@@ -27,7 +29,13 @@ export function evaluateEvidence({ env = process.env } = {}) {
   };
 
   if (!overrideRequested) {
-    return { ok: true, launchWindow: true, override: false, evidenceBundle: evidenceBundleTemplate };
+    return {
+      ok: true,
+      launchWindow,
+      stabilityWindow,
+      override: false,
+      evidenceBundle: evidenceBundleTemplate,
+    };
   }
 
   const evidenceId = (env.REQUIRED_EVIDENCE_ID || "").trim();
@@ -52,7 +60,8 @@ export function evaluateEvidence({ env = process.env } = {}) {
 
   return {
     ok: true,
-    launchWindow: true,
+    launchWindow,
+    stabilityWindow,
     override: true,
     overrideEnvKeys,
     evidenceId,

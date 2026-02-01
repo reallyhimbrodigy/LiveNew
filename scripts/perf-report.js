@@ -34,7 +34,9 @@ function latestIncident(paths) {
 }
 
 function run() {
-  const latest = latestIncident(listPerfIncidents());
+  const incidents = listPerfIncidents();
+  const postdeploy = incidents.filter((filePath) => filePath.includes("postdeploy"));
+  const latest = latestIncident(postdeploy.length ? postdeploy : incidents);
   if (!latest) {
     const out = { ok: false, error: "no_perf_incident_found" };
     console.log(USE_JSON ? JSON.stringify(out) : "perf_report ok=false error=no_perf_incident_found");

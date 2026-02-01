@@ -2,6 +2,7 @@
 import path from "path";
 import { runNode } from "./lib/exec.js";
 import { writeArtifact, writeLog } from "./lib/artifacts.js";
+import { writeEvidenceBundle } from "./lib/evidence-bundle.js";
 
 const ROOT = process.cwd();
 const USE_JSON = process.argv.includes("--json");
@@ -85,14 +86,26 @@ function run() {
   summary.artifactPath = artifactPath;
 
   if (WRITE_STORM_THRESHOLD > 0 && writeStormTotal > WRITE_STORM_THRESHOLD) {
-    writeArtifact("incidents/parity", "storm", {
+    const stormPath = writeArtifact("incidents/parity", "storm", {
       ok: false,
       ranAt: artifact.ranAt,
       total: writeStormTotal,
       threshold: WRITE_STORM_THRESHOLD,
       byRoute: writeStormByRoute,
       requestIdsByRoute: writeStormRequestIdsByRoute,
+      recommendations: [
+        "Reduce client retry burst; apply jitter/backoff",
+        "Ensure Idempotency-Key is stable per logical write",
+        "Throttle rapid repeat submissions on client",
+      ],
       sourceArtifact: artifactPath,
+    });
+    writeEvidenceBundle({
+      evidenceId: (process.env.REQUIRED_EVIDENCE_ID || "").trim(),
+      type: "write_storm",
+      requestId: (process.env.REQUEST_ID || "").trim(),
+      scenarioPack: (process.env.SCENARIO_PACK || "").trim(),
+      extra: { stormPath, total: writeStormTotal, byRoute: writeStormByRoute },
     });
   }
 

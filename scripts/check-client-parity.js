@@ -113,6 +113,21 @@ function ratesFrom(event) {
   };
 }
 
+function missingHeaderEstimates(event) {
+  if (!event || typeof event !== "object") return null;
+  const checkinTotal = Number(event.checkin?.total);
+  const checkinWith = Number(event.checkin?.withKey);
+  const quickTotal = Number(event.quick?.total);
+  const quickWith = Number(event.quick?.withKey);
+  const todayTotal = Number(event.today?.total);
+  const todayWith = Number(event.today?.withIfNoneMatch);
+  return {
+    "Idempotency-Key (checkin)": Number.isFinite(checkinTotal) && Number.isFinite(checkinWith) ? Math.max(0, checkinTotal - checkinWith) : null,
+    "Idempotency-Key (quick)": Number.isFinite(quickTotal) && Number.isFinite(quickWith) ? Math.max(0, quickTotal - quickWith) : null,
+    "If-None-Match (today)": Number.isFinite(todayTotal) && Number.isFinite(todayWith) ? Math.max(0, todayTotal - todayWith) : null,
+  };
+}
+
 function averageRates(events) {
   const sums = { checkin: 0, quick: 0, today: 0 };
   const counts = { checkin: 0, quick: 0, today: 0 };
@@ -158,6 +173,7 @@ async function run() {
   const events = latest.events || [];
   const latestEvent = events[events.length - 1] || {};
   const actual = ratesFrom(latestEvent);
+  const missingHeaders = missingHeaderEstimates(latestEvent);
   const windowStart = Math.max(0, events.length - PARITY_MOVING_WINDOW);
   const currentWindow = events.slice(windowStart);
   const previousWindow = events.slice(Math.max(0, windowStart - PARITY_MOVING_WINDOW), windowStart);
@@ -210,6 +226,7 @@ async function run() {
     movingAverage,
     previousAverage,
     trendDrop,
+    missingHeaders,
     missing,
     failures,
   };
@@ -222,12 +239,27 @@ async function run() {
   }
   if (!ok) {
     const artifactPath = writeArtifact("incidents/parity", "parity", summary);
+    const remediation = {
+      ok: false,
+      ranAt: new Date().toISOString(),
+      rootCauseClass: "client",
+      allowedRemediation: "client_headers_retry_backoff_only",
+      failures,
+      missingHeaders,
+      recommendations: [
+        "Ensure Idempotency-Key is set for checkin/quick writes",
+        "Send If-None-Match on /today requests to enable 304s",
+        "Apply retry with backoff on network errors (client-side)",
+      ],
+      sourceArtifact: artifactPath,
+    };
+    const remediationPath = writeArtifact("incidents/parity", "remediation", remediation);
     writeEvidenceBundle({
       evidenceId: (process.env.REQUIRED_EVIDENCE_ID || "").trim(),
       type: "parity",
       requestId: (process.env.REQUEST_ID || "").trim(),
       scenarioPack: (process.env.SCENARIO_PACK || "").trim(),
-      extra: { artifactPath, thresholds: summary.thresholds, movingAverage, trendDrop },
+      extra: { artifactPath, remediationPath, thresholds: summary.thresholds, movingAverage, trendDrop },
     });
     process.exit(1);
   }

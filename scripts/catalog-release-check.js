@@ -10,6 +10,8 @@ const USE_JSON = process.argv.includes("--json");
 const STRICT = process.argv.includes("--strict") || process.env.STRICT === "true";
 const STABILITY_N_RAW = Number(process.env.CATALOG_STABILITY_N || 3);
 const STABILITY_N = Number.isFinite(STABILITY_N_RAW) ? Math.max(1, STABILITY_N_RAW) : 3;
+const INCIDENT_LOOKBACK_HOURS_RAW = Number(process.env.CATALOG_INCIDENT_LOOKBACK_HOURS || 72);
+const INCIDENT_LOOKBACK_HOURS = Number.isFinite(INCIDENT_LOOKBACK_HOURS_RAW) ? Math.max(1, INCIDENT_LOOKBACK_HOURS_RAW) : 72;
 
 function parseThreshold(value, fallback) {
   if (value == null || value === "") return fallback;
@@ -29,6 +31,27 @@ function listArtifacts(subdir) {
   try {
     const files = fs.readdirSync(dir).filter((name) => name.endsWith(".json"));
     return files.map((name) => path.join(dir, name));
+  } catch {
+    return [];
+  }
+}
+
+function listRecentIncidents(subdir, lookbackMs) {
+  const dir = path.join(artifactsBaseDir(), subdir);
+  try {
+    const files = fs.readdirSync(dir).filter((name) => name.endsWith(".json"));
+    const cutoff = Date.now() - lookbackMs;
+    return files
+      .map((name) => {
+        const filePath = path.join(dir, name);
+        try {
+          const stat = fs.statSync(filePath);
+          return stat.mtimeMs >= cutoff ? filePath : null;
+        } catch {
+          return null;
+        }
+      })
+      .filter(Boolean);
   } catch {
     return [];
   }
@@ -111,6 +134,22 @@ function run() {
     );
   }
 
+  const lookbackMs = INCIDENT_LOOKBACK_HOURS * 60 * 60 * 1000;
+  const recentParity = listRecentIncidents("incidents/parity", lookbackMs);
+  const recentPerf = listRecentIncidents("incidents/perf", lookbackMs);
+  if (recentParity.length || recentPerf.length) {
+    outputAndExit(
+      {
+        ok: false,
+        error: "recent_incidents_present",
+        lookbackHours: INCIDENT_LOOKBACK_HOURS,
+        parity: recentParity,
+        perf: recentPerf,
+      },
+      1
+    );
+  }
+
   const results = [];
   results.push({
     step: "operate_mode_check",
@@ -138,6 +177,7 @@ function run() {
       nightly: nightly.map((entry) => ({ path: entry.filePath, ok: entry.parsed?.ok === true })),
       parity: daily.map((entry) => ({ path: entry.filePath, ok: parityOk(entry.parsed) })),
       thresholds: PARITY_THRESHOLDS,
+      incidentLookbackHours: INCIDENT_LOOKBACK_HOURS,
     },
     rollout: {
       canaryMode: true,

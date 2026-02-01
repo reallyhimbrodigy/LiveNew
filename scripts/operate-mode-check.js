@@ -3,6 +3,7 @@ import { evaluateEvidence } from "./lib/require-evidence.js";
 import { isCanaryEnabled } from "./lib/canary.js";
 
 const LAUNCH_WINDOW = process.env.LAUNCH_WINDOW === "true";
+const STABILITY_WINDOW = process.env.STABILITY_WINDOW === "true";
 const CANARY_MODE = process.env.CANARY_MODE === "true";
 const CANARY_ALLOWLIST = (process.env.CANARY_ALLOWLIST || "").trim();
 const CATALOG_FREEZE = process.env.CATALOG_FREEZE === "true";
@@ -10,8 +11,8 @@ const CATALOG_RELEASE_MODE = process.env.CATALOG_RELEASE_MODE === "true";
 const CATALOG_RELEASE_INTENT = process.env.CATALOG_RELEASE_INTENT === "true";
 
 function run() {
-  if (!LAUNCH_WINDOW) {
-    console.log(JSON.stringify({ ok: true, launchWindow: false }));
+  if (!LAUNCH_WINDOW && !STABILITY_WINDOW) {
+    console.log(JSON.stringify({ ok: true, launchWindow: false, stabilityWindow: false }));
     return;
   }
 
@@ -22,11 +23,21 @@ function run() {
   if (process.env.STATIC_ROOT_LOCK !== "true") missingLocks.push("STATIC_ROOT_LOCK");
   const canaryStillEnabled = isCanaryEnabled() && !CANARY_MODE;
   if (missingLocks.length) {
-    console.error(JSON.stringify({ ok: false, error: "launch_window_locks_missing", missing: missingLocks }));
+    console.error(
+      JSON.stringify({
+        ok: false,
+        error: STABILITY_WINDOW ? "stability_window_locks_missing" : "launch_window_locks_missing",
+        missing: missingLocks,
+      })
+    );
     process.exit(2);
   }
   if (!CATALOG_FREEZE) {
     console.error(JSON.stringify({ ok: false, error: "catalog_freeze_required" }));
+    process.exit(2);
+  }
+  if (STABILITY_WINDOW && CATALOG_RELEASE_MODE) {
+    console.error(JSON.stringify({ ok: false, error: "catalog_release_disallowed" }));
     process.exit(2);
   }
   if (canaryStillEnabled) {
@@ -46,7 +57,8 @@ function run() {
   console.log(
     JSON.stringify({
       ok: true,
-      launchWindow: true,
+      launchWindow: LAUNCH_WINDOW,
+      stabilityWindow: STABILITY_WINDOW,
       canaryMode: CANARY_MODE,
       canaryAllowlist: CANARY_ALLOWLIST || null,
       catalogFreeze: CATALOG_FREEZE,
