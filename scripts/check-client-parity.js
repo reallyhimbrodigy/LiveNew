@@ -242,8 +242,8 @@ async function run() {
     const remediation = {
       ok: false,
       ranAt: new Date().toISOString(),
-      rootCauseClass: "client",
-      allowedRemediation: "client_headers_retry_backoff_only",
+      root_cause_class: "client",
+      allowed_remediation: ["idempotency_header", "if-none-match", "retry_backoff"],
       failures,
       missingHeaders,
       recommendations: [

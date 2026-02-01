@@ -7,7 +7,7 @@ const ROOT = process.cwd();
 const USE_JSON = process.argv.includes("--json");
 
 function run() {
-  const runNightly = process.argv.includes("--nightly");
+  const runNightly = process.argv.includes("--nightly") || process.argv.includes("--include-nightly=true");
   const results = [];
 
   const perf = runNode(path.join(ROOT, "scripts", "post-deploy-perf.js"), { args: ["--json"] });

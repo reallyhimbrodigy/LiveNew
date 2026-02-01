@@ -30,5 +30,6 @@ const res = spawnSync(process.execPath, ["scripts/parity-escalate.js", "--json"]
 assert(res.status === 1, "parity-escalate should exit 1 when parity below thresholds");
 const parsed = JSON.parse(res.stdout || "{}");
 assert(Array.isArray(parsed.checklist), "parity-escalate should print checklist");
+assert(parsed.artifactPath, "parity-escalate should write escalation artifact");
 
 console.log(JSON.stringify({ ok: true }));

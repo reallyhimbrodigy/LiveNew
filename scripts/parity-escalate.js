@@ -1,7 +1,7 @@
 // Runbook: summarize latest parity incident and enforce client remediation.
 import fs from "fs";
 import path from "path";
-import { artifactsBaseDir } from "./lib/artifacts.js";
+import { artifactsBaseDir, writeArtifact } from "./lib/artifacts.js";
 
 const USE_JSON = process.argv.includes("--json");
 
@@ -50,14 +50,19 @@ function run() {
   const out = {
     ok: failures.length === 0,
     incidentPath: latest.filePath,
-    rootCauseClass: incident.rootCauseClass || "client",
-    allowedRemediation: incident.allowedRemediation || "client_headers_retry_backoff_only",
+    root_cause_class: incident.root_cause_class || "client",
+    allowed_remediation: incident.allowed_remediation || ["idempotency_header", "if-none-match", "retry_backoff"],
     failures,
     missingHeaders: incident.missingHeaders || null,
     checklist,
   };
 
-  console.log(USE_JSON ? JSON.stringify(out, null, 2) : `parity_escalate ok=${out.ok} incident=${latest.filePath}`);
+  const artifactPath = writeArtifact("incidents/parity", "escalate", {
+    ...out,
+    ranAt: new Date().toISOString(),
+  });
+  const output = { ...out, artifactPath };
+  console.log(USE_JSON ? JSON.stringify(output, null, 2) : `parity_escalate ok=${out.ok} incident=${latest.filePath}`);
   if (failures.length) process.exit(1);
 }
 
