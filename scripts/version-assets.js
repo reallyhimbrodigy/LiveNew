@@ -81,6 +81,17 @@ async function main() {
     );
   }
 
+  const controllersVersioned = path.join(assetsDir, `controllers.${buildId}.js`);
+  const controllersContent = await fs.readFile(controllersVersioned, "utf8");
+  const hasStaticAppCoreImport = /import\s*\{[^}]*\}\s*from\s*["']\.\/app\.core/.test(
+    controllersContent
+  );
+  if (hasStaticAppCoreImport) {
+    throw new Error(
+      `version-assets: generated controllers.${buildId}.js contains static named import from app.core`
+    );
+  }
+
   const htmlFiles = await walkHtmlFiles(path.join(process.cwd(), "public"));
   await Promise.all(
     htmlFiles.map(async (filePath) => {

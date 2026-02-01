@@ -1,7 +1,12 @@
-import { getAppState, initDay, initWeek, initTrends, initProfile, initAdmin } from "./app.core.js";
-
 const BUILD_ID = "__BUILD_ID__";
 console.log("[LiveNew BUILD]", BUILD_ID);
+
+const core = await import("./app.core.js");
+if (!core || typeof core.getAppState !== "function") {
+  const keys = core ? Object.keys(core).sort().join(", ") : "null";
+  throw new Error(`[LiveNew] app.core missing getAppState. exports=[${keys}]`);
+}
+const { getAppState, initDay, initWeek, initTrends, initProfile, initAdmin } = core;
 
 async function loadCore() {
   return { getAppState, initDay, initWeek, initTrends, initProfile, initAdmin };
