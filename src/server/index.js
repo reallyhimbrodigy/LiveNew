@@ -3484,9 +3484,10 @@ function cacheControlForPath(filePath) {
   if (isHashedAssetName(baseName)) {
     return "public, max-age=31536000, immutable";
   }
-  if (filePath.endsWith(".js")) {
-    return "no-cache";
-  }
+  const assetModule =
+    filePath.includes(`${path.sep}assets${path.sep}`) && (filePath.endsWith(".js") || filePath.endsWith(".mjs"));
+  if (assetModule) return "no-store, must-revalidate";
+  if (filePath.endsWith(".js") || filePath.endsWith(".mjs")) return "no-cache";
   return null;
 }
 

@@ -14,13 +14,16 @@ import {
   setDeviceName,
   getDeviceName,
 } from "./app.api.js";
-import { getAppState as getAppStateInternal } from "./app.state.js";
+import { APP_STATE_SPEC } from "./build.js";
+import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.js";
+import { STRINGS as EN_STRINGS } from "../i18n/en.js";
+
+const stateMod = await import(APP_STATE_SPEC);
+const { getAppState: getAppStateInternal } = stateMod;
+
 export function getAppState() {
   return getAppStateInternal();
 }
-export const BUILD_ID = "04c1fce";
-import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.js";
-import { STRINGS as EN_STRINGS } from "../i18n/en.js";
 
 const LOCALE = "en";
 const STRINGS = { en: EN_STRINGS }[LOCALE] || EN_STRINGS;
