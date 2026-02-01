@@ -28,6 +28,16 @@ import { assertTodayContract } from "../contracts/todayContract.js";
 import { assertBootstrapContract } from "../contracts/bootstrapContract.js";
 import { unwrapTodayEnvelope } from "../contracts/protocol.js";
 import { createMonitoringCounters } from "./monitoring/counters.js";
+import { supabaseForUser } from "./supabase/client.js";
+import { getUserFromRequest } from "./auth/getUserFromRequest.js";
+import { createPersist } from "./persist/index.js";
+import { getDateKey as getDateKeyWithMinute } from "./time/dateKey.js";
+import {
+  baselineFromSupabaseProfile,
+  computeSupabaseUiState,
+  supabaseConsentStatus,
+  supabaseProfileCompleteness,
+} from "./supabase/helpers.js";
 import {
   validateProfile,
   validateCheckIn,
@@ -255,6 +265,20 @@ function enforceLibVersionFreeze() {
       expected,
       actual: String(LIB_VERSION),
     });
+    process.exit(1);
+  }
+}
+
+function requireSupabaseEnv({ requireServiceRole = false } = {}) {
+  const url = (process.env.SUPABASE_URL || "").trim();
+  const anon = (process.env.SUPABASE_ANON_KEY || "").trim();
+  const service = (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim();
+  const missing = [];
+  if (!url) missing.push("SUPABASE_URL");
+  if (!anon) missing.push("SUPABASE_ANON_KEY");
+  if (requireServiceRole && !service) missing.push("SUPABASE_SERVICE_ROLE_KEY");
+  if (missing.length) {
+    logError({ event: "supabase_env_missing", missing });
     process.exit(1);
   }
 }
@@ -538,6 +562,7 @@ if (config.isDevLike) {
 const secretState = ensureSecretKey(config);
 
 enforceLibVersionFreeze();
+requireSupabaseEnv();
 enforceLaunchWindowLocks();
 await enforceLaunchLocks();
 await enforceStaticRootLock();
@@ -1918,6 +1943,663 @@ async function ensureHomeUiState({ userId, userProfile, userBaseline, userEmail,
     return { ok: false, uiState: bootstrap.uiState };
   }
   return { ok: true, uiState: bootstrap.uiState };
+}
+
+
+async function buildSupabaseBootstrapPayload({ userId, userProfile, flags }) {
+  const isAuthenticated = Boolean(userId);
+  const requiredVersion = await getRequiredConsentVersion();
+  const { accepted, consentComplete, version } = supabaseConsentStatus(userProfile, requiredVersion);
+  const userAcceptedKeys = Object.keys(accepted).filter((key) => accepted[key]);
+  const baseline = baselineFromSupabaseProfile(userProfile);
+  const profileStatus = supabaseProfileCompleteness(userProfile);
+  const tz = baseline?.timezone && validateTimeZone(baseline.timezone) ? baseline.timezone : DEFAULT_TIMEZONE;
+  const dayBoundaryHour = baseline?.dayBoundaryHour ?? 4;
+  const dateISO =
+    baseline && Number.isFinite(Number(baseline.dayBoundaryMinute))
+      ? getDateKeyWithMinute({
+          now: new Date(),
+          timezone: tz,
+          dayBoundaryMinute: baseline.dayBoundaryMinute,
+        })
+      : toDateISOWithBoundary(new Date(), tz, dayBoundaryHour) || domain.isoToday();
+  const incidentMode = resolveIncidentMode(flags);
+  const canaryAllowed = isCanaryAllowed({ userId });
+  const onboardingComplete = Boolean(userProfile?.onboardingCompletedAt);
+  const uiState = computeSupabaseUiState({
+    isAuthenticated,
+    consentComplete,
+    consentVersionOk: version >= requiredVersion,
+    profileComplete: profileStatus.isComplete,
+    onboardingComplete,
+    canaryAllowed,
+  });
+  return {
+    ok: true,
+    now: { dateISO, tz, dayBoundaryHour },
+    auth: {
+      isAuthenticated,
+      userId: isAuthenticated ? userId : undefined,
+      isAdmin: false,
+    },
+    consent: {
+      required: REQUIRED_CONSENTS.slice(),
+      requiredKeys: REQUIRED_CONSENTS.slice(),
+      accepted,
+      userAcceptedKeys,
+      isComplete: consentComplete && version >= requiredVersion,
+      requiredVersion,
+      userVersion: version,
+    },
+    profile: {
+      isComplete: profileStatus.isComplete,
+      missingFields: profileStatus.missingFields,
+    },
+    baseline: baseline
+      ? {
+          timezone: tz,
+          dayBoundaryHour,
+          constraints: baseline.constraints || null,
+        }
+      : null,
+    features: {
+      incidentMode,
+      railTodayAvailable: consentComplete && version >= requiredVersion && !incidentMode && isAuthenticated && canaryAllowed,
+    },
+    env: { mode: config.envMode },
+    uiState,
+  };
+}
+
+async function ensureSupabaseHome({ userId, userProfile, flags, pathname }, res) {
+  const bootstrap = await buildSupabaseBootstrapPayload({ userId, userProfile, flags });
+  if (canaryAllowlist.size && !isCanaryAllowed({ userId })) {
+    if (pathname && pathname.startsWith("/v1/")) {
+      logWarn({
+        event: "bootstrap_not_home",
+        requestId: res?.livenewRequestId,
+        userId,
+        route: pathname,
+        uiState: "canary",
+      });
+    }
+    monitoring.increment("gating_violation", { route: pathname, status: 403 });
+    sendErrorCodeOnly(res, 403, "CANARY_GATED");
+    return { ok: false, uiState: "consent" };
+  }
+  if (bootstrap.uiState !== "home") {
+    if (pathname && pathname.startsWith("/v1/")) {
+      logWarn({
+        event: "bootstrap_not_home",
+        requestId: res?.livenewRequestId,
+        userId,
+        route: pathname,
+        uiState: bootstrap.uiState,
+      });
+    }
+    monitoring.increment("gating_violation", { route: pathname, status: 403 });
+    sendErrorCodeOnly(res, 403, "BOOTSTRAP_NOT_HOME");
+    return { ok: false, uiState: bootstrap.uiState };
+  }
+  return { ok: true, uiState: bootstrap.uiState };
+}
+
+function getLastQuickSignal(events) {
+  if (!Array.isArray(events)) return "";
+  const quickEvents = events.filter((event) => event?.type === "quick_signal" && event?.payload?.signal);
+  if (!quickEvents.length) return "";
+  const latest = quickEvents[quickEvents.length - 1];
+  return typeof latest.payload.signal === "string" ? latest.payload.signal : "";
+}
+
+function dayStateFromDerived(derived, lastQuickSignal) {
+  const contract = derived?.todayContract || null;
+  return {
+    resetId: contract?.reset?.id || null,
+    movementId: contract?.movement?.id || null,
+    nutritionId: contract?.nutrition?.id || null,
+    lastQuickSignal: lastQuickSignal || "",
+  };
+}
+
+async function resolvePriorProfileSupabase(persist, userId, dateKey) {
+  const prevDateKey = addDaysISO(dateKey, -1);
+  const previous = await persist.getCheckinByDateKey(userId, prevDateKey);
+  if (!previous?.raw) return null;
+  const prevCheckIn = normalizeCheckInInput(previous.raw, prevDateKey);
+  const scores = computeLoadCapacity({
+    stress: prevCheckIn.stress,
+    sleepQuality: prevCheckIn.sleepQuality,
+    energy: prevCheckIn.energy,
+    timeMin: prevCheckIn.timeAvailableMin,
+  });
+  return assignProfile({
+    load: scores.load,
+    capacity: scores.capacity,
+    sleep: prevCheckIn.sleepQuality,
+    energy: prevCheckIn.energy,
+  });
+}
+
+async function loadSupabaseDayContext(persist, userId, dateKey) {
+  const stored = await persist.getCheckinByDateKey(userId, dateKey);
+  const checkIn = normalizeCheckInInput(stored?.raw || {}, dateKey);
+  const events = await persist.listEvents(userId, dateKey, dateKey);
+  const lastQuickSignal = getLastQuickSignal(events);
+  const derived = await persist.getDerivedState(userId);
+  const dayState = dayStateFromDerived(derived, lastQuickSignal);
+  const priorProfile = await resolvePriorProfileSupabase(persist, userId, dateKey);
+  return { checkIn, events, lastQuickSignal, dayState, priorProfile, derived };
+}
+
+async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
+  const supabaseRoutes = new Set([
+    "/v1/bootstrap",
+    "/v1/mobile/bootstrap",
+    "/v1/rail/today",
+    "/v1/mobile/today",
+    "/v1/checkin",
+    "/v1/quick",
+    "/v1/reset/complete",
+    "/v1/outcomes",
+    "/v1/consent/accept",
+    "/v1/consents/accept",
+    "/v1/onboard/complete",
+  ]);
+  if (!supabaseRoutes.has(pathname)) return false;
+
+  const flags = await getFeatureFlags();
+  if (pathname === "/v1/bootstrap" || pathname === "/v1/mobile/bootstrap") {
+    if (req.method !== "GET") {
+      sendError(res, 405, "method_not_allowed", "Method not allowed");
+      return true;
+    }
+    const auth = await getUserFromRequest(req);
+    if (auth.error && auth.error !== "missing_token") {
+      sendError(res, 401, "auth_required", "Authorization required");
+      return true;
+    }
+    let profile = null;
+    if (auth.userId && auth.jwt) {
+      const persist = createPersist(supabaseForUser(auth.jwt));
+      profile = await persist.getOrCreateUserProfile(auth.userId);
+      res.livenewUserId = auth.userId;
+    }
+    const payload = await buildSupabaseBootstrapPayload({ userId: auth.userId, userProfile: profile, flags });
+    assertBootstrapContract(payload);
+    sendJson(res, 200, payload, auth.userId || null);
+    return true;
+  }
+
+  const auth = await getUserFromRequest(req);
+  if (!auth.userId || !auth.jwt) {
+    sendError(res, 401, "auth_required", "Authorization required");
+    return true;
+  }
+  res.livenewUserId = auth.userId;
+  const isMutating = !["GET", "HEAD"].includes(req.method);
+  const rateCheck = checkUserRateLimit(auth.userId, isMutating);
+  if (!rateCheck.ok) {
+    monitoring.increment("rate_limit_429", { route: pathname, status: 429 });
+    sendError(res, 429, "rate_limited_user", "Too many requests");
+    return true;
+  }
+
+  const persist = createPersist(supabaseForUser(auth.jwt));
+  const profile = await persist.getOrCreateUserProfile(auth.userId);
+
+  if (pathname === "/v1/consent/accept" || pathname === "/v1/consents/accept") {
+    if (req.method !== "POST") {
+      sendError(res, 405, "method_not_allowed", "Method not allowed");
+      return true;
+    }
+    const body = await parseJson(req);
+    const accepted = extractConsentAcceptance(body);
+    const missing = REQUIRED_CONSENTS.filter((key) => !accepted.has(key));
+    if (missing.length) {
+      sendError(
+        res,
+        badRequest("consent_required", "Missing required consent", "consents", {
+          required: missing,
+          expose: true,
+        })
+      );
+      return true;
+    }
+    const requiredVersion = await getRequiredConsentVersion();
+    await persist.updateConsent(auth.userId, { version: requiredVersion, acceptedAt: new Date().toISOString() });
+    sendJson(res, 200, { ok: true, accepted: REQUIRED_CONSENTS, consentVersion: requiredVersion }, auth.userId);
+    return true;
+  }
+
+  if (pathname === "/v1/onboard/complete") {
+    if (req.method !== "POST") {
+      sendError(res, 405, "method_not_allowed", "Method not allowed");
+      return true;
+    }
+    const body = await parseJson(req);
+    const accepted = extractConsentAcceptance(body);
+    const missing = REQUIRED_CONSENTS.filter((key) => !accepted.has(key));
+    if (missing.length) {
+      sendError(
+        res,
+        badRequest("consent_required", "Terms, privacy, and alpha processing consent required", "consents", {
+          required: REQUIRED_CONSENTS,
+          expose: true,
+        })
+      );
+      return true;
+    }
+    const baselineInput = normalizeBaselineInput(body?.baseline || body?.userProfile || body?.profile || {});
+    const dayBoundaryMinuteRaw =
+      body?.dayBoundaryMinute ??
+      body?.day_boundary_minute ??
+      body?.baseline?.dayBoundaryMinute ??
+      body?.baseline?.day_boundary_minute ??
+      null;
+    const minuteOverride = Number.isFinite(Number(dayBoundaryMinuteRaw))
+      ? Math.max(0, Math.min(1439, Math.floor(Number(dayBoundaryMinuteRaw))))
+      : null;
+    const baselineForValidation =
+      baselineInput.dayBoundaryHour == null && minuteOverride != null
+        ? { ...baselineInput, dayBoundaryHour: Math.floor(minuteOverride / 60) }
+        : baselineInput;
+    const baselineValidation = validateBaselineInput(baselineForValidation);
+    if (!baselineValidation.ok) {
+      sendError(res, 400, baselineValidation.error.code, baselineValidation.error.message, baselineValidation.error.field);
+      return true;
+    }
+    const baseline = baselineValidation.value;
+    const dayBoundaryMinute = minuteOverride != null ? minuteOverride : baseline.dayBoundaryHour * 60;
+    const requiredVersion = await getRequiredConsentVersion();
+    await persist.updateConsent(auth.userId, { version: requiredVersion, acceptedAt: new Date().toISOString() });
+    const updatedProfile = await persist.updateOnboarding(auth.userId, {
+      timezone: baseline.timezone,
+      dayBoundaryMinute,
+      constraintsJson: baseline.constraints || null,
+      completedAt: new Date().toISOString(),
+    });
+
+    const now = new Date();
+    let dateKey =
+      body?.dateKey ||
+      body?.dateISO ||
+      body?.firstCheckIn?.dateISO ||
+      body?.checkIn?.dateISO ||
+      getDateKeyWithMinute({
+        now,
+        timezone: baseline.timezone,
+        dayBoundaryMinute,
+      });
+    const dateValidation = validateDateParam(dateKey, "dateISO");
+    if (!dateValidation.ok) {
+      sendError(res, 400, dateValidation.error.code, dateValidation.error.message, dateValidation.error.field);
+      return true;
+    }
+    dateKey = dateValidation.value;
+    const firstCheckInRaw =
+      body?.firstCheckIn && typeof body.firstCheckIn === "object"
+        ? body.firstCheckIn
+        : body?.checkIn && typeof body.checkIn === "object"
+          ? body.checkIn
+          : {};
+    const checkinValidation = validateCheckInPayload(firstCheckInRaw);
+    if (!checkinValidation.ok) {
+      sendErrorCodeOnly(res, 400, "INVALID_CHECKIN");
+      return true;
+    }
+    const checkIn = normalizeCheckInInput(firstCheckInRaw, dateKey);
+    await persist.upsertCheckin(auth.userId, dateKey, checkIn);
+    const checkinInserted = await persist.insertEventOncePerDay(
+      auth.userId,
+      dateKey,
+      "checkin_submitted",
+      {
+        stress: checkIn.stress,
+        sleep: checkIn.sleepQuality,
+        energy: checkIn.energy,
+        timeMin: checkIn.timeAvailableMin,
+      },
+      getIdempotencyKey(req)
+    );
+    if (checkinInserted?.inserted) {
+      invalidateOutcomesCache(auth.userId, dateKey);
+    }
+
+    const context = await loadSupabaseDayContext(persist, auth.userId, dateKey);
+    const today = buildToday({
+      userId: auth.userId,
+      dateKey,
+      timezone: baselineResolved.timezone,
+      dayBoundaryHour: baselineResolved.dayBoundaryHour,
+      baseline: baselineResolved,
+      latestCheckin: context.checkIn,
+      dayState: context.dayState,
+      weekSeed: {},
+      eventsToday: context.events,
+      panicMode: context.checkIn?.safety?.panic === true,
+      libVersion: LIB_VERSION,
+      priorProfile: context.priorProfile,
+    });
+    const normalizedToday = ensureTodayContract(today, res);
+    if (!normalizedToday) return true;
+    await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
+    const bootstrap = await buildSupabaseBootstrapPayload({
+      userId: auth.userId,
+      userProfile: updatedProfile,
+      flags,
+    });
+    sendJson(res, 200, { ok: true, bootstrap, today: normalizedToday }, auth.userId);
+    return true;
+  }
+
+  const gate = await ensureSupabaseHome({ userId: auth.userId, userProfile: profile, flags, pathname }, res);
+  if (!gate.ok) return true;
+
+  const baseline = baselineFromSupabaseProfile(profile);
+  if (!baseline?.timezone || !Number.isFinite(Number(baseline.dayBoundaryMinute))) {
+    sendError(res, 400, "baseline_required", "Baseline required before loading");
+    return true;
+  }
+  const resolvedTimezone = validateTimeZone(baseline.timezone) ? baseline.timezone : DEFAULT_TIMEZONE;
+  const baselineResolved = { ...baseline, timezone: resolvedTimezone };
+
+  if (pathname === "/v1/rail/today" || pathname === "/v1/mobile/today") {
+    if (req.method !== "GET") {
+      sendError(res, 405, "method_not_allowed", "Method not allowed");
+      return true;
+    }
+    const ifNoneMatch = req.headers["if-none-match"];
+    parityCounters.recordTodayRequest(Boolean(ifNoneMatch));
+    const now = new Date();
+    const dateKey = getDateKeyWithMinute({
+      now,
+      timezone: baselineResolved.timezone,
+      dayBoundaryMinute: baseline.dayBoundaryMinute,
+    });
+    if (!dateKey) {
+      sendError(res, 400, "date_invalid", "Unable to resolve date key");
+      return true;
+    }
+    const railInserted = await persist.insertEventOncePerDay(auth.userId, dateKey, "rail_opened", { v: 1 });
+    if (railInserted?.inserted) {
+      invalidateOutcomesCache(auth.userId, dateKey);
+    }
+    const context = await loadSupabaseDayContext(persist, auth.userId, dateKey);
+    const today = buildToday({
+      userId: auth.userId,
+      dateKey,
+      timezone: baselineResolved.timezone,
+      dayBoundaryHour: baselineResolved.dayBoundaryHour,
+      baseline: baselineResolved,
+      latestCheckin: context.checkIn,
+      dayState: context.dayState,
+      weekSeed: {},
+      eventsToday: context.events,
+      panicMode: context.checkIn?.safety?.panic === true,
+      libVersion: LIB_VERSION,
+      priorProfile: context.priorProfile,
+    });
+    const normalizedToday = ensureTodayContract(today, res);
+    if (!normalizedToday) return true;
+    const etag = normalizedToday.meta?.inputHash || null;
+    if (etag) {
+      res.livenewExtraHeaders = { ...(res.livenewExtraHeaders || {}), ETag: etag };
+      if (ifNoneMatch && String(ifNoneMatch) === String(etag)) {
+        parityCounters.recordTodayNotModified();
+        sendNotModified(res, etag);
+        return true;
+      }
+    }
+    await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
+    sendJson(res, 200, normalizedToday, auth.userId);
+    return true;
+  }
+
+  if (pathname === "/v1/checkin" && req.method === "POST") {
+    const body = await parseJson(req);
+    const now = new Date();
+    let dateKey =
+      body?.dateKey ||
+      body?.dateISO ||
+      body?.checkIn?.dateISO ||
+      getDateKeyWithMinute({
+        now,
+        timezone: baselineResolved.timezone,
+        dayBoundaryMinute: baselineResolved.dayBoundaryMinute,
+      });
+    const dateValidation = validateDateParam(dateKey, "dateISO");
+    if (!dateValidation.ok) {
+      sendError(res, 400, dateValidation.error.code, dateValidation.error.message, dateValidation.error.field);
+      return true;
+    }
+    dateKey = dateValidation.value;
+    const checkInRaw = body?.checkIn && typeof body.checkIn === "object" ? body.checkIn : body;
+    const checkinValidation = validateCheckInPayload(checkInRaw);
+    if (!checkinValidation.ok) {
+      sendErrorCodeOnly(res, 400, "INVALID_CHECKIN");
+      return true;
+    }
+    const checkIn = normalizeCheckInInput(checkInRaw, dateKey);
+    const idempotencyKey = getIdempotencyKey(req);
+    parityCounters.recordCheckin(Boolean(idempotencyKey));
+    await persist.upsertCheckin(auth.userId, dateKey, checkIn);
+    const checkinInserted = await persist.insertEventOncePerDay(
+      auth.userId,
+      dateKey,
+      "checkin_submitted",
+      {
+        stress: checkIn.stress,
+        sleep: checkIn.sleepQuality,
+        energy: checkIn.energy,
+        timeMin: checkIn.timeAvailableMin,
+      },
+      idempotencyKey
+    );
+    if (checkinInserted?.inserted) {
+      invalidateOutcomesCache(auth.userId, dateKey);
+    }
+    const context = await loadSupabaseDayContext(persist, auth.userId, dateKey);
+    const today = buildToday({
+      userId: auth.userId,
+      dateKey,
+      timezone: baselineResolved.timezone,
+      dayBoundaryHour: baselineResolved.dayBoundaryHour,
+      baseline: baselineResolved,
+      latestCheckin: context.checkIn,
+      dayState: context.dayState,
+      weekSeed: {},
+      eventsToday: context.events,
+      panicMode: context.checkIn?.safety?.panic === true,
+      libVersion: LIB_VERSION,
+      priorProfile: context.priorProfile,
+    });
+    const normalizedToday = ensureTodayContract(today, res);
+    if (!normalizedToday) return true;
+    await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
+    sendJson(res, 200, normalizedToday, auth.userId);
+    return true;
+  }
+
+  if (pathname === "/v1/quick" && req.method === "POST") {
+    const now = new Date();
+    const body = await parseJson(req);
+    const signal = typeof body?.signal === "string" ? body.signal : null;
+    const allowed = ["stressed", "exhausted", "ten_minutes", "more_energy"];
+    if (!signal || !allowed.includes(signal)) {
+      sendErrorCodeOnly(res, 400, "INVALID_SIGNAL");
+      return true;
+    }
+    let dateKey =
+      body?.dateKey ||
+      body?.dateISO ||
+      getDateKeyWithMinute({
+        now,
+        timezone: baselineResolved.timezone,
+        dayBoundaryMinute: baselineResolved.dayBoundaryMinute,
+      });
+    const dateValidation = validateDateParam(dateKey, "dateISO");
+    if (!dateValidation.ok) {
+      sendError(res, 400, dateValidation.error.code, dateValidation.error.message, dateValidation.error.field);
+      return true;
+    }
+    dateKey = dateValidation.value;
+    const idempotencyKey = getIdempotencyKey(req);
+    parityCounters.recordQuick(Boolean(idempotencyKey));
+    if (!idempotencyKey) {
+      sendErrorCodeOnly(res, 400, "IDEMPOTENCY_REQUIRED");
+      return true;
+    }
+    const context = await loadSupabaseDayContext(persist, auth.userId, dateKey);
+    const currentToday = buildToday({
+      userId: auth.userId,
+      dateKey,
+      timezone: baselineResolved.timezone,
+      dayBoundaryHour: baselineResolved.dayBoundaryHour,
+      baseline: baselineResolved,
+      latestCheckin: context.checkIn,
+      dayState: context.dayState,
+      weekSeed: {},
+      eventsToday: context.events,
+      panicMode: context.checkIn?.safety?.panic === true,
+      libVersion: LIB_VERSION,
+      priorProfile: context.priorProfile,
+    });
+    const normalizedCurrent = ensureTodayContract(currentToday, res);
+    if (!normalizedCurrent) return true;
+    const inserted = await persist.insertEventIdempotent(
+      auth.userId,
+      dateKey,
+      "quick_signal",
+      idempotencyKey,
+      { signal }
+    );
+    if (!inserted.inserted) {
+      await persist.upsertDerivedState(auth.userId, dateKey, normalizedCurrent.meta?.inputHash || null, normalizedCurrent);
+      sendJson(res, 200, normalizedCurrent, auth.userId);
+      return true;
+    }
+    const libraries = getLibrarySnapshot();
+    const selection = {
+      resetId: normalizedCurrent.reset?.id || null,
+      movementId: normalizedCurrent.movement?.id || null,
+      nutritionId: normalizedCurrent.nutrition?.id || null,
+    };
+    const updatedSelection =
+      context.dayState?.lastQuickSignal === signal
+        ? selection
+        : applyQuickSignal({
+            signal,
+            todaySelection: selection,
+            scored: normalizedCurrent.scores,
+            profile: normalizedCurrent.profile,
+            constraints: baselineResolved.constraints || {},
+            libraries,
+          });
+    const nextDayState = {
+      resetId: updatedSelection.resetId || null,
+      movementId: updatedSelection.movementId || null,
+      nutritionId: updatedSelection.nutritionId || null,
+      lastQuickSignal: signal,
+    };
+    const refreshed = buildToday({
+      userId: auth.userId,
+      dateKey,
+      timezone: baselineResolved.timezone,
+      dayBoundaryHour: baselineResolved.dayBoundaryHour,
+      baseline: baselineResolved,
+      latestCheckin: context.checkIn,
+      dayState: nextDayState,
+      weekSeed: {},
+      eventsToday: context.events,
+      panicMode: context.checkIn?.safety?.panic === true,
+      libVersion: LIB_VERSION,
+      priorProfile: context.priorProfile,
+    });
+    const normalizedRefreshed = ensureTodayContract(refreshed, res);
+    if (!normalizedRefreshed) return true;
+    await persist.upsertDerivedState(auth.userId, dateKey, normalizedRefreshed.meta?.inputHash || null, normalizedRefreshed);
+    sendJson(res, 200, normalizedRefreshed, auth.userId);
+    return true;
+  }
+
+  if (pathname === "/v1/reset/complete" && req.method === "POST") {
+    const now = new Date();
+    const dateKey = getDateKeyWithMinute({
+      now,
+      timezone: baselineResolved.timezone,
+      dayBoundaryMinute: baselineResolved.dayBoundaryMinute,
+    });
+    if (!dateKey) {
+      sendError(res, 400, "date_invalid", "Unable to resolve date key");
+      return true;
+    }
+    const result = await persist.insertEventOncePerDay(auth.userId, dateKey, "reset_completed", { v: 1 });
+    if (result?.inserted) {
+      invalidateOutcomesCache(auth.userId, dateKey);
+    }
+    sendJson(res, 200, { ok: true, alreadyCompleted: result.inserted === false }, auth.userId);
+    return true;
+  }
+
+  if (pathname === "/v1/outcomes") {
+    if (req.method !== "GET") {
+      sendError(res, 405, "method_not_allowed", "Method not allowed");
+      return true;
+    }
+    const daysParam = url.searchParams.get("days") || "7";
+    const daysNum = Number(daysParam);
+    const allowed = [7, 14, 30];
+    if (!allowed.includes(daysNum)) {
+      sendError(res, 400, "days_invalid", "days must be 7, 14, or 30", "days");
+      return true;
+    }
+    const now = new Date();
+    const toKey = getDateKeyWithMinute({
+      now,
+      timezone: baselineResolved.timezone,
+      dayBoundaryMinute: baselineResolved.dayBoundaryMinute,
+    });
+    if (!toKey) {
+      sendError(res, 400, "date_invalid", "Unable to resolve date range");
+      return true;
+    }
+    const fromKey = addDaysISO(toKey, -(daysNum - 1));
+    const cached = getOutcomesCache(auth.userId, daysNum, toKey);
+    if (cached) {
+      sendJson(res, 200, cached, auth.userId);
+      return true;
+    }
+    const events = await persist.listEvents(auth.userId, fromKey, toKey);
+    const railDays = new Set();
+    const resetDays = new Set();
+    const checkinDays = new Set();
+    events.forEach((event) => {
+      if (event.type === "rail_opened") railDays.add(event.dateKey);
+      if (event.type === "reset_completed") resetDays.add(event.dateKey);
+      if (event.type === "checkin_submitted") checkinDays.add(event.dateKey);
+    });
+    const payload = {
+      ok: true,
+      range: { days: daysNum, fromISO: fromKey, toISO: toKey },
+      metrics: {
+        railOpenedDays: railDays.size,
+        resetCompletedDays: resetDays.size,
+        checkinSubmittedDays: checkinDays.size,
+        resetCompletionRate: railDays.size ? resetDays.size / railDays.size : 0,
+      },
+    };
+    setOutcomesCache(auth.userId, daysNum, fromKey, toKey, payload, CACHE_TTLS.outcomes);
+    sendJson(res, 200, payload, auth.userId);
+    return true;
+  }
+
+  if (pathname === "/v1/checkin" || pathname === "/v1/quick" || pathname === "/v1/reset/complete") {
+    sendError(res, 405, "method_not_allowed", "Method not allowed");
+    return true;
+  }
+
+  return false;
 }
 
 function ensureTodayContract(contract, res) {
@@ -3975,6 +4657,8 @@ const server = http.createServer(async (req, res) => {
       seedInitialProfile,
     });
     if (handledSetup) return;
+    const handledSupabase = await handleSupabaseRoutes({ req, res, url, pathname, requestId });
+    if (handledSupabase) return;
 
     if (pathname === "/smoke" && req.method === "GET") {
       const report = await runSmokeChecks({ userId, userEmail });
