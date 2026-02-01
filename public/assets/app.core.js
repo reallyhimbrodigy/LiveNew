@@ -17,7 +17,7 @@ import {
 import { getAppState as getAppStateInternal } from "./app.state.js";
 import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.js";
 import { STRINGS as EN_STRINGS } from "../i18n/en.js";
-export const BUILD_ID = "202602012055";
+export const BUILD_ID = "__BUILD_ID__";
 
 export function getAppState() {
   return getAppStateInternal();

@@ -1,19 +1,10 @@
-const BUILD_ID = "202602012055";
+import { getAppState, initDay, initWeek, initTrends, initProfile, initAdmin } from "./app.core.js";
 
+const BUILD_ID = "__BUILD_ID__";
 console.log("[LiveNew BUILD]", BUILD_ID);
 
-const coreMod = await import("./app.core.js");
-if (!coreMod || typeof coreMod.getAppState !== "function") {
-  throw new Error(
-    `[LiveNew] app.core.js missing getAppState export. BUILD_ID=${BUILD_ID}. ` +
-      "This indicates stale/partial deploy or wrong static root."
-  );
-}
-const { getAppState } = coreMod;
-
-let corePromise = Promise.resolve(coreMod);
 async function loadCore() {
-  return corePromise;
+  return { getAppState, initDay, initWeek, initTrends, initProfile, initAdmin };
 }
 
 export function renderHome() {

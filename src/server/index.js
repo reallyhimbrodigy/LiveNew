@@ -3481,12 +3481,15 @@ function isHashedAssetName(name) {
 
 function cacheControlForPath(filePath) {
   const baseName = path.basename(filePath);
+  if (filePath.endsWith(".html")) {
+    return "no-store";
+  }
   if (isHashedAssetName(baseName)) {
     return "public, max-age=31536000, immutable";
   }
   const assetModule =
     filePath.includes(`${path.sep}assets${path.sep}`) && (filePath.endsWith(".js") || filePath.endsWith(".mjs"));
-  if (assetModule) return "no-store, must-revalidate";
+  if (assetModule) return "public, max-age=31536000, immutable";
   if (filePath.endsWith(".js") || filePath.endsWith(".mjs")) return "no-cache";
   return null;
 }
