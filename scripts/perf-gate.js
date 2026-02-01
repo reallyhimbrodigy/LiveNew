@@ -80,13 +80,45 @@ async function run() {
 
   console.log(JSON.stringify(summary, null, 2));
   if (!ok) {
-    const artifactPath = writeArtifact("incidents/perf", "perf", summary);
+    const metrics = summary.loadTest?.metrics || {};
+    const slowEndpoints = Object.entries(metrics)
+      .map(([endpoint, stats]) => ({
+        endpoint,
+        p95Ms: stats?.p95Ms ?? null,
+        p99Ms: stats?.p99Ms ?? null,
+      }))
+      .sort((a, b) => (b.p99Ms ?? b.p95Ms ?? 0) - (a.p99Ms ?? a.p95Ms ?? 0))
+      .slice(0, 5);
+    const dbQueries = Array.isArray(summary.dbProfile?.queries)
+      ? summary.dbProfile.queries.map((entry) => ({
+          label: entry.label,
+          indexed: entry.indexed,
+          fullScan: entry.fullScan,
+          suggestions: entry.suggestions || [],
+        }))
+      : [];
+    const suggestedIndexTargets = Array.from(
+      new Set(
+        dbQueries
+          .filter((entry) => entry.fullScan || entry.indexed === false)
+          .flatMap((entry) => entry.suggestions || [])
+      )
+    );
+
+    const incident = {
+      ...summary,
+      slowEndpoints,
+      dbQueries,
+      suggested_index_targets: suggestedIndexTargets,
+      regressions: summary.loadTest?.regressions || null,
+    };
+    const artifactPath = writeArtifact("incidents/perf", "perf", incident);
     writeEvidenceBundle({
       evidenceId: (process.env.REQUIRED_EVIDENCE_ID || "").trim(),
       type: "perf",
       requestId: (process.env.REQUEST_ID || "").trim(),
       scenarioPack: (process.env.SCENARIO_PACK || "").trim(),
-      extra: { artifactPath },
+      extra: { artifactPath, suggestedIndexTargets },
     });
     process.exit(1);
   }

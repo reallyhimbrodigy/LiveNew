@@ -1,11 +1,66 @@
 // Runbook: enforce controlled catalog releases during freeze windows.
 import path from "path";
+import fs from "fs";
 import { runNode } from "./lib/exec.js";
 import { isCanaryEnabled } from "./lib/canary.js";
+import { artifactsBaseDir } from "./lib/artifacts.js";
 
 const ROOT = process.cwd();
 const USE_JSON = process.argv.includes("--json");
 const STRICT = process.argv.includes("--strict") || process.env.STRICT === "true";
+const STABILITY_N_RAW = Number(process.env.CATALOG_STABILITY_N || 3);
+const STABILITY_N = Number.isFinite(STABILITY_N_RAW) ? Math.max(1, STABILITY_N_RAW) : 3;
+
+function parseThreshold(value, fallback) {
+  if (value == null || value === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
+  return parsed > 1 ? parsed / 100 : parsed;
+}
+
+const PARITY_THRESHOLDS = {
+  checkin: parseThreshold(process.env.CHECKIN_IDEMPOTENCY_MA_RATE, 0.98),
+  quick: parseThreshold(process.env.QUICK_IDEMPOTENCY_MA_RATE, 0.98),
+  today: parseThreshold(process.env.TODAY_IF_NONE_MATCH_MA_RATE, 0.9),
+};
+
+function listArtifacts(subdir) {
+  const dir = path.join(artifactsBaseDir(), subdir);
+  try {
+    const files = fs.readdirSync(dir).filter((name) => name.endsWith(".json"));
+    return files.map((name) => path.join(dir, name));
+  } catch {
+    return [];
+  }
+}
+
+function latestArtifacts(paths, count) {
+  const entries = paths
+    .map((filePath) => {
+      try {
+        const raw = fs.readFileSync(filePath, "utf8");
+        const parsed = JSON.parse(raw);
+        const stat = fs.statSync(filePath);
+        return { filePath, parsed, mtimeMs: stat.mtimeMs };
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return entries.slice(0, count);
+}
+
+function parityOk(artifact) {
+  const parity = artifact?.parity;
+  const moving = parity?.movingAverage || null;
+  if (!moving) return false;
+  return (
+    Number(moving.checkin) >= PARITY_THRESHOLDS.checkin &&
+    Number(moving.quick) >= PARITY_THRESHOLDS.quick &&
+    Number(moving.today) >= PARITY_THRESHOLDS.today
+  );
+}
 
 function summarizeLine(summary) {
   const failed = summary.steps.filter((entry) => !entry.ok).map((entry) => entry.step);
@@ -27,6 +82,33 @@ function run() {
   }
   if (!isCanaryEnabled()) {
     outputAndExit({ ok: false, error: "canary_allowlist_required" }, 2);
+  }
+
+  const nightly = latestArtifacts(listArtifacts("nightly"), STABILITY_N);
+  if (nightly.length < STABILITY_N || nightly.some((entry) => entry.parsed?.ok !== true)) {
+    outputAndExit(
+      {
+        ok: false,
+        error: "stability_nightly_failed",
+        required: STABILITY_N,
+        found: nightly.length,
+      },
+      1
+    );
+  }
+
+  const daily = latestArtifacts(listArtifacts("daily"), STABILITY_N);
+  if (daily.length < STABILITY_N || daily.some((entry) => !parityOk(entry.parsed))) {
+    outputAndExit(
+      {
+        ok: false,
+        error: "stability_parity_failed",
+        required: STABILITY_N,
+        found: daily.length,
+        thresholds: PARITY_THRESHOLDS,
+      },
+      1
+    );
   }
 
   const results = [];
@@ -51,6 +133,12 @@ function run() {
       code: entry.code,
       note: entry.ok ? entry.stdout || null : entry.stderr || entry.stdout || null,
     })),
+    stability: {
+      required: STABILITY_N,
+      nightly: nightly.map((entry) => ({ path: entry.filePath, ok: entry.parsed?.ok === true })),
+      parity: daily.map((entry) => ({ path: entry.filePath, ok: parityOk(entry.parsed) })),
+      thresholds: PARITY_THRESHOLDS,
+    },
     rollout: {
       canaryMode: true,
       requiredSteps: ["set CANARY_ALLOWLIST", "run full-traffic gate", "monitor parity/perf"],

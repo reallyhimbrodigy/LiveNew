@@ -51,6 +51,7 @@ function run() {
   const artifact = {
     ok,
     ranAt: new Date().toISOString(),
+    exitCode: ok ? 0 : 1,
     evidenceBundle: summary.evidenceBundle,
     dbProfile: dbParsed,
     logs: {

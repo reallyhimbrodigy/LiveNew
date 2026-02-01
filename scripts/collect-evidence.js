@@ -33,6 +33,8 @@ async function scanLogs(paths) {
   };
   const route4xx = {};
   const route5xx = {};
+  const writeStormByRoute = {};
+  const writeStormRequestIdsByRoute = {};
   const counters = {};
 
   for (const logPath of paths) {
@@ -61,7 +63,16 @@ async function scanLogs(paths) {
       if (event === "today_contract_invalid") pushUnique(artifacts.contractInvalidRequestIds, entry?.requestId);
       if (event === "nondeterminism_detected") pushUnique(artifacts.nondeterminismRequestIds, entry?.requestId);
       if (event === "idempotency_missing") pushUnique(artifacts.idempotencyMissingRequestIds, entry?.requestId);
-      if (event === "write_storm") pushUnique(artifacts.writeStormRequestIds, entry?.requestId);
+      if (event === "write_storm") {
+        pushUnique(artifacts.writeStormRequestIds, entry?.requestId);
+        if (entry?.route) addCount(writeStormByRoute, entry.route);
+        if (entry?.route && entry?.requestId) {
+          if (!writeStormRequestIdsByRoute[entry.route]) writeStormRequestIdsByRoute[entry.route] = [];
+          if (writeStormRequestIdsByRoute[entry.route].length < 10) {
+            pushUnique(writeStormRequestIdsByRoute[entry.route], entry.requestId);
+          }
+        }
+      }
 
       if (entry?.route && Number.isFinite(entry?.status)) {
         if (entry.status >= 500) addCount(route5xx, entry.route);
@@ -70,7 +81,7 @@ async function scanLogs(paths) {
     });
   }
 
-  return { artifacts, route4xx, route5xx, counters };
+  return { artifacts, route4xx, route5xx, counters, writeStormByRoute, writeStormRequestIdsByRoute };
 }
 
 async function scanReports(paths) {
@@ -102,6 +113,8 @@ async function run() {
     ok: true,
     artifacts: logSummary.artifacts,
     counters: logSummary.counters,
+    writeStormByRoute: logSummary.writeStormByRoute,
+    writeStormRequestIdsByRoute: logSummary.writeStormRequestIdsByRoute,
     topRoutes: {
       fourxx: topRoutes(logSummary.route4xx),
       fivexx: topRoutes(logSummary.route5xx),

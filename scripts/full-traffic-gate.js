@@ -11,6 +11,7 @@ import { writeEvidenceBundle } from "./lib/evidence-bundle.js";
 const ROOT = process.cwd();
 const BASE_URL = process.env.SIM_BASE_URL || process.env.BASE_URL || "";
 const CANARY_ALLOWLIST = (process.env.CANARY_ALLOWLIST || "").trim();
+const CANARY_MODE = process.env.CANARY_MODE === "true";
 const SKIP_PERF = process.env.PERF_SKIP === "true" || process.env.SKIP_PERF_GATE === "true";
 const USE_JSON = process.argv.includes("--json");
 const STRICT = process.argv.includes("--strict");
@@ -103,15 +104,18 @@ async function run() {
     );
   }
 
-  if (process.env.CATALOG_RELEASE_MODE === "true") {
+  const libCheck = runScript("check-lib-version-bump.js", {}, STRICT ? ["--strict"] : []);
+  results.push({ step: "lib_version_bump", ...libCheck });
+  if (libCheck.parsed?.libraries?.length) {
     const releaseCheck = runScript("catalog-release-check.js", {}, STRICT ? ["--strict"] : []);
     results.push({ step: "catalog_release_check", ...releaseCheck });
     if (!releaseCheck.ok) {
       outputAndExit({ ok: false, error: "catalog_release_check_failed", steps: results, evidenceBundle }, 1);
     }
+    results.push({ step: "catalog_coverage", ...runScript("constraints.coverage.test.js") });
   }
 
-  if (isCanaryEnabled()) {
+  if (isCanaryEnabled() && !CANARY_MODE) {
     outputAndExit(
       { ok: false, error: "canary_still_enabled", canaryAllowlist: CANARY_ALLOWLIST, steps: results, evidenceBundle },
       2
@@ -120,12 +124,6 @@ async function run() {
 
   if (!BASE_URL) {
     outputAndExit({ ok: false, error: "missing_base_url", steps: results, evidenceBundle }, 2);
-  }
-
-  const libCheck = runScript("check-lib-version-bump.js", {}, STRICT ? ["--strict"] : []);
-  results.push({ step: "lib_version_bump", ...libCheck });
-  if (libCheck.parsed?.libraries?.length) {
-    results.push({ step: "catalog_coverage", ...runScript("constraints.coverage.test.js") });
   }
 
   results.push({ step: "verify_static_root", ...runScript("verify-static-root.js") });

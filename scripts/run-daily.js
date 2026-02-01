@@ -7,6 +7,8 @@ const ROOT = process.cwd();
 const USE_JSON = process.argv.includes("--json");
 const STRICT = process.argv.includes("--strict") || process.env.STRICT === "true" ? true : process.env.RUNBOOK_STRICT !== "false";
 const EVIDENCE_STRICT = process.argv.includes("--strict") || process.env.STRICT === "true" ? true : process.env.EVIDENCE_STRICT === "true";
+const WRITE_STORM_THRESHOLD_RAW = Number(process.env.WRITE_STORM_ALERT_THRESHOLD || 0);
+const WRITE_STORM_THRESHOLD = Number.isFinite(WRITE_STORM_THRESHOLD_RAW) ? Math.max(0, WRITE_STORM_THRESHOLD_RAW) : 0;
 
 function summarizeLine(summary) {
   const failed = summary.steps.filter((entry) => !entry.ok).map((entry) => entry.step);
@@ -56,12 +58,24 @@ function run() {
     }
   });
 
+  const evidenceEntry = results.find((entry) => entry.step === "collect_evidence");
+  const writeStormByRoute = evidenceEntry?.parsed?.writeStormByRoute || {};
+  const writeStormRequestIdsByRoute = evidenceEntry?.parsed?.writeStormRequestIdsByRoute || {};
+  const writeStormTotal = Object.values(writeStormByRoute).reduce((sum, value) => sum + Number(value || 0), 0);
+
   const artifact = {
     ok,
     ranAt: new Date().toISOString(),
+    exitCode: !parityOk ? (parityEntry?.code === 2 ? 2 : 1) : ok ? 0 : STRICT ? 1 : 0,
     evidenceBundle: summary.evidenceBundle,
     parity: parityEntry?.parsed || null,
-    counters: results.find((entry) => entry.step === "collect_evidence")?.parsed?.counters || null,
+    counters: evidenceEntry?.parsed?.counters || null,
+    writeStorm: {
+      total: writeStormTotal,
+      byRoute: writeStormByRoute,
+      requestIdsByRoute: writeStormRequestIdsByRoute,
+      threshold: WRITE_STORM_THRESHOLD,
+    },
     logs: {
       paths: (process.env.LOG_PATHS || "").split(",").map((p) => p.trim()).filter(Boolean),
       outputs: logPaths,
@@ -69,6 +83,18 @@ function run() {
   };
   const artifactPath = writeArtifact("daily", "daily", artifact);
   summary.artifactPath = artifactPath;
+
+  if (WRITE_STORM_THRESHOLD > 0 && writeStormTotal > WRITE_STORM_THRESHOLD) {
+    writeArtifact("incidents/parity", "storm", {
+      ok: false,
+      ranAt: artifact.ranAt,
+      total: writeStormTotal,
+      threshold: WRITE_STORM_THRESHOLD,
+      byRoute: writeStormByRoute,
+      requestIdsByRoute: writeStormRequestIdsByRoute,
+      sourceArtifact: artifactPath,
+    });
+  }
 
   console.log(USE_JSON ? JSON.stringify(summary) : summarizeLine(summary));
   if (!parityOk) process.exit(parityEntry?.code === 2 ? 2 : 1);
