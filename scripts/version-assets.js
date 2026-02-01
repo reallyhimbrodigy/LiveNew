@@ -70,6 +70,17 @@ async function main() {
     })
   );
 
+  const appCoreVersioned = path.join(assetsDir, `app.core.${buildId}.js`);
+  const appCoreContent = await fs.readFile(appCoreVersioned, "utf8");
+  const hasGetAppStateExport =
+    appCoreContent.includes("export function getAppState") ||
+    appCoreContent.includes("export { getAppState");
+  if (!hasGetAppStateExport) {
+    throw new Error(
+      `version-assets: generated app.core.${buildId}.js missing named export getAppState`
+    );
+  }
+
   const htmlFiles = await walkHtmlFiles(path.join(process.cwd(), "public"));
   await Promise.all(
     htmlFiles.map(async (filePath) => {
