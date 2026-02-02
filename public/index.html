@@ -9,52 +9,50 @@
   <title>LiveNew</title>
 </head>
 <body data-page="home">
-  <header class="topbar">
-    <div class="topbar-inner">
+  <div class="shell">
+    <header class="topbar">
       <div class="brand">LiveNew</div>
       <nav class="nav">
-        <a href="/" class="active">Home</a>
-        <a id="nav-today" class="disabled" href="/day" aria-disabled="true" tabindex="-1">Today</a>
+        <a href="/index.html">Home</a>
+        <a href="/day">Today</a>
         <a href="/help">Help Center</a>
         <a href="/contact">Contact</a>
       </nav>
-    </div>
-  </header>
+    </header>
 
-  <main class="page shell">
-    <div class="stack">
-      <section class="card stack">
-        <div class="kicker">Reset-first</div>
+    <main class="stack">
+      <section class="card">
+        <p class="kicker">Reset-first</p>
         <h1 class="h1">LiveNew</h1>
         <p class="lead">Reset-first stress regulation for a healthy daily rhythm.</p>
-        <div class="row">
+        <div class="btnrow">
           <a class="btn btn-primary" href="#start">Start</a>
           <a class="btn btn-ghost" href="#how">How it works</a>
         </div>
-        <div class="muted small">Not medical advice.</div>
+        <div class="small">Not medical advice.</div>
       </section>
 
-      <section class="card stack" id="start">
-        <h2 class="h2">Start</h2>
+      <section class="card" id="start">
+        <h2 class="section-title">Start</h2>
         <p class="lead">Sign in to continue.</p>
-        <div class="auth" id="auth-panel">
+        <div class="auth form" id="auth-panel">
           <div class="auth-status" id="auth-status">Not signed in</div>
-        <div class="form-row">
-          <input class="input" id="auth-email" type="email" placeholder="email" aria-label="email" />
-          <button class="btn btn-primary" id="auth-request">Send code</button>
-        </div>
-        <div class="form-row">
-          <input class="input" id="auth-code" type="text" placeholder="code" aria-label="code" />
-          <button class="btn btn-primary" id="auth-verify">Verify</button>
-        </div>
-        <div class="row">
-          <button id="auth-logout" class="btn btn-ghost">Logout</button>
-        </div>
+          <div class="form-row">
+            <input class="input" id="auth-email" type="email" placeholder="email" aria-label="email" />
+            <button class="btn btn-primary" id="auth-request">Send code</button>
+          </div>
+          <div class="form-row">
+            <input class="input" id="auth-code" type="text" placeholder="code" aria-label="code" />
+            <button class="btn btn-primary" id="auth-verify">Verify</button>
+          </div>
+          <div class="row">
+            <button id="auth-logout" class="btn btn-ghost">Logout</button>
+          </div>
         </div>
       </section>
 
-      <section class="card hidden stack" id="consent-card">
-        <h2 class="h2">Consent required</h2>
+      <section class="card hidden" id="consent-card">
+        <h2 class="section-title">Consent required</h2>
         <p class="lead">Please accept to continue.</p>
         <label><input id="consent-terms" type="checkbox" /> <span>I agree to the Terms</span> <a href="/legal/terms" target="_blank" rel="noopener">View</a></label>
         <label><input id="consent-privacy" type="checkbox" /> <span>I agree to the Privacy Policy</span> <a href="/legal/privacy" target="_blank" rel="noopener">View</a></label>
@@ -63,96 +61,96 @@
         <div id="consent-status" class="muted"></div>
       </section>
 
-      <section class="card hidden stack" id="onboard-card">
+      <section class="card hidden" id="onboard-card">
         <div class="wizard-header" id="onboard">
           <div>
-            <h2 class="h2">Personalization</h2>
+            <h2 class="section-title">Personalization</h2>
             <p class="lead">A quick baseline to tailor your day.</p>
           </div>
           <div class="wizard-progress" id="onboard-step-label">Step 1 of 4</div>
         </div>
 
-      <div class="wizard-step onboard-step" data-step="0">
-        <h3>Time &amp; boundary</h3>
-        <div class="grid-2">
-          <label><span>Timezone</span> <input id="onboard-timezone" type="text" placeholder="America/Los_Angeles" /></label>
-          <label><span>Day boundary hour</span>
-            <select id="onboard-boundary">
-              <option value="0">0</option>
-              <option value="1">1</option>
-              <option value="2">2</option>
-              <option value="3">3</option>
-              <option value="4">4</option>
-              <option value="5">5</option>
-              <option value="6">6</option>
-            </select>
-          </label>
+        <div class="wizard-step onboard-step" data-step="0">
+          <h3>Time &amp; boundary</h3>
+          <div class="grid-2">
+            <label><span>Timezone</span> <input id="onboard-timezone" type="text" placeholder="America/Los_Angeles" /></label>
+            <label><span>Day boundary hour</span>
+              <select id="onboard-boundary">
+                <option value="0">0</option>
+                <option value="1">1</option>
+                <option value="2">2</option>
+                <option value="3">3</option>
+                <option value="4">4</option>
+                <option value="5">5</option>
+                <option value="6">6</option>
+              </select>
+            </label>
+          </div>
         </div>
-      </div>
 
-      <div class="wizard-step onboard-step hidden" data-step="1">
-        <h3>Constraints</h3>
-        <div class="grid-2">
-          <label><input id="onboard-injury-knee" type="checkbox" /> <span>Knee injury</span></label>
-          <label><input id="onboard-injury-shoulder" type="checkbox" /> <span>Shoulder injury</span></label>
-          <label><input id="onboard-injury-back" type="checkbox" /> <span>Back injury</span></label>
-          <label><input id="onboard-eq-none" type="checkbox" checked /> <span>No equipment</span></label>
-          <label><input id="onboard-eq-dumbbells" type="checkbox" /> <span>Dumbbells</span></label>
-          <label><input id="onboard-eq-bands" type="checkbox" /> <span>Bands</span></label>
-          <label><input id="onboard-eq-gym" type="checkbox" /> <span>Gym access</span></label>
-          <label class="span-2"><span>Preferred time of day</span>
-            <select id="onboard-time-pref">
-              <option value="any">Any</option>
-              <option value="morning">Morning</option>
-              <option value="midday">Midday</option>
-              <option value="evening">Evening</option>
-            </select>
-          </label>
+        <div class="wizard-step onboard-step hidden" data-step="1">
+          <h3>Constraints</h3>
+          <div class="grid-2">
+            <label><input id="onboard-injury-knee" type="checkbox" /> <span>Knee injury</span></label>
+            <label><input id="onboard-injury-shoulder" type="checkbox" /> <span>Shoulder injury</span></label>
+            <label><input id="onboard-injury-back" type="checkbox" /> <span>Back injury</span></label>
+            <label><input id="onboard-eq-none" type="checkbox" checked /> <span>No equipment</span></label>
+            <label><input id="onboard-eq-dumbbells" type="checkbox" /> <span>Dumbbells</span></label>
+            <label><input id="onboard-eq-bands" type="checkbox" /> <span>Bands</span></label>
+            <label><input id="onboard-eq-gym" type="checkbox" /> <span>Gym access</span></label>
+            <label class="span-2"><span>Preferred time of day</span>
+              <select id="onboard-time-pref">
+                <option value="any">Any</option>
+                <option value="morning">Morning</option>
+                <option value="midday">Midday</option>
+                <option value="evening">Evening</option>
+              </select>
+            </label>
+          </div>
         </div>
-      </div>
 
-      <div class="wizard-step onboard-step hidden" data-step="2">
-        <h3>Daily check-in</h3>
-        <div class="grid-2">
-          <label><span>Stress (1-10)</span> <input id="onboard-stress" type="number" min="1" max="10" /></label>
-          <label><span>Sleep quality (1-10)</span> <input id="onboard-sleep" type="number" min="1" max="10" /></label>
-          <label><span>Energy (1-10)</span> <input id="onboard-energy" type="number" min="1" max="10" /></label>
-          <label><span>Time available</span>
-            <select id="onboard-time">
-              <option value="5">5</option>
-              <option value="10">10</option>
-              <option value="15">15</option>
-              <option value="20" selected>20</option>
-              <option value="30">30</option>
-            </select>
-          </label>
+        <div class="wizard-step onboard-step hidden" data-step="2">
+          <h3>Daily check-in</h3>
+          <div class="grid-2">
+            <label><span>Stress (1-10)</span> <input id="onboard-stress" type="number" min="1" max="10" /></label>
+            <label><span>Sleep quality (1-10)</span> <input id="onboard-sleep" type="number" min="1" max="10" /></label>
+            <label><span>Energy (1-10)</span> <input id="onboard-energy" type="number" min="1" max="10" /></label>
+            <label><span>Time available</span>
+              <select id="onboard-time">
+                <option value="5">5</option>
+                <option value="10">10</option>
+                <option value="15">15</option>
+                <option value="20" selected>20</option>
+                <option value="30">30</option>
+              </select>
+            </label>
+          </div>
         </div>
-      </div>
 
-      <div class="wizard-step onboard-step hidden" data-step="3">
-        <h3>Review &amp; finish</h3>
-        <div id="onboard-review" class="muted review"></div>
-        <div class="row">
-          <label><input id="onboard-consent-terms" type="checkbox" /> <span>I agree to the Terms</span> <a href="/legal/terms" target="_blank" rel="noopener">View</a></label>
+        <div class="wizard-step onboard-step hidden" data-step="3">
+          <h3>Review &amp; finish</h3>
+          <div id="onboard-review" class="muted review"></div>
+          <div class="row">
+            <label><input id="onboard-consent-terms" type="checkbox" /> <span>I agree to the Terms</span> <a href="/legal/terms" target="_blank" rel="noopener">View</a></label>
+          </div>
+          <div class="row">
+            <label><input id="onboard-consent-privacy" type="checkbox" /> <span>I agree to the Privacy Policy</span> <a href="/legal/privacy" target="_blank" rel="noopener">View</a></label>
+          </div>
+          <div class="row">
+            <label><input id="onboard-consent-alpha" type="checkbox" /> <span>I agree to Alpha Data Processing</span> <a href="/legal/alpha-data-processing" target="_blank" rel="noopener">View</a></label>
+          </div>
         </div>
-        <div class="row">
-          <label><input id="onboard-consent-privacy" type="checkbox" /> <span>I agree to the Privacy Policy</span> <a href="/legal/privacy" target="_blank" rel="noopener">View</a></label>
-        </div>
-        <div class="row">
-          <label><input id="onboard-consent-alpha" type="checkbox" /> <span>I agree to Alpha Data Processing</span> <a href="/legal/alpha-data-processing" target="_blank" rel="noopener">View</a></label>
-        </div>
-      </div>
 
-      <div class="wizard-nav">
-        <button id="onboard-back" class="btn btn-ghost" type="button">Back</button>
-        <button id="onboard-next" class="btn btn-primary" type="button">Next</button>
-        <button id="onboard-submit" class="btn btn-primary" type="button">Finish</button>
-      </div>
-      <div id="onboard-status" class="muted"></div>
+        <div class="wizard-nav">
+          <button id="onboard-back" class="btn btn-ghost" type="button">Back</button>
+          <button id="onboard-next" class="btn btn-primary" type="button">Next</button>
+          <button id="onboard-submit" class="btn btn-primary" type="button">Finish</button>
+        </div>
+        <div id="onboard-status" class="muted"></div>
       </section>
 
-      <section class="card stack" id="how">
-        <h2 class="h2">How it works</h2>
+      <section id="how" class="card">
+        <h2 class="section-title">How it works</h2>
         <div class="steps">
           <div class="step">
             <div class="step-title">Check-in</div>
@@ -163,16 +161,49 @@
             <div class="step-desc">A short regulation step before anything else.</div>
           </div>
           <div class="step">
-            <div class="step-title">Optional movement + nutrition</div>
-            <div class="step-desc">If it fits, keep it simple and supportive.</div>
+            <div class="step-title">Optional movement &amp; nutrition</div>
+            <div class="step-desc">If it fits, keep it simple.</div>
           </div>
         </div>
       </section>
-    </div>
-  </main>
+    </main>
 
-  <div id="footer-root" class="footer"></div>
-  <script type="module" src="/assets/footer.js"></script>
+  </div>
+  <footer class="footer">
+    <div class="shell">
+      <div class="footer-panel">
+        <div class="footer-grid">
+          <div>
+            <div class="footer-head">LiveNew</div>
+            <div class="small" style="margin-top:0">Reset-first stress regulation for a healthy daily rhythm.</div>
+          </div>
+          <div>
+            <div class="footer-head">Platform</div>
+            <div class="footer-links">
+              <a href="/index.html">Home</a>
+              <a href="/day">Today</a>
+            </div>
+          </div>
+          <div>
+            <div class="footer-head">Resources</div>
+            <div class="footer-links">
+              <a href="/help">Help Center</a>
+              <a href="/privacy">Privacy Policy</a>
+              <a href="/terms">Terms of Service</a>
+            </div>
+          </div>
+          <div>
+            <div class="footer-head">Company</div>
+            <div class="footer-links">
+              <a href="/contact">Contact</a>
+              <a href="/reset-access">Reset Access</a>
+            </div>
+          </div>
+        </div>
+        <div class="footer-bottom">© 2026 LiveNew. All rights reserved.</div>
+      </div>
+    </div>
+  </footer>
   <script type="module" src="/assets/app.init.js"></script>
 </body>
 </html>
