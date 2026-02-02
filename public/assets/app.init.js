@@ -269,7 +269,17 @@ export async function initApp({ page } = {}) {
   }
 }
 
+function shouldAutoBoot() {
+  return (
+    typeof window !== "undefined" &&
+    typeof document !== "undefined" &&
+    !globalThis.__LIVENEW_NO_AUTOBOOT__
+  );
+}
+
 const initialPage = resolvePage();
-initApp({ page: initialPage }).catch((err) => handleAppError(err));
+if (shouldAutoBoot()) {
+  initApp({ page: initialPage }).catch((err) => handleAppError(err));
+}
 
 void apiPost;

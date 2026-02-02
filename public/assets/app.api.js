@@ -4,7 +4,6 @@ const LEGACY_KEY = "livenew_token";
 const DEVICE_KEY = "livenew_device";
 let csrfToken = null;
 let csrfPromise = null;
-const IS_BROWSER = typeof window !== "undefined" && typeof document !== "undefined";
 
 export function getToken() {
   const current = localStorage.getItem(ACCESS_KEY);
@@ -77,7 +76,7 @@ async function parseJsonResponse(res) {
 }
 
 async function ensureCsrf() {
-  if (!IS_BROWSER) return null;
+  if (typeof window === "undefined") return null;
   if (csrfToken) return csrfToken;
   if (csrfPromise) return csrfPromise;
   csrfPromise = apiFetch("/v1/csrf", { method: "GET", _skipRefresh: true, _skipRetry: true })

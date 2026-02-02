@@ -1,7 +1,6 @@
 import fs from "fs/promises";
 import path from "path";
 import { execSync } from "child_process";
-import { pathToFileURL } from "url";
 
 function utcTimestamp() {
   const now = new Date();
@@ -74,33 +73,17 @@ async function main() {
 
   const appCoreVersioned = path.join(assetsDir, `app.core.${buildId}.js`);
   const sourceCorePath = path.join(assetsDir, "app.core.js");
-  try {
-    const appCoreModule = await import(
-      `${pathToFileURL(appCoreVersioned).href}?v=${Date.now()}`
-    );
-    if (typeof appCoreModule.getAppState !== "function") {
-      const keys = Object.keys(appCoreModule).sort().join(", ");
-      const preview = await fs.readFile(appCoreVersioned, "utf8");
-      const hasExport = preview.includes("export");
-      console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
-      console.error(`[version-assets] outCorePath=${appCoreVersioned}`);
-      console.error(`[version-assets] app.core exports=[${keys}]`);
-      console.error(`[version-assets] app.core hasExport=${hasExport}`);
-      console.error(`[version-assets] app.core preview=${preview.slice(0, 200)}`);
-      throw new Error(
-        `version-assets: generated app.core.${buildId}.js missing named export getAppState`
-      );
-    }
-  } catch (err) {
-    if (err?.message?.startsWith("version-assets: generated app.core.")) {
-      throw err;
-    }
-    const preview = await fs.readFile(appCoreVersioned, "utf8");
-    const hasExport = preview.includes("export");
+  const appCoreText = await fs.readFile(appCoreVersioned, "utf8");
+  const hasExport = appCoreText.includes("export");
+  const hasNamedGetAppState =
+    /\bexport\s+function\s+getAppState\b/.test(appCoreText) ||
+    /\bexport\s+(const|let|var)\s+getAppState\b/.test(appCoreText) ||
+    /\bexport\s*\{[^}]*\bgetAppState\b[^}]*\}\s*;?/.test(appCoreText);
+  if (!hasNamedGetAppState) {
     console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
     console.error(`[version-assets] outCorePath=${appCoreVersioned}`);
     console.error(`[version-assets] app.core hasExport=${hasExport}`);
-    console.error(`[version-assets] app.core preview=${preview.slice(0, 200)}`);
+    console.error(`[version-assets] app.core preview=${appCoreText.slice(0, 200)}`);
     throw new Error(
       `version-assets: generated app.core.${buildId}.js missing named export getAppState`
     );

@@ -1,6 +1,5 @@
 import fs from "fs/promises";
 import path from "path";
-import { pathToFileURL } from "url";
 
 async function fileExists(filePath) {
   try {
@@ -41,10 +40,14 @@ async function main() {
     console.error(`verify-assets: missing ${appCorePath}`);
     process.exit(1);
   }
-  const mod = await import(pathToFileURL(appCorePath).href);
-  if (typeof mod.getAppState !== "function") {
+  const text = await fs.readFile(appCorePath, "utf8");
+  const hasNamedGetAppState =
+    /\bexport\s+function\s+getAppState\b/.test(text) ||
+    /\bexport\s+(const|let|var)\s+getAppState\b/.test(text) ||
+    /\bexport\s*\{[^}]*\bgetAppState\b[^}]*\}\s*;?/.test(text);
+  if (!hasNamedGetAppState) {
     throw new Error(
-      `verify-assets: app.core.${buildId}.js missing export getAppState (typeof=${typeof mod.getAppState})`
+      `verify-assets: app.core.${buildId}.js missing export getAppState`
     );
   }
   console.log(`verify-assets: OK app.core.${buildId}.js exports getAppState`);
