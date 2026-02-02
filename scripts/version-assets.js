@@ -75,15 +75,32 @@ async function main() {
   const sourceCorePath = path.join(assetsDir, "app.core.js");
   const appCoreText = await fs.readFile(appCoreVersioned, "utf8");
   const hasExport = appCoreText.includes("export");
-  const hasNamedGetAppState =
+  const hasDirectGetAppState =
     /\bexport\s+function\s+getAppState\b/.test(appCoreText) ||
-    /\bexport\s+(const|let|var)\s+getAppState\b/.test(appCoreText) ||
-    /\bexport\s*\{[^}]*\bgetAppState\b[^}]*\}\s*;?/.test(appCoreText);
+    /\bexport\s+(const|let|var)\s+getAppState\b/.test(appCoreText);
+  let hasNamedGetAppState = hasDirectGetAppState;
+  if (!hasNamedGetAppState) {
+    const exportBlocks = appCoreText.match(/\bexport\s*\{[^}]*\}/g) || [];
+    for (const block of exportBlocks) {
+      const inner = block.replace(/^export\s*\{/, "").replace(/\}\s*;?$/, "");
+      const parts = inner.split(",").map((part) => part.trim()).filter(Boolean);
+      const matches = parts.some((part) => {
+        if (part === "getAppState") return true;
+        return part.replace(/\s+/g, " ") === "getAppState as getAppState";
+      });
+      if (matches) {
+        hasNamedGetAppState = true;
+        break;
+      }
+    }
+  }
   if (!hasNamedGetAppState) {
     console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
     console.error(`[version-assets] outCorePath=${appCoreVersioned}`);
     console.error(`[version-assets] app.core hasExport=${hasExport}`);
-    console.error(`[version-assets] app.core preview=${appCoreText.slice(0, 200)}`);
+    console.error(`[version-assets] app.core hasGetAppState=${appCoreText.includes("getAppState")}`);
+    console.error(`[version-assets] app.core head=${appCoreText.slice(0, 600)}`);
+    console.error(`[version-assets] app.core tail=${appCoreText.slice(-200)}`);
     throw new Error(
       `version-assets: generated app.core.${buildId}.js missing named export getAppState`
     );
