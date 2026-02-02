@@ -24,52 +24,53 @@
   <main class="page-main">
     <div class="shell stack">
       <section class="card stack">
-        <div class="stack">
-          <h1>LiveNew</h1>
-          <p class="lead">Reset-first stress regulation for a healthy daily rhythm.</p>
-          <div class="row">
-            <a class="btn btn-primary" href="#start">Start</a>
-            <a class="btn btn-secondary" href="#how">How it works</a>
-          </div>
-          <div class="muted small">Not medical advice.</div>
+        <div class="kicker">Reset-first</div>
+        <h1 class="h1">LiveNew</h1>
+        <p class="lead">Reset-first stress regulation for a healthy daily rhythm.</p>
+        <div class="row">
+          <a class="btn btn-primary" href="#start">Start</a>
+          <a class="btn btn-ghost" href="#how">How it works</a>
         </div>
+        <div class="muted small">Not medical advice.</div>
       </section>
 
       <section class="card stack" id="start">
-        <h2>Start</h2>
-        <p class="muted">Sign in to continue.</p>
-      <div class="auth" id="auth-panel">
-        <div class="auth-status" id="auth-status">Not signed in</div>
-        <div class="auth-row">
-          <input id="auth-email" type="email" placeholder="email" aria-label="email" />
-          <button id="auth-request">Send code</button>
+        <h2 class="h2">Start</h2>
+        <p class="lead">Sign in to continue.</p>
+        <div class="auth" id="auth-panel">
+          <div class="auth-status" id="auth-status">Not signed in</div>
+        <div class="form-row">
+          <input class="input" id="auth-email" type="email" placeholder="email" aria-label="email" />
+          <button class="btn btn-primary" id="auth-request">Send code</button>
         </div>
-        <div class="auth-row">
-          <input id="auth-code" type="text" placeholder="code" aria-label="code" />
-          <button id="auth-verify">Verify</button>
-          <button id="auth-logout" class="ghost">Logout</button>
+        <div class="form-row">
+          <input class="input" id="auth-code" type="text" placeholder="code" aria-label="code" />
+          <button class="btn btn-primary" id="auth-verify">Verify</button>
         </div>
-      </div>
+        <div class="row">
+          <button id="auth-logout" class="btn btn-ghost">Logout</button>
+        </div>
+        </div>
       </section>
 
       <section class="card hidden stack" id="consent-card">
-        <h2>Consent required</h2>
-      <p class="muted">Please accept to continue.</p>
-      <label><input id="consent-terms" type="checkbox" /> <span>I agree to the Terms</span> <a href="/legal/terms" target="_blank" rel="noopener">View</a></label>
-      <label><input id="consent-privacy" type="checkbox" /> <span>I agree to the Privacy Policy</span> <a href="/legal/privacy" target="_blank" rel="noopener">View</a></label>
-      <label><input id="consent-alpha" type="checkbox" /> <span>I agree to Alpha Data Processing</span> <a href="/legal/alpha-data-processing" target="_blank" rel="noopener">View</a></label>
-      <button id="consent-submit">Accept and continue</button>
-      <div id="consent-status" class="muted"></div>
+        <h2 class="h2">Consent required</h2>
+        <p class="lead">Please accept to continue.</p>
+        <label><input id="consent-terms" type="checkbox" /> <span>I agree to the Terms</span> <a href="/legal/terms" target="_blank" rel="noopener">View</a></label>
+        <label><input id="consent-privacy" type="checkbox" /> <span>I agree to the Privacy Policy</span> <a href="/legal/privacy" target="_blank" rel="noopener">View</a></label>
+        <label><input id="consent-alpha" type="checkbox" /> <span>I agree to Alpha Data Processing</span> <a href="/legal/alpha-data-processing" target="_blank" rel="noopener">View</a></label>
+        <button id="consent-submit" class="btn btn-primary">Accept and continue</button>
+        <div id="consent-status" class="muted"></div>
       </section>
 
       <section class="card hidden stack" id="onboard-card">
-      <div class="wizard-header" id="onboard">
-        <div>
-          <h2>Personalization</h2>
-          <p class="muted">A quick baseline to tailor your day.</p>
+        <div class="wizard-header" id="onboard">
+          <div>
+            <h2 class="h2">Personalization</h2>
+            <p class="lead">A quick baseline to tailor your day.</p>
+          </div>
+          <div class="wizard-progress" id="onboard-step-label">Step 1 of 4</div>
         </div>
-        <div class="wizard-progress" id="onboard-step-label">Step 1 of 4</div>
-      </div>
 
       <div class="wizard-step onboard-step" data-step="0">
         <h3>Time &amp; boundary</h3>
@@ -143,34 +144,34 @@
       </div>
 
       <div class="wizard-nav">
-        <button id="onboard-back" class="ghost" type="button">Back</button>
-        <button id="onboard-next" type="button">Next</button>
-        <button id="onboard-submit" type="button">Finish</button>
+        <button id="onboard-back" class="btn btn-ghost" type="button">Back</button>
+        <button id="onboard-next" class="btn btn-primary" type="button">Next</button>
+        <button id="onboard-submit" class="btn btn-primary" type="button">Finish</button>
       </div>
       <div id="onboard-status" class="muted"></div>
       </section>
 
       <section class="card stack" id="how">
-        <h2>How it works</h2>
-        <div class="how-list">
-          <div class="how-item">
-            <div class="how-title">Check-in</div>
-            <div class="muted">A few numbers to orient the day.</div>
+        <h2 class="h2">How it works</h2>
+        <div class="steps">
+          <div class="step">
+            <div class="step-title">Check-in</div>
+            <div class="step-desc">A few numbers to orient the day.</div>
           </div>
-          <div class="how-item">
-            <div class="how-title">Reset</div>
-            <div class="muted">A short regulation step before anything else.</div>
+          <div class="step">
+            <div class="step-title">Reset</div>
+            <div class="step-desc">A short regulation step before anything else.</div>
           </div>
-          <div class="how-item">
-            <div class="how-title">Optional movement + nutrition</div>
-            <div class="muted">If it fits, keep it simple and supportive.</div>
+          <div class="step">
+            <div class="step-title">Optional movement + nutrition</div>
+            <div class="step-desc">If it fits, keep it simple and supportive.</div>
           </div>
         </div>
       </section>
     </div>
   </main>
 
-  <div id="footer-root"></div>
+  <div id="footer-root" class="footer"></div>
   <script type="module" src="/assets/footer.js"></script>
   <script type="module" src="/assets/app.init.js"></script>
 </body>
