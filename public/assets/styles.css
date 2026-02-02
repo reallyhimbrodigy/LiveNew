@@ -397,6 +397,11 @@ textarea:focus-visible {
   padding: 24px;
 }
 
+.footer-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
 .footer-card {
   border: 1px solid var(--border);
   background: var(--panel);
@@ -423,6 +428,14 @@ textarea:focus-visible {
   gap: 6px;
   font-size: 14px;
   color: var(--muted);
+}
+
+.footer-links a {
+  color: inherit;
+}
+
+.footer-links a:hover {
+  text-decoration: underline;
 }
 
 .footer-bottom {
