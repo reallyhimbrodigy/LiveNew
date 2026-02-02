@@ -10,36 +10,34 @@ async function fileExists(filePath) {
   }
 }
 
-async function resolveBuildId() {
-  const envId = (process.env.BUILD_ID || "").trim();
-  if (envId) return envId;
-  const indexPath = path.join(process.cwd(), "public", "index.html");
-  if (await fileExists(indexPath)) {
-    const html = await fs.readFile(indexPath, "utf8");
-    const match = html.match(/\/assets\/app\.init\.([A-Za-z0-9._-]+)\.js/);
-    if (match) return match[1];
-  }
-  const assetsDir = path.join(process.cwd(), "public", "assets");
-  const entries = (await fs.readdir(assetsDir)).filter((name) => name.startsWith("app.core."));
-  if (!entries.length) return "";
-  const sorted = entries.sort((a, b) => a.localeCompare(b));
-  const latest = sorted[sorted.length - 1];
-  const match = latest.match(/^app\.core\.(.+)\.js$/);
-  return match ? match[1] : "";
-}
-
 async function main() {
-  const buildId = await resolveBuildId();
-  if (!buildId) {
-    console.error("verify-assets: unable to determine BUILD_ID");
+  const assetsDir = path.join(process.cwd(), "public", "assets");
+  const manifestPath = path.join(assetsDir, "build.json");
+  if (!(await fileExists(manifestPath))) {
+    console.error("verify-assets: missing build manifest public/assets/build.json");
     process.exit(2);
   }
-  const assetsDir = path.join(process.cwd(), "public", "assets");
-  const appCorePath = path.join(assetsDir, `app.core.${buildId}.js`);
-  if (!(await fileExists(appCorePath))) {
-    console.error(`verify-assets: missing ${appCorePath}`);
-    process.exit(1);
+  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  const buildId = (manifest?.buildId || "").trim();
+  if (!buildId) {
+    console.error("verify-assets: build.json missing buildId");
+    process.exit(2);
   }
+  const files = manifest?.files || {};
+  for (const [key, fileName] of Object.entries(files)) {
+    const filePath = path.join(assetsDir, fileName);
+    if (!(await fileExists(filePath))) {
+      console.error(`verify-assets: missing ${key} at ${filePath}`);
+      process.exit(1);
+    }
+  }
+
+  const appCoreFile = files["app.core"];
+  if (!appCoreFile) {
+    console.error("verify-assets: build.json missing files.app.core");
+    process.exit(2);
+  }
+  const appCorePath = path.join(assetsDir, appCoreFile);
   const text = await fs.readFile(appCorePath, "utf8");
   const hasNamedGetAppState =
     /export\s+function\s+getAppState\b/m.test(text) ||
@@ -51,10 +49,25 @@ async function main() {
     const head = text.slice(0, 600);
     const tail = text.slice(-200);
     throw new Error(
-      `verify-assets: app.core.${buildId}.js missing export getAppState\nhead=${head}\ntail=${tail}`
+      `verify-assets: ${appCoreFile} missing export getAppState\nhead=${head}\ntail=${tail}`
     );
   }
-  console.log(`verify-assets: OK app.core.${buildId}.js exports getAppState`);
+
+  const controllersFile = files["controllers"];
+  if (controllersFile) {
+    const controllersPath = path.join(assetsDir, controllersFile);
+    const controllersText = await fs.readFile(controllersPath, "utf8");
+    const hasStaticNamedImport = /import\s*\{\s*[^}]+\s*\}\s*from\s*["']\.\/app\.core(?:\.[^"']+)?\.js["']/.test(
+      controllersText
+    );
+    if (hasStaticNamedImport) {
+      throw new Error(
+        `verify-assets: ${controllersFile} contains static named import from app.core`
+      );
+    }
+  }
+
+  console.log(`verify-assets: OK buildId=${buildId}`);
 }
 
 main().catch((err) => {

@@ -223,6 +223,22 @@ async function main() {
     })
   );
 
+  const manifest = {
+    buildId,
+    generatedAt: new Date().toISOString(),
+    files: {
+      "app.core": `app.core.${buildId}.js`,
+      controllers: `controllers.${buildId}.js`,
+      "app.api": `app.api.${buildId}.js`,
+      "app.ui": `app.ui.${buildId}.js`,
+    },
+  };
+  const manifestPath = path.join(assetsDir, "build.json");
+  const manifestTmp = path.join(assetsDir, `build.${buildId}.tmp.json`);
+  await fs.writeFile(manifestTmp, `${JSON.stringify(manifest, null, 2)}\n`);
+  await fs.rename(manifestTmp, manifestPath);
+  console.log(`[version-assets] wrote build manifest ${manifestPath}`);
+
   console.log(`[version-assets] BUILD_ID=${buildId}`);
 }
 
