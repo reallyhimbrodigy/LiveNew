@@ -48,7 +48,10 @@ async function main() {
   const sourceCorePath = path.join(assetsDir, "app.core.js");
   const sourceCoreText = await fs.readFile(sourceCorePath, "utf8");
   const srcBytes = Buffer.byteLength(sourceCoreText, "utf8");
-  const srcHasGetAppState = /export\s+function\s+getAppState\b/.test(sourceCoreText);
+  const srcHasGetAppState =
+    /export\s+function\s+getAppState\b/.test(sourceCoreText) ||
+    /export\s+(const|let|var)\s+getAppState\b/.test(sourceCoreText) ||
+    /\bexport\s*\{[^}]*\bgetAppState\b[^}]*\}\s*;?/.test(sourceCoreText);
   console.log(`[version-assets] app.core srcBytes=${srcBytes}`);
   console.log(`[version-assets] app.core srcHasGetAppState=${srcHasGetAppState}`);
   if (sourceCoreText.includes("getAppState")) {
@@ -59,6 +62,12 @@ async function main() {
         i + 120
       )}`
     );
+  }
+  if (!srcHasGetAppState) {
+    console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
+    console.error(`[version-assets] app.core srcBytes=${srcBytes}`);
+    console.error(`[version-assets] app.core srcHasGetAppState=${srcHasGetAppState}`);
+    throw new Error("version-assets: source app.core.js missing named export getAppState");
   }
   const assetFiles = (await fs.readdir(assetsDir)).filter((name) => name.endsWith(".js"));
   const replacements = new Map([

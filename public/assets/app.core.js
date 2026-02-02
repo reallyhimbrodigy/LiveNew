@@ -2240,6 +2240,14 @@ function initAdmin() {
   });
 }
 
+function shouldAutoBoot() {
+  return typeof window !== "undefined" && typeof document !== "undefined";
+}
+
+if (typeof init === "function" && shouldAutoBoot()) {
+  init().catch((err) => console.error(err));
+}
+
 export {
   initBaseUi,
   bindAuth,
