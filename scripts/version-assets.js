@@ -72,9 +72,16 @@ async function main() {
   );
 
   const appCoreVersioned = path.join(assetsDir, `app.core.${buildId}.js`);
+  const sourceCorePath = path.join(assetsDir, "app.core.js");
   try {
-    const appCoreModule = await import(pathToFileURL(appCoreVersioned).href);
+    const appCoreModule = await import(
+      `${pathToFileURL(appCoreVersioned).href}?v=${Date.now()}`
+    );
     if (typeof appCoreModule.getAppState !== "function") {
+      const keys = Object.keys(appCoreModule).sort().join(", ");
+      console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
+      console.error(`[version-assets] outCorePath=${appCoreVersioned}`);
+      console.error(`[version-assets] app.core exports=[${keys}]`);
       throw new Error(
         `version-assets: generated app.core.${buildId}.js missing named export getAppState`
       );
@@ -83,6 +90,10 @@ async function main() {
     if (err?.message?.startsWith("version-assets: generated app.core.")) {
       throw err;
     }
+    const preview = await fs.readFile(appCoreVersioned, "utf8");
+    console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
+    console.error(`[version-assets] outCorePath=${appCoreVersioned}`);
+    console.error(`[version-assets] app.core preview=${preview.slice(0, 200)}`);
     throw new Error(
       `version-assets: generated app.core.${buildId}.js missing named export getAppState`
     );

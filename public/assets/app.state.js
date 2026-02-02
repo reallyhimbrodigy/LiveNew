@@ -1,17 +1,18 @@
-const STATE = window.__APP_STATE || (window.__APP_STATE = {});
+const ROOT = globalThis;
+const STATE = ROOT.__APP_STATE || (ROOT.__APP_STATE = {});
 
 export function getAppState() {
-  return window.__APP_STATE;
+  return ROOT.__APP_STATE;
 }
 
 export function setAppState(patch) {
-  Object.assign(window.__APP_STATE, patch || {});
-  return window.__APP_STATE;
+  Object.assign(ROOT.__APP_STATE, patch || {});
+  return ROOT.__APP_STATE;
 }
 
 export function resetAppState() {
-  window.__APP_STATE = {};
-  return window.__APP_STATE;
+  ROOT.__APP_STATE = {};
+  return ROOT.__APP_STATE;
 }
 
 void STATE;

@@ -2099,13 +2099,6 @@ function initAdmin() {
 
 export {
   initBaseUi,
-  setAppErrorHandler,
-  hideGateScreens,
-  renderConsentScreen,
-  renderOnboardScreen,
-  showLoginScreen,
-  showIncidentScreen,
-  showErrorScreen,
   bindAuth,
   updateAdminVisibility,
   initDay,
