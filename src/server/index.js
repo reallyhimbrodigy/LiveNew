@@ -4568,7 +4568,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   const pageRoutes = new Map([
-    ["/", "day.html"],
+    ["/", "index.html"],
     ["/index.html", "index.html"],
     ["/day", "day.html"],
     ["/day.html", "day.html"],

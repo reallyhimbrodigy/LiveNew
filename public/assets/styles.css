@@ -1,13 +1,14 @@
 :root {
   color-scheme: light;
-  --bg: #f7f2ea;
+  --bg: #ffffff;
   --panel: #ffffff;
-  --text: #2a241d;
-  --muted: #6e6256;
-  --border: #e6dacb;
-  --accent: #e2cfb3;
-  --accent-2: #bfa67f;
-  --shadow: 0 18px 40px rgba(58, 44, 30, 0.08);
+  --text: #0f172a;
+  --muted: #64748b;
+  --border: #e5e7eb;
+  --accent: #d6c3a3;
+  --accent-strong: #b89f78;
+  --accent-2: var(--accent-strong);
+  --shadow: 0 18px 40px rgba(15, 23, 42, 0.06);
   --danger: #b85a4a;
   --card: var(--panel);
   --ink: var(--text);
@@ -24,7 +25,7 @@ body {
   flex-direction: column;
   font-family: "IBM Plex Sans", "Helvetica Neue", sans-serif;
   color: var(--text);
-  background: linear-gradient(180deg, #fbf8f2 0%, var(--bg) 100%);
+  background: var(--bg);
 }
 
 main {
@@ -76,6 +77,11 @@ a:hover {
 .nav a.active {
   background: var(--card);
   border: 1px solid var(--border);
+}
+
+.nav a.disabled {
+  opacity: 0.5;
+  pointer-events: none;
 }
 
 .admin-link {
@@ -182,7 +188,7 @@ a:hover {
 
 button, .button {
   background: var(--accent);
-  color: #3a2f22;
+  color: #1f2937;
   border: none;
   padding: 8px 14px;
   border-radius: 8px;
@@ -394,15 +400,12 @@ textarea:focus-visible {
 }
 
 .site-footer {
-  padding: 24px;
+  padding: 32px 24px;
 }
 
-.footer-inner {
+.site-footer__panel {
   max-width: 1100px;
   margin: 0 auto;
-}
-
-.footer-card {
   border: 1px solid var(--border);
   background: var(--panel);
   border-radius: 16px;
@@ -410,35 +413,37 @@ textarea:focus-visible {
   padding: 24px;
 }
 
-.footer-grid {
+.site-footer__grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 16px;
+  gap: 32px;
 }
 
-.footer-title {
+.site-footer__title {
   font-weight: 700;
   margin-bottom: 8px;
   letter-spacing: 0.08em;
+  text-transform: uppercase;
+  font-size: 12px;
 }
 
-.footer-links {
+.site-footer__links {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   font-size: 14px;
   color: var(--muted);
 }
 
-.footer-links a {
+.site-footer__links a {
   color: inherit;
 }
 
-.footer-links a:hover {
+.site-footer__links a:hover {
   text-decoration: underline;
 }
 
-.footer-bottom {
+.site-footer__bottom {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
@@ -469,6 +474,9 @@ footer {
     grid-template-columns: 1fr;
   }
   .footer-grid {
+    grid-template-columns: 1fr;
+  }
+  .site-footer__grid {
     grid-template-columns: 1fr;
   }
 }

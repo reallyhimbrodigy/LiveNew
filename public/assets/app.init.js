@@ -58,6 +58,20 @@ function resolvePage() {
   return "home";
 }
 
+function setTodayNavEnabled(enabled) {
+  const link = document.getElementById("nav-today");
+  if (!link) return;
+  if (enabled) {
+    link.classList.remove("disabled");
+    link.removeAttribute("aria-disabled");
+    link.removeAttribute("tabindex");
+  } else {
+    link.classList.add("disabled");
+    link.setAttribute("aria-disabled", "true");
+    link.setAttribute("tabindex", "-1");
+  }
+}
+
 function attachUnhandledHook() {
   if (unhandledHookAttached) return;
   window.addEventListener("unhandledrejection", (event) => {
@@ -135,6 +149,18 @@ function buildOnboardDefaults(boot) {
 async function routeUiState({ boot, page }) {
   const uiState = boot?.uiState || "login";
   hideGateScreens();
+  setTodayNavEnabled(uiState === "home");
+
+  if (page !== "home" && page !== "smoke" && uiState !== "home") {
+    const target = uiState === "onboard" ? "/#onboard" : "/#start";
+    window.location.assign(target);
+    return;
+  }
+
+  if (page === "home" && uiState === "home") {
+    window.location.assign("/day");
+    return;
+  }
 
   if (uiState === "login") {
     showLoginScreen();
