@@ -148,10 +148,34 @@ async function main() {
     return out;
   };
 
+  const rewriteAppCoreImport = (content) => {
+    const pattern = /import\s*\{\s*([^}]+)\s*\}\s*from\s*(["'])\.\/app\.core(?:\.[^"']+)?\.js\2\s*;\s*/g;
+    return content.replace(pattern, (match, names, quote) => {
+      const specMatch = match.match(/(["'])\.\/app\.core(?:\.[^"']+)?\.js\1/);
+      const spec = specMatch ? specMatch[0] : `${quote}./app.core.${buildId}.js${quote}`;
+      const tmp = "__Core";
+      const bindings = names
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .map((entry) => {
+          const parts = entry.split(/\s+as\s+/).map((part) => part.trim());
+          const from = parts[0];
+          const to = parts[1] || parts[0];
+          return `const ${to} = ${tmp}.${from};`;
+        })
+        .join("\n");
+      return `import * as ${tmp} from ${spec};\n${bindings}\n`;
+    });
+  };
+
   for (const name of assetFiles) {
     const sourcePath = path.join(assetsDir, name);
     const raw = name === "app.core.js" ? srcText : await fs.readFile(sourcePath, "utf8");
-    const content = applyReplacements(raw);
+    let content = applyReplacements(raw);
+    if (name === "controllers.js") {
+      content = rewriteAppCoreImport(content);
+    }
     const versionedName = name.replace(/\.js$/, `.${buildId}.js`);
     const versionedPath = path.join(assetsDir, versionedName);
     await fs.writeFile(versionedPath, content);
