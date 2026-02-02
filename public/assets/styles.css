@@ -12,6 +12,9 @@
   --danger: #b85a4a;
   --card: var(--panel);
   --ink: var(--text);
+  --r-lg: 16px;
+  --r-md: 12px;
+  --max: 1040px;
 }
 
 * {
@@ -23,13 +26,51 @@ body {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  font-family: "IBM Plex Sans", "Helvetica Neue", sans-serif;
+  font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
   color: var(--text);
   background: var(--bg);
+  line-height: 1.5;
 }
 
 main {
   flex: 1;
+}
+
+.shell {
+  max-width: var(--max);
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+.stack > * + * {
+  margin-top: 16px;
+}
+
+h1 {
+  font-size: 40px;
+  line-height: 1.2;
+  margin: 0;
+}
+
+h2 {
+  font-size: 24px;
+  margin: 0;
+}
+
+.lead {
+  font-size: 18px;
+  color: var(--muted);
+}
+
+.small {
+  font-size: 13px;
+}
+
+.row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  flex-wrap: wrap;
 }
 
 a {
@@ -55,6 +96,16 @@ a:hover {
   border-bottom: 1px solid var(--border);
   flex-wrap: wrap;
   background: var(--panel);
+}
+
+.topbar-inner {
+  display: flex;
+  gap: 24px;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  max-width: var(--max);
+  margin: 0 auto;
 }
 
 .brand {
@@ -90,7 +141,7 @@ a:hover {
 
 .container {
   padding: 32px 24px;
-  max-width: 1100px;
+  max-width: var(--max);
   margin: 0 auto;
   display: flex;
   flex-direction: column;
@@ -101,7 +152,7 @@ a:hover {
   border: 1px solid var(--border);
   background: var(--card);
   padding: 24px;
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   box-shadow: var(--shadow);
 }
 
@@ -186,14 +237,40 @@ a:hover {
   margin-top: 16px;
 }
 
-button, .button {
+button, .button, .btn {
   background: var(--accent);
-  color: #1f2937;
-  border: none;
-  padding: 8px 14px;
-  border-radius: 8px;
+  color: var(--text);
+  border: 1px solid var(--accent);
+  padding: 10px 16px;
+  border-radius: var(--r-md);
   cursor: pointer;
   font-weight: 600;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+button:hover, .button:hover, .btn:hover {
+  background: var(--accent-strong);
+  border-color: var(--accent-strong);
+}
+
+.btn-primary {
+  background: var(--accent);
+  color: var(--text);
+}
+
+.btn-secondary {
+  background: transparent;
+  color: var(--text);
+  border: 1px solid var(--border);
+}
+
+.btn-secondary:hover {
+  background: rgba(214, 195, 163, 0.2);
+  border-color: var(--accent);
 }
 
 button.ghost, .ghost {
@@ -215,10 +292,11 @@ label {
 }
 
 input, select, textarea {
-  padding: 8px;
-  border-radius: 8px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
   border: 1px solid var(--border);
   font-family: inherit;
+  height: 44px;
 }
 
 button:focus-visible,
@@ -365,6 +443,24 @@ textarea:focus-visible {
   background: #fff;
 }
 
+.how-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.how-item {
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  padding: 12px 16px;
+  background: #fff;
+}
+
+.how-title {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+
 .wizard-header {
   display: flex;
   justify-content: space-between;
@@ -399,27 +495,26 @@ textarea:focus-visible {
   white-space: pre-line;
 }
 
-.site-footer {
-  padding: 32px 24px;
+.footer {
+  margin-top: 48px;
+  padding-bottom: 32px;
 }
 
-.site-footer__panel {
-  max-width: 1100px;
-  margin: 0 auto;
+.footer-panel {
   border: 1px solid var(--border);
   background: var(--panel);
-  border-radius: 16px;
+  border-radius: var(--r-lg);
   box-shadow: var(--shadow);
   padding: 24px;
 }
 
-.site-footer__grid {
+.footer-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 32px;
 }
 
-.site-footer__title {
+.footer-title {
   font-weight: 700;
   margin-bottom: 8px;
   letter-spacing: 0.08em;
@@ -427,7 +522,7 @@ textarea:focus-visible {
   font-size: 12px;
 }
 
-.site-footer__links {
+.footer-links {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -435,15 +530,15 @@ textarea:focus-visible {
   color: var(--muted);
 }
 
-.site-footer__links a {
+.footer-links a {
   color: inherit;
 }
 
-.site-footer__links a:hover {
+.footer-links a:hover {
   text-decoration: underline;
 }
 
-.site-footer__bottom {
+.footer-bottom {
   margin-top: 16px;
   padding-top: 16px;
   border-top: 1px solid var(--border);
@@ -474,9 +569,6 @@ footer {
     grid-template-columns: 1fr;
   }
   .footer-grid {
-    grid-template-columns: 1fr;
-  }
-  .site-footer__grid {
     grid-template-columns: 1fr;
   }
 }

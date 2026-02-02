@@ -10,40 +10,34 @@
 </head>
 <body data-page="home">
   <header class="topbar">
-    <div class="brand">LiveNew</div>
-    <nav class="nav">
-      <a href="/" class="active">Home</a>
-      <a id="nav-today" class="disabled" href="/day" aria-disabled="true" tabindex="-1">Today</a>
-      <a href="/help">Help Center</a>
-      <a href="/contact">Contact</a>
-    </nav>
+    <div class="topbar-inner">
+      <div class="brand">LiveNew</div>
+      <nav class="nav">
+        <a href="/" class="active">Home</a>
+        <a id="nav-today" class="disabled" href="/day" aria-disabled="true" tabindex="-1">Today</a>
+        <a href="/help">Help Center</a>
+        <a href="/contact">Contact</a>
+      </nav>
+    </div>
   </header>
 
-  <main class="container">
-    <section class="card hero">
-      <div>
-        <h1>LiveNew</h1>
-        <p class="lead">Reset-first stress regulation for a healthy daily rhythm.</p>
-        <div class="hero-actions">
-          <a class="button" href="/day">Go to Today</a>
-          <a class="button ghost" href="#how">How it works</a>
+  <main class="page-main">
+    <div class="shell stack">
+      <section class="card stack">
+        <div class="stack">
+          <h1>LiveNew</h1>
+          <p class="lead">Reset-first stress regulation for a healthy daily rhythm.</p>
+          <div class="row">
+            <a class="btn btn-primary" href="#start">Start</a>
+            <a class="btn btn-secondary" href="#how">How it works</a>
+          </div>
+          <div class="muted small">Not medical advice.</div>
         </div>
-        <div class="muted">Not medical advice.</div>
-      </div>
-      <div>
-        <div class="card">
-          <h3 class="section-title">Daily rhythm, lighter load</h3>
-          <p class="muted">
-            LiveNew keeps the day calm and doable: quick check-ins, a reset-first plan, and a gentle
-            path back to energy.
-          </p>
-        </div>
-      </div>
-    </section>
+      </section>
 
-    <section class="card" id="start">
-      <h2 class="section-title">Start</h2>
-      <p class="muted">Sign in to continue.</p>
+      <section class="card stack" id="start">
+        <h2>Start</h2>
+        <p class="muted">Sign in to continue.</p>
       <div class="auth" id="auth-panel">
         <div class="auth-status" id="auth-status">Not signed in</div>
         <div class="auth-row">
@@ -56,22 +50,22 @@
           <button id="auth-logout" class="ghost">Logout</button>
         </div>
       </div>
-    </section>
+      </section>
 
-    <section class="card hidden" id="consent-card">
-      <h1>Consent required</h1>
+      <section class="card hidden stack" id="consent-card">
+        <h2>Consent required</h2>
       <p class="muted">Please accept to continue.</p>
       <label><input id="consent-terms" type="checkbox" /> <span>I agree to the Terms</span> <a href="/legal/terms" target="_blank" rel="noopener">View</a></label>
       <label><input id="consent-privacy" type="checkbox" /> <span>I agree to the Privacy Policy</span> <a href="/legal/privacy" target="_blank" rel="noopener">View</a></label>
       <label><input id="consent-alpha" type="checkbox" /> <span>I agree to Alpha Data Processing</span> <a href="/legal/alpha-data-processing" target="_blank" rel="noopener">View</a></label>
       <button id="consent-submit">Accept and continue</button>
       <div id="consent-status" class="muted"></div>
-    </section>
+      </section>
 
-    <section class="card hidden" id="onboard-card">
+      <section class="card hidden stack" id="onboard-card">
       <div class="wizard-header" id="onboard">
         <div>
-          <h1>Personalization</h1>
+          <h2>Personalization</h2>
           <p class="muted">A quick baseline to tailor your day.</p>
         </div>
         <div class="wizard-progress" id="onboard-step-label">Step 1 of 4</div>
@@ -154,25 +148,26 @@
         <button id="onboard-submit" type="button">Finish</button>
       </div>
       <div id="onboard-status" class="muted"></div>
-    </section>
+      </section>
 
-    <section class="card" id="how">
-      <h2 class="section-title">How it works</h2>
-      <div class="steps">
-        <div class="step-card">
-          <h3>Check-in</h3>
-          <p class="muted">A few numbers to orient the day.</p>
+      <section class="card stack" id="how">
+        <h2>How it works</h2>
+        <div class="how-list">
+          <div class="how-item">
+            <div class="how-title">Check-in</div>
+            <div class="muted">A few numbers to orient the day.</div>
+          </div>
+          <div class="how-item">
+            <div class="how-title">Reset</div>
+            <div class="muted">A short regulation step before anything else.</div>
+          </div>
+          <div class="how-item">
+            <div class="how-title">Optional movement + nutrition</div>
+            <div class="muted">If it fits, keep it simple and supportive.</div>
+          </div>
         </div>
-        <div class="step-card">
-          <h3>Reset</h3>
-          <p class="muted">A short regulation step before anything else.</p>
-        </div>
-        <div class="step-card">
-          <h3>Optional movement &amp; nutrition</h3>
-          <p class="muted">If it fits, keep it simple and supportive.</p>
-        </div>
-      </div>
-    </section>
+      </section>
+    </div>
   </main>
 
   <div id="footer-root"></div>
