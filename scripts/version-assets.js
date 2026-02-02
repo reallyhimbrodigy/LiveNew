@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { execSync } from "child_process";
+import { pathToFileURL } from "url";
 
 function utcTimestamp() {
   const now = new Date();
@@ -71,11 +72,17 @@ async function main() {
   );
 
   const appCoreVersioned = path.join(assetsDir, `app.core.${buildId}.js`);
-  const appCoreContent = await fs.readFile(appCoreVersioned, "utf8");
-  const hasGetAppStateExport =
-    appCoreContent.includes("export function getAppState") ||
-    appCoreContent.includes("export { getAppState");
-  if (!hasGetAppStateExport) {
+  try {
+    const appCoreModule = await import(pathToFileURL(appCoreVersioned).href);
+    if (typeof appCoreModule.getAppState !== "function") {
+      throw new Error(
+        `version-assets: generated app.core.${buildId}.js missing named export getAppState`
+      );
+    }
+  } catch (err) {
+    if (err?.message?.startsWith("version-assets: generated app.core.")) {
+      throw err;
+    }
     throw new Error(
       `version-assets: generated app.core.${buildId}.js missing named export getAppState`
     );
