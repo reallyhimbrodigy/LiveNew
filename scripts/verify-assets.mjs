@@ -42,12 +42,16 @@ async function main() {
   }
   const text = await fs.readFile(appCorePath, "utf8");
   const hasNamedGetAppState =
-    /\bexport\s+function\s+getAppState\b/.test(text) ||
-    /\bexport\s+(const|let|var)\s+getAppState\b/.test(text) ||
-    /\bexport\s*\{[^}]*\bgetAppState\b[^}]*\}\s*;?/.test(text);
+    /export\s+function\s+getAppState\b/m.test(text) ||
+    /export\s+(const|let|var)\s+getAppState\b/m.test(text) ||
+    /export\s*\{[\s\S]*?\bgetAppState\b[\s\S]*?\}/m.test(text) ||
+    /export\s*\{[\s\S]*?\bgetAppState\s+as\s+getAppState\b[\s\S]*?\}/m.test(text) ||
+    /export\s*\{[\s\S]*?\bgetAppStateInternal\s+as\s+getAppState\b[\s\S]*?\}/m.test(text);
   if (!hasNamedGetAppState) {
+    const head = text.slice(0, 600);
+    const tail = text.slice(-200);
     throw new Error(
-      `verify-assets: app.core.${buildId}.js missing export getAppState`
+      `verify-assets: app.core.${buildId}.js missing export getAppState\nhead=${head}\ntail=${tail}`
     );
   }
   console.log(`verify-assets: OK app.core.${buildId}.js exports getAppState`);

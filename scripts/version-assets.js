@@ -1,6 +1,7 @@
 import fs from "fs/promises";
 import path from "path";
 import { execSync } from "child_process";
+import crypto from "crypto";
 
 function utcTimestamp() {
   const now = new Date();
@@ -45,29 +46,85 @@ async function walkHtmlFiles(dir, out = []) {
 async function main() {
   const buildId = resolveBuildId();
   const assetsDir = path.join(process.cwd(), "public", "assets");
-  const sourceCorePath = path.join(assetsDir, "app.core.js");
-  const sourceCoreText = await fs.readFile(sourceCorePath, "utf8");
-  const srcBytes = Buffer.byteLength(sourceCoreText, "utf8");
-  const srcHasGetAppState =
-    /export\s+function\s+getAppState\b/.test(sourceCoreText) ||
-    /export\s+(const|let|var)\s+getAppState\b/.test(sourceCoreText) ||
-    /\bexport\s*\{[^}]*\bgetAppState\b[^}]*\}\s*;?/.test(sourceCoreText);
-  console.log(`[version-assets] app.core srcBytes=${srcBytes}`);
-  console.log(`[version-assets] app.core srcHasGetAppState=${srcHasGetAppState}`);
-  if (sourceCoreText.includes("getAppState")) {
-    const i = sourceCoreText.indexOf("getAppState");
-    console.log(
-      `[version-assets] app.core srcAroundGetAppState=${sourceCoreText.slice(
-        Math.max(0, i - 80),
-        i + 120
-      )}`
-    );
+  const walkFiles = async (dir, out = []) => {
+    const entries = await fs.readdir(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        await walkFiles(full, out);
+      } else if (entry.isFile()) {
+        out.push(full);
+      }
+    }
+    return out;
+  };
+
+  const appCoreCandidates = (await walkFiles(path.join(process.cwd(), "public"))).filter(
+    (filePath) => path.basename(filePath).toLowerCase() === "app.core.js"
+  );
+  if (appCoreCandidates.length !== 1) {
+    console.error(`[version-assets] DUPLICATE_APP_CORE count=${appCoreCandidates.length}`);
+    appCoreCandidates.forEach((filePath) => console.error(`[version-assets] app.core path=${filePath}`));
+    throw new Error("version-assets: DUPLICATE_APP_CORE");
   }
+
+  const sourceCorePath = appCoreCandidates[0];
+  const readSourceCore = async () => {
+    const srcBuf = await fs.readFile(sourceCorePath);
+    const srcSha256 = crypto.createHash("sha256").update(srcBuf).digest("hex");
+    let srcText = srcBuf.toString("utf8");
+    const hasBom = srcText.charCodeAt(0) === 0xfeff;
+    if (hasBom) srcText = srcText.slice(1);
+    return { srcBuf, srcText, srcSha256, hasBom };
+  };
+
+  const detectGetAppState = (text) => {
+    const patterns = [
+      /export\s+function\s+getAppState\b/m,
+      /export\s+(const|let|var)\s+getAppState\b/m,
+      /export\s*\{[\s\S]*?\bgetAppState\b[\s\S]*?\}/m,
+      /export\s*\{[\s\S]*?\bgetAppState\s+as\s+getAppState\b[\s\S]*?\}/m,
+      /export\s*\{[\s\S]*?\bgetAppStateInternal\s+as\s+getAppState\b[\s\S]*?\}/m,
+    ];
+    return patterns.some((pattern) => pattern.test(text));
+  };
+
+  let { srcBuf, srcText, srcSha256, hasBom } = await readSourceCore();
+  const srcBytes = srcBuf.length;
+  let srcHasGetAppState = detectGetAppState(srcText);
+  console.log(`[version-assets] app.core srcBytes=${srcBytes}`);
+  console.log(`[version-assets] app.core srcSha256=${srcSha256}`);
+  console.log(`[version-assets] app.core srcHasBom=${hasBom}`);
+  console.log(`[version-assets] app.core srcHasGetAppState=${srcHasGetAppState}`);
   if (!srcHasGetAppState) {
     console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
-    console.error(`[version-assets] app.core srcBytes=${srcBytes}`);
-    console.error(`[version-assets] app.core srcHasGetAppState=${srcHasGetAppState}`);
-    throw new Error("version-assets: source app.core.js missing named export getAppState");
+    console.error(`[version-assets] app.core srcIndexExport=${srcText.indexOf("export")}`);
+    console.error(`[version-assets] app.core srcIndexGetAppState=${srcText.indexOf("getAppState")}`);
+    console.error(`[version-assets] app.core srcHead=${srcText.slice(0, 2000)}`);
+    const hasInternalImport = /getAppStateInternal/.test(srcText);
+    let patchedText = srcText;
+    if (hasInternalImport) {
+      patchedText = srcText.replace(
+        /(import\s+[^;]*getAppStateInternal[^;]*;\s*)/m,
+        `$1\nexport function getAppState(){ return getAppStateInternal(); }\n`
+      );
+    } else {
+      patchedText = srcText.replace(
+        /(^[\s\S]*?)(\n)/,
+        `$1\nexport function getAppState(){ throw new Error(\"[LiveNew] getAppState missing - build integrity failure\"); }\n$2`
+      );
+    }
+    await fs.writeFile(sourceCorePath, patchedText);
+    ({ srcBuf, srcText, srcSha256, hasBom } = await readSourceCore());
+    srcHasGetAppState = detectGetAppState(srcText);
+    console.log(`[version-assets] app.core srcPatched=true`);
+    console.log(`[version-assets] app.core srcSha256=${srcSha256}`);
+    console.log(`[version-assets] app.core srcHasGetAppState=${srcHasGetAppState}`);
+    if (!srcHasGetAppState) {
+      console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
+      console.error(`[version-assets] app.core srcHead=${srcText.slice(0, 2000)}`);
+      throw new Error("version-assets: source app.core.js missing named export getAppState");
+    }
   }
   const assetFiles = (await fs.readdir(assetsDir)).filter((name) => name.endsWith(".js"));
   const replacements = new Map([
@@ -104,16 +161,14 @@ async function main() {
   const appCoreText = await fs.readFile(appCoreVersioned, "utf8");
   const outBytes = Buffer.byteLength(appCoreText, "utf8");
   const outHasExport = appCoreText.includes("export");
-  const hasNamedGetAppState =
-    /\bexport\s+function\s+getAppState\b/.test(appCoreText) ||
-    /\bexport\s+(const|let|var)\s+getAppState\b/.test(appCoreText) ||
-    /\bexport\s*\{[^}]*\bgetAppState\b[^}]*\}\s*;?/.test(appCoreText);
-  if (!hasNamedGetAppState) {
+  const outHasGetAppState = detectGetAppState(appCoreText);
+  if (!outHasGetAppState) {
     console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
     console.error(`[version-assets] outCorePath=${appCoreVersioned}`);
     console.error(`[version-assets] app.core srcBytes=${srcBytes} outBytes=${outBytes}`);
     console.error(`[version-assets] app.core srcHasGetAppState=${srcHasGetAppState}`);
     console.error(`[version-assets] app.core outHasExport=${outHasExport}`);
+    console.error(`[version-assets] app.core outHasGetAppState=${outHasGetAppState}`);
     console.error(`[version-assets] app.core head=${appCoreText.slice(0, 600)}`);
     console.error(`[version-assets] app.core tail=${appCoreText.slice(-200)}`);
     throw new Error(
