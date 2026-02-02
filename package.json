@@ -4,8 +4,8 @@
   "type": "module",
   "main": "index.js",
   "scripts": {
-    "build:assets": "node scripts/version-assets.js",
-    "prestart": "node scripts/version-assets.js",
+    "build:assets": "node scripts/version-assets.js && node scripts/verify-assets.mjs",
+    "prestart": "npm run build:assets",
     "start": "node src/server/index.js",
     "start:app": "expo start",
     "android": "expo start --android",

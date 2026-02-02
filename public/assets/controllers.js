@@ -1,12 +1,16 @@
+import * as Core from "./app.core.js";
+
 const BUILD_ID = "__BUILD_ID__";
 console.log("[LiveNew BUILD]", BUILD_ID);
 
-const core = await import("./app.core.js");
-if (!core || typeof core.getAppState !== "function") {
-  const keys = core ? Object.keys(core).sort().join(", ") : "null";
-  throw new Error(`[LiveNew] app.core missing getAppState. exports=[${keys}]`);
+const getAppState = Core.getAppState;
+if (typeof getAppState !== "function") {
+  const keys = Object.keys(Core).sort().join(", ");
+  throw new Error(
+    `[LiveNew] BUILD_INTEGRITY_FAILURE: app.core missing export getAppState. exports=[${keys}]`
+  );
 }
-const { getAppState, initDay, initWeek, initTrends, initProfile, initAdmin } = core;
+const { initDay, initWeek, initTrends, initProfile, initAdmin } = Core;
 
 async function loadCore() {
   return { getAppState, initDay, initWeek, initTrends, initProfile, initAdmin };
