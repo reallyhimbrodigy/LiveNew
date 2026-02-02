@@ -43,24 +43,34 @@
     </section>
 
     <section class="card hidden" id="onboard-card">
-      <h1 data-i18n="onboard.title">Start in under a minute</h1>
-      <p class="muted" data-i18n="onboard.subtitle">Consent + quick baseline + first check-in.</p>
-      <div class="grid-2">
-        <label><span data-i18n="onboard.timezone">Timezone</span> <input id="onboard-timezone" type="text" placeholder="America/Los_Angeles" /></label>
-        <label><span data-i18n="onboard.dayBoundary">Day boundary hour</span>
-          <select id="onboard-boundary">
-            <option value="0">0</option>
-            <option value="1">1</option>
-            <option value="2">2</option>
-            <option value="3">3</option>
-            <option value="4">4</option>
-            <option value="5">5</option>
-            <option value="6">6</option>
-          </select>
-        </label>
+      <div class="wizard-header">
+        <div>
+          <h1 data-i18n="onboard.title">Start in under a minute</h1>
+          <p class="muted" data-i18n="onboard.subtitle">Consent + quick baseline + first check-in.</p>
+        </div>
+        <div class="wizard-progress" id="onboard-step-label">Step 1 of 4</div>
       </div>
-      <details>
-        <summary data-i18n="onboard.constraints">Optional constraints</summary>
+
+      <div class="wizard-step onboard-step" data-step="0">
+        <h3 data-i18n="onboard.timezone">Time &amp; boundary</h3>
+        <div class="grid-2">
+          <label><span data-i18n="onboard.timezone">Timezone</span> <input id="onboard-timezone" type="text" placeholder="America/Los_Angeles" /></label>
+          <label><span data-i18n="onboard.dayBoundary">Day boundary hour</span>
+            <select id="onboard-boundary">
+              <option value="0">0</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+            </select>
+          </label>
+        </div>
+      </div>
+
+      <div class="wizard-step onboard-step hidden" data-step="1">
+        <h3 data-i18n="onboard.constraints">Constraints</h3>
         <div class="grid-2">
           <label><input id="onboard-injury-knee" type="checkbox" /> <span data-i18n="profile.injuryKnee">Knee injury</span></label>
           <label><input id="onboard-injury-shoulder" type="checkbox" /> <span data-i18n="profile.injuryShoulder">Shoulder injury</span></label>
@@ -78,31 +88,45 @@
             </select>
           </label>
         </div>
-      </details>
-      <div class="grid-2">
-        <label><span data-i18n="checkIn.stress">Stress (1-10)</span> <input id="onboard-stress" type="number" min="1" max="10" /></label>
-        <label><span data-i18n="checkIn.sleep">Sleep quality (1-10)</span> <input id="onboard-sleep" type="number" min="1" max="10" /></label>
-        <label><span data-i18n="checkIn.energy">Energy (1-10)</span> <input id="onboard-energy" type="number" min="1" max="10" /></label>
-        <label><span data-i18n="checkIn.timeAvailable">Time available</span>
-          <select id="onboard-time">
-            <option value="5">5</option>
-            <option value="10">10</option>
-            <option value="15">15</option>
-            <option value="20" selected>20</option>
-            <option value="30">30</option>
-          </select>
-        </label>
       </div>
-      <div class="row">
-        <label><input id="onboard-consent-terms" type="checkbox" /> <span data-i18n="consent.terms">I agree to the Terms</span> <a href="/legal/terms" target="_blank" rel="noopener">View</a></label>
+
+      <div class="wizard-step onboard-step hidden" data-step="2">
+        <h3 data-i18n="day.checkIn">Daily check-in</h3>
+        <div class="grid-2">
+          <label><span data-i18n="checkIn.stress">Stress (1-10)</span> <input id="onboard-stress" type="number" min="1" max="10" /></label>
+          <label><span data-i18n="checkIn.sleep">Sleep quality (1-10)</span> <input id="onboard-sleep" type="number" min="1" max="10" /></label>
+          <label><span data-i18n="checkIn.energy">Energy (1-10)</span> <input id="onboard-energy" type="number" min="1" max="10" /></label>
+          <label><span data-i18n="checkIn.timeAvailable">Time available</span>
+            <select id="onboard-time">
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="15">15</option>
+              <option value="20" selected>20</option>
+              <option value="30">30</option>
+            </select>
+          </label>
+        </div>
       </div>
-      <div class="row">
-        <label><input id="onboard-consent-privacy" type="checkbox" /> <span data-i18n="consent.privacy">I agree to the Privacy Policy</span> <a href="/legal/privacy" target="_blank" rel="noopener">View</a></label>
+
+      <div class="wizard-step onboard-step hidden" data-step="3">
+        <h3>Review &amp; start</h3>
+        <div id="onboard-review" class="muted review"></div>
+        <div class="row">
+          <label><input id="onboard-consent-terms" type="checkbox" /> <span data-i18n="consent.terms">I agree to the Terms</span> <a href="/legal/terms" target="_blank" rel="noopener">View</a></label>
+        </div>
+        <div class="row">
+          <label><input id="onboard-consent-privacy" type="checkbox" /> <span data-i18n="consent.privacy">I agree to the Privacy Policy</span> <a href="/legal/privacy" target="_blank" rel="noopener">View</a></label>
+        </div>
+        <div class="row">
+          <label><input id="onboard-consent-alpha" type="checkbox" /> <span data-i18n="consent.alpha">I agree to Alpha Data Processing</span> <a href="/legal/alpha-data-processing" target="_blank" rel="noopener">View</a></label>
+        </div>
       </div>
-      <div class="row">
-        <label><input id="onboard-consent-alpha" type="checkbox" /> <span data-i18n="consent.alpha">I agree to Alpha Data Processing</span> <a href="/legal/alpha-data-processing" target="_blank" rel="noopener">View</a></label>
+
+      <div class="wizard-nav">
+        <button id="onboard-back" class="ghost" type="button">Back</button>
+        <button id="onboard-next" type="button">Next</button>
+        <button id="onboard-submit" data-i18n="onboard.submit">Start now</button>
       </div>
-      <button id="onboard-submit" data-i18n="onboard.submit">Start now</button>
       <div id="onboard-status" class="muted"></div>
     </section>
 
@@ -196,25 +220,38 @@
     </section>
 
     <section class="card" id="checkin-card">
-      <h2 data-i18n="day.checkIn">Check-in</h2>
-      <div class="grid-2">
-        <label><span data-i18n="checkIn.stress">Stress (1-10)</span> <input id="checkin-stress" type="number" min="1" max="10" /></label>
-        <label><span data-i18n="checkIn.sleep">Sleep quality (1-10)</span> <input id="checkin-sleep" type="number" min="1" max="10" /></label>
-        <label><span data-i18n="checkIn.energy">Energy (1-10)</span> <input id="checkin-energy" type="number" min="1" max="10" /></label>
-        <label><span data-i18n="checkIn.timeAvailable">Time available</span>
-          <select id="checkin-time">
-            <option value="5">5</option>
-            <option value="10">10</option>
-            <option value="15">15</option>
-            <option value="20" selected>20</option>
-            <option value="30">30</option>
-            <option value="45">45</option>
-            <option value="60">60</option>
-          </select>
-        </label>
-        <label class="span-2"><span data-i18n="labels.notes">Notes</span> <input id="checkin-notes" type="text" placeholder="Optional" data-i18n-placeholder="day.notesPlaceholder" /></label>
+      <div class="wizard-header">
+        <h2 data-i18n="day.checkIn">Check-in</h2>
+        <div class="wizard-progress" id="checkin-step-label">Step 1 of 2</div>
       </div>
-      <button id="checkin-submit" data-i18n="day.saveCheckIn">Save check-in</button>
+      <div class="wizard-step checkin-step" data-step="0">
+        <div class="grid-2">
+          <label><span data-i18n="checkIn.stress">Stress (1-10)</span> <input id="checkin-stress" type="number" min="1" max="10" /></label>
+          <label><span data-i18n="checkIn.sleep">Sleep quality (1-10)</span> <input id="checkin-sleep" type="number" min="1" max="10" /></label>
+          <label><span data-i18n="checkIn.energy">Energy (1-10)</span> <input id="checkin-energy" type="number" min="1" max="10" /></label>
+        </div>
+      </div>
+      <div class="wizard-step checkin-step hidden" data-step="1">
+        <div class="grid-2">
+          <label><span data-i18n="checkIn.timeAvailable">Time available</span>
+            <select id="checkin-time">
+              <option value="5">5</option>
+              <option value="10">10</option>
+              <option value="15">15</option>
+              <option value="20" selected>20</option>
+              <option value="30">30</option>
+              <option value="45">45</option>
+              <option value="60">60</option>
+            </select>
+          </label>
+          <label class="span-2"><span data-i18n="labels.notes">Notes</span> <input id="checkin-notes" type="text" placeholder="Optional" data-i18n-placeholder="day.notesPlaceholder" /></label>
+        </div>
+      </div>
+      <div class="wizard-nav">
+        <button id="checkin-back" class="ghost" type="button">Back</button>
+        <button id="checkin-next" type="button">Next</button>
+        <button id="checkin-submit" data-i18n="day.saveCheckIn">Save check-in</button>
+      </div>
     </section>
 
     <section class="card" id="completion-card">
@@ -249,6 +286,8 @@
     </section>
   </main>
 
+  <div id="footer-root"></div>
+  <script type="module" src="/assets/footer.js"></script>
   <script type="module" src="/assets/app.init.202602012312-5308367.js"></script>
 </body>
 </html>

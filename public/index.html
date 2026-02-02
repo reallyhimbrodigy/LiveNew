@@ -6,41 +6,61 @@
   
   <link rel="icon" href="/favicon.ico" />
   <link rel="stylesheet" href="/assets/styles.css" />
+  <title>LiveNew</title>
 </head>
 <body data-page="home">
   <header class="topbar">
-    <div class="brand" data-i18n="appName">LiveNew</div>
+    <div class="brand">LiveNew</div>
     <nav class="nav">
-      <a href="/day" data-i18n="nav.day">Day</a>
-      <a href="/week" data-i18n="nav.week">Week</a>
-      <a href="/trends" data-i18n="nav.trends">Trends</a>
-      <a href="/profile" data-i18n="nav.profile">Profile</a>
-      <a class="admin-link" href="/admin" data-i18n="nav.admin">Admin</a>
+      <a href="/" class="active">Home</a>
+      <a href="/day">Today</a>
+      <a href="/help">Help Center</a>
+      <a href="/contact">Contact</a>
     </nav>
-    <div class="auth" id="auth-panel">
-      <div class="auth-status" id="auth-status" data-i18n="auth.notSignedIn">Not signed in</div>
-      <div class="auth-row">
-        <input id="auth-email" type="email" placeholder="email" data-i18n-placeholder="auth.emailPlaceholder" aria-label="email" data-i18n-aria="auth.emailPlaceholder" />
-        <button id="auth-request" data-i18n="auth.sendCode">Send code</button>
-      </div>
-      <div class="auth-row">
-        <input id="auth-code" type="text" placeholder="code" data-i18n-placeholder="auth.codePlaceholder" aria-label="code" data-i18n-aria="auth.codePlaceholder" />
-        <button id="auth-verify" data-i18n="auth.verify">Verify</button>
-        <button id="auth-logout" class="ghost" data-i18n="auth.logout">Logout</button>
-      </div>
-    </div>
   </header>
 
   <main class="container">
-    <section class="card">
-      <h1 data-i18n="appName">LiveNew</h1>
-      <p class="muted" data-i18n="home.tagline">Your daily recovery plan, distilled.</p>
-      <div class="actions">
-        <a class="button" href="/day" data-i18n="home.cta">Go to Day</a>
+    <section class="card hero">
+      <div>
+        <h1>LiveNew</h1>
+        <p class="lead">Reset-first stress regulation.</p>
+        <div class="hero-actions">
+          <a class="button" href="/day">Go to Today</a>
+          <a class="button ghost" href="#how">How it works</a>
+        </div>
+        <div class="muted">Not medical advice. If you feel unsafe, seek professional help.</div>
+      </div>
+      <div>
+        <div class="card">
+          <h3 class="section-title">Daily rhythm, lighter load</h3>
+          <p class="muted">
+            LiveNew keeps the day calm and doable: quick check-ins, a reset-first plan, and a gentle
+            path back to energy.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="card" id="how">
+      <h2 class="section-title">How it works</h2>
+      <div class="steps">
+        <div class="step-card">
+          <h3>Check-in</h3>
+          <p class="muted">A few numbers to orient the day.</p>
+        </div>
+        <div class="step-card">
+          <h3>Reset</h3>
+          <p class="muted">A short regulation step before anything else.</p>
+        </div>
+        <div class="step-card">
+          <h3>Optional movement &amp; nutrition</h3>
+          <p class="muted">If it fits, keep it simple and supportive.</p>
+        </div>
       </div>
     </section>
   </main>
 
-  <script type="module" src="/assets/app.init.202602012312-5308367.js"></script>
+  <div id="footer-root"></div>
+  <script type="module" src="/assets/footer.js"></script>
 </body>
 </html>
