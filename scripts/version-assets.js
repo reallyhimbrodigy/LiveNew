@@ -150,7 +150,7 @@ async function main() {
 
   for (const name of assetFiles) {
     const sourcePath = path.join(assetsDir, name);
-    const raw = name === "app.core.js" ? sourceCoreText : await fs.readFile(sourcePath, "utf8");
+    const raw = name === "app.core.js" ? srcText : await fs.readFile(sourcePath, "utf8");
     const content = applyReplacements(raw);
     const versionedName = name.replace(/\.js$/, `.${buildId}.js`);
     const versionedPath = path.join(assetsDir, versionedName);
