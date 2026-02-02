@@ -3,9 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  
   <link rel="icon" href="/favicon.ico" />
-  <link rel="stylesheet" href="/assets/styles.css" />
+  <link rel="stylesheet" href="/assets/app.css" />
   <title>LiveNew</title>
 </head>
 <body data-page="home">
@@ -14,7 +13,7 @@
       <div class="brand">LiveNew</div>
       <nav class="nav">
         <a href="/index.html">Home</a>
-        <a href="/day">Today</a>
+        <a id="nav-today" href="/day">Today</a>
         <a href="/help">Help Center</a>
         <a href="/contact">Contact</a>
       </nav>
@@ -32,121 +31,27 @@
         <div class="small">Not medical advice.</div>
       </section>
 
-      <section class="card" id="start">
+      <section id="start" class="card">
         <h2 class="section-title">Start</h2>
-        <p class="lead">Sign in to continue.</p>
-        <div class="auth form" id="auth-panel">
-          <div class="auth-status" id="auth-status">Not signed in</div>
+        <div class="small">Sign in to continue.</div>
+
+        <div class="form">
           <div class="form-row">
-            <input class="input" id="auth-email" type="email" placeholder="email" aria-label="email" />
-            <button class="btn btn-primary" id="auth-request">Send code</button>
+            <input id="auth-email" class="input" type="email" placeholder="email" />
+            <button id="auth-request" class="btn btn-primary" type="button">Send code</button>
           </div>
+
           <div class="form-row">
-            <input class="input" id="auth-code" type="text" placeholder="code" aria-label="code" />
-            <button class="btn btn-primary" id="auth-verify">Verify</button>
+            <input id="auth-code" class="input" type="text" placeholder="code" />
+            <button id="auth-verify" class="btn btn-primary" type="button">Verify</button>
           </div>
-          <div class="row">
-            <button id="auth-logout" class="btn btn-ghost">Logout</button>
-          </div>
-        </div>
-      </section>
 
-      <section class="card hidden" id="consent-card">
-        <h2 class="section-title">Consent required</h2>
-        <p class="lead">Please accept to continue.</p>
-        <label><input id="consent-terms" type="checkbox" /> <span>I agree to the Terms</span> <a href="/legal/terms" target="_blank" rel="noopener">View</a></label>
-        <label><input id="consent-privacy" type="checkbox" /> <span>I agree to the Privacy Policy</span> <a href="/legal/privacy" target="_blank" rel="noopener">View</a></label>
-        <label><input id="consent-alpha" type="checkbox" /> <span>I agree to Alpha Data Processing</span> <a href="/legal/alpha-data-processing" target="_blank" rel="noopener">View</a></label>
-        <button id="consent-submit" class="btn btn-primary">Accept and continue</button>
-        <div id="consent-status" class="muted"></div>
-      </section>
+          <div class="btnrow" style="margin-top:12px">
+            <button id="auth-logout" class="btn btn-ghost" type="button">Logout</button>
+          </div>
 
-      <section class="card hidden" id="onboard-card">
-        <div class="wizard-header" id="onboard">
-          <div>
-            <h2 class="section-title">Personalization</h2>
-            <p class="lead">A quick baseline to tailor your day.</p>
-          </div>
-          <div class="wizard-progress" id="onboard-step-label">Step 1 of 4</div>
+          <div id="auth-status" class="small"></div>
         </div>
-
-        <div class="wizard-step onboard-step" data-step="0">
-          <h3>Time &amp; boundary</h3>
-          <div class="grid-2">
-            <label><span>Timezone</span> <input id="onboard-timezone" type="text" placeholder="America/Los_Angeles" /></label>
-            <label><span>Day boundary hour</span>
-              <select id="onboard-boundary">
-                <option value="0">0</option>
-                <option value="1">1</option>
-                <option value="2">2</option>
-                <option value="3">3</option>
-                <option value="4">4</option>
-                <option value="5">5</option>
-                <option value="6">6</option>
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <div class="wizard-step onboard-step hidden" data-step="1">
-          <h3>Constraints</h3>
-          <div class="grid-2">
-            <label><input id="onboard-injury-knee" type="checkbox" /> <span>Knee injury</span></label>
-            <label><input id="onboard-injury-shoulder" type="checkbox" /> <span>Shoulder injury</span></label>
-            <label><input id="onboard-injury-back" type="checkbox" /> <span>Back injury</span></label>
-            <label><input id="onboard-eq-none" type="checkbox" checked /> <span>No equipment</span></label>
-            <label><input id="onboard-eq-dumbbells" type="checkbox" /> <span>Dumbbells</span></label>
-            <label><input id="onboard-eq-bands" type="checkbox" /> <span>Bands</span></label>
-            <label><input id="onboard-eq-gym" type="checkbox" /> <span>Gym access</span></label>
-            <label class="span-2"><span>Preferred time of day</span>
-              <select id="onboard-time-pref">
-                <option value="any">Any</option>
-                <option value="morning">Morning</option>
-                <option value="midday">Midday</option>
-                <option value="evening">Evening</option>
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <div class="wizard-step onboard-step hidden" data-step="2">
-          <h3>Daily check-in</h3>
-          <div class="grid-2">
-            <label><span>Stress (1-10)</span> <input id="onboard-stress" type="number" min="1" max="10" /></label>
-            <label><span>Sleep quality (1-10)</span> <input id="onboard-sleep" type="number" min="1" max="10" /></label>
-            <label><span>Energy (1-10)</span> <input id="onboard-energy" type="number" min="1" max="10" /></label>
-            <label><span>Time available</span>
-              <select id="onboard-time">
-                <option value="5">5</option>
-                <option value="10">10</option>
-                <option value="15">15</option>
-                <option value="20" selected>20</option>
-                <option value="30">30</option>
-              </select>
-            </label>
-          </div>
-        </div>
-
-        <div class="wizard-step onboard-step hidden" data-step="3">
-          <h3>Review &amp; finish</h3>
-          <div id="onboard-review" class="muted review"></div>
-          <div class="row">
-            <label><input id="onboard-consent-terms" type="checkbox" /> <span>I agree to the Terms</span> <a href="/legal/terms" target="_blank" rel="noopener">View</a></label>
-          </div>
-          <div class="row">
-            <label><input id="onboard-consent-privacy" type="checkbox" /> <span>I agree to the Privacy Policy</span> <a href="/legal/privacy" target="_blank" rel="noopener">View</a></label>
-          </div>
-          <div class="row">
-            <label><input id="onboard-consent-alpha" type="checkbox" /> <span>I agree to Alpha Data Processing</span> <a href="/legal/alpha-data-processing" target="_blank" rel="noopener">View</a></label>
-          </div>
-        </div>
-
-        <div class="wizard-nav">
-          <button id="onboard-back" class="btn btn-ghost" type="button">Back</button>
-          <button id="onboard-next" class="btn btn-primary" type="button">Next</button>
-          <button id="onboard-submit" class="btn btn-primary" type="button">Finish</button>
-        </div>
-        <div id="onboard-status" class="muted"></div>
       </section>
 
       <section id="how" class="card">
@@ -167,8 +72,8 @@
         </div>
       </section>
     </main>
-
   </div>
+
   <footer class="footer">
     <div class="shell">
       <div class="footer-panel">
