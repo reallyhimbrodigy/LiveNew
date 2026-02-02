@@ -14,14 +14,12 @@ import {
   setDeviceName,
   getDeviceName,
 } from "./app.api.js";
-import { getAppState as getAppStateInternal } from "./app.state.js";
+import { getAppState } from "./app.state.js";
 import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.js";
 import { STRINGS as EN_STRINGS } from "../i18n/en.js";
 export const BUILD_ID = "__BUILD_ID__";
 
-export function getAppState() {
-  return getAppStateInternal();
-}
+export { getAppState };
 
 const LOCALE = "en";
 const STRINGS = { en: EN_STRINGS }[LOCALE] || EN_STRINGS;
@@ -213,6 +211,77 @@ export function renderConsentScreen({ requiredKeys = null, requiredVersion = nul
 
 let onboardHandlers = { onComplete: null, onError: null };
 let onboardBound = false;
+let onboardStep = 0;
+
+function isNumberInRange(value, min, max) {
+  const num = Number(value);
+  return Number.isFinite(num) && num >= min && num <= max;
+}
+
+function onboardStepValid(step) {
+  if (step === 0) {
+    return Boolean(qs("#onboard-timezone")?.value?.trim());
+  }
+  if (step === 2) {
+    return (
+      isNumberInRange(qs("#onboard-stress")?.value, 1, 10) &&
+      isNumberInRange(qs("#onboard-sleep")?.value, 1, 10) &&
+      isNumberInRange(qs("#onboard-energy")?.value, 1, 10)
+    );
+  }
+  if (step === 3) {
+    return Boolean(qs("#onboard-consent-terms")?.checked) &&
+      Boolean(qs("#onboard-consent-privacy")?.checked) &&
+      Boolean(qs("#onboard-consent-alpha")?.checked);
+  }
+  return true;
+}
+
+function updateOnboardReview() {
+  const review = qs("#onboard-review");
+  if (!review) return;
+  const timezone = qs("#onboard-timezone")?.value?.trim() || "–";
+  const boundary = qs("#onboard-boundary")?.value ?? "0";
+  const stress = qs("#onboard-stress")?.value || "–";
+  const sleep = qs("#onboard-sleep")?.value || "–";
+  const energy = qs("#onboard-energy")?.value || "–";
+  const timeAvailable = qs("#onboard-time")?.value || "–";
+  review.textContent =
+    `Timezone: ${timezone}\n` +
+    `Day boundary: ${boundary}:00\n` +
+    `Stress: ${stress} · Sleep: ${sleep} · Energy: ${energy}\n` +
+    `Time available: ${timeAvailable} min`;
+}
+
+function updateOnboardWizard() {
+  const steps = qsa("#onboard-card .onboard-step");
+  if (!steps.length) return;
+  const stepLabel = qs("#onboard-step-label");
+  const backBtn = qs("#onboard-back");
+  const nextBtn = qs("#onboard-next");
+  const submitBtn = qs("#onboard-submit");
+  const total = steps.length;
+  const clamped = Math.min(Math.max(onboardStep, 0), total - 1);
+  onboardStep = clamped;
+  steps.forEach((step, idx) => step.classList.toggle("hidden", idx !== clamped));
+  if (stepLabel) stepLabel.textContent = `Step ${clamped + 1} of ${total}`;
+  const valid = onboardStepValid(clamped);
+  if (backBtn) backBtn.disabled = clamped === 0;
+  if (nextBtn) {
+    nextBtn.classList.toggle("hidden", clamped === total - 1);
+    nextBtn.disabled = !valid;
+  }
+  if (submitBtn) {
+    submitBtn.classList.toggle("hidden", clamped !== total - 1);
+    submitBtn.disabled = !valid;
+  }
+  if (clamped === total - 1) updateOnboardReview();
+}
+
+function setOnboardStep(next) {
+  onboardStep = next;
+  updateOnboardWizard();
+}
 export function renderOnboardScreen({ onComplete, onError, defaults = {} } = {}) {
   const card = qs("#onboard-card");
   if (!card) {
@@ -232,8 +301,32 @@ export function renderOnboardScreen({ onComplete, onError, defaults = {} } = {})
   if (qs("#onboard-stress")) qs("#onboard-stress").value = defaults.stress || "5";
   if (qs("#onboard-sleep")) qs("#onboard-sleep").value = defaults.sleepQuality || "6";
   if (qs("#onboard-energy")) qs("#onboard-energy").value = defaults.energy || "6";
+  onboardStep = 0;
+  updateOnboardWizard();
   if (!onboardBound) {
+    const backBtn = qs("#onboard-back");
+    const nextBtn = qs("#onboard-next");
     const submit = qs("#onboard-submit");
+    backBtn?.addEventListener("click", () => setOnboardStep(onboardStep - 1));
+    nextBtn?.addEventListener("click", () => {
+      if (!onboardStepValid(onboardStep)) return;
+      setOnboardStep(onboardStep + 1);
+    });
+    [
+      "#onboard-timezone",
+      "#onboard-boundary",
+      "#onboard-stress",
+      "#onboard-sleep",
+      "#onboard-energy",
+      "#onboard-time",
+      "#onboard-consent-terms",
+      "#onboard-consent-privacy",
+      "#onboard-consent-alpha",
+    ].forEach((selector) => {
+      const el = qs(selector);
+      el?.addEventListener("input", updateOnboardWizard);
+      el?.addEventListener("change", updateOnboardWizard);
+    });
     submit?.addEventListener("click", async () => {
       if (status) status.textContent = t("onboard.saving");
       const consent = {
@@ -434,6 +527,10 @@ function initDay({ initialDateISO } = {}) {
   const signalButtons = qs("#signal-buttons");
   const badDayBtn = qs("#bad-day-btn");
   const checkinBtn = qs("#checkin-submit");
+  const checkinBack = qs("#checkin-back");
+  const checkinNext = qs("#checkin-next");
+  const checkinStepLabel = qs("#checkin-step-label");
+  const checkinSteps = qsa("#checkin-card .checkin-step");
   const railSubmit = qs("#rail-submit");
   const railResetEl = qs("#rail-reset");
   const railViewFull = qs("#rail-view-full");
@@ -447,6 +544,38 @@ function initDay({ initialDateISO } = {}) {
   const communityCard = qs("#community-card");
   const feedbackCard = qs("#feedback-card");
   let currentContract = null;
+  let checkinStep = 0;
+
+  const isCheckinComplete = () => {
+    return (
+      isNumberInRange(qs("#checkin-stress")?.value, 1, 10) &&
+      isNumberInRange(qs("#checkin-sleep")?.value, 1, 10) &&
+      isNumberInRange(qs("#checkin-energy")?.value, 1, 10)
+    );
+  };
+
+  const updateCheckinWizard = () => {
+    if (!checkinSteps.length) return;
+    const total = checkinSteps.length;
+    const clamped = Math.min(Math.max(checkinStep, 0), total - 1);
+    checkinStep = clamped;
+    checkinSteps.forEach((step, idx) => step.classList.toggle("hidden", idx !== clamped));
+    if (checkinStepLabel) checkinStepLabel.textContent = `Step ${clamped + 1} of ${total}`;
+    if (checkinBack) checkinBack.disabled = clamped === 0;
+    if (checkinNext) {
+      checkinNext.classList.toggle("hidden", clamped === total - 1);
+      checkinNext.disabled = !isCheckinComplete();
+    }
+    if (checkinBtn) {
+      checkinBtn.classList.toggle("hidden", clamped !== total - 1);
+      checkinBtn.disabled = !isCheckinComplete();
+    }
+  };
+
+  const setCheckinStep = (next) => {
+    checkinStep = next;
+    updateCheckinWizard();
+  };
 
   if (dateInput) dateInput.value = initialDateISO || dateInput.value || todayISO();
   if (loadBtn) {
@@ -457,6 +586,17 @@ function initDay({ initialDateISO } = {}) {
   if (prefsCard) prefsCard.classList.add("hidden");
   if (communityCard) communityCard.classList.add("hidden");
   if (feedbackCard) feedbackCard.classList.add("hidden");
+  updateCheckinWizard();
+  checkinBack?.addEventListener("click", () => setCheckinStep(checkinStep - 1));
+  checkinNext?.addEventListener("click", () => {
+    if (!isCheckinComplete()) return;
+    setCheckinStep(checkinStep + 1);
+  });
+  ["#checkin-stress", "#checkin-sleep", "#checkin-energy", "#checkin-time"].forEach((selector) => {
+    const el = qs(selector);
+    el?.addEventListener("input", updateCheckinWizard);
+    el?.addEventListener("change", updateCheckinWizard);
+  });
 
   const setPanicMode = (active) => {
     if (panicBanner) panicBanner.classList.toggle("hidden", !active);
@@ -550,6 +690,7 @@ function initDay({ initialDateISO } = {}) {
       };
       const res = await apiPost("/v1/checkin", { checkIn });
       renderContract(res);
+      setCheckinStep(0);
     } catch (err) {
       reportError(err);
     }

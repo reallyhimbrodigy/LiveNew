@@ -55,6 +55,7 @@ async function main() {
     ["./app.ui.js", `./app.ui.${buildId}.js`],
     ["./controllers.js", `./controllers.${buildId}.js`],
     ["./build.js", `./build.${buildId}.js`],
+    ["./footer.js", `./footer.${buildId}.js`],
   ]);
 
   await Promise.all(
@@ -79,9 +80,13 @@ async function main() {
     );
     if (typeof appCoreModule.getAppState !== "function") {
       const keys = Object.keys(appCoreModule).sort().join(", ");
+      const preview = await fs.readFile(appCoreVersioned, "utf8");
+      const hasExport = preview.includes("export");
       console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
       console.error(`[version-assets] outCorePath=${appCoreVersioned}`);
       console.error(`[version-assets] app.core exports=[${keys}]`);
+      console.error(`[version-assets] app.core hasExport=${hasExport}`);
+      console.error(`[version-assets] app.core preview=${preview.slice(0, 200)}`);
       throw new Error(
         `version-assets: generated app.core.${buildId}.js missing named export getAppState`
       );
@@ -91,8 +96,10 @@ async function main() {
       throw err;
     }
     const preview = await fs.readFile(appCoreVersioned, "utf8");
+    const hasExport = preview.includes("export");
     console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
     console.error(`[version-assets] outCorePath=${appCoreVersioned}`);
+    console.error(`[version-assets] app.core hasExport=${hasExport}`);
     console.error(`[version-assets] app.core preview=${preview.slice(0, 200)}`);
     throw new Error(
       `version-assets: generated app.core.${buildId}.js missing named export getAppState`
@@ -114,7 +121,8 @@ async function main() {
   await Promise.all(
     htmlFiles.map(async (filePath) => {
       const raw = await fs.readFile(filePath, "utf8");
-      const updated = raw.replaceAll("/assets/app.init.js", `/assets/app.init.${buildId}.js`);
+      let updated = raw.replaceAll("/assets/app.init.js", `/assets/app.init.${buildId}.js`);
+      updated = updated.replaceAll("/assets/footer.js", `/assets/footer.${buildId}.js`);
       if (updated !== raw) {
         await fs.writeFile(filePath, updated);
       }
