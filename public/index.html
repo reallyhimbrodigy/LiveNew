@@ -9,9 +9,9 @@
 </head>
 <body>
   <div class="page">
-    <header class="topbar">
-      <div class="brand">LiveNew</div>
-      <nav class="nav">
+    <header class="topbar row">
+      <div class="wordmark">LiveNew</div>
+      <nav class="pill-nav">
         <a class="pill" href="#what">What it is</a>
         <a class="pill" href="#different">Different</a>
         <a class="pill" href="#benefits">Benefits</a>
@@ -20,120 +20,110 @@
     </header>
 
     <section class="hero" id="top">
-      <div class="hero-inner">
-        <p class="kicker">Reset-first stress regulation</p>
+      <div class="hero-inner center">
+        <span class="badge">Reset-first stress regulation</span>
         <h1 class="h1">A calmer day, built on a daily reset.</h1>
-        <p class="lead">
-          Reset-first, deterministic, and built without wearables.
-        </p>
-
+        <p class="lead">A 2–5 minute reset first, then a small plan that adapts without chaos.</p>
         <div class="cta-row">
           <a class="btn btn-primary" href="#start">Get started</a>
           <a class="btn btn-ghost" href="#how">How it works</a>
         </div>
-
-        <div class="subnote">Not medical advice.</div>
+        <div class="small">Not medical advice.</div>
       </div>
     </section>
 
-    <section class="section" id="what">
-      <h2 class="section-title">What LiveNew is</h2>
+    <section class="section center" id="what">
+      <h2 class="section-title">What it is</h2>
       <p class="section-sub">A stress-regulation system built for stability and trust.</p>
-
-      <div class="grid">
+      <div class="grid-3">
         <div class="card">
           <div class="card-title">Reset-first</div>
-          <div class="card-desc">2–5 minutes. Required. The daily win.</div>
+          <div class="card-desc">A short regulation step before anything else.</div>
         </div>
         <div class="card">
           <div class="card-title">Today-first</div>
-          <div class="card-desc">One doable day. No backlog guilt.</div>
+          <div class="card-desc">One day at a time. No backlog guilt.</div>
         </div>
         <div class="card">
           <div class="card-title">Deterministic</div>
-          <div class="card-desc">Same inputs → same output. Predictable.</div>
+          <div class="card-desc">Same inputs → same plan. Stable and trustworthy.</div>
         </div>
       </div>
     </section>
 
-    <section class="section" id="different">
+    <section class="section center" id="different">
       <h2 class="section-title">Why it’s different</h2>
-
-      <div class="grid">
+      <div class="grid-3">
         <div class="card">
           <div class="card-title">No streak pressure</div>
-          <div class="card-desc">No punishment for missed days.</div>
+          <div class="card-desc">No punishment. No grind language.</div>
         </div>
         <div class="card">
           <div class="card-title">No wearables</div>
-          <div class="card-desc">Works from your check-in + rules.</div>
+          <div class="card-desc">Works from your inputs, not devices.</div>
         </div>
         <div class="card">
           <div class="card-title">Not a chatbot</div>
-          <div class="card-desc">Not an AI planner. No randomness.</div>
+          <div class="card-desc">A system, not conversations.</div>
         </div>
       </div>
     </section>
 
-    <section class="section" id="benefits">
+    <section class="section center" id="benefits">
       <h2 class="section-title">Benefits</h2>
-
-      <div class="grid">
+      <div class="grid-3">
         <div class="card">
           <div class="card-title">Less overwhelm</div>
           <div class="card-desc">One clear next step.</div>
         </div>
         <div class="card">
           <div class="card-title">More consistency</div>
-          <div class="card-desc">Minimal change. Stable routine.</div>
+          <div class="card-desc">Missed days don’t derail you.</div>
         </div>
         <div class="card">
           <div class="card-title">Better regulation</div>
-          <div class="card-desc">Reset first. Optional extras second.</div>
+          <div class="card-desc">Reset first, optional second.</div>
         </div>
       </div>
     </section>
 
-    <section class="section" id="how">
+    <section class="section center" id="how">
       <h2 class="section-title">How it works</h2>
-
-      <div class="grid">
+      <div class="grid-3">
         <div class="card">
-          <div class="card-title">Check-in</div>
-          <div class="card-desc">Stress, sleep, energy, time available.</div>
+          <div class="card-title">1) Check-in</div>
+          <div class="card-desc">Stress, sleep, energy, time.</div>
         </div>
         <div class="card">
-          <div class="card-title">Reset</div>
-          <div class="card-desc">A 2–5 minute regulation step.</div>
+          <div class="card-title">2) Reset</div>
+          <div class="card-desc">2–5 minutes.</div>
         </div>
         <div class="card">
-          <div class="card-title">Optional</div>
+          <div class="card-title">3) Optional</div>
           <div class="card-desc">Movement + nutrition if it fits.</div>
         </div>
       </div>
     </section>
 
-    <section class="section" id="start">
+    <section class="section center" id="start">
       <div class="card">
         <h2 class="section-title">Start</h2>
-        <p class="section-sub">Sign in to begin personalization. Then you’ll go to Today.</p>
+        <p class="section-sub">Sign in to begin personalization, then continue to Today.</p>
+        <div class="divider"></div>
         <div class="form">
           <div class="form-row">
             <input id="auth-email" class="input" type="email" placeholder="email">
             <button id="auth-request" class="btn btn-primary" type="button">Send code</button>
           </div>
-
           <div class="form-row">
             <input id="auth-code" class="input" type="text" placeholder="code">
             <button id="auth-verify" class="btn btn-primary" type="button">Verify</button>
           </div>
-
           <div class="cta-row" style="margin-top:12px">
             <button id="auth-logout" class="btn btn-ghost" type="button">Logout</button>
             <a class="btn btn-ghost" href="/day">Go to Today</a>
           </div>
-
-          <div id="auth-status" class="subnote"></div>
+          <div id="auth-status" class="small"></div>
         </div>
       </div>
     </section>
@@ -142,18 +132,18 @@
       <div class="footer-panel">
         <div class="footer-grid">
           <div>
-            <div class="footer-head">LiveNew</div>
+            <div class="footer-title">LiveNew</div>
             <div class="section-sub" style="text-align:left">Reset-first stress regulation for a healthy daily rhythm.</div>
           </div>
           <div>
-            <div class="footer-head">Platform</div>
+            <div class="footer-title">Platform</div>
             <div class="footer-links">
               <a href="/index.html">Home</a>
               <a href="/day">Today</a>
             </div>
           </div>
           <div>
-            <div class="footer-head">Resources</div>
+            <div class="footer-title">Resources</div>
             <div class="footer-links">
               <a href="/help">Help Center</a>
               <a href="/privacy">Privacy Policy</a>
@@ -161,7 +151,7 @@
             </div>
           </div>
           <div>
-            <div class="footer-head">Company</div>
+            <div class="footer-title">Company</div>
             <div class="footer-links">
               <a href="/contact">Contact</a>
               <a href="/reset-access">Reset Access</a>
