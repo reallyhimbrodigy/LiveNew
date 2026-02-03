@@ -46,6 +46,13 @@ async function walkHtmlFiles(dir, out = []) {
 async function main() {
   const buildId = resolveBuildId();
   const assetsDir = path.join(process.cwd(), "public", "assets");
+  const appCssPath = path.join(assetsDir, "app.css");
+  try {
+    const stat = await fs.stat(appCssPath);
+    console.log(`[version-assets] app.css bytes=${stat.size}`);
+  } catch {
+    console.log("[version-assets] app.css bytes=missing");
+  }
   const walkFiles = async (dir, out = []) => {
     const entries = await fs.readdir(dir, { withFileTypes: true });
     for (const entry of entries) {
@@ -211,17 +218,7 @@ async function main() {
     );
   }
 
-  const htmlFiles = await walkHtmlFiles(path.join(process.cwd(), "public"));
-  await Promise.all(
-    htmlFiles.map(async (filePath) => {
-      const raw = await fs.readFile(filePath, "utf8");
-      let updated = raw.replaceAll("/assets/app.init.js", `/assets/app.init.${buildId}.js`);
-      updated = updated.replaceAll("/assets/footer.js", `/assets/footer.${buildId}.js`);
-      if (updated !== raw) {
-        await fs.writeFile(filePath, updated);
-      }
-    })
-  );
+  // Intentionally avoid mutating HTML/CSS during asset versioning.
 
   const manifest = {
     buildId,
