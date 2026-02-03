@@ -4,86 +4,147 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="/favicon.ico" />
-  <link rel="stylesheet" href="/assets/app.css?v=canary1" />
-  <title>LiveNew — THEME CANARY</title>
+  <link rel="stylesheet" href="/assets/app.css" />
+  <title>LiveNew</title>
 </head>
-<body data-page="home">
-  <div id="theme-canary" style="position:fixed;top:10px;left:10px;z-index:9999;background:#d6c3a3;color:#0f172a;border:1px solid rgba(184,159,120,.55);padding:8px 10px;border-radius:10px;font:600 12px ui-sans-serif,system-ui;">
-    THEME CANARY LOADED
-  </div>
+<body>
   <div class="shell">
     <header class="topbar">
-      <div class="brand">LiveNew</div>
+      <div class="brand"><span class="brand-dot"></span>LiveNew</div>
       <nav class="nav">
-        <a href="/index.html">Home</a>
-        <a id="nav-today" href="/day">Today</a>
-        <a href="/help">Help Center</a>
-        <a href="/contact">Contact</a>
+        <a href="#what">What it is</a>
+        <a href="#different">Why different</a>
+        <a href="#benefits">Benefits</a>
+        <a href="#start">Start</a>
       </nav>
     </header>
 
-    <main class="stack">
-      <section class="card">
-        <p class="kicker">Reset-first</p>
-        <h1 class="h1">LiveNew</h1>
-        <p class="lead">Reset-first stress regulation for a healthy daily rhythm.</p>
-        <div class="btnrow">
-          <a class="btn btn-primary" href="#start">Start</a>
-          <a class="btn btn-ghost" href="#how">How it works</a>
-        </div>
-        <div class="small">Not medical advice.</div>
-      </section>
+    <section class="hero" id="top">
+      <p class="kicker">Reset-first stress regulation</p>
+      <h1 class="h1">A calmer day, built on a daily reset.</h1>
+      <p class="lead">
+        LiveNew helps you regulate stress with a short reset first, then a simple plan that adapts without chaos.
+        No streak pressure. No wearable dependency. No random AI planning.
+      </p>
 
-      <section id="start" class="card">
-        <h2 class="section-title">Start</h2>
-        <div class="small">Sign in to continue.</div>
+      <div class="cta-row">
+        <a class="btn btn-primary" href="#start">Get started</a>
+        <a class="btn btn-ghost" href="#different">Why LiveNew is different</a>
+      </div>
+      <div class="subnote">Not medical advice.</div>
+    </section>
+
+    <section class="section" id="what">
+      <h2 class="h2">What LiveNew is</h2>
+      <div class="grid-3">
+        <div class="tile">
+          <div class="tile-title">Reset-first</div>
+          <div class="tile-desc">A 2–5 minute regulation step before anything else.</div>
+        </div>
+        <div class="tile">
+          <div class="tile-title">Today-first</div>
+          <div class="tile-desc">Focus on one doable day. No backlog guilt.</div>
+        </div>
+        <div class="tile">
+          <div class="tile-title">Deterministic</div>
+          <div class="tile-desc">Same inputs → same plan. Stable, predictable, trustworthy.</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section split" id="different">
+      <div class="card">
+        <h2 class="h2">Why it’s different</h2>
+        <div class="bullets">
+          <div class="bullet">
+            <div class="bullet-dot"></div>
+            <div class="bullet-text">Designed for nervous-system safety: minimal change, no “push harder” language.</div>
+          </div>
+          <div class="bullet">
+            <div class="bullet-dot"></div>
+            <div class="bullet-text">No wearable requirement. Personalization comes from your inputs + rules.</div>
+          </div>
+          <div class="bullet">
+            <div class="bullet-dot"></div>
+            <div class="bullet-text">Not a chatbot. Not an AI planner. The plan is bounded and consistent.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" id="benefits">
+        <h2 class="h2">Benefits</h2>
+        <div class="bullets">
+          <div class="bullet">
+            <div class="bullet-dot"></div>
+            <div class="bullet-text">Less overwhelm: one clear next step.</div>
+          </div>
+          <div class="bullet">
+            <div class="bullet-dot"></div>
+            <div class="bullet-text">More consistency: no punishment for missed days.</div>
+          </div>
+          <div class="bullet">
+            <div class="bullet-dot"></div>
+            <div class="bullet-text">Better regulation: reset first, optional movement/nutrition second.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section">
+      <div class="card">
+        <h2 class="h2">How it works</h2>
+        <div class="grid-3">
+          <div class="tile">
+            <div class="tile-title">1) Check-in</div>
+            <div class="tile-desc">Stress, sleep, energy, time available.</div>
+          </div>
+          <div class="tile">
+            <div class="tile-title">2) Reset</div>
+            <div class="tile-desc">A short guided regulation step.</div>
+          </div>
+          <div class="tile">
+            <div class="tile-title">3) Optional</div>
+            <div class="tile-desc">Movement + nutrition suggestions, only if it fits.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="start">
+      <div class="card">
+        <h2 class="h2">Start</h2>
+        <p class="p">Sign in to begin personalization. Then you’ll be taken to Today.</p>
+        <div class="divider"></div>
 
         <div class="form">
           <div class="form-row">
-            <input id="auth-email" class="input" type="email" placeholder="email" />
+            <input id="auth-email" class="input" type="email" placeholder="email">
             <button id="auth-request" class="btn btn-primary" type="button">Send code</button>
           </div>
 
           <div class="form-row">
-            <input id="auth-code" class="input" type="text" placeholder="code" />
+            <input id="auth-code" class="input" type="text" placeholder="code">
             <button id="auth-verify" class="btn btn-primary" type="button">Verify</button>
           </div>
 
-          <div class="btnrow" style="margin-top:12px">
+          <div class="cta-row" style="margin-top:12px">
             <button id="auth-logout" class="btn btn-ghost" type="button">Logout</button>
+            <a class="btn btn-ghost" href="/day">Go to Today</a>
           </div>
 
-          <div id="auth-status" class="small"></div>
+          <div id="auth-status" class="subnote"></div>
         </div>
-      </section>
+      </div>
+    </section>
 
-      <section id="how" class="card">
-        <h2 class="section-title">How it works</h2>
-        <div class="steps">
-          <div class="step">
-            <div class="step-title">Check-in</div>
-            <div class="step-desc">A few numbers to orient the day.</div>
-          </div>
-          <div class="step">
-            <div class="step-title">Reset</div>
-            <div class="step-desc">A short regulation step before anything else.</div>
-          </div>
-          <div class="step">
-            <div class="step-title">Optional movement &amp; nutrition</div>
-            <div class="step-desc">If it fits, keep it simple.</div>
-          </div>
-        </div>
-      </section>
-    </main>
-  </div>
-
-  <footer class="footer">
-    <div class="shell">
+    <footer class="footer">
       <div class="footer-panel">
         <div class="footer-grid">
           <div>
             <div class="footer-head">LiveNew</div>
-            <div class="small" style="margin-top:0">Reset-first stress regulation for a healthy daily rhythm.</div>
+            <div class="p" style="margin:0;color:var(--muted);font-size:14px">
+              Reset-first stress regulation for a healthy daily rhythm.
+            </div>
           </div>
           <div>
             <div class="footer-head">Platform</div>
@@ -110,8 +171,9 @@
         </div>
         <div class="footer-bottom">© 2026 LiveNew. All rights reserved.</div>
       </div>
-    </div>
-  </footer>
+    </footer>
+  </div>
+
   <script type="module" src="/assets/app.init.js"></script>
 </body>
 </html>
