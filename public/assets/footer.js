@@ -13,23 +13,24 @@ if (root) {
           <div>
             <div class="footer-head">Platform</div>
             <div class="footer-links">
-              <a href="/">Home</a>
-              <a href="/day">Today</a>
+              <a href="/index.html">Home</a>
+              <a href="/signup.html">Get started</a>
+              <a href="/login.html">Log in</a>
             </div>
           </div>
           <div>
             <div class="footer-head">Resources</div>
             <div class="footer-links">
-              <a href="/help">Help Center</a>
-              <a href="/privacy">Privacy Policy</a>
-              <a href="/terms">Terms of Service</a>
+              <a href="/help-center.html">Help Center</a>
+              <a href="/privacy.html">Privacy Policy</a>
+              <a href="/terms.html">Terms of Service</a>
             </div>
           </div>
           <div>
             <div class="footer-head">Company</div>
             <div class="footer-links">
-              <a href="/contact">Contact</a>
-              <a href="/reset-access">Reset Access</a>
+              <a href="/contact.html">Contact</a>
+              <a href="/reset-access.html">Reset Access</a>
             </div>
           </div>
         </div>

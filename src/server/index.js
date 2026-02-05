@@ -283,6 +283,83 @@ function requireSupabaseEnv({ requireServiceRole = false } = {}) {
   }
 }
 
+const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim().replace(/\/$/, "");
+const SUPABASE_JWKS_URL = SUPABASE_URL ? `${SUPABASE_URL}/auth/v1/keys` : "";
+const JWKS_CACHE_TTL_MS = 60 * 60 * 1000;
+let jwksCache = { keys: null, fetchedAt: 0 };
+
+function getCookie(req, name) {
+  const header = req?.headers?.cookie;
+  if (!header) return null;
+  const parts = header.split(";").map((part) => part.trim());
+  for (const part of parts) {
+    if (!part) continue;
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    const key = part.slice(0, idx).trim();
+    if (key === name) return decodeURIComponent(part.slice(idx + 1));
+  }
+  return null;
+}
+
+function extractBearerToken(req) {
+  const header = req?.headers?.authorization;
+  if (!header || typeof header !== "string") return "";
+  if (!header.toLowerCase().startsWith("bearer ")) return "";
+  return header.slice(7).trim();
+}
+
+function getAuthToken(req) {
+  return extractBearerToken(req) || getCookie(req, "ln_token") || "";
+}
+
+async function loadSupabaseJwks() {
+  if (!SUPABASE_JWKS_URL) return [];
+  const now = Date.now();
+  if (jwksCache.keys && now - jwksCache.fetchedAt < JWKS_CACHE_TTL_MS) return jwksCache.keys;
+  const res = await fetch(SUPABASE_JWKS_URL);
+  if (!res.ok) return [];
+  const payload = await res.json();
+  const keys = Array.isArray(payload?.keys) ? payload.keys : [];
+  jwksCache = { keys, fetchedAt: now };
+  return keys;
+}
+
+function decodeJwtPart(part) {
+  try {
+    const json = Buffer.from(part, "base64url").toString("utf8");
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+async function verifySupabaseJwt(token) {
+  if (!token || !SUPABASE_JWKS_URL) return null;
+  const parts = token.split(".");
+  if (parts.length !== 3) return null;
+  const [headerB64, payloadB64, signatureB64] = parts;
+  const header = decodeJwtPart(headerB64);
+  const payload = decodeJwtPart(payloadB64);
+  if (!header || !payload) return null;
+  if (header.alg !== "RS256") return null;
+  if (payload.exp && Math.floor(Date.now() / 1000) >= payload.exp) return null;
+  const keys = await loadSupabaseJwks();
+  const jwk = keys.find((key) => key.kid === header.kid) || keys[0];
+  if (!jwk) return null;
+  let keyObject;
+  try {
+    keyObject = crypto.createPublicKey({ key: jwk, format: "jwk" });
+  } catch {
+    return null;
+  }
+  const data = Buffer.from(`${headerB64}.${payloadB64}`);
+  const signature = Buffer.from(signatureB64, "base64url");
+  const ok = crypto.verify("RSA-SHA256", data, keyObject, signature);
+  if (!ok) return null;
+  return payload;
+}
+
 function enforceLaunchWindowLocks() {
   if (!LAUNCH_WINDOW) return;
   const missing = [];
@@ -333,6 +410,40 @@ const PUBLIC_DIR = path.join(process.cwd(), "public");
 const STATIC_ROOT_LOCK = process.env.STATIC_ROOT_LOCK === "true";
 const EXPECTED_STATIC_ROOT = (process.env.EXPECTED_STATIC_ROOT || "public").trim();
 const CITATIONS_PATH = path.join(PUBLIC_DIR, "citations.json");
+const PUBLIC_PAGE_PATHS = new Set([
+  "/",
+  "/index.html",
+  "/login",
+  "/login.html",
+  "/signup",
+  "/signup.html",
+  "/help-center.html",
+  "/privacy.html",
+  "/terms.html",
+  "/contact.html",
+  "/reset-access.html",
+]);
+const PROTECTED_PAGE_PATHS = new Set([
+  "/day",
+  "/day.html",
+  "/week",
+  "/week.html",
+  "/trends",
+  "/trends.html",
+  "/profile",
+  "/profile.html",
+  "/admin",
+  "/admin.html",
+  "/smoke-frontend",
+  "/smoke-frontend.html",
+]);
+const PUBLIC_API_PATHS = new Set([
+  "/v1/csrf",
+  "/v1/bootstrap",
+  "/v1/mobile/bootstrap",
+  "/healthz",
+  "/readyz",
+]);
 const REQUIRED_CONTENT_IDS = new Set(["r_panic_mode"]);
 const REQUIRED_CONSENTS = ["terms", "privacy", "alpha_processing"];
 const DEFAULT_TIMEZONE = "America/Los_Angeles";
@@ -4493,7 +4604,7 @@ function countErrors(windowMs = ERROR_WINDOW_LONG_MS) {
   return total;
 }
 
-async function serveFile(res, filePath, { replaceDevFlag } = {}) {
+async function serveFile(res, filePath, { replaceDevFlag, replacements } = {}) {
   try {
     const isText =
       filePath.endsWith(".js") ||
@@ -4501,8 +4612,15 @@ async function serveFile(res, filePath, { replaceDevFlag } = {}) {
       filePath.endsWith(".html") ||
       filePath.endsWith(".json");
     const raw = await fs.readFile(filePath, isText ? "utf8" : undefined);
-    const body =
-      replaceDevFlag && isText ? raw.replace("__IS_DEV__", isDevRoutesEnabled ? "true" : "false") : raw;
+    let body = raw;
+    if (replaceDevFlag && isText) {
+      body = body.replace("__IS_DEV__", isDevRoutesEnabled ? "true" : "false");
+    }
+    if (replacements && isText) {
+      for (const [key, value] of Object.entries(replacements)) {
+        body = body.split(key).join(value);
+      }
+    }
     const headers = { "Content-Type": contentTypeForPath(filePath) };
     const cacheControl = cacheControlForPath(filePath);
     if (cacheControl) headers["Cache-Control"] = cacheControl;
@@ -4570,6 +4688,15 @@ const server = http.createServer(async (req, res) => {
   const pageRoutes = new Map([
     ["/", "index.html"],
     ["/index.html", "index.html"],
+    ["/login", "login.html"],
+    ["/login.html", "login.html"],
+    ["/signup", "signup.html"],
+    ["/signup.html", "signup.html"],
+    ["/help-center.html", "help-center.html"],
+    ["/privacy.html", "privacy.html"],
+    ["/terms.html", "terms.html"],
+    ["/contact.html", "contact.html"],
+    ["/reset-access.html", "reset-access.html"],
     ["/day", "day.html"],
     ["/day.html", "day.html"],
     ["/smoke-frontend", "smoke-frontend.html"],
@@ -4582,17 +4709,26 @@ const server = http.createServer(async (req, res) => {
     ["/profile.html", "profile.html"],
     ["/admin", "admin.html"],
     ["/admin.html", "admin.html"],
-    ["/legal/privacy", "legal/privacy.html"],
-    ["/legal/privacy.html", "legal/privacy.html"],
-    ["/legal/terms", "legal/terms.html"],
-    ["/legal/terms.html", "legal/terms.html"],
-    ["/legal/alpha-data-processing", "legal/alpha-data-processing.html"],
-    ["/legal/alpha-data-processing.html", "legal/alpha-data-processing.html"],
   ]);
 
   if (req.method === "GET" && pageRoutes.has(pathname)) {
+    if (PROTECTED_PAGE_PATHS.has(pathname)) {
+      const token = getAuthToken(req);
+      const claims = await verifySupabaseJwt(token);
+      if (!claims) {
+        res.writeHead(302, { Location: "/index.html" });
+        res.end();
+        return;
+      }
+      res.livenewUserId = claims.sub || null;
+    }
     issueCsrfToken(res);
-    await serveFile(res, path.join(PUBLIC_DIR, pageRoutes.get(pathname)));
+    await serveFile(res, path.join(PUBLIC_DIR, pageRoutes.get(pathname)), {
+      replacements: {
+        "__SUPABASE_URL__": SUPABASE_URL,
+        "__SUPABASE_ANON_KEY__": (process.env.SUPABASE_ANON_KEY || "").trim(),
+      },
+    });
     return;
   }
 
@@ -4643,6 +4779,16 @@ const server = http.createServer(async (req, res) => {
       sendError(res, 429, "rate_limited_ip", "Too many requests");
       return;
     }
+  }
+
+  if (pathname.startsWith("/v1") && !PUBLIC_API_PATHS.has(pathname) && !pathname.startsWith("/v1/auth/")) {
+    const token = getAuthToken(req);
+    const claims = await verifySupabaseJwt(token);
+    if (!claims) {
+      sendError(res, 401, "auth_required", "Authorization required");
+      return;
+    }
+    res.livenewUserId = claims.sub || null;
   }
 
   try {

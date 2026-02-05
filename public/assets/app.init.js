@@ -1,4 +1,4 @@
-import { apiGet, apiPost, setToken, setRefreshToken } from "./app.api.js";
+import { apiGet, apiPost, getToken, setToken, setRefreshToken } from "./app.api.js";
 import { getAppState, setAppState } from "./app.state.js";
 import {
   initBaseUi,
@@ -56,6 +56,27 @@ function resolvePage() {
   if (path === "/admin" || path === "/admin.html") return "admin";
   if (path === "/smoke-frontend" || path === "/smoke-frontend.html") return "smoke";
   return "home";
+}
+
+function parseJwtPayload(token) {
+  if (!token || typeof token !== "string") return null;
+  const parts = token.split(".");
+  if (parts.length < 2) return null;
+  try {
+    const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const json = atob(payload);
+    return JSON.parse(json);
+  } catch {
+    return null;
+  }
+}
+
+function hasValidToken(token) {
+  if (!token) return false;
+  const payload = parseJwtPayload(token);
+  if (!payload?.exp) return true;
+  const now = Math.floor(Date.now() / 1000);
+  return payload.exp > now;
 }
 
 function setTodayNavEnabled(enabled) {
@@ -152,9 +173,7 @@ async function routeUiState({ boot, page }) {
   setTodayNavEnabled(uiState === "home");
 
   if (page !== "home" && page !== "smoke" && uiState !== "home") {
-    const target = uiState === "onboard" ? "/#onboard" : "/#start";
-    window.location.assign(target);
-    return;
+    // Stay on the current page and render the appropriate gate screen.
   }
 
   if (page === "home" && uiState === "home") {
@@ -262,6 +281,14 @@ async function runSmoke() {
 
 export async function initApp({ page } = {}) {
   const resolvedPage = page || resolvePage();
+  if (resolvedPage === "home") {
+    return;
+  }
+  const protectedPages = new Set(["day", "week", "trends", "profile", "admin"]);
+  if (protectedPages.has(resolvedPage) && !hasValidToken(getToken())) {
+    window.location.assign("/index.html");
+    return;
+  }
   if (initInFlight) {
     pendingInit = true;
     return;

@@ -2,10 +2,38 @@ const ACCESS_KEY = "livenew_access_token";
 const REFRESH_KEY = "livenew_refresh_token";
 const LEGACY_KEY = "livenew_token";
 const DEVICE_KEY = "livenew_device";
+const COOKIE_KEY = "ln_token";
 let csrfToken = null;
 let csrfPromise = null;
 
+function readCookie(name) {
+  if (typeof document === "undefined") return null;
+  const raw = document.cookie || "";
+  const parts = raw.split(";").map((entry) => entry.trim());
+  for (const part of parts) {
+    if (!part) continue;
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    const key = part.slice(0, idx).trim();
+    if (key === name) return decodeURIComponent(part.slice(idx + 1));
+  }
+  return null;
+}
+
+function writeCookie(name, value) {
+  if (typeof document === "undefined") return;
+  const secure = window.location?.protocol === "https:" ? "; Secure" : "";
+  document.cookie = `${name}=${encodeURIComponent(value)}; Path=/; SameSite=Lax${secure}`;
+}
+
+function clearCookie(name) {
+  if (typeof document === "undefined") return;
+  document.cookie = `${name}=; Path=/; Max-Age=0; SameSite=Lax`;
+}
+
 export function getToken() {
+  const cookieToken = readCookie(COOKIE_KEY);
+  if (cookieToken) return cookieToken;
   const current = localStorage.getItem(ACCESS_KEY);
   if (current) return current;
   const legacy = localStorage.getItem(LEGACY_KEY);
@@ -18,12 +46,16 @@ export function getToken() {
 }
 
 export function setToken(token) {
-  if (token) localStorage.setItem(ACCESS_KEY, token);
+  if (token) {
+    localStorage.setItem(ACCESS_KEY, token);
+    writeCookie(COOKIE_KEY, token);
+  }
 }
 
 export function clearToken() {
   localStorage.removeItem(ACCESS_KEY);
   localStorage.removeItem(LEGACY_KEY);
+  clearCookie(COOKIE_KEY);
 }
 
 export function getRefreshToken() {

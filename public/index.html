@@ -103,7 +103,6 @@
     .hero{
       width:100vw;
       margin-left:calc(50% - 50vw);
-      background:var(--surface);
       border-top:1px solid var(--line);
       border-bottom:1px solid var(--line);
       background:linear-gradient(180deg, rgba(200,176,138,.10), rgba(200,176,138,.04));
@@ -165,7 +164,7 @@
     .btn-primary{ background:var(--beige); border-color:var(--beige); }
     .btn-primary:hover{ background:var(--beige-2); }
     .btn-secondary:hover{ background:rgba(20,20,20,.04); }
-    .btn:focus-visible, .input:focus-visible, .nav a:focus-visible{
+    .btn:focus-visible, .nav a:focus-visible{
       outline:none;
       box-shadow:0 0 0 4px rgba(200,176,138,.45);
     }
@@ -223,30 +222,11 @@
       margin-bottom:10px;
     }
 
-    .auth-panel{
+    .cta-card{
       max-width:720px;
       margin:0 auto;
       text-align:center;
     }
-    .form{ margin-top:16px; }
-    .form-row{
-      display:grid;
-      grid-template-columns:1fr auto;
-      gap:10px;
-      align-items:center;
-    }
-    .form-row + .form-row{ margin-top:10px; }
-    .input{
-      width:100%;
-      height:48px;
-      border-radius:var(--radius-sm);
-      border:1px solid var(--line);
-      padding:0 12px;
-      font-size:14px;
-      color:var(--text);
-      background:#fff;
-    }
-    .divider{ height:1px; background:var(--line); margin:18px 0; }
 
     .footer{
       width:100vw;
@@ -301,24 +281,21 @@
     }
     @media (max-width:560px){
       .main{ padding:92px 16px 50px; }
-      .form-row{ grid-template-columns:1fr; }
       .btn{ width:100%; }
       .footer-links{ grid-template-columns:1fr; }
     }
   </style>
 </head>
 <body class="page">
-  <!-- LiveNew Landing v2 -->
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand">LiveNew</div>
       <nav class="nav">
-        <a href="#what">What it is</a>
-        <a href="#different">Different</a>
-        <a href="#benefits">Benefits</a>
-        <a href="#how">How it works</a>
-        <a href="#start">Start</a>
-        <a href="/day">Today</a>
+        <a href="/help-center.html">Help Center</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+        <a href="/contact.html">Contact</a>
+        <a href="/reset-access.html">Reset Access</a>
       </nav>
     </div>
   </header>
@@ -330,17 +307,18 @@
         <h1 class="h1">A calmer day, built on a daily reset.</h1>
         <p class="lead">A 2–5 minute reset first, then a small plan that adapts without chaos.</p>
         <div class="cta-row">
-          <a class="btn btn-primary" href="#start">Start</a>
-          <a class="btn btn-secondary" href="#how">How it works</a>
+          <a class="btn btn-primary" href="/signup.html">Get started</a>
+          <a class="btn btn-secondary" href="/login.html">Log in</a>
+          <a id="continue-btn" class="btn btn-secondary" href="/day" style="display:none;">Continue</a>
         </div>
         <div class="small">Not medical advice.</div>
       </div>
     </section>
 
-    <section class="section" id="what">
+    <section class="section" id="different">
       <div class="split">
         <div>
-          <h2 class="section-title">What it is</h2>
+          <h2 class="section-title">Why it’s different</h2>
           <p class="section-sub">Reset-first, today-first, and predictable by design.</p>
         </div>
         <div class="cards">
@@ -355,52 +333,6 @@
           <div class="card">
             <div class="card-title">Deterministic</div>
             <div class="card-desc">Same inputs → stable plan you can trust.</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="different">
-      <div class="split">
-        <div>
-          <h2 class="section-title">Why it’s different</h2>
-          <p class="section-sub">Calm tone, no pressure, no randomness.</p>
-        </div>
-        <div class="cards">
-          <div class="card">
-            <div class="card-title">No streak pressure</div>
-            <div class="card-desc">No punishment. No grind language.</div>
-          </div>
-          <div class="card">
-            <div class="card-title">No wearables</div>
-            <div class="card-desc">Works from your inputs, not devices.</div>
-          </div>
-          <div class="card">
-            <div class="card-title">Not a chatbot</div>
-            <div class="card-desc">A system, not conversations.</div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section class="section" id="benefits">
-      <div class="split">
-        <div>
-          <h2 class="section-title">Benefits</h2>
-          <p class="section-sub">Simple steps that reduce overwhelm.</p>
-        </div>
-        <div class="cards">
-          <div class="card">
-            <div class="card-title">Less overwhelm</div>
-            <div class="card-desc">One clear next step.</div>
-          </div>
-          <div class="card">
-            <div class="card-title">More consistency</div>
-            <div class="card-desc">Missed days don’t derail you.</div>
-          </div>
-          <div class="card">
-            <div class="card-title">Better regulation</div>
-            <div class="card-desc">Reset first, optional second.</div>
           </div>
         </div>
       </div>
@@ -433,24 +365,12 @@
     </section>
 
     <section class="section" id="start">
-      <div class="auth-panel card">
+      <div class="cta-card card">
         <h2 class="section-title">Start</h2>
-        <p class="section-sub">Sign in to begin personalization, then continue to Today.</p>
-        <div class="divider"></div>
-        <div class="form">
-          <div class="form-row">
-            <input id="auth-email" class="input" type="email" placeholder="email">
-            <button id="auth-request" class="btn btn-primary" type="button">Send code</button>
-          </div>
-          <div class="form-row">
-            <input id="auth-code" class="input" type="text" placeholder="code">
-            <button id="auth-verify" class="btn btn-primary" type="button">Verify</button>
-          </div>
-          <div class="cta-row" style="margin-top:12px">
-            <button id="auth-logout" class="btn btn-secondary" type="button">Logout</button>
-            <a class="btn btn-secondary" href="/day">Continue to Today</a>
-          </div>
-          <div id="auth-status" class="small"></div>
+        <p class="section-sub">Create an account or log in to continue to Today.</p>
+        <div class="cta-row">
+          <a class="btn btn-primary" href="/signup.html">Get started</a>
+          <a class="btn btn-secondary" href="/login.html">Log in</a>
         </div>
       </div>
     </section>
@@ -466,13 +386,11 @@
         <div>
           <div class="footer-title">Resources &amp; Company</div>
           <div class="footer-links">
-            <a href="/">Home</a>
-            <a href="/day">Today</a>
-            <a href="/help">Help Center</a>
-            <a href="/privacy">Privacy Policy</a>
-            <a href="/tos">Terms of Service</a>
-            <a href="/contact">Contact</a>
-            <a href="/reset-access">Reset Access</a>
+            <a href="/help-center.html">Help Center</a>
+            <a href="/privacy.html">Privacy Policy</a>
+            <a href="/terms.html">Terms of Service</a>
+            <a href="/contact.html">Contact</a>
+            <a href="/reset-access.html">Reset Access</a>
           </div>
         </div>
       </div>
@@ -480,7 +398,33 @@
     </div>
   </footer>
 
-  <!-- module entry -->
   <script type="module" src="/assets/app.init.js"></script>
+  <script>
+    (function () {
+      function readCookie(name) {
+        const raw = document.cookie || "";
+        return raw.split(";").map((v) => v.trim()).find((v) => v.startsWith(name + "="))?.split("=")[1] || "";
+      }
+      function parseJwt(token) {
+        if (!token) return null;
+        const parts = token.split(".");
+        if (parts.length < 2) return null;
+        try {
+          const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+          return JSON.parse(atob(payload));
+        } catch {
+          return null;
+        }
+      }
+      const token = readCookie("ln_token") || localStorage.getItem("livenew_access_token") || "";
+      const payload = parseJwt(token);
+      const exp = payload?.exp ? Number(payload.exp) : 0;
+      const now = Math.floor(Date.now() / 1000);
+      if (token && (!exp || exp > now)) {
+        const btn = document.getElementById("continue-btn");
+        if (btn) btn.style.display = "inline-flex";
+      }
+    })();
+  </script>
 </body>
 </html>

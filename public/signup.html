@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/favicon.ico" />
+  <title>Create account · LiveNew</title>
+  <style>
+    :root{
+      --bg:#FBF8F1;
+      --surface:#FFFFFF;
+      --text:#141210;
+      --muted:#5A544B;
+      --line:#E9E2D6;
+      --beige:#C8B08A;
+      --beige-2:#B79F79;
+      --shadow:0 10px 30px rgba(18,18,18,.06);
+      --radius:22px;
+      --radius-sm:16px;
+      --max:900px;
+    }
+    *{ box-sizing:border-box; margin:0; padding:0; }
+    html,body{ height:100%; }
+    body{
+      background:var(--bg);
+      color:var(--text);
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Inter, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      line-height:1.6;
+      font-size:18px;
+      display:flex;
+      flex-direction:column;
+      min-height:100vh;
+    }
+    a{ color:inherit; text-decoration:none; }
+    a:hover{ text-decoration:none; }
+    .topbar{
+      height:64px;
+      display:flex;
+      align-items:center;
+      border-bottom:1px solid var(--line);
+      background:#fff;
+    }
+    .topbar-inner{
+      max-width:var(--max);
+      width:100%;
+      margin:0 auto;
+      padding:0 20px;
+      display:flex;
+      align-items:center;
+      justify-content:space-between;
+      gap:16px;
+    }
+    .brand{ font-weight:700; font-size:18px; }
+    .nav{ display:flex; gap:10px; flex-wrap:wrap; }
+    .nav a{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      height:34px;
+      padding:0 12px;
+      border-radius:999px;
+      border:1px solid var(--line);
+      color:var(--muted);
+      font-size:13px;
+      background:#fff;
+    }
+    .page{ max-width:var(--max); margin:0 auto; width:100%; padding:40px 20px 60px; flex:1; }
+    .card{
+      background:var(--surface);
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      padding:24px;
+      box-shadow:var(--shadow);
+      max-width:520px;
+      margin:0 auto;
+      text-align:center;
+    }
+    .title{ font-size:32px; letter-spacing:-0.02em; }
+    .sub{ margin-top:8px; color:var(--muted); font-size:15px; }
+    .form{ margin-top:18px; display:grid; gap:12px; }
+    .input{
+      width:100%;
+      height:48px;
+      border-radius:var(--radius-sm);
+      border:1px solid var(--line);
+      padding:0 12px;
+      font-size:14px;
+      color:var(--text);
+      background:#fff;
+    }
+    .input:focus{
+      outline:none;
+      box-shadow:0 0 0 4px rgba(200,176,138,.45);
+      border-color:var(--beige);
+    }
+    .btn{
+      height:48px;
+      border-radius:var(--radius-sm);
+      border:1px solid var(--line);
+      background:#fff;
+      font-weight:650;
+      font-size:14px;
+      cursor:pointer;
+    }
+    .btn-primary{ background:var(--beige); border-color:var(--beige); }
+    .btn-primary:hover{ background:var(--beige-2); }
+    .footer{ margin-top:12px; color:var(--muted); font-size:14px; }
+    .error{ margin-top:10px; color:#8b3e32; font-size:14px; }
+  </style>
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">LiveNew</div>
+      <nav class="nav">
+        <a href="/index.html">Home</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+      </nav>
+    </div>
+  </header>
+
+  <main class="page">
+    <section class="card">
+      <h1 class="title">Create account</h1>
+      <p class="sub">Use email and password to get started.</p>
+      <form id="signup-form" class="form">
+        <input id="signup-email" class="input" type="email" placeholder="email" required />
+        <input id="signup-password" class="input" type="password" placeholder="password" required />
+        <button class="btn btn-primary" type="submit">Create account</button>
+      </form>
+      <div id="signup-error" class="error" role="status"></div>
+      <div class="footer">Already have an account? <a href="/login.html">Log in</a></div>
+    </section>
+  </main>
+
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+    const SUPABASE_URL = "__SUPABASE_URL__";
+    const SUPABASE_ANON_KEY = "__SUPABASE_ANON_KEY__";
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    const form = document.getElementById("signup-form");
+    const errorEl = document.getElementById("signup-error");
+
+    function setToken(accessToken, refreshToken) {
+      if (accessToken) localStorage.setItem("livenew_access_token", accessToken);
+      if (refreshToken) localStorage.setItem("livenew_refresh_token", refreshToken);
+      const secure = window.location.protocol === "https:" ? "; Secure" : "";
+      if (accessToken) document.cookie = `ln_token=${encodeURIComponent(accessToken)}; Path=/; SameSite=Lax${secure}`;
+    }
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      errorEl.textContent = "";
+      const email = document.getElementById("signup-email").value.trim();
+      const password = document.getElementById("signup-password").value;
+      const { data, error } = await supabase.auth.signUp({ email, password });
+      if (error || !data?.session) {
+        errorEl.textContent = error?.message || "Signup failed";
+        return;
+      }
+      setToken(data.session.access_token, data.session.refresh_token);
+      window.location.assign("/day");
+    });
+  </script>
+</body>
+</html>
