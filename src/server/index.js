@@ -2,6 +2,7 @@ import http from "http";
 import fs from "fs/promises";
 import path from "path";
 import crypto from "crypto";
+import { createClient } from "@supabase/supabase-js";
 import * as domain from "../domain/index.js";
 import { reduceEvent } from "../state/engine.js";
 import { normalizeState, validateState } from "../domain/schema.js";
@@ -287,6 +288,23 @@ const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim().replace(/\/$/, "");
 const SUPABASE_JWKS_URL = SUPABASE_URL ? `${SUPABASE_URL}/auth/v1/keys` : "";
 const JWKS_CACHE_TTL_MS = 60 * 60 * 1000;
 let jwksCache = { keys: null, fetchedAt: 0 };
+const originClean = (value) => {
+  const text = String(value || "");
+  return text.endsWith("/") ? text.slice(0, -1) : text;
+};
+const PUBLIC_ORIGIN = originClean(process.env.PUBLIC_ORIGIN || process.env.BASE_URL || "");
+let supabaseAnonClient = null;
+function supabaseAnon() {
+  if (!SUPABASE_URL || !(process.env.SUPABASE_ANON_KEY || "").trim()) {
+    throw new Error("Supabase anon client requires SUPABASE_URL and SUPABASE_ANON_KEY.");
+  }
+  if (!supabaseAnonClient) {
+    supabaseAnonClient = createClient(SUPABASE_URL, (process.env.SUPABASE_ANON_KEY || "").trim(), {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  }
+  return supabaseAnonClient;
+}
 
 function getCookie(req, name) {
   const header = req?.headers?.cookie;
@@ -5036,6 +5054,85 @@ const server = http.createServer(async (req, res) => {
         verified.userId
       );
       return;
+    }
+
+    if (pathname === "/v1/auth/signup" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
+      const body = await parseJson(req);
+      const email = body?.email;
+      const password = body?.password;
+      if (!email || typeof email !== "string") {
+        sendError(res, 400, "email_required", "email is required", "email");
+        return;
+      }
+      if (!password || typeof password !== "string") {
+        sendError(res, 400, "password_required", "password is required", "password");
+        return;
+      }
+      // Supabase Dashboard must allow this redirect URL: https://<domain>/auth-callback.html
+      const redirectTo = PUBLIC_ORIGIN ? `${PUBLIC_ORIGIN}/auth-callback.html` : "/auth-callback.html";
+      try {
+        const { data, error } = await supabaseAnon().auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: redirectTo },
+        });
+        if (error) {
+          console.error("[auth][signup] error", {
+            message: error.message,
+            status: error.status,
+            name: error.name,
+          });
+          sendJson(res, 400, { ok: false, code: "SIGNUP_FAILED", message: error.message });
+          return;
+        }
+        console.log("[auth][signup] ok", {
+          email,
+          redirectTo,
+          userId: data?.user?.id || null,
+        });
+        sendJson(res, 200, { ok: true, needsEmailConfirm: !data?.session });
+        return;
+      } catch (err) {
+        console.error("[auth][signup] error", { message: err?.message || String(err) });
+        sendJson(res, 400, { ok: false, code: "SIGNUP_FAILED", message: err?.message || "Signup failed" });
+        return;
+      }
+    }
+
+    if (pathname === "/v1/auth/resend-signup" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
+      const body = await parseJson(req);
+      const email = body?.email;
+      if (!email || typeof email !== "string") {
+        sendError(res, 400, "email_required", "email is required", "email");
+        return;
+      }
+      // Supabase Dashboard must allow this redirect URL: https://<domain>/auth-callback.html
+      const redirectTo = PUBLIC_ORIGIN ? `${PUBLIC_ORIGIN}/auth-callback.html` : "/auth-callback.html";
+      try {
+        const { data, error } = await supabaseAnon().auth.resend({
+          type: "signup",
+          email,
+          options: { emailRedirectTo: redirectTo },
+        });
+        if (error) {
+          console.error("[auth][resend] error", {
+            message: error.message,
+            status: error.status,
+            name: error.name,
+          });
+          sendJson(res, 400, { ok: false, code: "RESEND_FAILED", message: error.message });
+          return;
+        }
+        console.log("[auth][resend] ok", { email, redirectTo, data: Boolean(data) });
+        sendJson(res, 200, { ok: true });
+        return;
+      } catch (err) {
+        console.error("[auth][resend] error", { message: err?.message || String(err) });
+        sendJson(res, 400, { ok: false, code: "RESEND_FAILED", message: err?.message || "Resend failed" });
+        return;
+      }
     }
 
     token = parseAuthToken(req);
