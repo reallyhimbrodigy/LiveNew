@@ -442,6 +442,13 @@ const PUBLIC_PAGE_PATHS = new Set([
   "/contact.html",
   "/reset-access.html",
 ]);
+const PUBLIC_POST_ROUTES = new Set([
+  "/v1/auth/signup",
+  "/v1/auth/login",
+  "/v1/auth/resend-signup",
+  "/v1/auth/logout",
+  "/v1/csrf",
+]);
 const PROTECTED_PAGE_PATHS = new Set([
   "/day",
   "/day.html",
@@ -3625,9 +3632,12 @@ function cacheControlForPath(filePath) {
 }
 
 function applyCors(req, res) {
-  if (!ALLOWED_ORIGINS.length) return false;
   const origin = req.headers.origin;
-  if (!origin || !ALLOWED_ORIGINS.includes(origin)) return false;
+  if (!origin) return false;
+  const allowed =
+    (ALLOWED_ORIGINS.length && ALLOWED_ORIGINS.includes(origin)) ||
+    (PUBLIC_ORIGIN && origin === PUBLIC_ORIGIN);
+  if (!allowed) return false;
   res.setHeader("Access-Control-Allow-Origin", origin);
   res.setHeader("Vary", "Origin");
   res.setHeader(
@@ -3635,6 +3645,7 @@ function applyCors(req, res) {
     "Authorization, Content-Type, X-Device-Name, X-Request-Id, X-Client-Type, X-CSRF-Token"
   );
   res.setHeader("Access-Control-Allow-Methods", "GET,POST,PATCH,DELETE,OPTIONS");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
   return true;
 }
 
@@ -3925,6 +3936,14 @@ function isApiBypassAllowed(req) {
 function requireCsrf(req, res) {
   if (!config.csrfEnabled) return true;
   const method = req.method || "GET";
+  if (method === "POST") {
+    try {
+      const url = new URL(req.url, `http://${req.headers.host}`);
+      if (PUBLIC_POST_ROUTES.has(url.pathname)) return true;
+    } catch {
+      // fall through to csrf checks
+    }
+  }
   if (["GET", "HEAD", "OPTIONS"].includes(method)) return true;
   const authHeader = parseAuthToken(req);
   if (authHeader) return true;
@@ -3934,6 +3953,12 @@ function requireCsrf(req, res) {
   const csrfCookie = getCsrfToken(req);
   const csrfHeader = req.headers["x-csrf-token"];
   if (!csrfCookie || !csrfHeader || csrfCookie !== csrfHeader) {
+    logError({
+      event: "csrf_missing",
+      path: req?.url,
+      method,
+      origin: req?.headers?.origin || null,
+    });
     sendError(res, 403, "csrf_required", "CSRF token missing or invalid");
     return false;
   }
@@ -4667,7 +4692,8 @@ const server = http.createServer(async (req, res) => {
   }
   const corsApplied = applyCors(req, res);
   if (req.method === "OPTIONS") {
-    if (corsApplied) {
+    if (corsApplied || (req.headers.origin && PUBLIC_ORIGIN && req.headers.origin === PUBLIC_ORIGIN)) {
+      if (!corsApplied) applyCors(req, res);
       res.writeHead(204);
       res.end();
       return;
@@ -4801,7 +4827,12 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  if (pathname.startsWith("/v1") && !PUBLIC_API_PATHS.has(pathname) && !pathname.startsWith("/v1/auth/")) {
+  if (
+    pathname.startsWith("/v1") &&
+    !PUBLIC_API_PATHS.has(pathname) &&
+    !(req.method === "POST" && PUBLIC_POST_ROUTES.has(pathname)) &&
+    !pathname.startsWith("/v1/auth/")
+  ) {
     const token = getAuthToken(req);
     const claims = await verifySupabaseJwt(token);
     if (!claims) {
