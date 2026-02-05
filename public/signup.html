@@ -146,7 +146,28 @@
     resendBtn.className = "btn btn-primary";
     resendBtn.textContent = "Resend confirmation email";
     resendBtn.style.display = "none";
-    document.querySelector(".card").appendChild(resendBtn);
+
+    const debugAllowed =
+      location.hostname === "localhost" || location.search.includes("debug=1");
+    const debugWrap = document.createElement("div");
+    debugWrap.style.display = "none";
+    debugWrap.style.marginTop = "10px";
+    const debugBtn = document.createElement("button");
+    debugBtn.type = "button";
+    debugBtn.className = "btn";
+    debugBtn.textContent = "Get debug link";
+    const debugLink = document.createElement("a");
+    debugLink.className = "btn";
+    debugLink.style.marginLeft = "8px";
+    debugLink.style.display = "none";
+    debugLink.target = "_blank";
+    debugLink.rel = "noopener";
+    debugWrap.appendChild(debugBtn);
+    debugWrap.appendChild(debugLink);
+
+    const card = document.querySelector(".card");
+    card.appendChild(resendBtn);
+    card.appendChild(debugWrap);
 
     async function postJson(path, body) {
       const res = await fetch(path, {
@@ -167,18 +188,22 @@
       errorEl.textContent = "";
       messageEl.textContent = "";
       resendBtn.style.display = "none";
+      debugWrap.style.display = "none";
+      debugLink.style.display = "none";
       const email = document.getElementById("signup-email").value.trim();
       const password = document.getElementById("signup-password").value;
       try {
         const payload = await postJson("/v1/auth/signup", { email, password });
         if (payload?.needsEmailConfirm) {
-          messageEl.innerHTML = "Confirm your email to finish signup. <a href=\"/login.html\">Log in</a>.";
+          messageEl.innerHTML =
+            "If email delivery is enabled, you’ll receive a confirmation email shortly. Confirm your email to finish signup. <a href=\"/login.html\">Log in</a>.";
           resendBtn.style.display = "inline-block";
         } else {
           messageEl.innerHTML = "Signup complete. <a href=\"/login.html\">Log in</a>.";
         }
       } catch (err) {
         errorEl.textContent = err?.message || "Sign up failed";
+        if (debugAllowed) debugWrap.style.display = "block";
       }
     });
 
@@ -192,9 +217,34 @@
       }
       try {
         await postJson("/v1/auth/resend-signup", { email });
-        messageEl.textContent = "Confirmation email sent. Check your inbox.";
+        messageEl.textContent =
+          "If email delivery is enabled, you’ll receive a confirmation email shortly.";
       } catch (err) {
         errorEl.textContent = err?.message || "Resend failed";
+        if (debugAllowed) debugWrap.style.display = "block";
+      }
+    });
+
+    debugBtn.addEventListener("click", async () => {
+      errorEl.textContent = "";
+      messageEl.textContent = "";
+      debugLink.style.display = "none";
+      const email = document.getElementById("signup-email").value.trim();
+      if (!email) {
+        errorEl.textContent = "Enter your email first.";
+        return;
+      }
+      try {
+        const payload = await postJson("/v1/auth/debug-generate-confirmation-link", { email });
+        if (payload?.action_link) {
+          debugLink.href = payload.action_link;
+          debugLink.textContent = "Open confirmation link";
+          debugLink.style.display = "inline-flex";
+        } else {
+          errorEl.textContent = "No confirmation link available.";
+        }
+      } catch (err) {
+        errorEl.textContent = err?.message || "Debug link failed";
       }
     });
   </script>

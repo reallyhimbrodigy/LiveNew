@@ -292,7 +292,7 @@ const originClean = (value) => {
   const text = String(value || "");
   return text.endsWith("/") ? text.slice(0, -1) : text;
 };
-const PUBLIC_ORIGIN = originClean(process.env.PUBLIC_ORIGIN || process.env.BASE_URL || "");
+const PUBLIC_ORIGIN = originClean(process.env.PUBLIC_ORIGIN || process.env.BASE_URL || "https://livenew.app");
 let supabaseAnonClient = null;
 function supabaseAnon() {
   if (!SUPABASE_URL || !(process.env.SUPABASE_ANON_KEY || "").trim()) {
@@ -304,6 +304,19 @@ function supabaseAnon() {
     });
   }
   return supabaseAnonClient;
+}
+
+let supabaseAdminClient = null;
+function supabaseAdmin() {
+  if (!SUPABASE_URL || !(process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()) {
+    throw new Error("Supabase admin client requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+  }
+  if (!supabaseAdminClient) {
+    supabaseAdminClient = createClient(SUPABASE_URL, (process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim(), {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+  }
+  return supabaseAdminClient;
 }
 
 function getCookie(req, name) {
@@ -5110,11 +5123,17 @@ const server = http.createServer(async (req, res) => {
         });
         if (error) {
           console.error("[auth][signup] error", {
+            email,
             message: error.message,
             status: error.status,
             name: error.name,
           });
-          sendJson(res, 400, { ok: false, code: "SIGNUP_FAILED", message: error.message });
+          sendJson(res, 400, {
+            ok: false,
+            code: "SUPABASE_SIGNUP_ERROR",
+            message: error.message,
+            status: error.status ?? null,
+          });
           return;
         }
         console.log("[auth][signup] ok", {
@@ -5126,7 +5145,12 @@ const server = http.createServer(async (req, res) => {
         return;
       } catch (err) {
         console.error("[auth][signup] error", { message: err?.message || String(err) });
-        sendJson(res, 400, { ok: false, code: "SIGNUP_FAILED", message: err?.message || "Signup failed" });
+        sendJson(res, 400, {
+          ok: false,
+          code: "SUPABASE_SIGNUP_ERROR",
+          message: err?.message || "Signup failed",
+          status: null,
+        });
         return;
       }
     }
@@ -5149,11 +5173,17 @@ const server = http.createServer(async (req, res) => {
         });
         if (error) {
           console.error("[auth][resend] error", {
+            email,
             message: error.message,
             status: error.status,
             name: error.name,
           });
-          sendJson(res, 400, { ok: false, code: "RESEND_FAILED", message: error.message });
+          sendJson(res, 400, {
+            ok: false,
+            code: "SUPABASE_RESEND_ERROR",
+            message: error.message,
+            status: error.status ?? null,
+          });
           return;
         }
         console.log("[auth][resend] ok", { email, redirectTo, data: Boolean(data) });
@@ -5161,7 +5191,57 @@ const server = http.createServer(async (req, res) => {
         return;
       } catch (err) {
         console.error("[auth][resend] error", { message: err?.message || String(err) });
-        sendJson(res, 400, { ok: false, code: "RESEND_FAILED", message: err?.message || "Resend failed" });
+        sendJson(res, 400, {
+          ok: false,
+          code: "SUPABASE_RESEND_ERROR",
+          message: err?.message || "Resend failed",
+          status: null,
+        });
+        return;
+      }
+    }
+
+    if (pathname === "/v1/auth/debug-generate-confirmation-link" && req.method === "POST") {
+      const isProd = process.env.NODE_ENV === "production";
+      const adminKey = (process.env.ADMIN_KEY || "").trim();
+      const headerKey = String(req.headers["x-admin-key"] || "");
+      const allowed = !isProd || (adminKey && headerKey === adminKey);
+      if (!allowed) {
+        sendError(res, 404, "not_found", "Not found");
+        return;
+      }
+      const body = await parseJson(req);
+      const email = body?.email;
+      if (!email || typeof email !== "string") {
+        sendError(res, 400, "email_required", "email is required", "email");
+        return;
+      }
+      const redirectTo = PUBLIC_ORIGIN ? `${PUBLIC_ORIGIN}/auth-callback.html` : "/auth-callback.html";
+      try {
+        const { data, error } = await supabaseAdmin().auth.admin.generateLink({
+          type: "signup",
+          email,
+          options: { redirectTo },
+        });
+        if (error) {
+          console.error("[auth][debug-link] error", {
+            email,
+            message: error.message,
+            status: error.status,
+            name: error.name,
+          });
+          sendJson(res, 400, {
+            ok: false,
+            code: "SUPABASE_DEBUG_LINK_ERROR",
+            message: error.message,
+            status: error.status ?? null,
+          });
+          return;
+        }
+        sendJson(res, 200, {
+          ok: true,
+          action_link: data?.properties?.action_link ?? null,
+        });
         return;
       }
     }
