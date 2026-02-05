@@ -9911,17 +9911,26 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, () => {
   logInfo(`LiveNew server listening on http://localhost:${PORT}`);
   const publicOrigin = (process.env.PUBLIC_ORIGIN || process.env.BASE_URL || "").trim();
+  const stripTrailingSlash = (value) => {
+    const text = String(value || "");
+    return text.endsWith("/") ? text.slice(0, -1) : text;
+  };
+  const publicOriginClean = stripTrailingSlash(publicOrigin);
+  const callbackUrl = publicOriginClean ? `${publicOriginClean}/auth-callback.html` : "/auth-callback.html";
+  if (process.env.NODE_ENV === "production") {
+    console.log("[auth] publicOrigin=%s callbackUrl=%s", publicOriginClean, callbackUrl);
+  }
   if (publicOrigin) {
     logInfo({
       event: "auth_callback_url",
       publicOrigin,
-      callbackUrl: `${publicOrigin.replace(/\\/$/, "")}/auth-callback.html`,
+      callbackUrl,
     });
   } else {
     logInfo({
       event: "auth_callback_url",
       publicOrigin: null,
-      callbackUrl: "/auth-callback.html",
+      callbackUrl,
     });
   }
   const smokeEnabled = config.envMode === "alpha" || config.envMode === "prod";
