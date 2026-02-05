@@ -417,6 +417,7 @@ const PUBLIC_PAGE_PATHS = new Set([
   "/login.html",
   "/signup",
   "/signup.html",
+  "/auth-callback.html",
   "/help-center.html",
   "/privacy.html",
   "/terms.html",
@@ -4692,6 +4693,7 @@ const server = http.createServer(async (req, res) => {
     ["/login.html", "login.html"],
     ["/signup", "signup.html"],
     ["/signup.html", "signup.html"],
+    ["/auth-callback.html", "auth-callback.html"],
     ["/help-center.html", "help-center.html"],
     ["/privacy.html", "privacy.html"],
     ["/terms.html", "terms.html"],
@@ -9908,6 +9910,20 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   logInfo(`LiveNew server listening on http://localhost:${PORT}`);
+  const publicOrigin = (process.env.PUBLIC_ORIGIN || process.env.BASE_URL || "").trim();
+  if (publicOrigin) {
+    logInfo({
+      event: "auth_callback_url",
+      publicOrigin,
+      callbackUrl: `${publicOrigin.replace(/\\/$/, "")}/auth-callback.html`,
+    });
+  } else {
+    logInfo({
+      event: "auth_callback_url",
+      publicOrigin: null,
+      callbackUrl: "/auth-callback.html",
+    });
+  }
   const smokeEnabled = config.envMode === "alpha" || config.envMode === "prod";
   scheduleStartupSmoke({
     enabled: smokeEnabled,

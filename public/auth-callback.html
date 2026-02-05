@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/favicon.ico" />
+  <title>Authenticating · LiveNew</title>
+  <style>
+    body{
+      margin:0;
+      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Inter, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
+      background:#FBF8F1;
+      color:#141210;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      height:100vh;
+    }
+    .card{
+      background:#fff;
+      border:1px solid #E9E2D6;
+      border-radius:18px;
+      padding:24px;
+      box-shadow:0 10px 30px rgba(18,18,18,.06);
+      text-align:center;
+      max-width:420px;
+    }
+    .muted{ color:#5A544B; font-size:14px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Finishing sign‑in…</h1>
+    <p class="muted">Please wait.</p>
+  </div>
+  <script type="module">
+    import { createClient } from "https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm";
+
+    const SUPABASE_URL = "__SUPABASE_URL__";
+    const SUPABASE_ANON_KEY = "__SUPABASE_ANON_KEY__";
+
+    const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+      auth: { persistSession: false, autoRefreshToken: false },
+    });
+
+    function setToken(accessToken, refreshToken) {
+      if (accessToken) {
+        localStorage.setItem("livenew_access_token", accessToken);
+        localStorage.setItem("ln_token", accessToken);
+      }
+      if (refreshToken) localStorage.setItem("livenew_refresh_token", refreshToken);
+      const secure = window.location.protocol === "https:" ? "; Secure" : "";
+      if (accessToken) document.cookie = `ln_token=${encodeURIComponent(accessToken)}; Path=/; SameSite=Lax${secure}`;
+    }
+
+    async function run() {
+      try {
+        const { data, error } = await supabase.auth.exchangeCodeForSession(window.location.href);
+        const session = data?.session || null;
+        if (session?.access_token) {
+          setToken(session.access_token, session.refresh_token);
+          window.location.assign("/day");
+          return;
+        }
+        if (error) throw error;
+        const { data: hashData } = await supabase.auth.getSessionFromUrl({ storeSession: false });
+        if (hashData?.session?.access_token) {
+          setToken(hashData.session.access_token, hashData.session.refresh_token);
+          window.location.assign("/day");
+          return;
+        }
+        window.location.assign("/login.html?confirmed=1");
+      } catch {
+        window.location.assign("/login.html?error=auth_callback_failed");
+      }
+    }
+
+    run();
+  </script>
+</body>
+</html>

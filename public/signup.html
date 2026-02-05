@@ -106,6 +106,7 @@
     .btn-primary:hover{ background:var(--beige-2); }
     .footer{ margin-top:12px; color:var(--muted); font-size:14px; }
     .error{ margin-top:10px; color:#8b3e32; font-size:14px; }
+    .info{ margin-top:10px; color:var(--muted); font-size:14px; }
   </style>
 </head>
 <body>
@@ -129,6 +130,7 @@
         <input id="signup-password" class="input" type="password" placeholder="password" required />
         <button class="btn btn-primary" type="submit">Create account</button>
       </form>
+      <div id="signup-message" class="info" role="status"></div>
       <div id="signup-error" class="error" role="status"></div>
       <div class="footer">Already have an account? <a href="/login.html">Log in</a></div>
     </section>
@@ -146,9 +148,13 @@
 
     const form = document.getElementById("signup-form");
     const errorEl = document.getElementById("signup-error");
+    const messageEl = document.getElementById("signup-message");
 
     function setToken(accessToken, refreshToken) {
-      if (accessToken) localStorage.setItem("livenew_access_token", accessToken);
+      if (accessToken) {
+        localStorage.setItem("livenew_access_token", accessToken);
+        localStorage.setItem("ln_token", accessToken);
+      }
       if (refreshToken) localStorage.setItem("livenew_refresh_token", refreshToken);
       const secure = window.location.protocol === "https:" ? "; Secure" : "";
       if (accessToken) document.cookie = `ln_token=${encodeURIComponent(accessToken)}; Path=/; SameSite=Lax${secure}`;
@@ -157,15 +163,29 @@
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       errorEl.textContent = "";
+      messageEl.textContent = "";
       const email = document.getElementById("signup-email").value.trim();
       const password = document.getElementById("signup-password").value;
-      const { data, error } = await supabase.auth.signUp({ email, password });
-      if (error || !data?.session) {
-        errorEl.textContent = error?.message || "Signup failed";
+      // Supabase Dashboard must allow this redirect URL: https://<domain>/auth-callback.html
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: `${window.location.origin}/auth-callback.html` },
+      });
+      if (error) {
+        errorEl.textContent = error.message || "Sign up failed";
         return;
       }
-      setToken(data.session.access_token, data.session.refresh_token);
-      window.location.assign("/day");
+      if (data?.session) {
+        setToken(data.session.access_token, data.session.refresh_token);
+        window.location.assign("/day");
+        return;
+      }
+      if (data?.user) {
+        messageEl.innerHTML = "Confirm your email to finish signup. <a href=\"/login.html\">Log in</a>.";
+        return;
+      }
+      messageEl.textContent = "Check your email to confirm your account.";
     });
   </script>
 </body>
