@@ -460,7 +460,7 @@ const PUBLIC_POST_ROUTES = new Set([
   "/v1/auth/signup",
   "/v1/auth/login",
   "/v1/auth/resend-signup",
-  "/v1/auth/debug/confirm-link",
+  "/v1/auth/admin/generate-signup-link",
   "/v1/auth/logout",
   "/v1/csrf",
 ]);
@@ -482,6 +482,7 @@ const PUBLIC_API_PATHS = new Set([
   "/v1/csrf",
   "/v1/bootstrap",
   "/v1/mobile/bootstrap",
+  "/v1/auth/debug/status",
   "/healthz",
   "/readyz",
 ]);
@@ -5132,7 +5133,7 @@ const server = http.createServer(async (req, res) => {
           });
           sendJson(res, 400, {
             ok: false,
-            code: "SUPABASE_SIGNUP_ERROR",
+            code: "SUPABASE_AUTH_ERROR",
             message: error.message,
             status: error.status ?? null,
           });
@@ -5149,7 +5150,7 @@ const server = http.createServer(async (req, res) => {
         console.error("[auth][signup] error", { message: err?.message || String(err) });
         sendJson(res, 400, {
           ok: false,
-          code: "SUPABASE_SIGNUP_ERROR",
+          code: "SUPABASE_AUTH_ERROR",
           message: err?.message || "Signup failed",
           status: null,
         });
@@ -5182,7 +5183,7 @@ const server = http.createServer(async (req, res) => {
           });
           sendJson(res, 400, {
             ok: false,
-            code: "SUPABASE_RESEND_ERROR",
+            code: "SUPABASE_AUTH_ERROR",
             message: error.message,
             status: error.status ?? null,
           });
@@ -5195,7 +5196,7 @@ const server = http.createServer(async (req, res) => {
         console.error("[auth][resend] error", { message: err?.message || String(err) });
         sendJson(res, 400, {
           ok: false,
-          code: "SUPABASE_RESEND_ERROR",
+          code: "SUPABASE_AUTH_ERROR",
           message: err?.message || "Resend failed",
           status: null,
         });
@@ -5203,7 +5204,20 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    if (pathname === "/v1/auth/debug/confirm-link" && req.method === "POST") {
+    if (pathname === "/v1/auth/debug/status" && req.method === "GET") {
+      sendJson(res, 200, {
+        ok: true,
+        publicOrigin: PUBLIC_ORIGIN || null,
+        callbackUrl: CALLBACK_URL,
+        hasSupabaseUrl: Boolean(SUPABASE_URL),
+        hasAnonKey: Boolean((process.env.SUPABASE_ANON_KEY || "").trim()),
+        hasServiceRoleKey: Boolean((process.env.SUPABASE_SERVICE_ROLE_KEY || "").trim()),
+        envMode: process.env.NODE_ENV || null,
+      });
+      return;
+    }
+
+    if (pathname === "/v1/auth/admin/generate-signup-link" && req.method === "POST") {
       const isProd = process.env.NODE_ENV === "production";
       const adminKey = (process.env.ADMIN_KEY || "").trim();
       const headerKey = String(req.headers["x-admin-key"] || "");
@@ -5226,7 +5240,7 @@ const server = http.createServer(async (req, res) => {
           options: { redirectTo },
         });
         if (error) {
-          console.error("[auth][debug-link] error", {
+          console.error("[auth][admin-link] error", {
             email,
             message: error.message,
             status: error.status,
@@ -5234,7 +5248,7 @@ const server = http.createServer(async (req, res) => {
           });
           sendJson(res, 400, {
             ok: false,
-            code: "SUPABASE_DEBUG_LINK_ERROR",
+            code: "SUPABASE_AUTH_ERROR",
             message: error.message,
             status: error.status ?? null,
           });
@@ -5246,13 +5260,13 @@ const server = http.createServer(async (req, res) => {
         });
         return;
       } catch (err) {
-        console.error("[auth][debug-link] error", {
+        console.error("[auth][admin-link] error", {
           email,
           message: err?.message || String(err),
         });
         sendJson(res, 400, {
           ok: false,
-          code: "SUPABASE_DEBUG_LINK_ERROR",
+          code: "SUPABASE_AUTH_ERROR",
           message: err?.message || "Debug link failed",
           status: null,
         });

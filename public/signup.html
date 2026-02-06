@@ -147,8 +147,7 @@
     resendBtn.textContent = "Resend confirmation email";
     resendBtn.style.display = "none";
 
-    const debugAllowed =
-      location.hostname === "localhost" || location.search.includes("debug=1");
+    const debugAllowed = location.search.includes("debug=1");
     const debugWrap = document.createElement("div");
     debugWrap.style.display = "none";
     debugWrap.style.marginTop = "10px";
@@ -205,7 +204,7 @@
         const payload = await postJson("/v1/auth/signup", { email, password });
         if (payload?.needsEmailConfirm) {
           messageEl.innerHTML =
-            "Account created. Confirmation email may take a moment. If it doesn’t arrive, use Resend. <a href=\"/login.html\">Log in</a>.";
+            "Account created. If email delivery is enabled, you will receive a confirmation email. If you don’t, contact support or use debug confirmation. <a href=\"/login.html\">Log in</a>.";
           resendBtn.style.display = "inline-block";
         } else {
           messageEl.innerHTML = "Signup complete. <a href=\"/login.html\">Log in</a>.";
@@ -248,7 +247,7 @@
         return;
       }
       try {
-        const res = await fetch("/v1/auth/debug/confirm-link", {
+        const res = await fetch("/v1/auth/admin/generate-signup-link", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
