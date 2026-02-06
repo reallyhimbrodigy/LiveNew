@@ -320,6 +320,26 @@ function supabaseAdmin() {
   return supabaseAdminClient;
 }
 
+async function userExistsByEmail(emailLower) {
+  if (!emailLower) return false;
+  const perPage = 200;
+  const maxPages = 20;
+  for (let page = 1; page <= maxPages; page += 1) {
+    const { data, error } = await supabaseAdmin().auth.admin.listUsers({
+      page,
+      perPage,
+    });
+    if (error) throw error;
+    const users = data?.users || [];
+    for (const user of users) {
+      const userEmail = (user?.email || "").toLowerCase();
+      if (userEmail === emailLower) return true;
+    }
+    if (!users.length || users.length < perPage) break;
+  }
+  return false;
+}
+
 function getCookie(req, name) {
   const header = req?.headers?.cookie;
   if (!header) return null;
@@ -5116,7 +5136,22 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "password_required", "password is required", "password");
         return;
       }
-      // Supabase Dashboard must allow this redirect URL: https://<domain>/auth-callback.html
+      const emailLower = email.trim().toLowerCase();
+      let exists = false;
+      try {
+        exists = await userExistsByEmail(emailLower);
+      } catch (err) {
+        console.error("[auth][signup] admin_check_error", { message: err?.message || String(err) });
+        sendJson(res, 500, { ok: false, code: "ACCOUNT_CHECK_FAILED" });
+        return;
+      }
+      console.log("[auth][signup] email=%s exists=%s", emailLower, exists);
+      res.setHeader("X-LN-SIGNUP-PATH", exists ? "exists" : "new");
+      if (exists) {
+        sendJson(res, 409, { ok: false, code: "ACCOUNT_EXISTS" });
+        return;
+      }
+      // Supabase dashboard must allow Redirect URL: https://livenew.app/auth-callback.html
       const redirectTo = CALLBACK_URL;
       try {
         const { data, error } = await supabaseAnon().auth.signUp({

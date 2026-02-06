@@ -172,21 +172,6 @@
     debugWrap.appendChild(debugLink);
     bodyEl.appendChild(debugWrap);
 
-    async function postJson(path, body) {
-      const res = await fetch(path, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      const payload = await res.json().catch(() => ({}));
-      if (!res.ok || payload?.ok === false) {
-        const status = payload?.status ?? res.status;
-        const message = payload?.message ? `${payload.message}${status ? ` (status ${status})` : ""}` : `HTTP ${res.status}`;
-        throw new Error(message);
-      }
-      return payload;
-    }
-
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       errorEl.textContent = "";
@@ -197,22 +182,25 @@
       const email = document.getElementById("signup-email").value.trim();
       const password = document.getElementById("signup-password").value;
       try {
-        const payload = await postJson("/v1/auth/signup", { email, password });
-        if (payload?.needsEmailConfirm) {
-          card.innerHTML = "<div class=\"info\" role=\"status\">Verification email sent.</div>";
-        } else {
-          card.innerHTML = "<div class=\"info\" role=\"status\">Verification email sent.</div>";
-        }
-      } catch (err) {
-        const msg = err?.message || "Sign up failed.";
-        const exists = /already registered|already exists/i.test(msg);
-        if (exists) {
+        const res = await fetch("/v1/auth/signup", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (res.status === 409 || payload?.code === "ACCOUNT_EXISTS") {
           card.innerHTML = "<div class=\"info\" role=\"status\">Account already exists.</div>";
           setTimeout(() => {
-            window.location.assign("/login.html");
-          }, 1200);
+            window.location.assign("/login.html?reason=exists");
+          }, 400);
           return;
         }
+        if (res.ok) {
+          card.innerHTML = "<div class=\"info\" role=\"status\">Verification email sent.</div>";
+          return;
+        }
+        throw new Error("Sign up failed.");
+      } catch (err) {
         errorEl.textContent = "Sign up failed.";
         if (debugAllowed) debugWrap.style.display = "block";
         submitBtn.disabled = false;
