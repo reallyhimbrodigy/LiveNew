@@ -10135,10 +10135,10 @@ server.listen(PORT, () => {
   const publicOriginClean = PUBLIC_ORIGIN;
   const callbackUrl = CALLBACK_URL;
   console.log("[auth] PUBLIC_ORIGIN=%s CALLBACK_URL=%s", publicOriginClean, callbackUrl);
-  if (publicOrigin) {
+  if (PUBLIC_ORIGIN) {
     logInfo({
       event: "auth_callback_url",
-      publicOrigin,
+      publicOrigin: PUBLIC_ORIGIN,
       callbackUrl,
     });
   } else {
