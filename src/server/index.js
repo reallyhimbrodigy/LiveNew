@@ -293,6 +293,7 @@ const originClean = (value) => {
   return text.endsWith("/") ? text.slice(0, -1) : text;
 };
 const PUBLIC_ORIGIN = originClean(process.env.PUBLIC_ORIGIN || process.env.BASE_URL || "https://livenew.app");
+const CALLBACK_URL = PUBLIC_ORIGIN ? `${PUBLIC_ORIGIN}/auth-callback.html` : "/auth-callback.html";
 let supabaseAnonClient = null;
 function supabaseAnon() {
   if (!SUPABASE_URL || !(process.env.SUPABASE_ANON_KEY || "").trim()) {
@@ -459,6 +460,7 @@ const PUBLIC_POST_ROUTES = new Set([
   "/v1/auth/signup",
   "/v1/auth/login",
   "/v1/auth/resend-signup",
+  "/v1/auth/debug/confirm-link",
   "/v1/auth/logout",
   "/v1/csrf",
 ]);
@@ -5114,7 +5116,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       // Supabase Dashboard must allow this redirect URL: https://<domain>/auth-callback.html
-      const redirectTo = PUBLIC_ORIGIN ? `${PUBLIC_ORIGIN}/auth-callback.html` : "/auth-callback.html";
+      const redirectTo = CALLBACK_URL;
       try {
         const { data, error } = await supabaseAnon().auth.signUp({
           email,
@@ -5164,7 +5166,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       // Supabase Dashboard must allow this redirect URL: https://<domain>/auth-callback.html
-      const redirectTo = PUBLIC_ORIGIN ? `${PUBLIC_ORIGIN}/auth-callback.html` : "/auth-callback.html";
+      const redirectTo = CALLBACK_URL;
       try {
         const { data, error } = await supabaseAnon().auth.resend({
           type: "signup",
@@ -5201,7 +5203,7 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
-    if (pathname === "/v1/auth/debug-generate-confirmation-link" && req.method === "POST") {
+    if (pathname === "/v1/auth/debug/confirm-link" && req.method === "POST") {
       const isProd = process.env.NODE_ENV === "production";
       const adminKey = (process.env.ADMIN_KEY || "").trim();
       const headerKey = String(req.headers["x-admin-key"] || "");
@@ -5216,7 +5218,7 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "email_required", "email is required", "email");
         return;
       }
-      const redirectTo = PUBLIC_ORIGIN ? `${PUBLIC_ORIGIN}/auth-callback.html` : "/auth-callback.html";
+      const redirectTo = CALLBACK_URL;
       try {
         const { data, error } = await supabaseAdmin().auth.admin.generateLink({
           type: "signup",
@@ -10130,16 +10132,9 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(PORT, () => {
   logInfo(`LiveNew server listening on http://localhost:${PORT}`);
-  const publicOrigin = (process.env.PUBLIC_ORIGIN || process.env.BASE_URL || "").trim();
-  const stripTrailingSlash = (value) => {
-    const text = String(value || "");
-    return text.endsWith("/") ? text.slice(0, -1) : text;
-  };
-  const publicOriginClean = stripTrailingSlash(publicOrigin);
-  const callbackUrl = publicOriginClean ? `${publicOriginClean}/auth-callback.html` : "/auth-callback.html";
-  if (process.env.NODE_ENV === "production") {
-    console.log("[auth] publicOrigin=%s callbackUrl=%s", publicOriginClean, callbackUrl);
-  }
+  const publicOriginClean = PUBLIC_ORIGIN;
+  const callbackUrl = CALLBACK_URL;
+  console.log("[auth] PUBLIC_ORIGIN=%s CALLBACK_URL=%s", publicOriginClean, callbackUrl);
   if (publicOrigin) {
     logInfo({
       event: "auth_callback_url",

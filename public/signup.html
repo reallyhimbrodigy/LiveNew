@@ -152,16 +152,24 @@
     const debugWrap = document.createElement("div");
     debugWrap.style.display = "none";
     debugWrap.style.marginTop = "10px";
+    debugWrap.style.textAlign = "left";
+    const debugKey = document.createElement("input");
+    debugKey.type = "password";
+    debugKey.placeholder = "Admin key";
+    debugKey.className = "input";
+    debugKey.style.maxWidth = "240px";
+    debugKey.style.marginRight = "8px";
     const debugBtn = document.createElement("button");
     debugBtn.type = "button";
     debugBtn.className = "btn";
-    debugBtn.textContent = "Get debug link";
+    debugBtn.textContent = "Get confirmation link";
     const debugLink = document.createElement("a");
     debugLink.className = "btn";
     debugLink.style.marginLeft = "8px";
     debugLink.style.display = "none";
     debugLink.target = "_blank";
     debugLink.rel = "noopener";
+    debugWrap.appendChild(debugKey);
     debugWrap.appendChild(debugBtn);
     debugWrap.appendChild(debugLink);
 
@@ -177,7 +185,8 @@
       });
       const payload = await res.json().catch(() => ({}));
       if (!res.ok || payload?.ok === false) {
-        const message = payload?.message || `HTTP ${res.status}`;
+        const status = payload?.status ?? res.status;
+        const message = payload?.message ? `${payload.message}${status ? ` (status ${status})` : ""}` : `HTTP ${res.status}`;
         throw new Error(message);
       }
       return payload;
@@ -196,7 +205,7 @@
         const payload = await postJson("/v1/auth/signup", { email, password });
         if (payload?.needsEmailConfirm) {
           messageEl.innerHTML =
-            "If email delivery is enabled, you’ll receive a confirmation email shortly. Confirm your email to finish signup. <a href=\"/login.html\">Log in</a>.";
+            "Account created. Confirmation email may take a moment. If it doesn’t arrive, use Resend. <a href=\"/login.html\">Log in</a>.";
           resendBtn.style.display = "inline-block";
         } else {
           messageEl.innerHTML = "Signup complete. <a href=\"/login.html\">Log in</a>.";
@@ -217,8 +226,7 @@
       }
       try {
         await postJson("/v1/auth/resend-signup", { email });
-        messageEl.textContent =
-          "If email delivery is enabled, you’ll receive a confirmation email shortly.";
+        messageEl.textContent = "Resend requested.";
       } catch (err) {
         errorEl.textContent = err?.message || "Resend failed";
         if (debugAllowed) debugWrap.style.display = "block";
@@ -229,13 +237,30 @@
       errorEl.textContent = "";
       messageEl.textContent = "";
       debugLink.style.display = "none";
+      const adminKey = debugKey.value.trim();
       const email = document.getElementById("signup-email").value.trim();
       if (!email) {
         errorEl.textContent = "Enter your email first.";
         return;
       }
+      if (!adminKey) {
+        errorEl.textContent = "Admin key required.";
+        return;
+      }
       try {
-        const payload = await postJson("/v1/auth/debug-generate-confirmation-link", { email });
+        const res = await fetch("/v1/auth/debug/confirm-link", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "X-ADMIN-KEY": adminKey,
+          },
+          body: JSON.stringify({ email }),
+        });
+        const payload = await res.json().catch(() => ({}));
+        if (!res.ok || payload?.ok === false) {
+          const message = payload?.message || `HTTP ${res.status}`;
+          throw new Error(message);
+        }
         if (payload?.action_link) {
           debugLink.href = payload.action_link;
           debugLink.textContent = "Open confirmation link";
