@@ -55,23 +55,39 @@
 
     async function run() {
       try {
-        const { data, error } = await supabase.auth.exchangeCodeForSession(window.location.href);
-        const session = data?.session || null;
-        if (session?.access_token) {
-          setToken(session.access_token, session.refresh_token);
-          window.location.assign("/day");
-          return;
+        const url = window.location.href;
+        const hasCode = window.location.search.includes("code=");
+        if (hasCode) {
+          const { data, error } = await supabase.auth.exchangeCodeForSession(url);
+          const session = data?.session || null;
+          if (session?.access_token) {
+            setToken(session.access_token, session.refresh_token);
+            window.location.assign("/day");
+            return;
+          }
+          if (error) throw error;
         }
-        if (error) throw error;
-        const { data: hashData } = await supabase.auth.getSessionFromUrl({ storeSession: false });
-        if (hashData?.session?.access_token) {
-          setToken(hashData.session.access_token, hashData.session.refresh_token);
-          window.location.assign("/day");
-          return;
+        if (window.location.hash) {
+          const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+          const access_token = hash.get("access_token");
+          const refresh_token = hash.get("refresh_token");
+          if (access_token && refresh_token) {
+            const { data, error } = await supabase.auth.setSession({
+              access_token,
+              refresh_token,
+            });
+            const session = data?.session || null;
+            if (session?.access_token) {
+              setToken(session.access_token, session.refresh_token);
+              window.location.assign("/day");
+              return;
+            }
+            if (error) throw error;
+          }
         }
-        window.location.assign("/login.html?confirmed=1");
+        window.location.assign("/login.html?confirmed=0");
       } catch {
-        window.location.assign("/login.html?error=auth_callback_failed");
+        window.location.assign("/login.html?confirmed=0");
       }
     }
 

@@ -125,14 +125,16 @@
     <section class="card">
       <h1 class="title">Create account</h1>
       <p class="sub">Use email and password to get started.</p>
-      <form id="signup-form" class="form">
-        <input id="signup-email" class="input" type="email" placeholder="email" required />
-        <input id="signup-password" class="input" type="password" placeholder="password" required />
-        <button class="btn btn-primary" type="submit">Create account</button>
-      </form>
-      <div id="signup-message" class="info" role="status"></div>
-      <div id="signup-error" class="error" role="status"></div>
-      <div class="footer">Already have an account? <a href="/login.html">Log in</a></div>
+      <div id="signup-body">
+        <form id="signup-form" class="form">
+          <input id="signup-email" class="input" type="email" placeholder="email" required />
+          <input id="signup-password" class="input" type="password" placeholder="password" required />
+          <button id="signup-submit" class="btn btn-primary" type="submit">Create account</button>
+        </form>
+        <div id="signup-message" class="info" role="status"></div>
+        <div id="signup-error" class="error" role="status"></div>
+        <div class="footer">Already have an account? <a href="/login.html">Log in</a></div>
+      </div>
     </section>
   </main>
 
@@ -140,12 +142,9 @@
     const form = document.getElementById("signup-form");
     const errorEl = document.getElementById("signup-error");
     const messageEl = document.getElementById("signup-message");
-
-    const resendBtn = document.createElement("button");
-    resendBtn.type = "button";
-    resendBtn.className = "btn btn-primary";
-    resendBtn.textContent = "Resend confirmation email";
-    resendBtn.style.display = "none";
+    const bodyEl = document.getElementById("signup-body");
+    const submitBtn = document.getElementById("signup-submit");
+    const card = document.querySelector(".card");
 
     const debugAllowed = location.search.includes("debug=1");
     const debugWrap = document.createElement("div");
@@ -161,7 +160,7 @@
     const debugBtn = document.createElement("button");
     debugBtn.type = "button";
     debugBtn.className = "btn";
-    debugBtn.textContent = "Get confirmation link";
+    debugBtn.textContent = "Generate confirmation link";
     const debugLink = document.createElement("a");
     debugLink.className = "btn";
     debugLink.style.marginLeft = "8px";
@@ -171,10 +170,7 @@
     debugWrap.appendChild(debugKey);
     debugWrap.appendChild(debugBtn);
     debugWrap.appendChild(debugLink);
-
-    const card = document.querySelector(".card");
-    card.appendChild(resendBtn);
-    card.appendChild(debugWrap);
+    bodyEl.appendChild(debugWrap);
 
     async function postJson(path, body) {
       const res = await fetch(path, {
@@ -195,40 +191,31 @@
       event.preventDefault();
       errorEl.textContent = "";
       messageEl.textContent = "";
-      resendBtn.style.display = "none";
       debugWrap.style.display = "none";
       debugLink.style.display = "none";
+      submitBtn.disabled = true;
       const email = document.getElementById("signup-email").value.trim();
       const password = document.getElementById("signup-password").value;
       try {
         const payload = await postJson("/v1/auth/signup", { email, password });
         if (payload?.needsEmailConfirm) {
-          messageEl.innerHTML =
-            "Account created. If email delivery is enabled, you will receive a confirmation email. If you don’t, contact support or use debug confirmation. <a href=\"/login.html\">Log in</a>.";
-          resendBtn.style.display = "inline-block";
+          card.innerHTML = "<div class=\"info\" role=\"status\">Verification email sent.</div>";
         } else {
-          messageEl.innerHTML = "Signup complete. <a href=\"/login.html\">Log in</a>.";
+          card.innerHTML = "<div class=\"info\" role=\"status\">Verification email sent.</div>";
         }
       } catch (err) {
-        errorEl.textContent = err?.message || "Sign up failed";
+        const msg = err?.message || "Sign up failed.";
+        const exists = /already registered|already exists/i.test(msg);
+        if (exists) {
+          card.innerHTML = "<div class=\"info\" role=\"status\">Account already exists.</div>";
+          setTimeout(() => {
+            window.location.assign("/login.html");
+          }, 1200);
+          return;
+        }
+        errorEl.textContent = "Sign up failed.";
         if (debugAllowed) debugWrap.style.display = "block";
-      }
-    });
-
-    resendBtn.addEventListener("click", async () => {
-      errorEl.textContent = "";
-      messageEl.textContent = "";
-      const email = document.getElementById("signup-email").value.trim();
-      if (!email) {
-        errorEl.textContent = "Enter your email first.";
-        return;
-      }
-      try {
-        await postJson("/v1/auth/resend-signup", { email });
-        messageEl.textContent = "Resend requested.";
-      } catch (err) {
-        errorEl.textContent = err?.message || "Resend failed";
-        if (debugAllowed) debugWrap.style.display = "block";
+        submitBtn.disabled = false;
       }
     });
 
