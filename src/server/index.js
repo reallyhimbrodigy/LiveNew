@@ -5243,6 +5243,18 @@ const server = http.createServer(async (req, res) => {
           action_link: data?.properties?.action_link ?? null,
         });
         return;
+      } catch (err) {
+        console.error("[auth][debug-link] error", {
+          email,
+          message: err?.message || String(err),
+        });
+        sendJson(res, 400, {
+          ok: false,
+          code: "SUPABASE_DEBUG_LINK_ERROR",
+          message: err?.message || "Debug link failed",
+          status: null,
+        });
+        return;
       }
     }
 
