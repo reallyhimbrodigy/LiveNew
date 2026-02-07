@@ -165,8 +165,9 @@
         localStorage.setItem("ln_token", accessToken);
       }
       if (refreshToken) localStorage.setItem("livenew_refresh_token", refreshToken);
-      const secure = window.location.protocol === "https:" ? "; Secure" : "";
-      if (accessToken) document.cookie = `ln_token=${encodeURIComponent(accessToken)}; Path=/; SameSite=Lax${secure}`;
+      if (accessToken) {
+        document.cookie = `ln_token=${encodeURIComponent(accessToken)}; Path=/; Secure; SameSite=Lax`;
+      }
     }
 
     form.addEventListener("submit", async (event) => {
@@ -181,7 +182,7 @@
         return;
       }
       setToken(data.session.access_token, data.session.refresh_token);
-      window.location.assign("/day");
+      window.location.href = "/day";
     });
   </script>
 </body>

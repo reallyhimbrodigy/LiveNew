@@ -4798,10 +4798,11 @@ const server = http.createServer(async (req, res) => {
       const token = getAuthToken(req);
       const claims = await verifySupabaseJwt(token);
       if (!claims) {
-        res.writeHead(302, { Location: "/index.html" });
+        res.writeHead(302, { Location: "/index.html", "X-LN-AUTH": "redirect" });
         res.end();
         return;
       }
+      res.setHeader("X-LN-AUTH", "ok");
       res.livenewUserId = claims.sub || null;
     }
     issueCsrfToken(res);
