@@ -392,7 +392,6 @@ function initBaseUi() {
     week: `${t("appName")} — ${t("nav.week")}`,
     trends: `${t("appName")} — ${t("nav.trends")}`,
     profile: `${t("appName")} — ${t("nav.profile")}`,
-    admin: `${t("appName")} — ${t("nav.admin")}`,
   };
   if (page && titleMap[page]) {
     document.title = titleMap[page];
@@ -452,7 +451,6 @@ function bindAuth({ onAuthChange, onError } = {}) {
       }
       clearTokens();
       updateAuthStatus();
-      updateAdminVisibility();
       if (typeof authHandlers.onAuthChange === "function") {
         await authHandlers.onAuthChange({ reason: "logout" });
       }
@@ -468,17 +466,7 @@ function updateAuthStatus() {
 }
 
 async function updateAdminVisibility() {
-  const adminLinks = qsa(".admin-link");
-  adminLinks.forEach((link) => (link.style.display = "none"));
-  if (!getToken() && !getRefreshToken()) return;
-  try {
-    const res = await apiGet("/v1/admin/me");
-    if (res?.isAdmin) {
-      adminLinks.forEach((link) => (link.style.display = "inline-flex"));
-    }
-  } catch {
-    // ignore
-  }
+  return;
 }
 
 function renderDay(contract) {

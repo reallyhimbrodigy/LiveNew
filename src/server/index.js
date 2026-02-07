@@ -509,8 +509,6 @@ const PROTECTED_PAGE_PATHS = new Set([
   "/trends.html",
   "/profile",
   "/profile.html",
-  "/admin",
-  "/admin.html",
   "/smoke-frontend",
   "/smoke-frontend.html",
 ]);
@@ -4782,6 +4780,12 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && (pathname === "/admin" || pathname === "/admin.html")) {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
+    return;
+  }
+
   const pageRoutes = new Map([
     ["/", "index.html"],
     ["/index.html", "index.html"],
@@ -4805,8 +4809,6 @@ const server = http.createServer(async (req, res) => {
     ["/trends.html", "trends.html"],
     ["/profile", "profile.html"],
     ["/profile.html", "profile.html"],
-    ["/admin", "admin.html"],
-    ["/admin.html", "admin.html"],
   ]);
 
   if (req.method === "GET" && pageRoutes.has(pathname)) {

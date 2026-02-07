@@ -3,7 +3,6 @@ import { getAppState, setAppState } from "./app.state.js";
 import {
   initBaseUi,
   bindAuth,
-  updateAdminVisibility,
   setAppErrorHandler,
   hideGateScreens,
   renderConsentScreen,
@@ -53,7 +52,6 @@ function resolvePage() {
   if (path === "/week" || path === "/week.html") return "week";
   if (path === "/trends" || path === "/trends.html") return "trends";
   if (path === "/profile" || path === "/profile.html") return "profile";
-  if (path === "/admin" || path === "/admin.html") return "admin";
   if (path === "/smoke-frontend" || path === "/smoke-frontend.html") return "smoke";
   return "home";
 }
@@ -212,7 +210,7 @@ async function routeUiState({ boot, page }) {
   }
 
   if (uiState === "home") {
-    const { renderHome, renderDay, renderWeek, renderTrends, renderProfile, renderAdmin } = await loadControllers();
+    const { renderHome, renderDay, renderWeek, renderTrends, renderProfile } = await loadControllers();
     if (page === "day") {
       await renderDay();
     } else if (page === "week") {
@@ -221,8 +219,6 @@ async function routeUiState({ boot, page }) {
       await renderTrends();
     } else if (page === "profile") {
       await renderProfile();
-    } else if (page === "admin") {
-      await renderAdmin();
     } else {
       await renderHome();
     }
@@ -284,7 +280,7 @@ export async function initApp({ page } = {}) {
   if (resolvedPage === "home") {
     return;
   }
-  const protectedPages = new Set(["day", "week", "trends", "profile", "admin"]);
+  const protectedPages = new Set(["day", "week", "trends", "profile"]);
   if (protectedPages.has(resolvedPage) && !hasValidToken(getToken())) {
     window.location.assign("/index.html");
     return;
@@ -298,10 +294,13 @@ export async function initApp({ page } = {}) {
     initBaseUi();
     attachUnhandledHook();
     setAppErrorHandler(handleAppError);
-    bindAuth({
-      onAuthChange: requestInit,
-      onError: handleAppError,
-    });
+    const hasAuthUi = Boolean(document.querySelector("#auth-email") || document.querySelector("#auth-request"));
+    if (hasAuthUi) {
+      bindAuth({
+        onAuthChange: requestInit,
+        onError: handleAppError,
+      });
+    }
 
     if (resolvedPage === "smoke") {
       await runSmoke();
@@ -309,7 +308,6 @@ export async function initApp({ page } = {}) {
     }
 
     const { boot } = await runBootstrap();
-    await updateAdminVisibility();
     await routeUiState({ boot, page: resolvedPage });
   } catch (err) {
     handleAppError(err);
