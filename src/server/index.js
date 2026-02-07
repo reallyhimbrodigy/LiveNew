@@ -4795,10 +4795,15 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && pageRoutes.has(pathname)) {
     if (PROTECTED_PAGE_PATHS.has(pathname)) {
+      const authz = String(req.headers.authorization || "");
+      const hasAuthz = authz.toLowerCase().startsWith("bearer ");
+      const cookieTok = getCookie(req, "ln_token");
+      console.log("[gate] path=%s hasCookie=%s hasAuthz=%s", pathname, Boolean(cookieTok), Boolean(hasAuthz));
       const token = getAuthToken(req);
       const claims = await verifySupabaseJwt(token);
       if (!claims) {
         res.writeHead(302, { Location: "/index.html", "X-LN-AUTH": "redirect" });
+        console.log("[gate] redirect to /index reason=invalid_token");
         res.end();
         return;
       }

@@ -182,6 +182,7 @@
         return;
       }
       setToken(data.session.access_token, data.session.refresh_token);
+      console.log("ln_token cookie set?", document.cookie.includes("ln_token="));
       window.location.href = "/day";
     });
   </script>
