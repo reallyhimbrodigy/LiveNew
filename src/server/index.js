@@ -285,6 +285,7 @@ function requireSupabaseEnv({ requireServiceRole = false } = {}) {
 }
 
 const SUPABASE_URL = (process.env.SUPABASE_URL || "").trim().replace(/\/$/, "");
+const SUPABASE_ANON_KEY = (process.env.SUPABASE_ANON_KEY || "").trim();
 const SUPABASE_JWKS_URL = SUPABASE_URL ? `${SUPABASE_URL}/auth/v1/keys` : "";
 const JWKS_CACHE_TTL_MS = 60 * 60 * 1000;
 let jwksCache = { keys: null, fetchedAt: 0 };
@@ -363,6 +364,21 @@ function extractBearerToken(req) {
 
 function getAuthToken(req) {
   return extractBearerToken(req) || getCookie(req, "ln_token") || "";
+}
+
+async function getSupabaseUserFromToken(token) {
+  if (!token || !SUPABASE_URL || !SUPABASE_ANON_KEY) return null;
+  const url = `${SUPABASE_URL}/auth/v1/user`;
+  const res = await fetch(url, {
+    method: "GET",
+    headers: {
+      apikey: SUPABASE_ANON_KEY,
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) return null;
+  const json = await res.json().catch(() => null);
+  return json && json.id ? json : null;
 }
 
 async function loadSupabaseJwks() {
@@ -4805,23 +4821,28 @@ const server = http.createServer(async (req, res) => {
       const token = bearer || cookieTok;
       let decision = "ok";
       if (!token) {
-        decision = "redirect:no_token";
+        decision = "no_token";
         res.writeHead(302, { Location: "/index.html", "X-LN-AUTH": "redirect:no_token" });
         console.log("[gate]", { path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
         res.end();
         return;
       }
+      let user = null;
       const claims = await verifySupabaseJwt(token);
-      if (!claims) {
-        decision = "redirect:jwt_invalid";
-        res.writeHead(302, { Location: "/index.html", "X-LN-AUTH": "redirect:jwt_invalid" });
+      if (claims?.sub) user = { id: claims.sub };
+      if (!user) {
+        user = await getSupabaseUserFromToken(token);
+      }
+      if (!user) {
+        decision = "token_invalid";
+        res.writeHead(302, { Location: "/index.html", "X-LN-AUTH": "redirect:token_invalid" });
         console.log("[gate]", { path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
         res.end();
         return;
       }
       res.setHeader("X-LN-AUTH", "ok");
       console.log("[gate]", { path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
-      res.livenewUserId = claims.sub || null;
+      res.livenewUserId = user.id || null;
     }
     issueCsrfToken(res);
     await serveFile(res, path.join(PUBLIC_DIR, pageRoutes.get(pathname)), {
