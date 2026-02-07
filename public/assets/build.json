@@ -1,0 +1,10 @@
+{
+  "buildId": "202602071854-235c258",
+  "generatedAt": "2026-02-07T18:54:57.045Z",
+  "files": {
+    "app.core": "app.core.202602071854-235c258.js",
+    "controllers": "controllers.202602071854-235c258.js",
+    "app.api": "app.api.202602071854-235c258.js",
+    "app.ui": "app.ui.202602071854-235c258.js"
+  }
+}
