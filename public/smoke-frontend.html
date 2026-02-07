@@ -4,15 +4,65 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>LiveNew Frontend Smoke</title>
-  <link rel="stylesheet" href="/assets/styles.css" />
+  <link rel="icon" href="/favicon.ico" />
+  <link rel="stylesheet" href="/assets/app.css" />
 </head>
 <body data-page="smoke">
-  <main class="page shell container">
-    <h1>Frontend smoke</h1>
-    <p class="muted">Running checks...</p>
+  <header class="topbar">
+    <div class="topbar-inner ln-header-inner">
+      <div class="brand">LiveNew</div>
+      <nav class="nav">
+        <a href="/day">Day</a>
+        <a href="/week">Week</a>
+        <a href="/trends">Trends</a>
+        <a href="/profile">Profile</a>
+      </nav>
+      <div class="auth">
+        <div class="auth-status">Frontend smoke</div>
+      </div>
+    </div>
+  </header>
+
+  <main class="ln-main">
+    <div class="ln-container page shell container">
+      <section class="card">
+        <h1>Frontend smoke</h1>
+        <p class="muted">Running checks...</p>
+      </section>
+    </div>
   </main>
-  <div id="footer-root" class="footer"></div>
-  <script type="module" src="/assets/footer.js"></script>
+
+  <footer class="ln-footer footer" id="footer-root">
+    <div class="ln-container">
+      <div class="footer-panel">
+        <div class="footer-grid">
+          <div>
+            <div class="footer-head">LIVENEW</div>
+            <div class="footer-links">Reset-first stress regulation for a healthy daily rhythm.</div>
+          </div>
+          <div>
+            <div class="footer-head">Resources</div>
+            <div class="footer-links">
+              <a href="/">Home</a>
+              <a href="/help-center.html">Help Center</a>
+              <a href="/terms.html">Terms</a>
+              <a href="/privacy.html">Privacy</a>
+              <a href="/day">Today</a>
+            </div>
+          </div>
+          <div>
+            <div class="footer-head">Company</div>
+            <div class="footer-links">
+              <a href="/contact.html">Contact</a>
+              <a href="/reset-access.html">Reset Access</a>
+            </div>
+          </div>
+        </div>
+        <div class="footer-bottom">© 2026 LiveNew. All rights reserved.</div>
+      </div>
+    </div>
+  </footer>
+
   <script type="module" src="/assets/app.init.js"></script>
 </body>
 </html>
