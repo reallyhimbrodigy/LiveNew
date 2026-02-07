@@ -32,6 +32,22 @@ async function main() {
     }
   }
 
+  const appCssPath = path.join(assetsDir, "app.css");
+  if (!(await fileExists(appCssPath))) {
+    console.error("verify-assets: missing public/assets/app.css");
+    process.exit(1);
+  }
+  const cssText = await fs.readFile(appCssPath, "utf8");
+  const cssBytes = Buffer.byteLength(cssText, "utf8");
+  if (cssBytes < 2000) {
+    console.error(`verify-assets: app.css too small (${cssBytes} bytes)`);
+    process.exit(1);
+  }
+  if (cssText.includes("LIVE NEW THEME CANARY")) {
+    console.error("verify-assets: app.css contains canary marker");
+    process.exit(1);
+  }
+
   const appCoreFile = files["app.core"];
   if (!appCoreFile) {
     console.error("verify-assets: build.json missing files.app.core");

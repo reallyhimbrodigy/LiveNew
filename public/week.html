@@ -4,7 +4,36 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="/favicon.ico" />
-  <link rel="stylesheet" href="/assets/app.css?v=20260208-3" />
+  <script>
+    (function loadInAppAssets() {
+      const addCss = (href) => {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = href;
+        document.head.appendChild(link);
+      };
+      const addInit = (src) => {
+        const script = document.createElement("script");
+        script.type = "module";
+        script.src = src;
+        document.head.appendChild(script);
+      };
+      fetch("/assets/build.json", { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error("build.json"))))
+        .then((manifest) => {
+          const buildId = String(manifest?.buildId || "").trim();
+          const initFile = manifest?.files?.["app.init"] || (buildId ? `app.init.${buildId}.js` : "app.init.js");
+          const cssHref = `/assets/app.css?v=${encodeURIComponent(buildId || Date.now().toString())}`;
+          addCss(cssHref);
+          addInit(`/assets/${initFile}`);
+        })
+        .catch(() => {
+          const bust = String(Date.now());
+          addCss(`/assets/app.css?v=${bust}`);
+          addInit(`/assets/app.init.js?v=${bust}`);
+        });
+    })();
+  </script>
   <title>LiveNew · Week</title>
 </head>
 <body class="page" data-page="week">
@@ -58,11 +87,9 @@
         <div>
           <div class="footer-head">Resources</div>
           <div class="footer-links">
-            <a href="/">Home</a>
             <a href="/help-center.html">Help Center</a>
             <a href="/terms.html">Terms</a>
             <a href="/privacy.html">Privacy</a>
-            <a href="/day">Today</a>
           </div>
         </div>
         <div>
@@ -76,7 +103,5 @@
       <div class="footer-bottom">© 2026 LiveNew. All rights reserved.</div>
     </div>
   </footer>
-
-  <script type="module" src="/assets/app.init.js?v=20260208-3"></script>
 </body>
 </html>

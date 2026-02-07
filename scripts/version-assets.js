@@ -224,6 +224,7 @@ async function main() {
     buildId,
     generatedAt: new Date().toISOString(),
     files: {
+      "app.init": `app.init.${buildId}.js`,
       "app.core": `app.core.${buildId}.js`,
       controllers: `controllers.${buildId}.js`,
       "app.api": `app.api.${buildId}.js`,
