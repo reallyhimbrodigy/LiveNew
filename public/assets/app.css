@@ -15,7 +15,10 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; }
 body.page {
-  background: var(--bg);
+  background:
+    radial-gradient(1200px 600px at 8% -10%, #f2e9da 0%, rgba(242, 233, 218, 0) 62%),
+    radial-gradient(900px 520px at 95% 8%, #f6efe3 0%, rgba(246, 239, 227, 0) 58%),
+    var(--bg);
   color: var(--text);
   font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Inter, Roboto, Helvetica, Arial;
   line-height: 1.6;
@@ -26,7 +29,7 @@ body.page {
 }
 
 a, a:visited { color: inherit; text-decoration: none; }
-a:hover { text-decoration: underline; }
+a:hover { text-decoration: none; opacity: 0.85; }
 
 .topbar {
   position: fixed;
@@ -35,7 +38,7 @@ a:hover { text-decoration: underline; }
   right: 0;
   z-index: 1000;
   border-bottom: 1px solid rgba(20, 20, 20, 0.08);
-  background: rgba(255, 255, 255, 0.8);
+  background: rgba(255, 255, 255, 0.88);
   backdrop-filter: blur(12px);
 }
 .topbar-inner {
@@ -120,6 +123,8 @@ textarea {
   background: #fff;
   color: var(--text);
   font-size: 14px;
+  font-family: inherit;
+  appearance: none;
 }
 input:not([type="checkbox"]):not([type="radio"]),
 select { height: 44px; padding: 0 12px; }
@@ -152,7 +157,8 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 }
 .today-next { margin-top: 18px; width: 100%; }
 .today-links { margin-top: 8px; font-size: 14px; color: var(--muted); }
-.today-links a { text-decoration: underline; }
+.today-links a { text-decoration: none; }
+.today-links a:hover { text-decoration: none; opacity: 0.85; }
 
 .secondary-page {
   max-width: 760px;

@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="/favicon.ico" />
-  <link rel="stylesheet" href="/assets/app.css" />
+  <link rel="stylesheet" href="/assets/app.css?v=20260208" />
   <title>LiveNew · Today</title>
 </head>
 <body class="page" data-page="day">
@@ -22,44 +22,14 @@
 
   <main class="ln-main">
     <div class="ln-container">
-      <section id="consent-card" class="card today-shell hidden">
-        <h2>Before we begin</h2>
-        <p class="muted">By continuing, you agree to our <a href="/terms.html">Terms</a> and <a href="/privacy.html">Privacy Policy</a>.</p>
-        <button id="consent-accept" class="primary">I agree</button>
-        <div id="consent-status" class="muted"></div>
-      </section>
-
-      <section id="onboard-card" class="card today-shell hidden">
-        <h2 data-i18n="onboard.title">Start in under a minute</h2>
-        <div id="onboard-step-label" class="muted">Step 1 of 1</div>
-        <div class="grid-2">
-          <label><span data-i18n="onboard.timezone">Timezone</span><input id="onboard-timezone" type="text" placeholder="America/Los_Angeles" /></label>
-          <label><span data-i18n="onboard.dayBoundary">Day boundary hour</span><select id="onboard-boundary"><option value="0">0</option><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option></select></label>
-          <label><span data-i18n="checkIn.stress">Stress (1-10)</span><input id="onboard-stress" type="number" min="1" max="10" /></label>
-          <label><span data-i18n="checkIn.sleep">Sleep quality (1-10)</span><input id="onboard-sleep" type="number" min="1" max="10" /></label>
-          <label><span data-i18n="checkIn.energy">Energy (1-10)</span><input id="onboard-energy" type="number" min="1" max="10" /></label>
-          <label><span data-i18n="checkIn.timeAvailable">Time available</span><select id="onboard-time"><option value="5">5</option><option value="10">10</option><option value="15">15</option><option value="20" selected>20</option><option value="30">30</option></select></label>
-        </div>
-        <div id="onboard-review" class="hidden"></div>
-        <input id="onboard-consent-terms" type="checkbox" checked class="hidden" />
-        <input id="onboard-consent-privacy" type="checkbox" checked class="hidden" />
-        <input id="onboard-consent-alpha" type="checkbox" checked class="hidden" />
-        <button id="onboard-back" type="button" class="hidden">Back</button>
-        <button id="onboard-next" type="button" class="hidden">Next</button>
-        <div class="row">
-          <button id="onboard-submit" class="primary" data-i18n="onboard.submit">Start now</button>
-          <div id="onboard-status" class="muted"></div>
-        </div>
-      </section>
-
       <section id="today-flow" class="card today-shell">
-        <div id="today-step-start" class="today-screen">
+        <div id="today-step-start" class="today-screen" data-step="start">
           <h1>Let’s reset your day.</h1>
           <p class="today-sub">One gentle step at a time.</p>
           <button id="today-start-btn" class="primary today-next">Start today</button>
         </div>
 
-        <div id="today-step-stress" class="today-screen hidden">
+        <div id="today-step-stress" class="today-screen hidden" data-step="stress">
           <h2 class="today-question">How stressed do you feel right now?</h2>
           <p class="today-sub">Choose 1 (low) to 10 (high)</p>
           <div id="today-stress-options" class="choice-grid">
@@ -68,7 +38,7 @@
           <button id="today-stress-next" class="primary today-next">Continue</button>
         </div>
 
-        <div id="today-step-energy" class="today-screen hidden">
+        <div id="today-step-energy" class="today-screen hidden" data-step="energy">
           <h2 class="today-question">How is your energy?</h2>
           <p class="today-sub">Choose 1 (drained) to 10 (full)</p>
           <div id="today-energy-options" class="choice-grid">
@@ -77,7 +47,7 @@
           <button id="today-energy-next" class="primary today-next">Continue</button>
         </div>
 
-        <div id="today-step-time" class="today-screen hidden">
+        <div id="today-step-time" class="today-screen hidden" data-step="time">
           <h2 class="today-question">How much time do you have?</h2>
           <p class="today-sub">Pick one option</p>
           <div id="today-time-options" class="choice-grid time">
@@ -88,7 +58,7 @@
           <button id="today-time-next" class="primary today-next">Continue</button>
         </div>
 
-        <div id="today-step-reco" class="today-screen hidden">
+        <div id="today-step-reco" class="today-screen hidden" data-step="reco">
           <h2 class="today-question">Today’s reset</h2>
           <h3 id="today-reco-title">Reset</h3>
           <p id="today-reco-body" class="today-sub"></p>
@@ -96,7 +66,7 @@
           <button id="today-begin-reset" class="primary today-next">Begin reset</button>
         </div>
 
-        <div id="today-step-done" class="today-screen hidden">
+        <div id="today-step-done" class="today-screen hidden" data-step="done">
           <h2 class="today-question">Done</h2>
           <p class="today-sub">Nice work. Keep the next step easy.</p>
           <div id="today-done-links" class="today-links hidden">

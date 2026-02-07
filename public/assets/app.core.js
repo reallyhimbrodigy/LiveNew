@@ -495,14 +495,8 @@ function initDay({ initialDateISO } = {}) {
   const dayRoot = qs("#today-flow");
   if (!dayRoot) return;
 
-  const steps = {
-    start: qs("#today-step-start"),
-    stress: qs("#today-step-stress"),
-    energy: qs("#today-step-energy"),
-    time: qs("#today-step-time"),
-    reco: qs("#today-step-reco"),
-    done: qs("#today-step-done"),
-  };
+  const stepNodes = Array.from(dayRoot.querySelectorAll("[data-step]"));
+  const stepNames = new Set(stepNodes.map((node) => node.dataset.step).filter(Boolean));
   const secondaryNav = qs("#day-secondary-nav");
   const statusEl = qs("#today-status");
   const beginResetBtn = qs("#today-begin-reset");
@@ -512,7 +506,8 @@ function initDay({ initialDateISO } = {}) {
   let currentDateISO = initialDateISO || todayISO();
 
   const showStep = (name) => {
-    Object.entries(steps).forEach(([key, node]) => node?.classList.toggle("hidden", key !== name));
+    if (!stepNames.has(name)) return;
+    stepNodes.forEach((node) => node.classList.toggle("hidden", node.dataset.step !== name));
     if (secondaryNav) secondaryNav.classList.toggle("hidden", name !== "done");
   };
 
