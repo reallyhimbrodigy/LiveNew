@@ -401,6 +401,36 @@ function initBaseUi() {
   if (page && titleMap[page]) {
     document.title = titleMap[page];
   }
+  const accountBtn = qs("#account-menu-btn");
+  const accountMenu = qs("#account-menu");
+  const accountLogoutBtn = qs("#account-logout-btn");
+  if (accountBtn && accountMenu) {
+    const closeMenu = () => {
+      accountMenu.classList.add("hidden");
+      accountBtn.setAttribute("aria-expanded", "false");
+    };
+    accountBtn.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const nextHidden = !accountMenu.classList.contains("hidden");
+      accountMenu.classList.toggle("hidden", nextHidden);
+      accountBtn.setAttribute("aria-expanded", nextHidden ? "false" : "true");
+    });
+    document.addEventListener("click", (event) => {
+      if (!accountMenu.classList.contains("hidden") && !accountMenu.contains(event.target) && event.target !== accountBtn) {
+        closeMenu();
+      }
+    });
+    accountLogoutBtn?.addEventListener("click", async () => {
+      try {
+        if (getRefreshToken()) await logoutAuth();
+      } catch {
+        // ignore
+      }
+      clearTokens();
+      closeMenu();
+      window.location.assign("/login.html");
+    });
+  }
 }
 
 let authHandlers = { onAuthChange: null, onError: null };
@@ -498,6 +528,7 @@ function initDay({ initialDateISO } = {}) {
   const stepNodes = Array.from(dayRoot.querySelectorAll("[data-step]"));
   const stepNames = new Set(stepNodes.map((node) => node.dataset.step).filter(Boolean));
   const secondaryNav = qs("#day-secondary-nav");
+  const stepIndicator = qs("#today-step-indicator");
   const statusEl = qs("#today-status");
   const beginResetBtn = qs("#today-begin-reset");
   const doneLinks = qs("#today-done-links");
@@ -509,6 +540,11 @@ function initDay({ initialDateISO } = {}) {
     if (!stepNames.has(name)) return;
     stepNodes.forEach((node) => node.classList.toggle("hidden", node.dataset.step !== name));
     if (secondaryNav) secondaryNav.classList.toggle("hidden", name !== "done");
+    if (stepIndicator) {
+      const order = ["start", "stress", "energy", "time", "reco"];
+      const idx = order.indexOf(name);
+      stepIndicator.textContent = idx >= 0 ? `Step ${idx + 1} of ${order.length}` : "Complete";
+    }
   };
 
   const bindChoiceButtons = (containerId, key) => {

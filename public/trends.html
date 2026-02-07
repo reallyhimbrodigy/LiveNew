@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="/favicon.ico" />
-  <link rel="stylesheet" href="/assets/app.css?v=20260208-2" />
+  <link rel="stylesheet" href="/assets/app.css?v=20260208-3" />
   <title>LiveNew · Trends</title>
 </head>
 <body class="page" data-page="trends">
@@ -17,6 +17,13 @@
         <a href="/trends" class="active" data-i18n="nav.trends">Trends</a>
         <a href="/profile" data-i18n="nav.profile">Profile</a>
       </nav>
+      <div class="account">
+        <button id="account-menu-btn" class="ghost account-btn" type="button" aria-expanded="false">Account</button>
+        <div id="account-menu" class="account-menu hidden">
+          <a href="/profile">Profile</a>
+          <button id="account-logout-btn" type="button">Logout</button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -83,6 +90,6 @@
     </div>
   </footer>
 
-  <script type="module" src="/assets/app.init.js?v=20260208-2"></script>
+  <script type="module" src="/assets/app.init.js?v=20260208-3"></script>
 </body>
 </html>
