@@ -282,7 +282,7 @@ export async function initApp({ page } = {}) {
   }
   const protectedPages = new Set(["day", "week", "trends", "profile"]);
   if (protectedPages.has(resolvedPage) && !hasValidToken(getToken())) {
-    window.location.assign("/index.html");
+    window.location.assign("/login.html");
     return;
   }
   if (initInFlight) {

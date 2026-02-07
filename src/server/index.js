@@ -4824,7 +4824,7 @@ const server = http.createServer(async (req, res) => {
       let decision = "ok";
       if (!token) {
         decision = "no_token";
-        res.writeHead(302, { Location: "/index.html", "X-LN-AUTH": "redirect:no_token" });
+        res.writeHead(302, { Location: "/login.html", "X-LN-AUTH": "redirect:no_token" });
         console.log("[gate]", { path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
         res.end();
         return;
@@ -4837,7 +4837,11 @@ const server = http.createServer(async (req, res) => {
       }
       if (!user) {
         decision = "token_invalid";
-        res.writeHead(302, { Location: "/index.html", "X-LN-AUTH": "redirect:token_invalid" });
+        res.writeHead(302, {
+          Location: "/login.html",
+          "X-LN-AUTH": "redirect:token_invalid",
+          "Set-Cookie": "ln_token=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+        });
         console.log("[gate]", { path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
         res.end();
         return;

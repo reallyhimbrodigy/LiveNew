@@ -10,10 +10,10 @@ if (typeof getAppState !== "function") {
     `[LiveNew] BUILD_INTEGRITY_FAILURE: app.core missing export getAppState. exports=[${keys}]`
   );
 }
-const { initDay, initWeek, initTrends, initProfile, initAdmin } = Core;
+const { initDay, initWeek, initTrends, initProfile } = Core;
 
 async function loadCore() {
-  return { getAppState, initDay, initWeek, initTrends, initProfile, initAdmin };
+  return { getAppState, initDay, initWeek, initTrends, initProfile };
 }
 
 export function renderHome() {
@@ -38,9 +38,4 @@ export async function renderTrends() {
 export async function renderProfile() {
   const { initProfile } = await loadCore();
   return initProfile();
-}
-
-export async function renderAdmin() {
-  const { initAdmin } = await loadCore();
-  return initAdmin();
 }

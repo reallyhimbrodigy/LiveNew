@@ -165,20 +165,23 @@ export function renderConsentScreen({ requiredKeys = null, requiredVersion = nul
   const privacy = qs("#consent-privacy");
   const alpha = qs("#consent-alpha");
   const submit = qs("#consent-submit");
+  const acceptBtn = qs("#consent-accept");
   const status = qs("#consent-status");
   if (status) status.textContent = "";
   if (!consentBound) {
     let pending = false;
-    submit?.addEventListener("click", async () => {
+    const handleConsentAccept = async () => {
       if (pending) return;
       const required = Array.isArray(consentHandlers.requiredKeys) && consentHandlers.requiredKeys.length
         ? consentHandlers.requiredKeys
         : ["terms", "privacy", "alpha_processing"];
-      const accepted = {
-        terms: Boolean(terms?.checked),
-        privacy: Boolean(privacy?.checked),
-        alpha_processing: Boolean(alpha?.checked),
-      };
+      const accepted = acceptBtn
+        ? { terms: true, privacy: true, alpha_processing: true }
+        : {
+            terms: Boolean(terms?.checked),
+            privacy: Boolean(privacy?.checked),
+            alpha_processing: Boolean(alpha?.checked),
+          };
       const missing = required.filter((key) => accepted[key] !== true);
       if (missing.length) {
         if (status) status.textContent = t("consent.missing");
@@ -205,7 +208,9 @@ export function renderConsentScreen({ requiredKeys = null, requiredVersion = nul
       } finally {
         pending = false;
       }
-    });
+    };
+    submit?.addEventListener("click", handleConsentAccept);
+    acceptBtn?.addEventListener("click", handleConsentAccept);
     consentBound = true;
   }
   void requiredVersion;
@@ -470,266 +475,113 @@ async function updateAdminVisibility() {
 }
 
 function renderDay(contract) {
-  if (!contract) return;
-  const resetMinutes = contract.reset?.seconds ? Math.max(1, Math.round(contract.reset.seconds / 60)) : "–";
-  setText(
-    qs("#day-what"),
-    `${t("labels.reset")}: ${contract.reset?.title || "–"} (${resetMinutes} min)\n` +
-      `${t("labels.workout")}: ${contract.movement?.title || "–"} (${contract.movement?.minutes ?? "–"} min)\n` +
-      `${t("labels.nutrition")}: ${contract.nutrition?.title || "–"}`
-  );
-  const whyEl = qs("#day-why");
-  const loadPct = Math.round((contract.scores?.load || 0) * 100);
-  const capacityPct = Math.round((contract.scores?.capacity || 0) * 100);
-  const rationale = Array.isArray(contract.rationale?.bullets) ? contract.rationale.bullets.join(" ") : "";
-  setText(
-    whyEl,
-    `${t("labels.profile")}: ${contract.profile || "–"}\n` +
-      `Load ${loadPct}%, capacity ${capacityPct}%\n` +
-      `${rationale}`
-  );
-  setText(
-    qs("#day-howlong"),
-    `Reset: ${resetMinutes} min\nMovement: ${contract.movement?.minutes ?? "–"} min`
-  );
-
-  const details = qs("#day-details");
-  if (!details) return;
-  clear(details);
-  const resetSteps = Array.isArray(contract.reset?.steps) ? contract.reset.steps.join(" • ") : "–";
-  const nutrition = Array.isArray(contract.nutrition?.bullets) ? contract.nutrition.bullets.join(" • ") : "–";
-  details.appendChild(el("div", { text: `${t("labels.resetSteps")}: ${resetSteps}` }));
-  details.appendChild(el("div", { text: `${t("labels.nutritionPriorities")}: ${nutrition}` }));
-  if (contract.movement) {
-    details.appendChild(
-      el("div", {
-        text: `${t("labels.workout")}: ${contract.movement.title} (${contract.movement.intensity}/3)`,
-      })
-    );
+  if (!contract) return null;
+  const resetMinutes = contract.reset?.seconds ? Math.max(1, Math.round(contract.reset.seconds / 60)) : 2;
+  const titleEl = qs("#today-reco-title");
+  const bodyEl = qs("#today-reco-body");
+  const stepsEl = qs("#today-reco-steps");
+  if (titleEl) titleEl.textContent = contract.reset?.title || "Two-minute reset";
+  if (bodyEl) {
+    bodyEl.textContent = `${contract.reset?.title || "Reset"} for about ${resetMinutes} min. Keep it gentle.`;
   }
+  if (stepsEl) {
+    const steps = Array.isArray(contract.reset?.steps) ? contract.reset.steps : [];
+    stepsEl.textContent = steps.length ? steps.join(" • ") : "Breathe slowly and release shoulder tension.";
+  }
+  return contract;
 }
 
 function initDay({ initialDateISO } = {}) {
-  const dateInput = qs("#day-date");
-  const loadBtn = qs("#day-load");
-  const detailsToggle = qs("#day-details-toggle");
-  const details = qs("#day-details");
-  const signalButtons = qs("#signal-buttons");
-  const badDayBtn = qs("#bad-day-btn");
-  const checkinBtn = qs("#checkin-submit");
-  const checkinBack = qs("#checkin-back");
-  const checkinNext = qs("#checkin-next");
-  const checkinStepLabel = qs("#checkin-step-label");
-  const checkinSteps = qsa("#checkin-card .checkin-step");
-  const railSubmit = qs("#rail-submit");
-  const railResetEl = qs("#rail-reset");
-  const railViewFull = qs("#rail-view-full");
-  const railDoneEl = qs("#rail-done");
-  const railDoneView = qs("#rail-done-view");
-  const panicBanner = qs("#panic-banner");
-  const panicDisclaimer = qs("#panic-disclaimer");
-  const panicClear = qs("#panic-clear");
-  const completionList = qs("#completion-list");
-  const prefsCard = qs("#prefs-card");
-  const communityCard = qs("#community-card");
-  const feedbackCard = qs("#feedback-card");
+  const dayRoot = qs("#today-flow");
+  if (!dayRoot) return;
+
+  const steps = {
+    start: qs("#today-step-start"),
+    stress: qs("#today-step-stress"),
+    energy: qs("#today-step-energy"),
+    time: qs("#today-step-time"),
+    reco: qs("#today-step-reco"),
+    done: qs("#today-step-done"),
+  };
+  const secondaryNav = qs("#day-secondary-nav");
+  const statusEl = qs("#today-status");
+  const beginResetBtn = qs("#today-begin-reset");
+  const doneLinks = qs("#today-done-links");
+  const choice = { stress: null, energy: null, time: null };
   let currentContract = null;
-  let checkinStep = 0;
+  let currentDateISO = initialDateISO || todayISO();
 
-  const isCheckinComplete = () => {
-    return (
-      isNumberInRange(qs("#checkin-stress")?.value, 1, 10) &&
-      isNumberInRange(qs("#checkin-sleep")?.value, 1, 10) &&
-      isNumberInRange(qs("#checkin-energy")?.value, 1, 10)
-    );
+  const showStep = (name) => {
+    Object.entries(steps).forEach(([key, node]) => node?.classList.toggle("hidden", key !== name));
+    if (secondaryNav) secondaryNav.classList.toggle("hidden", name !== "done");
   };
 
-  const updateCheckinWizard = () => {
-    if (!checkinSteps.length) return;
-    const total = checkinSteps.length;
-    const clamped = Math.min(Math.max(checkinStep, 0), total - 1);
-    checkinStep = clamped;
-    checkinSteps.forEach((step, idx) => step.classList.toggle("hidden", idx !== clamped));
-    if (checkinStepLabel) checkinStepLabel.textContent = `Step ${clamped + 1} of ${total}`;
-    if (checkinBack) checkinBack.disabled = clamped === 0;
-    if (checkinNext) {
-      checkinNext.classList.toggle("hidden", clamped === total - 1);
-      checkinNext.disabled = !isCheckinComplete();
-    }
-    if (checkinBtn) {
-      checkinBtn.classList.toggle("hidden", clamped !== total - 1);
-      checkinBtn.disabled = !isCheckinComplete();
-    }
+  const bindChoiceButtons = (containerId, key) => {
+    const container = qs(containerId);
+    const buttons = container ? Array.from(container.querySelectorAll("button[data-value]")) : [];
+    buttons.forEach((btn) => {
+      btn.addEventListener("click", () => {
+        choice[key] = Number(btn.dataset.value);
+        buttons.forEach((other) => other.classList.toggle("active", other === btn));
+      });
+    });
   };
 
-  const setCheckinStep = (next) => {
-    checkinStep = next;
-    updateCheckinWizard();
-  };
+  bindChoiceButtons("#today-stress-options", "stress");
+  bindChoiceButtons("#today-energy-options", "energy");
+  bindChoiceButtons("#today-time-options", "time");
 
-  if (dateInput) dateInput.value = initialDateISO || dateInput.value || todayISO();
-  if (loadBtn) {
-    loadBtn.classList.add("hidden");
-    loadBtn.setAttribute("disabled", "true");
-  }
-  if (badDayBtn) badDayBtn.classList.add("hidden");
-  if (prefsCard) prefsCard.classList.add("hidden");
-  if (communityCard) communityCard.classList.add("hidden");
-  if (feedbackCard) feedbackCard.classList.add("hidden");
-  updateCheckinWizard();
-  checkinBack?.addEventListener("click", () => setCheckinStep(checkinStep - 1));
-  checkinNext?.addEventListener("click", () => {
-    if (!isCheckinComplete()) return;
-    setCheckinStep(checkinStep + 1);
+  qs("#today-start-btn")?.addEventListener("click", () => showStep("stress"));
+  qs("#today-stress-next")?.addEventListener("click", () => {
+    if (!isNumberInRange(choice.stress, 1, 10)) return;
+    showStep("energy");
   });
-  ["#checkin-stress", "#checkin-sleep", "#checkin-energy", "#checkin-time"].forEach((selector) => {
-    const el = qs(selector);
-    el?.addEventListener("input", updateCheckinWizard);
-    el?.addEventListener("change", updateCheckinWizard);
+  qs("#today-energy-next")?.addEventListener("click", () => {
+    if (!isNumberInRange(choice.energy, 1, 10)) return;
+    showStep("time");
+  });
+  qs("#today-time-next")?.addEventListener("click", async () => {
+    if (![5, 10, 20].includes(Number(choice.time))) return;
+    if (statusEl) statusEl.textContent = "Finding your best next step…";
+    try {
+      const checkIn = {
+        dateISO: currentDateISO,
+        stress: Number(choice.stress),
+        sleepQuality: 6,
+        energy: Number(choice.energy),
+        timeAvailableMin: Number(choice.time),
+      };
+      const res = await apiPost("/v1/checkin", { checkIn });
+      currentContract = renderDay(res);
+      currentDateISO = res?.dateISO || currentDateISO;
+      if (statusEl) statusEl.textContent = "";
+      showStep("reco");
+    } catch (err) {
+      if (statusEl) statusEl.textContent = "Could not load recommendation. Try again.";
+      reportError(err);
+    }
   });
 
-  const setPanicMode = (active) => {
-    if (panicBanner) panicBanner.classList.toggle("hidden", !active);
-    if (panicDisclaimer) panicDisclaimer.textContent = active ? "Take the smallest safe step first." : "";
-  };
-
-  const renderRailReset = (reset) => {
-    if (!railResetEl) return;
-    clear(railResetEl);
-    if (railDoneEl) railDoneEl.classList.add("hidden");
-    if (!reset) {
-      railResetEl.appendChild(el("div", { class: "muted", text: "Reset unavailable" }));
-      return;
-    }
-    const minutes = reset.seconds ? Math.max(1, Math.round(reset.seconds / 60)) : 2;
-    railResetEl.appendChild(el("div", { class: "rail-title", text: t("rail.resetTitle") }));
-    railResetEl.appendChild(
-      el("div", { class: "rail-reset-name", text: `${reset.title || "Reset"} (${minutes} min)` })
-    );
-    const steps = Array.isArray(reset.steps) ? reset.steps : [];
-    if (steps.length) {
-      railResetEl.appendChild(el("div", { class: "muted", text: steps.slice(0, 3).join(" • ") }));
-    }
-  };
-
-  const renderCompletion = () => {
-    if (!completionList) return;
-    clear(completionList);
-    const btn = el("button", { text: "Reset completed", type: "button" });
-    btn.addEventListener("click", async () => {
-      if (!currentContract?.reset?.id) return;
-      try {
+  beginResetBtn?.addEventListener("click", async () => {
+    if (statusEl) statusEl.textContent = "Saving completion…";
+    try {
+      if (currentContract?.reset?.id) {
         await apiPost("/v1/reset/complete", {
-          dateISO: currentContract.dateISO,
+          dateISO: currentContract.dateISO || currentDateISO,
           resetId: currentContract.reset.id,
         });
-        if (railDoneEl) railDoneEl.classList.remove("hidden");
-      } catch (err) {
-        reportError(err);
       }
-    });
-    completionList.appendChild(btn);
-  };
-
-  const renderSignals = () => {
-    if (!signalButtons) return;
-    clear(signalButtons);
-    SIGNALS.forEach((signal) => {
-      const btn = el("button", { text: signal.label, type: "button" });
-      btn.addEventListener("click", async () => {
-        if (!currentContract) return;
-        try {
-          const res = await apiPost("/v1/quick", { dateISO: currentContract.dateISO, signal: signal.id });
-          renderContract(res);
-        } catch (err) {
-          reportError(err);
-        }
-      });
-      signalButtons.appendChild(btn);
-    });
-  };
-
-  const renderContract = (contract) => {
-    currentContract = contract;
-    if (dateInput) dateInput.value = contract?.dateISO || todayISO();
-    setPanicMode(Boolean(contract?.panicMode));
-    renderDay(contract);
-    renderRailReset(contract?.reset || null);
-    renderCompletion();
-  };
-
-  const loadToday = async () => {
-    try {
-      if (railDoneEl) railDoneEl.classList.add("hidden");
-      const res = await apiGet("/v1/rail/today");
-      renderContract(res);
+      if (doneLinks) doneLinks.classList.remove("hidden");
+      if (statusEl) statusEl.textContent = "";
+      showStep("done");
     } catch (err) {
+      if (statusEl) statusEl.textContent = "Could not save completion. You can continue anyway.";
       reportError(err);
-    }
-  };
-
-  railSubmit?.addEventListener("click", async () => {
-    try {
-      const dateISO = currentContract?.dateISO || todayISO();
-      const checkIn = {
-        dateISO,
-        stress: Number(qs("#rail-stress")?.value || 5),
-        sleepQuality: Number(qs("#rail-sleep")?.value || 6),
-        energy: Number(qs("#rail-energy")?.value || 6),
-        timeAvailableMin: Number(qs("#rail-time")?.value || 10),
-      };
-      const res = await apiPost("/v1/checkin", { checkIn });
-      renderContract(res);
-      setCheckinStep(0);
-    } catch (err) {
-      reportError(err);
+      showStep("done");
     }
   });
 
-  checkinBtn?.addEventListener("click", async () => {
-    try {
-      const dateISO = currentContract?.dateISO || todayISO();
-      const checkIn = {
-        dateISO,
-        stress: Number(qs("#checkin-stress")?.value || 5),
-        sleepQuality: Number(qs("#checkin-sleep")?.value || 6),
-        energy: Number(qs("#checkin-energy")?.value || 6),
-        timeAvailableMin: Number(qs("#checkin-time")?.value || 20),
-      };
-      const res = await apiPost("/v1/checkin", { checkIn });
-      renderContract(res);
-    } catch (err) {
-      reportError(err);
-    }
-  });
-
-  railViewFull?.addEventListener("click", () => {
-    qs("#day-summary")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  });
-  railDoneView?.addEventListener("click", () => {
-    qs("#day-summary")?.scrollIntoView({ behavior: "smooth", block: "start" });
-  });
-
-  detailsToggle?.addEventListener("click", () => {
-    details?.classList.toggle("hidden");
-    detailsToggle.textContent = details?.classList.contains("hidden") ? t("day.showDetails") : t("day.hideDetails");
-    if (detailsToggle) {
-      detailsToggle.setAttribute("aria-expanded", details?.classList.contains("hidden") ? "false" : "true");
-    }
-  });
-
-  panicClear?.addEventListener("click", async () => {
-    try {
-      const dateISO = currentContract?.dateISO || todayISO();
-      const res = await apiPost("/v1/checkin", { dateISO, safety: { panic: false } });
-      renderContract(res);
-    } catch (err) {
-      reportError(err);
-    }
-  });
-
-  renderSignals();
-  loadToday();
+  showStep("start");
 }
 
 function initWeek() {
@@ -767,71 +619,44 @@ function initWeek() {
 function initTrends() {
   const select = qs("#trends-days");
   const loadBtn = qs("#trends-load");
-  const tbody = qs("#trends-table tbody");
-  const outcomesSummary = qs("#outcomes-summary");
-  const outcomesAnchors = qs("#outcomes-anchors tbody");
-  const outcomesResets = qs("#outcomes-resets tbody");
+  const trendsList = qs("#trends-list");
+  const outcomesList = qs("#outcomes-list");
+  const resetsList = qs("#outcomes-resets-list");
 
   const loadTrends = async () => {
     try {
       const days = select?.value || "7";
       const res = await apiGet(`/v1/trends?days=${days}`);
-      clear(tbody);
+      clear(trendsList);
       (res.days || []).forEach((row) => {
-        const tr = el("tr", {}, [
-          el("td", { text: row.dateISO }),
-          el("td", { text: row.stressAvg != null ? row.stressAvg.toFixed(1) : "–" }),
-          el("td", { text: row.sleepAvg != null ? row.sleepAvg.toFixed(1) : "–" }),
-          el("td", { text: row.energyAvg != null ? row.energyAvg.toFixed(1) : "–" }),
-          el("td", { text: row.anyPart == null ? "–" : row.anyPart ? t("misc.yes") : t("misc.no") }),
-          el("td", { text: formatMinutes(row.downshiftMinutes) }),
-        ]);
-        tbody.appendChild(tr);
+        trendsList?.appendChild(
+          el("div", { class: "list-item" }, [
+            el("div", { text: row.dateISO }),
+            el("div", {
+              class: "muted",
+              text: `Stress ${row.stressAvg != null ? row.stressAvg.toFixed(1) : "–"} • Sleep ${row.sleepAvg != null ? row.sleepAvg.toFixed(1) : "–"} • Energy ${row.energyAvg != null ? row.energyAvg.toFixed(1) : "–"}`,
+            }),
+          ])
+        );
       });
       const outcomes = await apiGet(`/v1/outcomes?days=${days}`);
-      if (outcomesSummary) {
-        clear(outcomesSummary);
-        outcomesSummary.appendChild(
-          el("div", { class: "list-item" }, [
-            el("div", { text: "Rail opened days" }),
-            el("div", { class: "muted", text: String(outcomes.metrics?.railOpenedDays ?? 0) }),
-          ])
-        );
-        outcomesSummary.appendChild(
-          el("div", { class: "list-item" }, [
-            el("div", { text: "Reset completed days" }),
-            el("div", { class: "muted", text: String(outcomes.metrics?.resetCompletedDays ?? 0) }),
-          ])
-        );
-        outcomesSummary.appendChild(
-          el("div", { class: "list-item" }, [
-            el("div", { text: "Check-in submitted days" }),
-            el("div", { class: "muted", text: String(outcomes.metrics?.checkinSubmittedDays ?? 0) }),
-          ])
-        );
+      if (outcomesList) {
+        clear(outcomesList);
         const resetRate = outcomes.metrics?.resetCompletionRate ?? 0;
-        outcomesSummary.appendChild(
-          el("div", { class: "list-item" }, [
-            el("div", { text: "Reset completion rate" }),
-            el("div", { class: "muted", text: `${Math.round(resetRate * 100)}%` }),
-          ])
-        );
+        outcomesList.appendChild(el("div", { class: "list-item", text: `Rail opened days: ${String(outcomes.metrics?.railOpenedDays ?? 0)}` }));
+        outcomesList.appendChild(el("div", { class: "list-item", text: `Reset completed days: ${String(outcomes.metrics?.resetCompletedDays ?? 0)}` }));
+        outcomesList.appendChild(el("div", { class: "list-item", text: `Check-in submitted days: ${String(outcomes.metrics?.checkinSubmittedDays ?? 0)}` }));
+        outcomesList.appendChild(el("div", { class: "list-item", text: `Reset completion rate: ${Math.round(resetRate * 100)}%` }));
       }
-      if (outcomesAnchors) {
-        clear(outcomesAnchors);
-        outcomesAnchors.appendChild(
-          el("tr", {}, [el("td", { text: "–" }), el("td", { text: "–" }), el("td", { text: "–" }), el("td", { text: "–" })])
-        );
-      }
-      if (outcomesResets) {
-        clear(outcomesResets);
+      if (resetsList) {
+        clear(resetsList);
         (outcomes.metrics?.topResets || []).forEach((entry) => {
-          const tr = el("tr", {}, [
-            el("td", { text: entry.title || entry.resetId }),
-            el("td", { text: String(entry.completedCount || 0) }),
-            el("td", { text: entry.lastUsedAtISO || "–" }),
-          ]);
-          outcomesResets.appendChild(tr);
+          resetsList.appendChild(
+            el("div", { class: "list-item" }, [
+              el("div", { text: entry.title || entry.resetId || "Reset" }),
+              el("div", { class: "muted", text: `Completed ${String(entry.completedCount || 0)} • Last used ${entry.lastUsedAtISO || "–"}` }),
+            ])
+          );
         });
       }
     } catch (err) {
@@ -2239,11 +2064,9 @@ if (typeof init === "function" && shouldAutoBoot()) {
 export {
   initBaseUi,
   bindAuth,
-  updateAdminVisibility,
   initDay,
   initWeek,
   initTrends,
   initProfile,
-  initAdmin,
   t,
 };
