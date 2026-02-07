@@ -4794,20 +4794,33 @@ const server = http.createServer(async (req, res) => {
   ]);
 
   if (req.method === "GET" && pageRoutes.has(pathname)) {
+    const isDayRoute = pathname === "/day" || pathname === "/day.html";
+    if (isDayRoute) {
+      res.setHeader("X-LN-DAY-ROUTE", "hit");
+    }
     if (PROTECTED_PAGE_PATHS.has(pathname)) {
       const authz = String(req.headers.authorization || "");
-      const hasAuthz = authz.toLowerCase().startsWith("bearer ");
-      const cookieTok = getCookie(req, "ln_token");
-      console.log("[gate] path=%s hasCookie=%s hasAuthz=%s", pathname, Boolean(cookieTok), Boolean(hasAuthz));
-      const token = getAuthToken(req);
+      const bearer = authz.toLowerCase().startsWith("bearer ") ? authz.slice(7).trim() : "";
+      const cookieTok = getCookie(req, "ln_token") || "";
+      const token = bearer || cookieTok;
+      let decision = "ok";
+      if (!token) {
+        decision = "redirect:no_token";
+        res.writeHead(302, { Location: "/index.html", "X-LN-AUTH": "redirect:no_token" });
+        console.log("[gate]", { path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
+        res.end();
+        return;
+      }
       const claims = await verifySupabaseJwt(token);
       if (!claims) {
-        res.writeHead(302, { Location: "/index.html", "X-LN-AUTH": "redirect" });
-        console.log("[gate] redirect to /index reason=invalid_token");
+        decision = "redirect:jwt_invalid";
+        res.writeHead(302, { Location: "/index.html", "X-LN-AUTH": "redirect:jwt_invalid" });
+        console.log("[gate]", { path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
         res.end();
         return;
       }
       res.setHeader("X-LN-AUTH", "ok");
+      console.log("[gate]", { path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
       res.livenewUserId = claims.sub || null;
     }
     issueCsrfToken(res);
