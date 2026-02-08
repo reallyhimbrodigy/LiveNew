@@ -65,6 +65,13 @@ async function main() {
     console.error("verify-assets: build.json missing files.app.core");
     process.exit(2);
   }
+  const sourceCorePath = path.join(assetsDir, "app.core.js");
+  const sourceCoreText = await fsp.readFile(sourceCorePath, "utf8");
+  if (!/export\s+function\s+getAppState\b/m.test(sourceCoreText)) {
+    throw new Error(
+      `verify-assets: source app.core.js missing literal 'export function getAppState' at ${sourceCorePath}`
+    );
+  }
   const appCorePath = path.join(assetsDir, appCoreFile);
   const text = await fsp.readFile(appCorePath, "utf8");
   const hasNamedGetAppState =
