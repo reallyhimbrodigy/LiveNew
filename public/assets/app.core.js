@@ -19,8 +19,19 @@ import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDi
 import { STRINGS as EN_STRINGS } from "../i18n/en.js";
 export const BUILD_ID = "__BUILD_ID__";
 
+// LiveNew required export for controllers + build validation.
+// Must remain a named export.
 export function getAppState() {
-  return getAppStateInternal();
+  try {
+    if (typeof window !== "undefined" && window.__LN_STATE__) return window.__LN_STATE__;
+  } catch {
+    // fall through to internal state getter
+  }
+  try {
+    return getAppStateInternal();
+  } catch {
+    return {};
+  }
 }
 
 const LOCALE = "en";
