@@ -562,7 +562,7 @@ function initDay({ initialDateISO } = {}) {
   bindChoiceButtons("#today-energy-options", "energy");
   bindChoiceButtons("#today-time-options", "time");
 
-  qs("#today-start-btn")?.addEventListener("click", () => showStep("stress"));
+  qs("#begin-personalization")?.addEventListener("click", () => showStep("stress"));
   qs("#today-stress-next")?.addEventListener("click", () => {
     if (!isNumberInRange(choice.stress, 1, 10)) return;
     showStep("energy");
