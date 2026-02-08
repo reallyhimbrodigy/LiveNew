@@ -47,7 +47,10 @@ async function main() {
   const buildId = resolveBuildId();
   const assetsDir = path.join(process.cwd(), "public", "assets");
   const appCssPath = path.join(assetsDir, "app.css");
+  let appCssBeforeSha256 = null;
   try {
+    const cssBuf = await fs.readFile(appCssPath);
+    appCssBeforeSha256 = crypto.createHash("sha256").update(cssBuf).digest("hex");
     const stat = await fs.stat(appCssPath);
     console.log(`[version-assets] app.css bytes=${stat.size}`);
   } catch {
@@ -236,6 +239,14 @@ async function main() {
   await fs.writeFile(manifestTmp, `${JSON.stringify(manifest, null, 2)}\n`);
   await fs.rename(manifestTmp, manifestPath);
   console.log(`[version-assets] wrote build manifest ${manifestPath}`);
+
+  if (appCssBeforeSha256) {
+    const cssAfterBuf = await fs.readFile(appCssPath);
+    const appCssAfterSha256 = crypto.createHash("sha256").update(cssAfterBuf).digest("hex");
+    if (appCssAfterSha256 !== appCssBeforeSha256) {
+      throw new Error("version-assets: app.css was mutated during build; JS versioning must not rewrite CSS");
+    }
+  }
 
   console.log(`[version-assets] BUILD_ID=${buildId}`);
 }
