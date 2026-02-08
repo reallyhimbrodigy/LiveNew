@@ -3,6 +3,7 @@ import fsSync from "fs";
 import path from "path";
 import { execSync } from "child_process";
 import crypto from "crypto";
+import os from "os";
 
 function utcTimestamp() {
   const now = new Date();
@@ -110,6 +111,25 @@ async function main() {
   }
 
   const sourceCorePath = appCoreCandidates[0];
+  const assertModuleSyntax = (label, text) => {
+    const tmpPath = path.join(
+      os.tmpdir(),
+      `livenew-asset-syntax-${process.pid}-${Date.now()}-${crypto.randomBytes(4).toString("hex")}.mjs`
+    );
+    try {
+      fsSync.writeFileSync(tmpPath, String(text || ""), "utf8");
+      execSync(`node --check "${tmpPath}"`, { stdio: ["ignore", "pipe", "pipe"] });
+    } catch (err) {
+      const head = String(text || "").slice(0, 600);
+      throw new Error(`version-assets: invalid module syntax in ${label}: ${err?.message || err}\nhead=${head}`);
+    } finally {
+      try {
+        fsSync.unlinkSync(tmpPath);
+      } catch {
+        // ignore temp cleanup errors
+      }
+    }
+  };
   const readSourceCore = async () => {
     const srcBuf = await fs.readFile(sourceCorePath);
     const srcSha256 = crypto.createHash("sha256").update(srcBuf).digest("hex");
@@ -137,37 +157,28 @@ async function main() {
   console.log(`[version-assets] app.core srcSha256=${srcSha256}`);
   console.log(`[version-assets] app.core srcHasBom=${hasBom}`);
   console.log(`[version-assets] app.core srcHasGetAppState=${srcHasGetAppState}`);
+  assertModuleSyntax(sourceCorePath, srcText);
   if (!srcHasGetAppState) {
     console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
     console.error(`[version-assets] app.core srcIndexExport=${srcText.indexOf("export")}`);
     console.error(`[version-assets] app.core srcIndexGetAppState=${srcText.indexOf("getAppState")}`);
     console.error(`[version-assets] app.core srcHead=${srcText.slice(0, 2000)}`);
-    const hasInternalImport = /getAppStateInternal/.test(srcText);
-    let patchedText = srcText;
-    if (hasInternalImport) {
-      patchedText = srcText.replace(
-        /(import\s+[^;]*getAppStateInternal[^;]*;\s*)/m,
-        `$1\nexport function getAppState(){ return getAppStateInternal(); }\n`
-      );
-    } else {
-      patchedText = srcText.replace(
-        /(^[\s\S]*?)(\n)/,
-        `$1\nexport function getAppState(){ throw new Error(\"[LiveNew] getAppState missing - build integrity failure\"); }\n$2`
-      );
-    }
-    await fs.writeFile(sourceCorePath, patchedText);
-    ({ srcBuf, srcText, srcSha256, hasBom } = await readSourceCore());
-    srcHasGetAppState = detectGetAppState(srcText);
-    console.log(`[version-assets] app.core srcPatched=true`);
-    console.log(`[version-assets] app.core srcSha256=${srcSha256}`);
-    console.log(`[version-assets] app.core srcHasGetAppState=${srcHasGetAppState}`);
-    if (!srcHasGetAppState) {
-      console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
-      console.error(`[version-assets] app.core srcHead=${srcText.slice(0, 2000)}`);
-      throw new Error("version-assets: source app.core.js missing named export getAppState");
-    }
+    throw new Error("version-assets: source app.core.js missing named export getAppState");
   }
-  const assetFiles = (await fs.readdir(assetsDir)).filter((name) => name.endsWith(".js"));
+  const sourceAssetNames = [
+    "app.api.js",
+    "app.core.js",
+    "app.init.js",
+    "app.state.js",
+    "app.ui.js",
+    "controllers.js",
+    "build.js",
+    "footer.js",
+  ];
+  const assetFiles = [];
+  for (const name of sourceAssetNames) {
+    if (fsSync.existsSync(path.join(assetsDir, name))) assetFiles.push(name);
+  }
   const replacements = new Map([
     ["./app.api.js", `./app.api.${buildId}.js`],
     ["./app.core.js", `./app.core.${buildId}.js`],
@@ -217,6 +228,7 @@ async function main() {
     if (name === "controllers.js") {
       content = rewriteAppCoreImport(content);
     }
+    assertModuleSyntax(sourcePath, content);
     const versionedName = name.replace(/\.js$/, `.${buildId}.js`);
     const versionedPath = path.join(assetsDir, versionedName);
     await fs.writeFile(versionedPath, content);
