@@ -393,7 +393,7 @@ export function renderOnboardScreen({ onComplete, onError, defaults = {} } = {})
   }
 }
 
-function initBaseUi() {
+export function initBaseUi() {
   applyI18n(STRINGS);
   const page = document.body.dataset.page;
   const titleMap = {
@@ -504,8 +504,23 @@ function updateAuthStatus() {
   status.textContent = getToken() || getRefreshToken() ? t("auth.signedIn") : t("auth.notSignedIn");
 }
 
-async function updateAdminVisibility() {
+export async function updateAdminVisibility() {
   return;
+}
+
+// Compatibility exports for app.init module boundaries across builds.
+export function routeError(err) {
+  reportError(err);
+}
+
+export function setupConsentGate({ requiredKeys = null, requiredVersion = null, onAccepted, onError } = {}) {
+  renderConsentScreen({ requiredKeys, requiredVersion, onAccepted, onError });
+}
+
+export async function bootstrapApp({ onAuthChange, onError } = {}) {
+  initBaseUi();
+  await updateAdminVisibility();
+  bindAuth({ onAuthChange, onError });
 }
 
 function renderDay(contract) {
@@ -2119,7 +2134,6 @@ if (typeof init === "function" && shouldAutoBoot()) {
 }
 
 export {
-  initBaseUi,
   initDay,
   initWeek,
   initTrends,
