@@ -56,16 +56,19 @@
     </div>
   </header>
 
-  <main class="ln-main">
+  <div class="ln-main">
     <div class="ln-container">
-      <section id="today-flow" class="card today-shell">
-        <div id="today-step-indicator" class="today-progress">Step 1 of 5</div>
-        <div id="today-step-start" class="today-screen" data-step="start">
-          <h1>Let’s reset your day.</h1>
-          <p class="today-sub">One gentle step at a time.</p>
-          <button id="begin-personalization" class="primary today-next" type="button">Begin personalization</button>
-        </div>
+      <section id="day-intro" class="card today-shell">
+        <h1>Let’s reset your day.</h1>
+        <p class="today-sub">One gentle step at a time.</p>
+        <button id="begin-personalization" class="primary today-next" type="button">Begin personalization</button>
+      </section>
 
+      <section id="onboarding" class="card today-shell wizard hidden" aria-hidden="true"></section>
+
+      <main id="day-app" class="hidden" aria-hidden="true">
+      <section id="today-flow" class="card today-shell">
+        <div id="today-step-indicator" class="today-progress">Step 1 of 4</div>
         <div id="today-step-stress" class="today-screen hidden" data-step="stress">
           <h2 class="today-question">How stressed do you feel right now?</h2>
           <p class="today-sub">Choose 1 (low) to 10 (high)</p>
@@ -114,8 +117,9 @@
         </div>
         <div id="today-status" class="muted"></div>
       </section>
+      </main>
     </div>
-  </main>
+  </div>
 
   <footer class="footer" id="footer-root">
     <div class="footer-panel">

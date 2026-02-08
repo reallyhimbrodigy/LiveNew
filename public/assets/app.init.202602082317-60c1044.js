@@ -1,4 +1,4 @@
-import { bootstrapApp } from "./app.core.js";
+import { bootstrapApp } from "./app.core.202602082317-60c1044.js";
 
 function shouldAutoBoot() {
   return (

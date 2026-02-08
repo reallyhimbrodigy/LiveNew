@@ -113,17 +113,21 @@ async function main() {
         const parts = entry.split(/\s+as\s+/).map((part) => part.trim());
         return parts[0];
       });
-    const missing = importedNames.filter((name) => {
-      const fnExport = new RegExp(`\\bexport\\s+function\\s+${name}\\b`, "m").test(text);
-      const varExport = new RegExp(`\\bexport\\s+(const|let|var)\\s+${name}\\b`, "m").test(text);
-      const listExport = new RegExp(`\\bexport\\s*\\{[\\s\\S]*?\\b${name}\\b[\\s\\S]*?\\}`, "m").test(text);
-      return !(fnExport || varExport || listExport);
-    });
-    if (missing.length) {
+    if (importedNames.length !== 1 || importedNames[0] !== "bootstrapApp") {
       throw new Error(
-        `verify-assets: ${appInitFile} imports ${missing.join(", ")} from ${appCoreFile} but ${appCoreFile} does not export it`
+        `verify-assets: ${appInitFile} must import only bootstrapApp from ${appCoreFile}; found [${importedNames.join(", ")}]`
       );
     }
+    const hasBootstrapAppExport =
+      /\bexport\s+(async\s+)?function\s+bootstrapApp\b/m.test(text) ||
+      /\bexport\s*\{[\s\S]*?\bbootstrapApp\b[\s\S]*?\}/m.test(text);
+    if (!hasBootstrapAppExport) {
+      throw new Error(
+        `verify-assets: ${appInitFile} imports bootstrapApp from ${appCoreFile} but ${appCoreFile} does not export it`
+      );
+    }
+  } else {
+    throw new Error(`verify-assets: ${appInitFile} must import bootstrapApp from ${appCoreFile}`);
   }
 
   const controllersFile = files["controllers"];
