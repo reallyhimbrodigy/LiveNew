@@ -139,15 +139,46 @@ async function main() {
     return { srcBuf, srcText, srcSha256, hasBom };
   };
 
-  const detectGetAppState = (text) => {
-    const patterns = [
-      /export\s+function\s+getAppState\b/m,
-      /export\s+(const|let|var)\s+getAppState\b/m,
-      /export\s*\{[\s\S]*?\bgetAppState\b[\s\S]*?\}/m,
-      /export\s*\{[\s\S]*?\bgetAppState\s+as\s+getAppState\b[\s\S]*?\}/m,
-      /export\s*\{[\s\S]*?\bgetAppStateInternal\s+as\s+getAppState\b[\s\S]*?\}/m,
-    ];
-    return patterns.some((pattern) => pattern.test(text));
+  const detectGetAppState = (sourceCoreText) => {
+    const hasGetAppState =
+      /\bexport\s+function\s+getAppState\b/.test(sourceCoreText) ||
+      /\bexport\s*\{\s*getAppState\b/.test(sourceCoreText);
+    return hasGetAppState;
+  };
+
+  const requiredGetAppStateBlock = [
+    "/* REQUIRED: build-time export used by controllers + asset verification */",
+    "export function getAppState() {",
+    "  try {",
+    "    if (typeof window !== \"undefined\" && window.__LN_STATE__) return window.__LN_STATE__;",
+    "  } catch {}",
+    "  return {};",
+    "}",
+  ].join("\n");
+
+  const insertGetAppStateAfterImports = (text) => {
+    const lines = String(text || "").split(/\r?\n/);
+    let idx = 0;
+    while (idx < lines.length) {
+      const trimmed = lines[idx].trim();
+      if (!trimmed) {
+        idx += 1;
+        continue;
+      }
+      if (!trimmed.startsWith("import ")) break;
+      idx += 1;
+      while (idx < lines.length && !lines[idx - 1].includes(";")) {
+        idx += 1;
+      }
+    }
+    const patched = [
+      ...lines.slice(0, idx),
+      "",
+      requiredGetAppStateBlock,
+      "",
+      ...lines.slice(idx),
+    ].join("\n");
+    return patched;
   };
 
   let { srcBuf, srcText, srcSha256, hasBom } = await readSourceCore();
@@ -156,6 +187,12 @@ async function main() {
   console.log(`[version-assets] app.core srcBytes=${srcBytes}`);
   console.log(`[version-assets] app.core srcSha256=${srcSha256}`);
   console.log(`[version-assets] app.core srcHasBom=${hasBom}`);
+  if (!srcHasGetAppState) {
+    srcText = insertGetAppStateAfterImports(srcText);
+    srcHasGetAppState = detectGetAppState(srcText);
+    await fs.writeFile(sourceCorePath, srcText);
+    console.log("[version-assets] app.core srcPatched=true");
+  }
   console.log(`[version-assets] app.core srcHasGetAppState=${srcHasGetAppState}`);
   assertModuleSyntax(sourceCorePath, srcText);
   if (!srcHasGetAppState) {

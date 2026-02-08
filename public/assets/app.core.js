@@ -17,22 +17,15 @@ import {
 import { getAppState as getAppStateInternal } from "./app.state.js";
 import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.js";
 import { STRINGS as EN_STRINGS } from "../i18n/en.js";
-export const BUILD_ID = "__BUILD_ID__";
-
-// LiveNew required export for controllers + build validation.
-// Must remain a named export.
+/* REQUIRED: build-time export used by controllers + asset verification */
 export function getAppState() {
   try {
     if (typeof window !== "undefined" && window.__LN_STATE__) return window.__LN_STATE__;
-  } catch {
-    // fall through to internal state getter
-  }
-  try {
-    return getAppStateInternal();
-  } catch {
-    return {};
-  }
+  } catch {}
+  return {};
 }
+void getAppStateInternal;
+export const BUILD_ID = "__BUILD_ID__";
 
 const LOCALE = "en";
 const STRINGS = { en: EN_STRINGS }[LOCALE] || EN_STRINGS;

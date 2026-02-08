@@ -74,6 +74,13 @@ async function main() {
   }
   const appCorePath = path.join(assetsDir, appCoreFile);
   const text = await fsp.readFile(appCorePath, "utf8");
+  const firstLine = text.split(/\r?\n/, 1)[0] || "";
+  if (!/^\s*import\b/.test(firstLine)) {
+    throw new Error(`verify-assets: ${appCoreFile} must begin with a top-level import statement`);
+  }
+  if (/import\s*\{\s*\n\s*export\s+function\s+getAppState\b/m.test(text)) {
+    throw new Error(`verify-assets: ${appCoreFile} has corrupted import/export sequence (import { followed by export function)`);
+  }
   const hasNamedGetAppState =
     /export\s+function\s+getAppState\b/m.test(text) ||
     /export\s+(const|let|var)\s+getAppState\b/m.test(text) ||
