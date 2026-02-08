@@ -95,6 +95,37 @@ async function main() {
     );
   }
 
+  const appInitFile = files["app.init"] || `app.init.${buildId}.js`;
+  const appInitPath = path.join(assetsDir, appInitFile);
+  if (!(await fileExists(appInitPath))) {
+    throw new Error(`verify-assets: missing app.init at ${appInitPath}`);
+  }
+  const appInitText = await fsp.readFile(appInitPath, "utf8");
+  const coreImportMatch = appInitText.match(
+    /import\s*\{\s*([^}]+)\s*\}\s*from\s*["']\.\/app\.core(?:\.[^"']+)?\.js["']\s*;?/m
+  );
+  if (coreImportMatch) {
+    const importedNames = coreImportMatch[1]
+      .split(",")
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .map((entry) => {
+        const parts = entry.split(/\s+as\s+/).map((part) => part.trim());
+        return parts[0];
+      });
+    const missing = importedNames.filter((name) => {
+      const fnExport = new RegExp(`\\bexport\\s+function\\s+${name}\\b`, "m").test(text);
+      const varExport = new RegExp(`\\bexport\\s+(const|let|var)\\s+${name}\\b`, "m").test(text);
+      const listExport = new RegExp(`\\bexport\\s*\\{[\\s\\S]*?\\b${name}\\b[\\s\\S]*?\\}`, "m").test(text);
+      return !(fnExport || varExport || listExport);
+    });
+    if (missing.length) {
+      throw new Error(
+        `verify-assets: ${appInitFile} imports ${missing.join(", ")} from ${appCoreFile} but ${appCoreFile} does not export it`
+      );
+    }
+  }
+
   const controllersFile = files["controllers"];
   if (controllersFile) {
     const controllersPath = path.join(assetsDir, controllersFile);

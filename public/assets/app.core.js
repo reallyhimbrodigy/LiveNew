@@ -439,7 +439,7 @@ function initBaseUi() {
 
 let authHandlers = { onAuthChange: null, onError: null };
 let authBound = false;
-function bindAuth({ onAuthChange, onError } = {}) {
+export function bindAuth({ onAuthChange, onError } = {}) {
   authHandlers = { onAuthChange, onError };
   const emailInput = qs("#auth-email");
   const codeInput = qs("#auth-code");
@@ -2120,7 +2120,6 @@ if (typeof init === "function" && shouldAutoBoot()) {
 
 export {
   initBaseUi,
-  bindAuth,
   initDay,
   initWeek,
   initTrends,
