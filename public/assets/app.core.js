@@ -562,7 +562,13 @@ function initDay({ initialDateISO } = {}) {
   bindChoiceButtons("#today-energy-options", "energy");
   bindChoiceButtons("#today-time-options", "time");
 
-  qs("#begin-personalization")?.addEventListener("click", () => showStep("stress"));
+  const startDayFlow = () => showStep("stress");
+  const beginBtn = qs("#begin-personalization");
+  if (beginBtn && typeof showStep !== "function") {
+    console.error("[day] showStep missing; cannot start personalization");
+  }
+  beginBtn?.addEventListener("click", startDayFlow);
+  qs("#today-start-btn")?.addEventListener("click", startDayFlow);
   qs("#today-stress-next")?.addEventListener("click", () => {
     if (!isNumberInRange(choice.stress, 1, 10)) return;
     showStep("energy");
