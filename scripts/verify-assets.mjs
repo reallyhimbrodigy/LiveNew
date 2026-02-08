@@ -1,9 +1,10 @@
-import fs from "fs/promises";
+import fs from "fs";
+import fsp from "fs/promises";
 import path from "path";
 
 async function fileExists(filePath) {
   try {
-    await fs.access(filePath);
+    await fsp.access(filePath);
     return true;
   } catch {
     return false;
@@ -17,7 +18,7 @@ async function main() {
     console.error("verify-assets: missing build manifest public/assets/build.json");
     process.exit(2);
   }
-  const manifest = JSON.parse(await fs.readFile(manifestPath, "utf8"));
+  const manifest = JSON.parse(await fsp.readFile(manifestPath, "utf8"));
   const buildId = (manifest?.buildId || "").trim();
   if (!buildId) {
     console.error("verify-assets: build.json missing buildId");
@@ -37,14 +38,25 @@ async function main() {
     console.error("verify-assets: missing public/assets/app.css");
     process.exit(1);
   }
-  const cssText = await fs.readFile(appCssPath, "utf8");
+  const cssResolved = path.resolve(appCssPath);
+  const cssExists = fs.existsSync(appCssPath);
+  const cssSize = cssExists ? fs.statSync(appCssPath).size : -1;
+  const cssHead = cssExists ? String(fs.readFileSync(appCssPath, "utf8")).slice(0, 120) : "";
+  console.log(
+    `[verify-assets][css-debug] path=${cssResolved} exists=${cssExists} size=${cssSize} head=${JSON.stringify(cssHead)}`
+  );
+  const cssText = await fsp.readFile(appCssPath, "utf8");
   const cssBytes = Buffer.byteLength(cssText, "utf8");
   if (cssBytes < 2000) {
-    console.error(`verify-assets: app.css too small (${cssBytes} bytes)`);
+    console.error(
+      `verify-assets: app.css too small (${cssBytes} bytes) path=${cssResolved} head=${JSON.stringify(cssText.slice(0, 80))}`
+    );
     process.exit(1);
   }
   if (cssText.includes("LIVE NEW THEME CANARY")) {
-    console.error("verify-assets: app.css contains canary marker");
+    console.error(
+      `verify-assets: app.css contains canary marker path=${cssResolved} bytes=${cssBytes} head=${JSON.stringify(cssText.slice(0, 80))}`
+    );
     process.exit(1);
   }
 
@@ -54,7 +66,7 @@ async function main() {
     process.exit(2);
   }
   const appCorePath = path.join(assetsDir, appCoreFile);
-  const text = await fs.readFile(appCorePath, "utf8");
+  const text = await fsp.readFile(appCorePath, "utf8");
   const hasNamedGetAppState =
     /export\s+function\s+getAppState\b/m.test(text) ||
     /export\s+(const|let|var)\s+getAppState\b/m.test(text) ||
@@ -72,7 +84,7 @@ async function main() {
   const controllersFile = files["controllers"];
   if (controllersFile) {
     const controllersPath = path.join(assetsDir, controllersFile);
-    const controllersText = await fs.readFile(controllersPath, "utf8");
+    const controllersText = await fsp.readFile(controllersPath, "utf8");
     const hasStaticNamedImport = /import\s*\{\s*[^}]+\s*\}\s*from\s*["']\.\/app\.core(?:\.[^"']+)?\.js["']/.test(
       controllersText
     );

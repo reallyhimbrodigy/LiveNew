@@ -1,4 +1,5 @@
 import fs from "fs/promises";
+import fsSync from "fs";
 import path from "path";
 import { execSync } from "child_process";
 import crypto from "crypto";
@@ -45,8 +46,38 @@ async function walkHtmlFiles(dir, out = []) {
 
 async function main() {
   const buildId = resolveBuildId();
+  const publicDir = path.join(process.cwd(), "public");
   const assetsDir = path.join(process.cwd(), "public", "assets");
+  const themeCssPath = path.join(publicDir, "theme.css");
   const appCssPath = path.join(assetsDir, "app.css");
+
+  const debugCssFile = (label, filePath) => {
+    const resolved = path.resolve(filePath);
+    const exists = fsSync.existsSync(filePath);
+    const size = exists ? fsSync.statSync(filePath).size : -1;
+    const head = exists ? String(fsSync.readFileSync(filePath, "utf8")).slice(0, 120) : "";
+    console.log(
+      `[version-assets][css-debug] ${label} path=${resolved} exists=${exists} size=${size} head=${JSON.stringify(head)}`
+    );
+  };
+
+  debugCssFile("theme-source:before-copy", themeCssPath);
+  debugCssFile("app-css:before-copy", appCssPath);
+  if (!fsSync.existsSync(themeCssPath)) {
+    throw new Error(`version-assets: missing theme source ${path.resolve(themeCssPath)}`);
+  }
+  fsSync.copyFileSync(themeCssPath, appCssPath);
+  debugCssFile("app-css:after-copy", appCssPath);
+
+  const copiedCss = String(fsSync.readFileSync(appCssPath, "utf8"));
+  const copiedBytes = Buffer.byteLength(copiedCss, "utf8");
+  if (copiedBytes < 2000) {
+    throw new Error(`version-assets: copied app.css too small (${copiedBytes} bytes)`);
+  }
+  if (copiedCss.includes("LIVE NEW THEME CANARY")) {
+    throw new Error("version-assets: copied app.css contains canary marker");
+  }
+
   let appCssBeforeSha256 = null;
   try {
     const cssBuf = await fs.readFile(appCssPath);
