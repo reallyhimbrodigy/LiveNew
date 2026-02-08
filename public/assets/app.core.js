@@ -522,6 +522,7 @@ function renderDay(contract) {
 }
 
 function initDay({ initialDateISO } = {}) {
+  console.log("[day] initDay running");
   const dayRoot = qs("#today-flow");
   if (!dayRoot) return;
 
@@ -562,12 +563,27 @@ function initDay({ initialDateISO } = {}) {
   bindChoiceButtons("#today-energy-options", "energy");
   bindChoiceButtons("#today-time-options", "time");
 
-  const startDayFlow = () => showStep("stress");
+  const startDayFlow = (event) => {
+    event?.preventDefault?.();
+    console.log("[day] begin clicked");
+    if (typeof showStep !== "function") {
+      const msg = "[day] showStep missing; cannot start personalization";
+      console.error(msg);
+      throw new Error(msg);
+    }
+    if (!stepNames.has("stress")) {
+      console.error("[day] missing target step: stress");
+      return;
+    }
+    showStep("stress");
+  };
   const beginBtn = qs("#begin-personalization");
+  console.log("[day] begin btn", !!beginBtn);
   if (beginBtn && typeof showStep !== "function") {
     console.error("[day] showStep missing; cannot start personalization");
   }
   beginBtn?.addEventListener("click", startDayFlow);
+  if (beginBtn) console.log("[day] begin listener bound");
   qs("#today-start-btn")?.addEventListener("click", startDayFlow);
   qs("#today-stress-next")?.addEventListener("click", () => {
     if (!isNumberInRange(choice.stress, 1, 10)) return;
