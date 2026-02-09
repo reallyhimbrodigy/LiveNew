@@ -111,6 +111,15 @@ async function main() {
   }
 
   const sourceCorePath = appCoreCandidates[0];
+  const appInitCandidates = (await walkFiles(path.join(process.cwd(), "public"))).filter(
+    (filePath) => path.basename(filePath).toLowerCase() === "app.init.js"
+  );
+  if (appInitCandidates.length !== 1) {
+    console.error(`[version-assets] DUPLICATE_APP_INIT count=${appInitCandidates.length}`);
+    appInitCandidates.forEach((filePath) => console.error(`[version-assets] app.init path=${filePath}`));
+    throw new Error("version-assets: DUPLICATE_APP_INIT");
+  }
+  const sourceInitPath = appInitCandidates[0];
   const assertModuleSyntax = (label, text) => {
     const tmpPath = path.join(
       os.tmpdir(),
@@ -202,6 +211,16 @@ async function main() {
     console.error(`[version-assets] app.core srcHead=${srcText.slice(0, 2000)}`);
     throw new Error("version-assets: source app.core.js missing named export getAppState");
   }
+
+  const initBuf = await fs.readFile(sourceInitPath);
+  const initSha256 = crypto.createHash("sha256").update(initBuf).digest("hex");
+  let initText = initBuf.toString("utf8");
+  if (initText.charCodeAt(0) === 0xfeff) initText = initText.slice(1);
+  console.log(`[version-assets] sourceInitPath=${path.resolve(sourceInitPath)}`);
+  console.log(`[version-assets] app.init srcBytes=${initBuf.length}`);
+  console.log(`[version-assets] app.init srcSha256=${initSha256}`);
+  console.log(`[version-assets] app.init srcHead=${JSON.stringify(initText.slice(0, 200))}`);
+
   const sourceAssetNames = [
     "app.api.js",
     "app.core.js",
@@ -260,7 +279,12 @@ async function main() {
 
   for (const name of assetFiles) {
     const sourcePath = path.join(assetsDir, name);
-    const raw = name === "app.core.js" ? srcText : await fs.readFile(sourcePath, "utf8");
+    const raw =
+      name === "app.core.js"
+        ? srcText
+        : name === "app.init.js"
+          ? initText
+          : await fs.readFile(sourcePath, "utf8");
     let content = applyReplacements(raw);
     if (name === "controllers.js") {
       content = rewriteAppCoreImport(content);
