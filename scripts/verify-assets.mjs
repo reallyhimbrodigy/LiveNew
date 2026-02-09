@@ -65,6 +65,25 @@ async function main() {
     console.error("verify-assets: build.json missing files.app.core");
     process.exit(2);
   }
+  const sourceInitPath = path.join(assetsDir, "app.init.js");
+  const sourceInitText = await fsp.readFile(sourceInitPath, "utf8");
+  if (!/import\s*\{\s*bootstrapApp\s*\}\s*from\s*["']\.\/app\.core\.js["']/.test(sourceInitText)) {
+    throw new Error(`verify-assets: source app.init.js must import only bootstrapApp from ./app.core.js at ${sourceInitPath}`);
+  }
+  const forbiddenInitTokens = [
+    "bindAuth",
+    "initBaseUi",
+    "updateAdminVisibility",
+    "getAppState",
+    "routeError",
+    "setupConsentGate",
+  ];
+  const forbiddenInSourceInit = forbiddenInitTokens.filter((token) => sourceInitText.includes(token));
+  if (forbiddenInSourceInit.length) {
+    throw new Error(
+      `verify-assets: source app.init.js contains forbidden legacy tokens [${forbiddenInSourceInit.join(", ")}] at ${sourceInitPath}`
+    );
+  }
   const sourceCorePath = path.join(assetsDir, "app.core.js");
   const sourceCoreText = await fsp.readFile(sourceCorePath, "utf8");
   if (!/export\s+function\s+getAppState\b/m.test(sourceCoreText)) {

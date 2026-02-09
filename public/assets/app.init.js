@@ -1,4 +1,3 @@
-// LiveNew init shim (must remain minimal).
-// verify-assets requires app.init to import ONLY bootstrapApp from app.core.
+// LiveNew init shim (keep minimal; verify-assets enforces this).
 import { bootstrapApp } from "./app.core.js";
 bootstrapApp();
