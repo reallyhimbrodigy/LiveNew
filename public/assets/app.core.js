@@ -855,6 +855,7 @@ function initDay({ initialDateISO } = {}) {
 
   const showStep = (name) => {
     if (!stepNames.has(name)) return;
+    console.log("[day] showStep", name);
     stepNodes.forEach((node) => node.classList.toggle("hidden", node.dataset.step !== name));
     if (secondaryNav) secondaryNav.classList.toggle("hidden", name !== "done");
     if (stepIndicator) {
@@ -944,6 +945,7 @@ function initDay({ initialDateISO } = {}) {
 
   const startOnboarding = (event) => {
     event?.preventDefault?.();
+    console.log("[day] begin personalization clicked");
     if (window.location.search.includes("debug=1")) console.log("onboarding:start");
     onboardingIndex = 0;
     setVisible(introPanel, false);

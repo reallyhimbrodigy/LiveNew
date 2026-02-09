@@ -70,6 +70,9 @@ async function main() {
   if (!/import\s*\{\s*bootstrapApp\s*\}\s*from\s*["']\.\/app\.core\.js["']/.test(sourceInitText)) {
     throw new Error(`verify-assets: source app.init.js must import only bootstrapApp from ./app.core.js at ${sourceInitPath}`);
   }
+  if (!/\bbootstrapApp\s*\(\s*\)\s*;?/.test(sourceInitText)) {
+    throw new Error(`verify-assets: source app.init.js must call bootstrapApp() at ${sourceInitPath}`);
+  }
   const forbiddenInitTokens = [
     "bindAuth",
     "initBaseUi",
