@@ -1,0 +1,3 @@
+export const BUILD_ID = "202602090410-1da7ca1";
+export const APP_CORE_SPEC = "./app.core.js?v=" + BUILD_ID;
+export const APP_STATE_SPEC = "./app.state.js?v=" + BUILD_ID;
