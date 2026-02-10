@@ -163,10 +163,12 @@ async function main() {
     return hasGetAppState;
   };
   const detectBootstrapAppExport = (text) =>
-    /\bexport\s+(async\s+)?function\s+bootstrapApp\b/.test(text) ||
-    /\bexport\s+(const|let|var)\s+bootstrapApp\b/.test(text) ||
-    /\bexport\s*\{[\s\S]*?\bbootstrapApp\b[\s\S]*?\}/.test(text);
-  const hasBootstrapAppSymbol = (text) => /\bbootstrapApp\b/.test(text);
+    /\bexport\s+(async\s+)?function\s+bootstrapApp\b/m.test(text) ||
+    /\bexport\s+(const|let|var)\s+bootstrapApp\b/m.test(text) ||
+    /\bexport\s*\{[\s\S]*?\bbootstrapApp\b[\s\S]*?\}/m.test(text);
+  const detectBootstrapAppBinding = (text) =>
+    /\b(?:async\s+)?function\s+bootstrapApp\b/m.test(text) ||
+    /\b(?:const|let|var)\s+bootstrapApp\b/m.test(text);
 
   const requiredGetAppStateBlock = [
     "/* REQUIRED: build-time export used by controllers + asset verification */",
@@ -303,12 +305,27 @@ async function main() {
       content = rewriteAppCoreImport(content);
     }
     if (name === "app.core.js") {
-      if (!hasBootstrapAppSymbol(content)) {
+      const hasBinding = detectBootstrapAppBinding(content);
+      if (!hasBinding) {
         throw new Error("version-assets: source app.core.js missing bootstrapApp symbol");
       }
       const hadBootstrapExport = detectBootstrapAppExport(content);
       if (!hadBootstrapExport) {
         content = `${content}\nexport { bootstrapApp };\n`;
+        const bootstrapIdx = content.indexOf("bootstrapApp");
+        const bootstrapLine =
+          bootstrapIdx >= 0 ? content.slice(0, bootstrapIdx).split(/\r?\n/).length : -1;
+        const snippet =
+          bootstrapIdx >= 0
+            ? content.slice(Math.max(0, bootstrapIdx - 300), Math.min(content.length, bootstrapIdx + 300))
+            : "";
+        try {
+          assertModuleSyntax(sourcePath, content);
+        } catch (err) {
+          throw new Error(
+            `version-assets: injected bootstrapApp export invalid (line=${bootstrapLine})\nbootstrap_snippet=${snippet}\n${err?.message || err}`
+          );
+        }
       }
       console.log(`[version-assets] injected bootstrapApp export=${!hadBootstrapExport}`);
     }
@@ -324,6 +341,9 @@ async function main() {
   const outHasExport = appCoreText.includes("export");
   const outHasGetAppState = detectGetAppState(appCoreText);
   const outHasBootstrapApp = detectBootstrapAppExport(appCoreText);
+  const firstBootstrapIdx = appCoreText.indexOf("bootstrapApp");
+  const firstBootstrapLine =
+    firstBootstrapIdx >= 0 ? appCoreText.slice(0, firstBootstrapIdx).split(/\r?\n/).length : -1;
   if (!outHasGetAppState) {
     console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
     console.error(`[version-assets] outCorePath=${appCoreVersioned}`);
@@ -343,6 +363,8 @@ async function main() {
       `version-assets: generated app.core.${buildId}.js missing export bootstrapApp; head=${JSON.stringify(head)}`
     );
   }
+  console.log(`[version-assets] app.core hasBootstrapAppExport=${outHasBootstrapApp}`);
+  console.log(`[version-assets] app.core firstBootstrapAppLine=${firstBootstrapLine}`);
   console.log(`[version-assets] app.core tail=${JSON.stringify(appCoreText.slice(-200))}`);
 
   const controllersVersioned = path.join(assetsDir, `controllers.${buildId}.js`);
