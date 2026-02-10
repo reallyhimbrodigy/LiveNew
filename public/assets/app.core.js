@@ -855,7 +855,7 @@ function initDay({ initialDateISO } = {}) {
 
   const showStep = (name) => {
     if (!stepNames.has(name)) return;
-    console.log("[day] showStep", name);
+    console.log("[day] step", name);
     stepNodes.forEach((node) => node.classList.toggle("hidden", node.dataset.step !== name));
     if (secondaryNav) secondaryNav.classList.toggle("hidden", name !== "done");
     if (stepIndicator) {
