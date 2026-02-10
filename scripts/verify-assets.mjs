@@ -67,6 +67,12 @@ async function main() {
   }
   const sourceInitPath = path.join(assetsDir, "app.init.js");
   const sourceInitText = await fsp.readFile(sourceInitPath, "utf8");
+  const sourceInitBytes = Buffer.byteLength(sourceInitText, "utf8");
+  if (sourceInitBytes > 200) {
+    throw new Error(
+      `verify-assets: source app.init.js too large (${sourceInitBytes} bytes); expected minimal bootstrap shim at ${sourceInitPath}`
+    );
+  }
   if (!/import\s*\{\s*bootstrapApp\s*\}\s*from\s*["']\.\/app\.core\.js["']/.test(sourceInitText)) {
     throw new Error(`verify-assets: source app.init.js must import only bootstrapApp from ./app.core.js at ${sourceInitPath}`);
   }
@@ -74,6 +80,7 @@ async function main() {
     throw new Error(`verify-assets: source app.init.js must call bootstrapApp() at ${sourceInitPath}`);
   }
   const forbiddenInitTokens = [
+    "ensureCsrf",
     "bindAuth",
     "initBaseUi",
     "updateAdminVisibility",
