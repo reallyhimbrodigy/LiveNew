@@ -164,6 +164,7 @@ async function main() {
   };
   const detectBootstrapAppExport = (text) =>
     /\bexport\s+(async\s+)?function\s+bootstrapApp\b/.test(text) ||
+    /\bexport\s+(const|let|var)\s+bootstrapApp\b/.test(text) ||
     /\bexport\s*\{[\s\S]*?\bbootstrapApp\b[\s\S]*?\}/.test(text);
 
   const requiredGetAppStateBlock = [
