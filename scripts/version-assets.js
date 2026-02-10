@@ -120,6 +120,14 @@ async function main() {
     throw new Error("version-assets: DUPLICATE_APP_INIT");
   }
   const sourceInitPath = appInitCandidates[0];
+  const initShim = `import { bootstrapApp } from "./app.core.js";\nbootstrapApp();\n`;
+  fsSync.writeFileSync(sourceInitPath, initShim, "utf8");
+  const enforcedInitBuf = fsSync.readFileSync(sourceInitPath);
+  const enforcedInitBytes = enforcedInitBuf.length;
+  const enforcedInitSha256 = crypto.createHash("sha256").update(enforcedInitBuf).digest("hex");
+  console.log(
+    `[version-assets] enforced app.init shim bytes=${enforcedInitBytes} sha256=${enforcedInitSha256}`
+  );
   const assertModuleSyntax = (label, text) => {
     const tmpPath = path.join(
       os.tmpdir(),
