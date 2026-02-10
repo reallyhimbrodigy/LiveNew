@@ -162,6 +162,9 @@ async function main() {
       /\bexport\s*\{\s*getAppState\b/.test(sourceCoreText);
     return hasGetAppState;
   };
+  const detectBootstrapAppExport = (text) =>
+    /\bexport\s+(async\s+)?function\s+bootstrapApp\b/.test(text) ||
+    /\bexport\s*\{[\s\S]*?\bbootstrapApp\b[\s\S]*?\}/.test(text);
 
   const requiredGetAppStateBlock = [
     "/* REQUIRED: build-time export used by controllers + asset verification */",
@@ -308,6 +311,7 @@ async function main() {
   const outBytes = Buffer.byteLength(appCoreText, "utf8");
   const outHasExport = appCoreText.includes("export");
   const outHasGetAppState = detectGetAppState(appCoreText);
+  const outHasBootstrapApp = detectBootstrapAppExport(appCoreText);
   if (!outHasGetAppState) {
     console.error(`[version-assets] sourceCorePath=${sourceCorePath}`);
     console.error(`[version-assets] outCorePath=${appCoreVersioned}`);
@@ -319,6 +323,12 @@ async function main() {
     console.error(`[version-assets] app.core tail=${appCoreText.slice(-200)}`);
     throw new Error(
       `version-assets: generated app.core.${buildId}.js missing named export getAppState`
+    );
+  }
+  if (!outHasBootstrapApp) {
+    const head = appCoreText.slice(0, 200);
+    throw new Error(
+      `version-assets: generated app.core.${buildId}.js missing export bootstrapApp; head=${JSON.stringify(head)}`
     );
   }
 
