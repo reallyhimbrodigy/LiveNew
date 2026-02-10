@@ -166,6 +166,7 @@ async function main() {
     /\bexport\s+(async\s+)?function\s+bootstrapApp\b/.test(text) ||
     /\bexport\s+(const|let|var)\s+bootstrapApp\b/.test(text) ||
     /\bexport\s*\{[\s\S]*?\bbootstrapApp\b[\s\S]*?\}/.test(text);
+  const hasBootstrapAppSymbol = (text) => /\bbootstrapApp\b/.test(text);
 
   const requiredGetAppStateBlock = [
     "/* REQUIRED: build-time export used by controllers + asset verification */",
@@ -301,6 +302,16 @@ async function main() {
     if (name === "controllers.js") {
       content = rewriteAppCoreImport(content);
     }
+    if (name === "app.core.js") {
+      if (!hasBootstrapAppSymbol(content)) {
+        throw new Error("version-assets: source app.core.js missing bootstrapApp symbol");
+      }
+      const hadBootstrapExport = detectBootstrapAppExport(content);
+      if (!hadBootstrapExport) {
+        content = `${content}\nexport { bootstrapApp };\n`;
+      }
+      console.log(`[version-assets] injected bootstrapApp export=${!hadBootstrapExport}`);
+    }
     assertModuleSyntax(sourcePath, content);
     const versionedName = name.replace(/\.js$/, `.${buildId}.js`);
     const versionedPath = path.join(assetsDir, versionedName);
@@ -332,6 +343,7 @@ async function main() {
       `version-assets: generated app.core.${buildId}.js missing export bootstrapApp; head=${JSON.stringify(head)}`
     );
   }
+  console.log(`[version-assets] app.core tail=${JSON.stringify(appCoreText.slice(-200))}`);
 
   const controllersVersioned = path.join(assetsDir, `controllers.${buildId}.js`);
   const controllersContent = await fs.readFile(controllersVersioned, "utf8");
