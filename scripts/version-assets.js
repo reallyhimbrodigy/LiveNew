@@ -174,8 +174,23 @@ async function main() {
     "  return {};",
     "}",
   ].join("\n");
+  const requiredBootstrapAppBlock = [
+    "/* REQUIRED: build-time export used by init shim + asset verification */",
+    "export async function bootstrapApp({ page } = {}) {",
+    "  const p =",
+    "    page ||",
+    "    (typeof location !== \"undefined\" && location && location.pathname) ||",
+    "    \"/day\";",
+    "",
+    "  if (p.startsWith(\"/week\") && typeof initWeek === \"function\") return initWeek();",
+    "  if (p.startsWith(\"/trends\") && typeof initTrends === \"function\") return initTrends();",
+    "  if (p.startsWith(\"/profile\") && typeof initProfile === \"function\") return initProfile();",
+    "  if (typeof initDay === \"function\") return initDay();",
+    "  return;",
+    "}",
+  ].join("\n");
 
-  const insertGetAppStateAfterImports = (text) => {
+  const insertBlockAfterImports = (text, block) => {
     const lines = String(text || "").split(/\r?\n/);
     let idx = 0;
     while (idx < lines.length) {
@@ -193,12 +208,14 @@ async function main() {
     const patched = [
       ...lines.slice(0, idx),
       "",
-      requiredGetAppStateBlock,
+      block,
       "",
       ...lines.slice(idx),
     ].join("\n");
     return patched;
   };
+  const insertGetAppStateAfterImports = (text) => insertBlockAfterImports(text, requiredGetAppStateBlock);
+  const insertBootstrapAppAfterImports = (text) => insertBlockAfterImports(text, requiredBootstrapAppBlock);
 
   let { srcBuf, srcText, srcSha256, hasBom } = await readSourceCore();
   const srcBytes = srcBuf.length;
@@ -212,6 +229,13 @@ async function main() {
     await fs.writeFile(sourceCorePath, srcText);
     console.log("[version-assets] app.core srcPatched=true");
   }
+  let srcHasBootstrapBinding = detectBootstrapAppBinding(srcText);
+  if (!srcHasBootstrapBinding) {
+    srcText = insertBootstrapAppAfterImports(srcText);
+    srcHasBootstrapBinding = detectBootstrapAppBinding(srcText);
+    await fs.writeFile(sourceCorePath, srcText);
+    console.log("[version-assets] app.core srcBootstrapPatched=true");
+  }
   console.log(`[version-assets] app.core srcHasGetAppState=${srcHasGetAppState}`);
   assertModuleSyntax(sourceCorePath, srcText);
   if (!srcHasGetAppState) {
@@ -220,6 +244,12 @@ async function main() {
     console.error(`[version-assets] app.core srcIndexGetAppState=${srcText.indexOf("getAppState")}`);
     console.error(`[version-assets] app.core srcHead=${srcText.slice(0, 2000)}`);
     throw new Error("version-assets: source app.core.js missing named export getAppState");
+  }
+  if (!srcHasBootstrapBinding) {
+    console.error(`[version-assets] sourceCorePath=${path.resolve(sourceCorePath)}`);
+    console.error(`[version-assets] app.core srcHead=${JSON.stringify(srcText.slice(0, 300))}`);
+    console.error(`[version-assets] app.core srcTail=${JSON.stringify(srcText.slice(-300))}`);
+    throw new Error("version-assets: source app.core.js missing bootstrapApp symbol");
   }
 
   const initBuf = await fs.readFile(sourceInitPath);
@@ -259,10 +289,14 @@ async function main() {
   const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const applyReplacements = (content) => {
     let out = content.replaceAll("__BUILD_ID__", buildId);
-    for (const [from, to] of replacements.entries()) {
-      const re = new RegExp(`(["'])${escapeRegExp(from)}\\1`, "g");
-      out = out.replace(re, `$1${to}$1`);
-    }
+    out = out.replace(/(["'])\.\/app\.api(?:\.[^"']+)?\.js\1/g, `$1./app.api.${buildId}.js$1`);
+    out = out.replace(/(["'])\.\/app\.core(?:\.[^"']+)?\.js\1/g, `$1./app.core.${buildId}.js$1`);
+    out = out.replace(/(["'])\.\/app\.init(?:\.[^"']+)?\.js\1/g, `$1./app.init.${buildId}.js$1`);
+    out = out.replace(/(["'])\.\/app\.state(?:\.[^"']+)?\.js\1/g, `$1./app.state.${buildId}.js$1`);
+    out = out.replace(/(["'])\.\/app\.ui(?:\.[^"']+)?\.js\1/g, `$1./app.ui.${buildId}.js$1`);
+    out = out.replace(/(["'])\.\/controllers(?:\.[^"']+)?\.js\1/g, `$1./controllers.${buildId}.js$1`);
+    out = out.replace(/(["'])\.\/build(?:\.[^"']+)?\.js\1/g, `$1./build.${buildId}.js$1`);
+    out = out.replace(/(["'])\.\/footer(?:\.[^"']+)?\.js\1/g, `$1./footer.${buildId}.js$1`);
     return out;
   };
 
