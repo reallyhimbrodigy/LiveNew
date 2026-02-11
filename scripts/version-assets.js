@@ -101,16 +101,11 @@ async function main() {
     return out;
   };
 
-  const appCoreCandidates = (await walkFiles(path.join(process.cwd(), "public"))).filter(
-    (filePath) => path.basename(filePath).toLowerCase() === "app.core.js"
-  );
-  if (appCoreCandidates.length !== 1) {
-    console.error(`[version-assets] DUPLICATE_APP_CORE count=${appCoreCandidates.length}`);
-    appCoreCandidates.forEach((filePath) => console.error(`[version-assets] app.core path=${filePath}`));
-    throw new Error("version-assets: DUPLICATE_APP_CORE");
+  const sourceCorePath = path.join(process.cwd(), "public", "assets", "app.core.js");
+  console.log(`[version-assets] sourceCorePath=${path.resolve(sourceCorePath)}`);
+  if (!fsSync.existsSync(sourceCorePath)) {
+    throw new Error("version-assets: missing public/assets/app.core.js");
   }
-
-  const sourceCorePath = appCoreCandidates[0];
   const appInitCandidates = (await walkFiles(path.join(process.cwd(), "public"))).filter(
     (filePath) => path.basename(filePath).toLowerCase() === "app.init.js"
   );
