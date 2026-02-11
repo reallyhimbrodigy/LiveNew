@@ -302,6 +302,9 @@ async function main() {
     if (name === "app.core.js") {
       const hasBinding = detectBootstrapAppBinding(content);
       if (!hasBinding) {
+        console.error(`[version-assets] sourceCorePath=${path.resolve(sourceCorePath)}`);
+        console.error(`[version-assets] app.core srcHead=${JSON.stringify(content.slice(0, 300))}`);
+        console.error(`[version-assets] app.core srcTail=${JSON.stringify(content.slice(-300))}`);
         throw new Error("version-assets: source app.core.js missing bootstrapApp symbol");
       }
       const hadBootstrapExport = detectBootstrapAppExport(content);
