@@ -603,6 +603,11 @@ function attachUnhandledHook(routeError) {
   if (unhandledHookAttached) return;
   window.addEventListener("unhandledrejection", (event) => {
     const err = event?.reason || {};
+    if (isAuthRequiredError(err)) {
+      event.preventDefault();
+      routeError(err);
+      return;
+    }
     if (isProdLike()) {
       event.preventDefault();
       const code = err?.code || "error";
