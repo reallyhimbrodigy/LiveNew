@@ -13,9 +13,9 @@ import {
   logoutAuth,
   setDeviceName,
   getDeviceName,
-} from "./app.api.js";
-import { getAppState as getAppStateInternal, setAppState } from "./app.state.js";
-import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.js";
+} from "./app.api.202602140208-95315ad.js";
+import { getAppState as getAppStateInternal, setAppState } from "./app.state.202602140208-95315ad.js";
+import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.202602140208-95315ad.js";
 import { STRINGS as EN_STRINGS } from "../i18n/en.js";
 console.log("[LN][core] source-loaded");
 /* REQUIRED: build-time export used by controllers + asset verification */
@@ -26,7 +26,7 @@ export function getAppState() {
   return {};
 }
 void getAppStateInternal;
-export const BUILD_ID = "__BUILD_ID__";
+export const BUILD_ID = "202602140208-95315ad";
 
 const LOCALE = "en";
 const STRINGS = { en: EN_STRINGS }[LOCALE] || EN_STRINGS;
@@ -512,7 +512,7 @@ async function updateAdminVisibility() {
 let controllersModule = null;
 async function loadControllers() {
   if (!controllersModule) {
-    controllersModule = import("./controllers.js");
+    controllersModule = import("./controllers.202602140208-95315ad.js");
   }
   return controllersModule;
 }
