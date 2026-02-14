@@ -2301,20 +2301,30 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       sendError(res, 405, "method_not_allowed", "Method not allowed");
       return true;
     }
-    const auth = await getUserFromRequest(req);
-    if (auth.error && auth.error !== "missing_token") {
-      sendError(res, 401, "auth_required", "Authorization required");
-      return true;
+    try {
+      const auth = await getUserFromRequest(req);
+      if (auth.error && auth.error !== "missing_token") {
+        sendError(res, 401, "auth_required", "Authorization required");
+        return true;
+      }
+      let profile = null;
+      if (auth.userId && auth.jwt) {
+        const persist = createPersist(supabaseForUser(auth.jwt));
+        profile = await persist.getOrCreateUserProfile(auth.userId);
+        res.livenewUserId = auth.userId;
+      }
+      const payload = await buildSupabaseBootstrapPayload({ userId: auth.userId, userProfile: profile, flags });
+      assertBootstrapContract(payload);
+      sendJson(res, 200, payload, auth.userId || null);
+    } catch (bootstrapErr) {
+      console.error("[BOOTSTRAP_ERROR]", JSON.stringify({
+        message: bootstrapErr?.message,
+        code: bootstrapErr?.code,
+        stack: bootstrapErr?.stack,
+        requestId: res?.livenewRequestId,
+      }));
+      sendError(res, 500, "internal", "Bootstrap failed");
     }
-    let profile = null;
-    if (auth.userId && auth.jwt) {
-      const persist = createPersist(supabaseForUser(auth.jwt));
-      profile = await persist.getOrCreateUserProfile(auth.userId);
-      res.livenewUserId = auth.userId;
-    }
-    const payload = await buildSupabaseBootstrapPayload({ userId: auth.userId, userProfile: profile, flags });
-    assertBootstrapContract(payload);
-    sendJson(res, 200, payload, auth.userId || null);
     return true;
   }
 
