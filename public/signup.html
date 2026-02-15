@@ -129,6 +129,10 @@
         <form id="signup-form" class="form">
           <input id="signup-email" class="input" type="email" placeholder="email" required />
           <input id="signup-password" class="input" type="password" placeholder="password" required />
+          <label style="display:flex;align-items:flex-start;gap:8px;text-align:left;font-size:14px;color:var(--muted);line-height:1.4;">
+            <input id="signup-consent" type="checkbox" required style="margin-top:4px;flex-shrink:0;" />
+            <span>I agree to the <a href="/terms.html" target="_blank" style="text-decoration:underline;">Terms of Service</a>, <a href="/privacy.html" target="_blank" style="text-decoration:underline;">Privacy Policy</a>, and alpha processing agreement.</span>
+          </label>
           <button id="signup-submit" class="btn btn-primary" type="submit">Create account</button>
         </form>
         <div id="signup-message" class="info" role="status"></div>
@@ -185,7 +189,7 @@
         const res = await fetch("/v1/auth/signup", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ email, password, consent: document.getElementById("signup-consent").checked }),
         });
         const payload = await res.json().catch(() => ({}));
         if (res.status === 409 || payload?.code === "ACCOUNT_EXISTS") {

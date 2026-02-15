@@ -5230,10 +5230,35 @@ const server = http.createServer(async (req, res) => {
           });
           return;
         }
+        const newUserId = data?.user?.id || null;
+        // Auto-accept consent if provided during signup
+        if (body?.consent === true && newUserId) {
+          try {
+            const adminSupabase = supabaseAdmin();
+            const requiredVersion = await getRequiredConsentVersion();
+            const now = new Date().toISOString();
+            const { error: consentError } = await adminSupabase
+              .from("user_profile")
+              .upsert(
+                {
+                  user_id: newUserId,
+                  consent_accepted_at: now,
+                  consent_version: requiredVersion,
+                  created_at: now,
+                  updated_at: now,
+                },
+                { onConflict: "user_id" }
+              );
+            if (consentError) throw consentError;
+          } catch (consentErr) {
+            console.error("[auth][signup] consent_save_error", { message: consentErr?.message });
+            // Don't fail signup if consent save fails — they can accept later
+          }
+        }
         console.log("[auth][signup] ok", {
           email,
           redirectTo,
-          userId: data?.user?.id || null,
+          userId: newUserId,
         });
         sendJson(res, 200, { ok: true, needsEmailConfirm: !data?.session });
         return;
