@@ -58,55 +58,6 @@
 
   <div class="ln-main">
     <div class="ln-container">
-      <section id="consent-card" class="card hidden">
-        <h2>Consent required</h2>
-        <p class="muted">Please review and accept to continue.</p>
-        <p class="today-sub">By continuing, you agree to our <a href="/terms.html">Terms of Service</a>, <a href="/privacy.html">Privacy Policy</a>, and alpha processing agreement.</p>
-        <button id="consent-accept" class="primary today-next" type="button">I agree and continue</button>
-        <div id="consent-status" class="muted"></div>
-      </section>
-
-      <section id="onboard-card" class="card today-shell hidden" aria-hidden="true">
-        <h2>Set up your profile</h2>
-        <p class="muted">A few quick preferences so we can personalize your experience.</p>
-        <div class="onboard-step" data-step="0">
-          <label for="onboard-timezone">Your timezone</label>
-          <select id="onboard-timezone"><option value="America/Los_Angeles">Pacific</option><option value="America/Denver">Mountain</option><option value="America/Chicago">Central</option><option value="America/New_York">Eastern</option></select>
-        </div>
-        <div class="onboard-step hidden" data-step="1">
-          <label for="onboard-boundary">Day boundary hour</label>
-          <select id="onboard-boundary"><option value="0">Midnight</option><option value="3">3 AM</option><option value="4">4 AM</option><option value="5">5 AM</option></select>
-        </div>
-        <div class="onboard-step hidden" data-step="2">
-          <label for="onboard-stress">Baseline stress (1-10)</label>
-          <input type="range" id="onboard-stress" min="1" max="10" value="5" />
-        </div>
-        <div class="onboard-step hidden" data-step="3">
-          <label for="onboard-sleep">Baseline sleep quality (1-10)</label>
-          <input type="range" id="onboard-sleep" min="1" max="10" value="6" />
-        </div>
-        <div class="onboard-step hidden" data-step="4">
-          <label for="onboard-energy">Baseline energy (1-10)</label>
-          <input type="range" id="onboard-energy" min="1" max="10" value="6" />
-        </div>
-        <div class="onboard-step hidden" data-step="5">
-          <label for="onboard-time">Available time (minutes)</label>
-          <select id="onboard-time"><option value="5">5 min</option><option value="10">10 min</option><option value="20">20 min</option></select>
-        </div>
-        <div class="onboard-step hidden" data-step="6">
-          <p>Please accept to continue:</p>
-          <label><input type="checkbox" id="onboard-consent-terms" /> I accept the <a href="/terms.html">Terms</a></label>
-          <label><input type="checkbox" id="onboard-consent-privacy" /> I accept the <a href="/privacy.html">Privacy Policy</a></label>
-          <label><input type="checkbox" id="onboard-consent-alpha" /> I accept the alpha processing agreement</label>
-        </div>
-        <div class="onboard-nav">
-          <button id="onboard-back" class="ghost" type="button">Back</button>
-          <button id="onboard-next" class="primary today-next" type="button">Next</button>
-          <button id="onboard-submit" class="primary today-next hidden" type="button">Complete setup</button>
-        </div>
-        <div id="onboard-status" class="muted"></div>
-      </section>
-
       <section id="day-intro" class="card today-shell">
         <h1>Let’s reset your day.</h1>
         <p class="today-sub">One gentle step at a time.</p>
