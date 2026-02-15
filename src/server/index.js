@@ -2314,6 +2314,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         res.livenewUserId = auth.userId;
       }
       const payload = await buildSupabaseBootstrapPayload({ userId: auth.userId, userProfile: profile, flags });
+      console.log("[BOOTSTRAP_RESPONSE]", JSON.stringify({ userId: auth.userId, uiState: payload?.uiState, consent: payload?.consent, profile: payload?.profile }));
       assertBootstrapContract(payload);
       sendJson(res, 200, payload, auth.userId || null);
     } catch (bootstrapErr) {
