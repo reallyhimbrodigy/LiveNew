@@ -18,6 +18,7 @@ import { getAppState as getAppStateInternal, setAppState } from "./app.state.js"
 import { qs, qsa, el, clear, setText, formatMinutes, formatPct, applyI18n, getDictValue } from "./app.ui.js";
 import { STRINGS as EN_STRINGS } from "../i18n/en.js";
 console.log("[LN][core] source-loaded");
+let __suppressRedirect = false;
 /* REQUIRED: build-time export used by controllers + asset verification */
 export function getAppState() {
   try {
@@ -553,6 +554,10 @@ function currentPathWithQuery() {
 }
 
 function redirectToLogin(nextPath = currentPathWithQuery()) {
+  if (__suppressRedirect) {
+    console.warn("[LN] redirect suppressed during personalization transition");
+    return;
+  }
   if (typeof window === "undefined") return;
   const currentPath = window.location?.pathname || "";
   if (currentPath === "/login" || currentPath === "/login.html") return;
@@ -958,7 +963,11 @@ function initDay({ initialDateISO } = {}) {
 
   const finishOnboarding = () => {
     localStorage.setItem("ln_onboarding_done", "1");
+    __suppressRedirect = true;
     showDayApp();
+    setTimeout(() => {
+      __suppressRedirect = false;
+    }, 5000);
   };
 
   const renderOnboardingStep = () => {
