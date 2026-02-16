@@ -2556,67 +2556,80 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
   }
 
   if (pathname === "/v1/checkin" && req.method === "POST") {
-    const body = await parseJson(req);
-    const now = new Date();
-    let dateKey =
-      body?.dateKey ||
-      body?.dateISO ||
-      body?.checkIn?.dateISO ||
-      getDateKeyWithMinute({
-        now,
+    try {
+      const body = await parseJson(req);
+      const now = new Date();
+      let dateKey =
+        body?.dateKey ||
+        body?.dateISO ||
+        body?.checkIn?.dateISO ||
+        getDateKeyWithMinute({
+          now,
+          timezone: baselineResolved.timezone,
+          dayBoundaryMinute: baselineResolved.dayBoundaryMinute,
+        });
+      const dateValidation = validateDateParam(dateKey, "dateISO");
+      if (!dateValidation.ok) {
+        sendError(res, 400, dateValidation.error.code, dateValidation.error.message, dateValidation.error.field);
+        return true;
+      }
+      dateKey = dateValidation.value;
+      const checkInRaw = body?.checkIn && typeof body.checkIn === "object" ? body.checkIn : body;
+      const checkinValidation = validateCheckInPayload(checkInRaw);
+      if (!checkinValidation.ok) {
+        sendErrorCodeOnly(res, 400, "INVALID_CHECKIN");
+        return true;
+      }
+      const checkIn = normalizeCheckInInput(checkInRaw, dateKey);
+      const idempotencyKey = getIdempotencyKey(req);
+      parityCounters.recordCheckin(Boolean(idempotencyKey));
+      await persist.upsertCheckin(auth.userId, dateKey, checkIn);
+      const checkinInserted = await persist.insertEventOncePerDay(
+        auth.userId,
+        dateKey,
+        "checkin_submitted",
+        {
+          stress: checkIn.stress,
+          sleep: checkIn.sleepQuality,
+          energy: checkIn.energy,
+          timeMin: checkIn.timeAvailableMin,
+        },
+        idempotencyKey
+      );
+      if (checkinInserted?.inserted) {
+        invalidateOutcomesCache(auth.userId, dateKey);
+      }
+      const context = await loadSupabaseDayContext(persist, auth.userId, dateKey);
+      const today = buildToday({
+        userId: auth.userId,
+        dateKey,
         timezone: baselineResolved.timezone,
-        dayBoundaryMinute: baselineResolved.dayBoundaryMinute,
+        dayBoundaryHour: baselineResolved.dayBoundaryHour,
+        baseline: baselineResolved,
+        latestCheckin: context.checkIn,
+        dayState: context.dayState,
+        weekSeed: {},
+        eventsToday: context.events,
+        panicMode: context.checkIn?.safety?.panic === true,
+        libVersion: LIB_VERSION,
+        priorProfile: context.priorProfile,
       });
-    const dateValidation = validateDateParam(dateKey, "dateISO");
-    if (!dateValidation.ok) {
-      sendError(res, 400, dateValidation.error.code, dateValidation.error.message, dateValidation.error.field);
-      return true;
+      const normalizedToday = ensureTodayContract(today, res);
+      if (!normalizedToday) return true;
+      await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
+      sendJson(res, 200, normalizedToday, auth.userId);
+    } catch (checkinErr) {
+      console.error(
+        "[CHECKIN_ERROR]",
+        JSON.stringify({
+          message: checkinErr?.message,
+          code: checkinErr?.code,
+          stack: checkinErr?.stack,
+          requestId: res?.livenewRequestId,
+        })
+      );
+      sendError(res, 500, "internal", "Checkin failed");
     }
-    dateKey = dateValidation.value;
-    const checkInRaw = body?.checkIn && typeof body.checkIn === "object" ? body.checkIn : body;
-    const checkinValidation = validateCheckInPayload(checkInRaw);
-    if (!checkinValidation.ok) {
-      sendErrorCodeOnly(res, 400, "INVALID_CHECKIN");
-      return true;
-    }
-    const checkIn = normalizeCheckInInput(checkInRaw, dateKey);
-    const idempotencyKey = getIdempotencyKey(req);
-    parityCounters.recordCheckin(Boolean(idempotencyKey));
-    await persist.upsertCheckin(auth.userId, dateKey, checkIn);
-    const checkinInserted = await persist.insertEventOncePerDay(
-      auth.userId,
-      dateKey,
-      "checkin_submitted",
-      {
-        stress: checkIn.stress,
-        sleep: checkIn.sleepQuality,
-        energy: checkIn.energy,
-        timeMin: checkIn.timeAvailableMin,
-      },
-      idempotencyKey
-    );
-    if (checkinInserted?.inserted) {
-      invalidateOutcomesCache(auth.userId, dateKey);
-    }
-    const context = await loadSupabaseDayContext(persist, auth.userId, dateKey);
-    const today = buildToday({
-      userId: auth.userId,
-      dateKey,
-      timezone: baselineResolved.timezone,
-      dayBoundaryHour: baselineResolved.dayBoundaryHour,
-      baseline: baselineResolved,
-      latestCheckin: context.checkIn,
-      dayState: context.dayState,
-      weekSeed: {},
-      eventsToday: context.events,
-      panicMode: context.checkIn?.safety?.panic === true,
-      libVersion: LIB_VERSION,
-      priorProfile: context.priorProfile,
-    });
-    const normalizedToday = ensureTodayContract(today, res);
-    if (!normalizedToday) return true;
-    await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
-    sendJson(res, 200, normalizedToday, auth.userId);
     return true;
   }
 
