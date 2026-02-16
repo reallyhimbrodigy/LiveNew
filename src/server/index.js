@@ -4921,11 +4921,26 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
+  const SUPABASE_HANDLED_ROUTES = new Set([
+    "/v1/bootstrap",
+    "/v1/mobile/bootstrap",
+    "/v1/rail/today",
+    "/v1/mobile/today",
+    "/v1/checkin",
+    "/v1/quick",
+    "/v1/reset/complete",
+    "/v1/outcomes",
+    "/v1/consent/accept",
+    "/v1/consents/accept",
+    "/v1/onboard/complete",
+  ]);
+
   if (
     pathname.startsWith("/v1") &&
     !PUBLIC_API_PATHS.has(pathname) &&
     !(req.method === "POST" && PUBLIC_POST_ROUTES.has(pathname)) &&
-    !pathname.startsWith("/v1/auth/")
+    !pathname.startsWith("/v1/auth/") &&
+    !SUPABASE_HANDLED_ROUTES.has(pathname)
   ) {
     const token = getAuthToken(req);
     const claims = await verifySupabaseJwt(token);
