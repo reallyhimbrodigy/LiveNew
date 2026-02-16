@@ -323,7 +323,11 @@ export function verifyAuth(email, code) {
 }
 
 export function refreshAuth(options = {}) {
-  return apiPost("/v1/auth/refresh", { refreshToken: getRefreshToken() }, { _skipRefresh: true, ...options });
+  return apiPost(
+    "/v1/auth/refresh-session",
+    { refreshToken: getRefreshToken() },
+    { _skipRefresh: true, _skipCsrf: true, ...options }
+  );
 }
 
 export function logoutAuth() {

@@ -495,6 +495,7 @@ const PUBLIC_PAGE_PATHS = new Set([
 const PUBLIC_POST_ROUTES = new Set([
   "/v1/auth/signup",
   "/v1/auth/login",
+  "/v1/auth/refresh-session",
   "/v1/auth/resend-signup",
   "/v1/auth/admin/generate-signup-link",
   "/v1/auth/logout",
@@ -5407,6 +5408,46 @@ const server = http.createServer(async (req, res) => {
           await touchSession(token, deviceName);
         }
       }
+    }
+
+    if (pathname === "/v1/auth/refresh-session" && req.method === "POST") {
+      const body = await parseJson(req);
+      const refreshToken = body?.refreshToken;
+      if (!refreshToken || typeof refreshToken !== "string") {
+        sendError(res, 400, "refresh_required", "refreshToken is required");
+        return;
+      }
+      try {
+        const { createClient } = await import("@supabase/supabase-js");
+        const supabaseUrl = (process.env.SUPABASE_URL || "").trim();
+        const supabaseAnonKey = (process.env.SUPABASE_ANON_KEY || "").trim();
+        if (!supabaseUrl || !supabaseAnonKey) {
+          sendError(res, 500, "internal", "Supabase not configured");
+          return;
+        }
+        const client = createClient(supabaseUrl, supabaseAnonKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const { data, error } = await client.auth.refreshSession({ refresh_token: refreshToken });
+        if (error || !data?.session) {
+          sendError(res, 401, "refresh_invalid", error?.message || "Could not refresh session");
+          return;
+        }
+        sendJson(
+          res,
+          200,
+          {
+            ok: true,
+            accessToken: data.session.access_token,
+            refreshToken: data.session.refresh_token,
+          },
+          data.session.user?.id || null
+        );
+      } catch (err) {
+        console.error("[auth][refresh-session] error", { message: err?.message });
+        sendError(res, 500, "internal", "Refresh failed");
+      }
+      return;
     }
 
     if (pathname === "/v1/auth/refresh" && req.method === "POST") {
