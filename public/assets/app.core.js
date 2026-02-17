@@ -962,7 +962,13 @@ function initDay({ initialDateISO } = {}) {
   };
 
   const finishOnboarding = () => {
-    localStorage.setItem("ln_onboarding_done", "1");
+    const now = new Date();
+    const resetHour = 8;
+    const todayReset = new Date(now.getFullYear(), now.getMonth(), now.getDate(), resetHour, 0, 0);
+    const effectiveDate =
+      now < todayReset ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1) : now;
+    const dateKey = effectiveDate.toISOString().slice(0, 10);
+    localStorage.setItem("ln_onboarding_done", dateKey);
     __suppressRedirect = true;
     showDayApp();
     setTimeout(() => {
@@ -1111,7 +1117,13 @@ function initDay({ initialDateISO } = {}) {
     }
   });
 
-  const onboardingDone = localStorage.getItem("ln_onboarding_done") === "1";
+  const onboardingVal = localStorage.getItem("ln_onboarding_done") || "";
+  const now = new Date();
+  const resetHour = 8;
+  const todayReset = new Date(now.getFullYear(), now.getMonth(), now.getDate(), resetHour, 0, 0);
+  const effectiveDate = now < todayReset ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1) : now;
+  const todayKey = effectiveDate.toISOString().slice(0, 10);
+  const onboardingDone = onboardingVal === todayKey || onboardingVal === "1";
   if (onboardingDone) {
     showDayApp();
   } else {
