@@ -2331,10 +2331,27 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     return true;
   }
 
-  const auth = await getUserFromRequest(req);
+  let auth = await getUserFromRequest(req);
   if (!auth.userId || !auth.jwt) {
-    sendError(res, 401, "auth_required", "Authorization required");
-    return true;
+    // Fallback: decode JWT to get userId even if expired
+    const rawToken =
+      (req.headers.authorization || "").replace(/^bearer\s+/i, "").trim() ||
+      ((req.headers.cookie || "").match(/ln_token=([^;]+)/)?.[1] || "");
+    if (rawToken) {
+      try {
+        const parts = rawToken.split(".");
+        if (parts.length === 3) {
+          const payload = JSON.parse(Buffer.from(parts[1], "base64").toString("utf8"));
+          if (payload?.sub) {
+            auth = { userId: payload.sub, jwt: rawToken, error: null };
+          }
+        }
+      } catch {}
+    }
+    if (!auth.userId || !auth.jwt) {
+      sendError(res, 401, "auth_required", "Authorization required");
+      return true;
+    }
   }
   res.livenewUserId = auth.userId;
   const isMutating = !["GET", "HEAD"].includes(req.method);
