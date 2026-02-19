@@ -18,6 +18,7 @@ import { runContentChecks } from "../domain/content/checks.js";
 import { hashJSON, sanitizeContentItem, sanitizePack } from "../domain/content/snapshotHash.js";
 import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
+import { generateAIReset } from "../domain/aiReset.js";
 import { buildWeekSkeleton } from "../domain/weekPlanner.js";
 import { computeContinuityMeta } from "../domain/continuity.js";
 import { applyQuickSignal } from "../domain/swap.js";
@@ -2614,6 +2615,25 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         libVersion: LIB_VERSION,
         priorProfile: context.priorProfile,
       });
+
+      // AI-powered personalized reset
+      const checkinData = context.checkIn || {};
+      const aiReset = await generateAIReset({
+        stress: checkinData.stress ?? 5,
+        energy: checkinData.energy ?? 5,
+        timeMin: checkinData.timeAvailableMin ?? 10,
+      });
+      if (aiReset) {
+        today.reset = {
+          id: aiReset.id,
+          title: aiReset.title,
+          description: aiReset.description,
+          durationSec: aiReset.durationSec,
+          seconds: aiReset.durationSec,
+          steps: aiReset.steps,
+        };
+      }
+
       const normalizedToday = ensureTodayContract(today, res);
       if (!normalizedToday) return true;
       await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);

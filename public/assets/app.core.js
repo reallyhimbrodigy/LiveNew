@@ -891,7 +891,7 @@ function renderDay(contract) {
   const stepsEl = qs("#today-reco-steps");
   if (titleEl) titleEl.textContent = contract.reset?.title || "Two-minute reset";
   if (bodyEl) {
-    bodyEl.textContent = `${contract.reset?.title || "Reset"} for about ${resetMinutes} min. Keep it gentle.`;
+    bodyEl.textContent = contract.reset?.description || `${contract.reset?.title || "Reset"} for about ${resetMinutes} min.`;
   }
   if (stepsEl) {
     const steps = Array.isArray(contract.reset?.steps) ? contract.reset.steps : [];
@@ -962,13 +962,13 @@ function initDay({ initialDateISO } = {}) {
   };
 
   const finishOnboarding = () => {
-    const now = new Date();
-    const resetHour = 8;
-    const todayReset = new Date(now.getFullYear(), now.getMonth(), now.getDate(), resetHour, 0, 0);
-    const effectiveDate =
-      now < todayReset ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1) : now;
-    const dateKey = effectiveDate.toISOString().slice(0, 10);
-    localStorage.setItem("ln_onboarding_done", dateKey);
+    const _now = new Date();
+    const _resetHour = 8;
+    const _todayReset = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate(), _resetHour, 0, 0);
+    const _effectiveDate =
+      _now < _todayReset ? new Date(_now.getFullYear(), _now.getMonth(), _now.getDate() - 1) : _now;
+    const _dateKey = _effectiveDate.toISOString().slice(0, 10);
+    localStorage.setItem("ln_onboarding_done", _dateKey);
     __suppressRedirect = true;
     showDayApp();
     setTimeout(() => {
@@ -1117,13 +1117,14 @@ function initDay({ initialDateISO } = {}) {
     }
   });
 
-  const onboardingVal = localStorage.getItem("ln_onboarding_done") || "";
-  const now = new Date();
-  const resetHour = 8;
-  const todayReset = new Date(now.getFullYear(), now.getMonth(), now.getDate(), resetHour, 0, 0);
-  const effectiveDate = now < todayReset ? new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1) : now;
-  const todayKey = effectiveDate.toISOString().slice(0, 10);
-  const onboardingDone = onboardingVal === todayKey || onboardingVal === "1";
+  const _obVal = localStorage.getItem("ln_onboarding_done") || "";
+  const _obNow = new Date();
+  const _obResetHour = 8;
+  const _obTodayReset = new Date(_obNow.getFullYear(), _obNow.getMonth(), _obNow.getDate(), _obResetHour, 0, 0);
+  const _obEffective =
+    _obNow < _obTodayReset ? new Date(_obNow.getFullYear(), _obNow.getMonth(), _obNow.getDate() - 1) : _obNow;
+  const _obTodayKey = _obEffective.toISOString().slice(0, 10);
+  const onboardingDone = _obVal === _obTodayKey;
   if (onboardingDone) {
     showDayApp();
   } else {
