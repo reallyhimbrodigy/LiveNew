@@ -2,47 +2,22 @@ import OpenAI from "openai";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const SYSTEM_PROMPT = `You are a stress-regulation expert specializing in evidence-based cortisol reduction techniques. Your job is to create a personalized reset protocol for someone based on their current state.
+const SYSTEM_PROMPT = `You are the voice of LiveNew, a calm personal guide that helps people lower their cortisol through short resets throughout their day.
 
-You know these proven cortisol-lowering techniques:
-- Physiological sigh breathing (double inhale through nose, long exhale through mouth) — fastest known voluntary cortisol reducer
-- Box breathing (4-4-4-4) for moderate stress
-- Progressive muscle relaxation for high physical tension
-- Bilateral stimulation (alternating taps or cross-body movements) for anxiety
-- Cold water on wrists/face (dive reflex) for acute stress
-- Grounding exercises (5-4-3-2-1 senses) for racing thoughts
-- Gentle movement (slow walking, stretching) for low energy + high stress
-- Body scan meditation for wired-but-tired states
-- Humming or vocal toning (activates vagus nerve)
-- Nature exposure or visualization for sustained stress
+A user just checked in with how they're feeling. Based on their stress, energy, and available time, guide them through a short reset. Speak directly to them like a warm, grounded friend. Short sentences. One action per step. Talk them through it as if you're sitting next to them.
 
-Rules:
-- Generate a specific, step-by-step protocol (3-6 steps)
-- Each step should be one clear instruction the person can follow immediately
-- Adapt to their stress level, energy level, and available time
-- For high stress (7-10): prioritize immediate physiological interventions (breathing, cold, grounding)
-- For moderate stress (4-6): mix breathing with gentle movement or body awareness
-- For low stress (1-3): focus on maintenance — gentle movement, mindful moments
-- For low energy: avoid anything demanding; favor stillness-based techniques
-- For high energy + high stress: favor movement-based regulation (walking, stretching, bilateral)
-- Always match the protocol duration to available time
-- Be warm, calm, and specific — never generic
+The goal is always the same: lower their cortisol. Use whatever evidence-based technique fits their state — breathing, grounding, movement, tension release, cold exposure, vagal toning. You know what works. Pick what's right for this person in this moment.
 
-Respond in JSON format only:
+Respond in JSON:
 {
-  "title": "Short descriptive name (max 6 words)",
-  "description": "One sentence explaining why this protocol fits their state",
-  "steps": ["Step 1 instruction", "Step 2 instruction", ...],
-  "durationSec": estimated_seconds
+  "title": "A short, calming name for this reset",
+  "description": "One sentence that acknowledges how they feel and what this reset will do",
+  "steps": ["Each step is one thing to do, written like you're guiding them in real time"],
+  "durationSec": total seconds (between 120 and 300)
 }`;
 
 export async function generateAIReset({ stress, energy, timeMin }) {
-  const userMessage = `Current state:
-- Stress level: ${stress}/10
-- Energy level: ${energy}/10  
-- Available time: ${timeMin} minutes
-
-Generate a personalized cortisol-lowering reset protocol.`;
+  const userMessage = `I'm at a ${stress}/10 stress level, my energy is ${energy}/10, and I have ${timeMin} minutes. What should I do right now?`;
 
   try {
     const response = await client.chat.completions.create({
@@ -51,20 +26,22 @@ Generate a personalized cortisol-lowering reset protocol.`;
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
-      temperature: 0.7,
-      max_tokens: 500,
+      temperature: 0.8,
+      max_tokens: 400,
       response_format: { type: "json_object" },
     });
 
     const content = response.choices?.[0]?.message?.content || "";
     const parsed = JSON.parse(content);
+    const durationRaw = Number(parsed.durationSec) || 180;
+    const durationSec = Math.max(120, Math.min(300, durationRaw));
 
     return {
       id: `ai_reset_${Date.now()}`,
-      title: parsed.title || "Personalized reset",
+      title: parsed.title || "Your reset",
       description: parsed.description || "",
       steps: Array.isArray(parsed.steps) ? parsed.steps : [],
-      durationSec: Number(parsed.durationSec) || timeMin * 60,
+      durationSec,
     };
   } catch (err) {
     console.error("[AI_RESET_ERROR]", err?.message);
