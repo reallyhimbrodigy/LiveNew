@@ -12,8 +12,7 @@ Respond in JSON:
 {
   "title": "A calming name for this reset",
   "description": "One short sentence — acknowledge how I feel and what we're going to do",
-  "steps": ["Each step is one complete action to do right now"],
-  "durationSec": total seconds (between 120 and 300)
+  "steps": ["Each step is one complete action to do right now"]
 }`;
 
 export async function generateAIReset({ stress, energy, timeMin }) {
@@ -33,15 +32,12 @@ export async function generateAIReset({ stress, energy, timeMin }) {
 
     const content = response.choices?.[0]?.message?.content || "";
     const parsed = JSON.parse(content);
-    const durationRaw = Number(parsed.durationSec) || 180;
-    const durationSec = Math.max(120, Math.min(300, durationRaw));
 
     return {
       id: `ai_reset_${Date.now()}`,
       title: parsed.title || "Your reset",
       description: parsed.description || "",
       steps: Array.isArray(parsed.steps) ? parsed.steps : [],
-      durationSec,
     };
   } catch (err) {
     console.error("[AI_RESET_ERROR]", err?.message);

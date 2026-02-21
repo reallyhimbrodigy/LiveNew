@@ -2641,13 +2641,12 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         timeMin: checkinData.timeAvailableMin ?? 10,
       });
       if (aiReset) {
-        const clampedDuration = Math.max(120, Math.min(300, aiReset.durationSec || 180));
         today.reset = {
           id: aiReset.id,
           title: aiReset.title,
           description: aiReset.description,
-          durationSec: clampedDuration,
-          seconds: clampedDuration,
+          durationSec: 180,
+          seconds: 180,
           steps: aiReset.steps,
         };
       }
