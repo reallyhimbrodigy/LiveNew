@@ -2645,9 +2645,10 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           id: aiReset.id,
           title: aiReset.title,
           description: aiReset.description,
+          reset: aiReset.reset,
           durationSec: 180,
           seconds: 180,
-          steps: aiReset.steps,
+          steps: [],
         };
       }
 

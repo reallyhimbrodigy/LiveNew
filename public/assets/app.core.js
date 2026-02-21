@@ -885,23 +885,29 @@ export async function bootstrapApp({ page } = {}) {
 
 function renderDay(contract) {
   if (!contract) return null;
-  const resetMinutes = contract.reset?.seconds ? Math.max(1, Math.round(contract.reset.seconds / 60)) : 2;
   const titleEl = qs("#today-reco-title");
   const bodyEl = qs("#today-reco-body");
   const stepsEl = qs("#today-reco-steps");
-  if (titleEl) titleEl.textContent = contract.reset?.title || "Two-minute reset";
-  if (bodyEl) {
-    bodyEl.textContent = contract.reset?.description || `${contract.reset?.title || "Reset"} for about ${resetMinutes} min.`;
-  }
+  if (titleEl) titleEl.textContent = contract.reset?.title || "Your reset";
+  if (bodyEl) bodyEl.textContent = contract.reset?.description || "";
   if (stepsEl) {
-    const steps = Array.isArray(contract.reset?.steps) ? contract.reset.steps : [];
-    stepsEl.innerHTML = "";
-    steps.forEach((step) => {
+    const resetText = contract.reset?.reset || "";
+    if (resetText) {
+      stepsEl.innerHTML = "";
       const p = document.createElement("p");
-      p.style.cssText = "margin:10px 0;line-height:1.6;";
-      p.textContent = step;
+      p.style.cssText = "margin:10px 0;line-height:1.8;";
+      p.textContent = resetText;
       stepsEl.appendChild(p);
-    });
+    } else {
+      const steps = Array.isArray(contract.reset?.steps) ? contract.reset.steps : [];
+      stepsEl.innerHTML = "";
+      steps.forEach((step) => {
+        const p = document.createElement("p");
+        p.style.cssText = "margin:10px 0;line-height:1.6;";
+        p.textContent = step;
+        stepsEl.appendChild(p);
+      });
+    }
   }
   return contract;
 }

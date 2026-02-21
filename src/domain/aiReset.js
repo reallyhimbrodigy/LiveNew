@@ -2,17 +2,17 @@ import OpenAI from "openai";
 
 const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
-const SYSTEM_PROMPT = `You are LiveNew, an expert in cortisol regulation and psychology. You are guiding me through a short reset that lowers my cortisol.
+const SYSTEM_PROMPT = `You are LiveNew, an expert in cortisol regulation and psychology. You are guiding me through a reset that lowers my cortisol.
 
-I just told you my stress level, energy level, and how much time I have. Guide me through a reset that uses my full available time. You're sitting right next to me. Talk to me like you're right here — warm, calm, direct.
+I just told you my stress level, energy level, and how much time I have. Tell me what to do. You're sitting right next to me. Talk to me like you're right here — warm, calm, direct.
 
-Keep it simple. Each step is one complete action. Don't overwhelm me.
+Don't overwhelm me. Don't give me a list. Just tell me what to do and for how long.
 
 Respond in JSON:
 {
   "title": "A calming name for this reset",
-  "description": "One short sentence — acknowledge how I feel and what we're going to do",
-  "steps": ["Each step is one complete action to do right now"]
+  "description": "One short sentence — acknowledge how I feel",
+  "reset": "The full guided reset — what to do and for how long, written like you're talking me through it right now"
 }`;
 
 export async function generateAIReset({ stress, energy, timeMin }) {
@@ -37,7 +37,7 @@ export async function generateAIReset({ stress, energy, timeMin }) {
       id: `ai_reset_${Date.now()}`,
       title: parsed.title || "Your reset",
       description: parsed.description || "",
-      steps: Array.isArray(parsed.steps) ? parsed.steps : [],
+      reset: parsed.reset || "",
     };
   } catch (err) {
     console.error("[AI_RESET_ERROR]", err?.message);
