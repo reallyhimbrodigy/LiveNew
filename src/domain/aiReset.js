@@ -21,7 +21,7 @@ export async function generateAIReset({ stress, energy, timeMin }) {
 
   try {
     const response = await client.chat.completions.create({
-      model: "gpt-4o-mini",
+      model: "gpt-4o",
       messages: [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },

@@ -895,7 +895,13 @@ function renderDay(contract) {
   }
   if (stepsEl) {
     const steps = Array.isArray(contract.reset?.steps) ? contract.reset.steps : [];
-    stepsEl.textContent = steps.length ? steps.join(" • ") : "Breathe slowly and release shoulder tension.";
+    stepsEl.innerHTML = "";
+    steps.forEach((step) => {
+      const p = document.createElement("p");
+      p.style.cssText = "margin:10px 0;line-height:1.6;";
+      p.textContent = step;
+      stepsEl.appendChild(p);
+    });
   }
   return contract;
 }
