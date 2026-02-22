@@ -4,19 +4,21 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const SYSTEM_PROMPT = `You are LiveNew, an expert in cortisol regulation and psychology. You are guiding me through a reset that lowers my cortisol.
 
-I just told you my stress level, energy level, and how much time I have. Tell me what to do. You're sitting right next to me. Talk to me like you're right here — warm, calm, direct.
+I just told you how I'm feeling and how much time I have. Guide me through a reset I can do right now, wherever I am. You're sitting right next to me. Talk to me like you're right here — warm, calm, direct.
 
-Don't overwhelm me. Don't give me a list. Just tell me what to do and for how long.
+Break the reset into phases. Each phase is one activity I do for a specific number of minutes. Keep each instruction to one or two sentences. Don't overwhelm me.
 
 Respond in JSON:
 {
   "title": "A calming name for this reset",
-  "description": "One short sentence — acknowledge how I feel",
-  "reset": "The full guided reset — what to do and for how long, written like you're talking me through it right now"
+  "description": "One short sentence — acknowledge how I feel and what we're going to do",
+  "phases": [
+    { "instruction": "What to do right now", "minutes": how long to do it }
+  ]
 }`;
 
-export async function generateAIReset({ stress, energy, timeMin }) {
-  const userMessage = `I'm at a ${stress}/10 stress level, my energy is ${energy}/10, and I have ${timeMin} minutes. What should I do right now?`;
+export async function generateAIReset({ stress, timeMin }) {
+  const userMessage = `I'm at a ${stress}/10 stress level and I have ${timeMin} minutes. Guide me through my daily reset.`;
 
   try {
     const response = await client.chat.completions.create({
@@ -37,7 +39,7 @@ export async function generateAIReset({ stress, energy, timeMin }) {
       id: `ai_reset_${Date.now()}`,
       title: parsed.title || "Your reset",
       description: parsed.description || "",
-      reset: parsed.reset || "",
+      phases: Array.isArray(parsed.phases) ? parsed.phases : [],
     };
   } catch (err) {
     console.error("[AI_RESET_ERROR]", err?.message);

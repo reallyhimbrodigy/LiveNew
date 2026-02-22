@@ -2637,7 +2637,6 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       const checkinData = context.checkIn || {};
       const aiReset = await generateAIReset({
         stress: checkinData.stress ?? 5,
-        energy: checkinData.energy ?? 5,
         timeMin: checkinData.timeAvailableMin ?? 10,
       });
       if (aiReset) {
@@ -2645,7 +2644,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           id: aiReset.id,
           title: aiReset.title,
           description: aiReset.description,
-          reset: aiReset.reset,
+          phases: aiReset.phases,
           durationSec: 180,
           seconds: 180,
           steps: [],

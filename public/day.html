@@ -40,11 +40,9 @@
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand" data-i18n="appName">LiveNew</div>
-      <nav id="day-secondary-nav" class="nav hidden">
-        <a href="/day" class="active" data-i18n="nav.day">Day</a>
-        <a href="/week" data-i18n="nav.week">Week</a>
-        <a href="/trends" data-i18n="nav.trends">Trends</a>
-        <a href="/profile" data-i18n="nav.profile">Profile</a>
+      <nav class="nav nav-muted">
+        <a href="/day" class="active">Reset</a>
+        <a href="/progress">Progress</a>
       </nav>
       <div class="account">
         <button id="account-menu-btn" class="ghost account-btn" type="button" aria-expanded="false">Account</button>
@@ -58,65 +56,58 @@
 
   <div class="ln-main">
     <div class="ln-container">
-      <section id="day-intro" class="card today-shell">
-        <h1>Let’s reset your day.</h1>
-        <p class="today-sub">One gentle step at a time.</p>
-        <button id="begin-personalization" class="primary today-next" type="button">Begin personalization</button>
-      </section>
+      <main id="day-app" class="today-shell">
 
-      <section id="onboarding" class="card today-shell wizard hidden" aria-hidden="true"></section>
-
-      <main id="day-app" class="hidden" aria-hidden="true">
-      <section id="today-flow" class="card today-shell">
-        <div id="today-step-indicator" class="today-progress">Step 1 of 4</div>
-        <div id="today-step-stress" class="today-screen hidden" data-step="stress">
+        <!-- Step: stress -->
+        <section id="day-step-stress" class="card today-screen" data-step="stress">
           <h2 class="today-question">How stressed do you feel right now?</h2>
-          <p class="today-sub">Choose 1 (low) to 10 (high)</p>
-          <div id="today-stress-options" class="choice-grid">
-            <button data-value="1">1</button><button data-value="2">2</button><button data-value="3">3</button><button data-value="4">4</button><button data-value="5">5</button><button data-value="6">6</button><button data-value="7">7</button><button data-value="8">8</button><button data-value="9">9</button><button data-value="10">10</button>
+          <div class="slider-wrap">
+            <input id="stress-slider" class="stress-slider" type="range" min="1" max="10" value="5" />
+            <div class="slider-labels"><span>1 — calm</span><span>10 — overwhelmed</span></div>
+            <div class="slider-value">5</div>
           </div>
-          <button id="today-stress-next" class="primary today-next">Continue</button>
-        </div>
+          <button id="stress-next" class="primary today-next" type="button">Continue</button>
+        </section>
 
-        <div id="today-step-energy" class="today-screen hidden" data-step="energy">
-          <h2 class="today-question">How is your energy?</h2>
-          <p class="today-sub">Choose 1 (drained) to 10 (full)</p>
-          <div id="today-energy-options" class="choice-grid">
-            <button data-value="1">1</button><button data-value="2">2</button><button data-value="3">3</button><button data-value="4">4</button><button data-value="5">5</button><button data-value="6">6</button><button data-value="7">7</button><button data-value="8">8</button><button data-value="9">9</button><button data-value="10">10</button>
-          </div>
-          <button id="today-energy-next" class="primary today-next">Continue</button>
-        </div>
-
-        <div id="today-step-time" class="today-screen hidden" data-step="time">
+        <!-- Step: time -->
+        <section id="day-step-time" class="card today-screen hidden" data-step="time">
           <h2 class="today-question">How much time do you have?</h2>
-          <p class="today-sub">Pick one option</p>
-          <div id="today-time-options" class="choice-grid time">
-            <button data-value="5">5 min</button>
-            <button data-value="10">10 min</button>
-            <button data-value="20">20 min</button>
+          <div class="today-options">
+            <button class="time-opt" data-value="5" type="button">5 min</button>
+            <button class="time-opt" data-value="10" type="button">10 min</button>
+            <button class="time-opt" data-value="20" type="button">20 min</button>
           </div>
-          <button id="today-time-next" class="primary today-next">Continue</button>
-        </div>
+          <button id="time-next" class="primary today-next" type="button" disabled>Continue</button>
+          <div id="day-status" class="muted"></div>
+        </section>
 
-        <div id="today-step-reco" class="today-screen hidden" data-step="reco">
-          <h2 class="today-question">Today’s reset</h2>
-          <h3 id="today-reco-title">Reset</h3>
-          <p id="today-reco-body" class="today-sub"></p>
-          <p id="today-reco-steps" class="today-sub"></p>
-          <button id="today-begin-reset" class="primary today-next">Begin reset</button>
-        </div>
+        <!-- Step: reset (phases + timer) -->
+        <section id="day-step-reset" class="card today-screen hidden" data-step="reset">
+          <h2 id="reset-title" class="today-question"></h2>
+          <p id="reset-description" class="today-sub"></p>
+          <div class="reset-instruction" id="reset-instruction"></div>
+          <div class="reset-timer" id="reset-timer"></div>
+          <button id="reset-skip" class="ghost today-next" type="button" style="margin-top:8px">Skip phase</button>
+        </section>
 
-        <div id="today-step-done" class="today-screen hidden" data-step="done">
-          <h2 class="today-question">Done</h2>
-          <p class="today-sub">Nice work. Keep the next step easy.</p>
-          <div id="today-done-links" class="today-links hidden">
-            <a href="/week">See week</a> ·
-            <a href="/trends">See trends</a> ·
-            <a href="/profile">Profile</a>
+        <!-- Step: after (post-reset stress check) -->
+        <section id="day-step-after" class="card today-screen hidden" data-step="after">
+          <h2 class="today-question">How are you feeling now?</h2>
+          <div class="slider-wrap">
+            <input id="after-slider" class="stress-slider" type="range" min="1" max="10" value="5" />
+            <div class="slider-labels"><span>1 — calm</span><span>10 — overwhelmed</span></div>
+            <div class="slider-value">5</div>
           </div>
-        </div>
-        <div id="today-status" class="muted"></div>
-      </section>
+          <button id="after-next" class="primary today-next" type="button">Done</button>
+        </section>
+
+        <!-- Step: done -->
+        <section id="day-step-done" class="card today-screen hidden" data-step="done">
+          <h2 class="today-question">Reset complete.</h2>
+          <p id="done-message" class="today-sub"></p>
+          <a href="/progress" class="btn primary" style="display:inline-flex;align-items:center;justify-content:center;margin-top:12px">See your progress</a>
+        </section>
+
       </main>
     </div>
   </div>
