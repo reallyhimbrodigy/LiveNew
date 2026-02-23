@@ -1043,7 +1043,6 @@ function validateCheckInPayload(raw) {
   const rules = [
     { field: "stress", min: 1, max: 10 },
     { field: "sleepQuality", min: 1, max: 10 },
-    { field: "energy", min: 1, max: 10 },
     { field: "timeAvailableMin", min: 5, max: 60 },
   ];
   for (const rule of rules) {
