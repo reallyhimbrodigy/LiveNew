@@ -28,7 +28,7 @@ export async function generateAIReset({ stress, timeMin }) {
         { role: "user", content: userMessage },
       ],
       temperature: 0.8,
-      max_tokens: 400,
+      max_tokens: 1000,
       response_format: { type: "json_object" },
     });
 
