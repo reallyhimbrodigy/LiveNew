@@ -1,6 +1,6 @@
-import OpenAI from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SYSTEM_PROMPT = `You are LiveNew, an expert in cortisol regulation and psychology. You are guiding me through a reset that lowers my cortisol.
 
@@ -8,7 +8,7 @@ I just told you how I'm feeling and how much time I have. Guide me through a res
 
 Break the reset into phases. Use your full expertise — each phase should be a different evidence-based technique that activates my parasympathetic nervous system. Walk me through each phase for its full duration — tell me what to do and keep guiding me through it.
 
-Respond in JSON:
+Respond in JSON only, no other text:
 {
   "title": "A calming name for this reset",
   "description": "One short sentence — acknowledge how I feel and what we're going to do",
@@ -18,22 +18,21 @@ Respond in JSON:
 }`;
 
 export async function generateAIReset({ stress, timeMin }) {
-  const userMessage = `I'm at a ${stress}/10 stress level and I have ${timeMin} minutes. Guide me through my daily reset.`;
+  const userMessage = `I'm at a ${stress}/10 stress level and I have ${timeMin} minutes. What should I do right now?`;
 
   try {
-    const response = await client.chat.completions.create({
-      model: "gpt-4o",
+    const response = await client.messages.create({
+      model: "claude-opus-4-6",
+      max_tokens: 1500,
+      system: SYSTEM_PROMPT,
       messages: [
-        { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userMessage },
       ],
-      temperature: 0.8,
-      max_tokens: 1000,
-      response_format: { type: "json_object" },
     });
 
-    const content = response.choices?.[0]?.message?.content || "";
-    const parsed = JSON.parse(content);
+    const content = response.content?.[0]?.text || "";
+    const jsonMatch = content.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
 
     return {
       id: `ai_reset_${Date.now()}`,
