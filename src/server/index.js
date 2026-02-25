@@ -2575,7 +2575,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
   if (pathname === "/v1/checkin" && req.method === "POST") {
     let keepAlive = null;
     try {
-      const body = await parseJson(req);
+      let body = await parseJson(req);
       const now = new Date();
       let dateKey =
         body?.dateKey ||
@@ -2667,7 +2667,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
       clearInterval(keepAlive);
       keepAlive = null;
-      const body = { userId: auth.userId, ...normalizedToday };
+      body = { userId: auth.userId, ...normalizedToday };
       if (res?.livenewRequestId) body.requestId = res.livenewRequestId;
       attachDbStats(res);
       res.end(JSON.stringify(body));
