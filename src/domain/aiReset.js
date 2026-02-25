@@ -21,7 +21,7 @@ export async function generateAIReset({ stress, timeMin }) {
   const userMessage = `I'm at a ${stress}/10 stress level and I have ${timeMin} minutes. What should I do right now?`;
 
   try {
-    const response = await client.messages.create({
+    const stream = client.messages.stream({
       model: "claude-sonnet-4-5-20250929",
       max_tokens: 1500,
       temperature: 0.7,
@@ -29,9 +29,11 @@ export async function generateAIReset({ stress, timeMin }) {
       messages: [
         { role: "user", content: userMessage },
       ],
-    }, { timeout: 25000 });
+    });
 
-    const content = response.content?.[0]?.text || "";
+    const finalMessage = await stream.finalMessage();
+    console.log("[AI_RESET] Stream complete, tokens used:", finalMessage.usage);
+    const content = finalMessage.content?.[0]?.text || "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     let jsonStr = jsonMatch ? jsonMatch[0] : content;
 

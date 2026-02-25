@@ -1,11 +1,11 @@
 {
-  "buildId": "202602250446-2ab5f5b",
-  "generatedAt": "2026-02-25T04:46:20.598Z",
+  "buildId": "202602251943-1ae43f1",
+  "generatedAt": "2026-02-25T19:43:35.631Z",
   "files": {
-    "app.init": "app.init.202602250446-2ab5f5b.js",
-    "app.core": "app.core.202602250446-2ab5f5b.js",
-    "controllers": "controllers.202602250446-2ab5f5b.js",
-    "app.api": "app.api.202602250446-2ab5f5b.js",
-    "app.ui": "app.ui.202602250446-2ab5f5b.js"
+    "app.init": "app.init.202602251943-1ae43f1.js",
+    "app.core": "app.core.202602251943-1ae43f1.js",
+    "controllers": "controllers.202602251943-1ae43f1.js",
+    "app.api": "app.api.202602251943-1ae43f1.js",
+    "app.ui": "app.ui.202602251943-1ae43f1.js"
   }
 }

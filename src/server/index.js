@@ -2573,6 +2573,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
   }
 
   if (pathname === "/v1/checkin" && req.method === "POST") {
+    let keepAlive = null;
     try {
       const body = await parseJson(req);
       const now = new Date();
@@ -2632,6 +2633,13 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         priorProfile: context.priorProfile,
       });
 
+      // Keep-alive: write a space every 10s so Render's 30s proxy timeout doesn't kill the connection
+      res.setHeader('Content-Type', 'application/json');
+      res.setHeader('X-Accel-Buffering', 'no');
+      keepAlive = setInterval(() => {
+        if (!res.writableEnded) res.write(' ');
+      }, 10000);
+
       // AI-powered personalized reset
       const checkinData = context.checkIn || {};
       const aiReset = await generateAIReset({
@@ -2651,10 +2659,20 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       }
 
       const normalizedToday = ensureTodayContract(today, res);
-      if (!normalizedToday) return true;
+      if (!normalizedToday) {
+        clearInterval(keepAlive);
+        keepAlive = null;
+        return true;
+      }
       await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
-      sendJson(res, 200, normalizedToday, auth.userId);
+      clearInterval(keepAlive);
+      keepAlive = null;
+      const body = { userId: auth.userId, ...normalizedToday };
+      if (res?.livenewRequestId) body.requestId = res.livenewRequestId;
+      attachDbStats(res);
+      res.end(JSON.stringify(body));
     } catch (checkinErr) {
+      if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
       console.error(
         "[CHECKIN_ERROR]",
         JSON.stringify({
@@ -2664,7 +2682,13 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           requestId: res?.livenewRequestId,
         })
       );
-      sendError(res, 500, "internal", "Checkin failed");
+      if (!res.writableEnded) {
+        if (res.headersSent) {
+          res.end(JSON.stringify({ ok: false, error: { code: "internal", message: "Checkin failed" } }));
+        } else {
+          sendError(res, 500, "internal", "Checkin failed");
+        }
+      }
     }
     return true;
   }
