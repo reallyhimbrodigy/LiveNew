@@ -23,7 +23,7 @@ export async function generateAIReset({ stress, timeMin }) {
   try {
     const response = await client.messages.create({
       model: "claude-opus-4-6",
-      max_tokens: 1500,
+      max_tokens: 4000,
       system: SYSTEM_PROMPT,
       messages: [
         { role: "user", content: userMessage },
@@ -32,7 +32,27 @@ export async function generateAIReset({ stress, timeMin }) {
 
     const content = response.content?.[0]?.text || "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
-    const parsed = JSON.parse(jsonMatch ? jsonMatch[0] : content);
+    let jsonStr = jsonMatch ? jsonMatch[0] : content;
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch {
+      // Attempt to fix truncated JSON by closing open arrays/objects
+      if (!jsonStr.endsWith("}")) {
+        // Find last complete phase object
+        const lastComplete = jsonStr.lastIndexOf("}");
+        if (lastComplete > 0) {
+          jsonStr = jsonStr.substring(0, lastComplete + 1) + "]}";
+          parsed = JSON.parse(jsonStr);
+        }
+      }
+    }
+
+    if (!parsed) {
+      console.error("[AI_RESET_ERROR] Could not parse response");
+      return null;
+    }
 
     return {
       id: `ai_reset_${Date.now()}`,
