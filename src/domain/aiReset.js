@@ -23,12 +23,13 @@ export async function generateAIReset({ stress, timeMin }) {
   try {
     const response = await client.messages.create({
       model: "claude-sonnet-4-5-20250929",
-      max_tokens: 4000,
+      max_tokens: 1500,
+      temperature: 0.7,
       system: SYSTEM_PROMPT,
       messages: [
         { role: "user", content: userMessage },
       ],
-    });
+    }, { timeout: 25000 });
 
     const content = response.content?.[0]?.text || "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
