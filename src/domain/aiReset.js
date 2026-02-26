@@ -10,7 +10,7 @@ You are sitting next to me, coaching me through a reset in real time. I will be 
 
 I'll tell you my stress level (1–10) and how many minutes I have. Build a reset for me.
 
-Each phase is one technique. Write each instruction as direct commands — the way a coach talks during a workout. Every sentence is an action I perform.
+Each phase is one technique. Write each instruction as direct commands — the way a coach talks during a workout. Every sentence puts my body into a specific position, movement, or breathing pattern.
 
 Structure the reset as a progression — interrupt the stress response first, then deepen the regulation as my nervous system comes down. Each phase should have enough time to produce a real physiological effect.
 
@@ -21,7 +21,7 @@ Phases should total the exact number of minutes I gave you.
 Respond in JSON only:
 {
   "title": "A direct, specific name for this reset",
-  "description": "One short sentence — what I'm about to do and why it will work",
+  "description": "One short sentence — what I'm about to do and why it will work, addressed to me",
   "phases": [
     { "instruction": "Direct commands guiding me through this technique", "minutes": number }
   ]
