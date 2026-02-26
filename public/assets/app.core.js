@@ -896,6 +896,8 @@ function initDay({ initialDateISO } = {}) {
   let currentContract = null;
   let currentDateISO = initialDateISO || todayISO();
   let stressBefore = 5;
+  let energy = null;
+  let sleepHours = 7;
   let timeMin = null;
 
   const showStep = (name) => {
@@ -904,68 +906,197 @@ function initDay({ initialDateISO } = {}) {
     });
   };
 
+  const startGuidedExperience = (phases, config) => {
+    const instructionEl = qs(`#${config.instructionEl}`);
+    const timerEl = qs(`#${config.timerEl}`);
+    const skipBtn = qs(`#${config.skipBtn}`);
+    const titleEl = qs(`#${config.titleEl || ""}`);
+    const descEl = qs(`#${config.descriptionEl || ""}`);
+    let phaseIndex = 0;
+    let intervalId = null;
+
+    const finish = () => {
+      clearInterval(intervalId);
+      if (typeof config.onComplete === "function") config.onComplete();
+    };
+
+    const runPhase = () => {
+      if (phaseIndex >= phases.length) {
+        finish();
+        return;
+      }
+      const phase = phases[phaseIndex];
+      const totalSec = Math.round((phase.minutes || 1) * 60);
+      let remaining = totalSec;
+      if (phaseIndex > 0) {
+        if (titleEl) titleEl.style.display = "none";
+        if (descEl) descEl.style.display = "none";
+      } else {
+        if (titleEl) titleEl.style.display = "";
+        if (descEl) descEl.style.display = "";
+      }
+      if (instructionEl) instructionEl.textContent = phase.instruction || "";
+      const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+      if (timerEl) timerEl.textContent = fmt(remaining);
+      clearInterval(intervalId);
+      intervalId = setInterval(() => {
+        remaining -= 1;
+        if (timerEl) timerEl.textContent = fmt(remaining);
+        if (remaining <= 0) {
+          clearInterval(intervalId);
+          phaseIndex += 1;
+          runPhase();
+        }
+      }, 1000);
+    };
+
+    if (skipBtn) {
+      skipBtn.onclick = () => {
+        clearInterval(intervalId);
+        phaseIndex += 1;
+        runPhase();
+      };
+    }
+
+    runPhase();
+  };
+
+  function startGuidedReset(phases) {
+    startGuidedExperience(phases, {
+      instructionEl: "reset-instruction",
+      timerEl: "reset-timer",
+      skipBtn: "reset-skip",
+      titleEl: "reset-title",
+      descriptionEl: "reset-description",
+      onComplete: () => showStep("after"),
+    });
+  }
+
+  const checkinNext = qs("#checkin-next");
+  const statusEl = qs("#day-status");
+  const updateCheckinReady = () => {
+    const ready = Number.isFinite(stressBefore) && stressBefore >= 1 && stressBefore <= 10 && !!energy && Number.isFinite(sleepHours) && sleepHours >= 0 && sleepHours <= 12 && !!timeMin;
+    if (checkinNext) checkinNext.disabled = !ready;
+  };
+
   // Stress slider
   const stressSlider = qs("#stress-slider");
   const stressValEl = qs("#stress-slider")?.closest(".slider-wrap")?.querySelector(".slider-value");
   stressSlider?.addEventListener("input", () => {
     stressBefore = Number(stressSlider.value);
     if (stressValEl) stressValEl.textContent = stressSlider.value;
+    updateCheckinReady();
   });
-  qs("#stress-next")?.addEventListener("click", () => {
-    stressBefore = Number(stressSlider?.value || 5);
-    console.log("[LN] stress-next clicked, stress:", stressBefore);
-    if (stressBefore <= 3) {
-      window.location.href = "/progress";
-      return;
-    }
-    showStep("time");
+
+  const sleepSlider = qs("#sleep-slider");
+  const sleepValEl = sleepSlider?.closest(".slider-wrap")?.querySelector(".slider-value");
+  sleepHours = Number(sleepSlider?.value || 7);
+  sleepSlider?.addEventListener("input", () => {
+    sleepHours = Number(sleepSlider.value);
+    if (sleepValEl) sleepValEl.textContent = sleepSlider.value;
+    updateCheckinReady();
   });
-  console.log("[LN] stress-next element:", qs("#stress-next"));
+
+  const energyOpts = Array.from(document.querySelectorAll(".energy-opt"));
+  energyOpts.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      energy = String(btn.dataset.value || "").trim() || null;
+      energyOpts.forEach((other) => other.classList.toggle("active", other === btn));
+      updateCheckinReady();
+    });
+  });
 
   // Time option buttons
   const timeOpts = Array.from(document.querySelectorAll(".time-opt"));
-  const timeNext = qs("#time-next");
-  const statusEl = qs("#day-status");
   timeOpts.forEach((btn) => {
     btn.addEventListener("click", () => {
       timeMin = Number(btn.dataset.value);
       timeOpts.forEach((other) => other.classList.toggle("active", other === btn));
-      if (timeNext) timeNext.disabled = false;
+      updateCheckinReady();
     });
   });
 
-  timeNext?.addEventListener("click", async () => {
-    if (!timeMin) return;
-    if (statusEl) statusEl.textContent = "Building your reset…";
-    if (timeNext) timeNext.disabled = true;
+  checkinNext?.addEventListener("click", async () => {
+    stressBefore = Number(stressSlider?.value || 5);
+    sleepHours = Number(sleepSlider?.value || 7);
+    if (!energy || !timeMin || !Number.isFinite(sleepHours)) return;
+    if (statusEl) statusEl.textContent = "Building your plan…";
+    if (checkinNext) checkinNext.disabled = true;
     try {
+      const energyScore = energy === "low" ? 3 : energy === "high" ? 9 : 6;
       const res = await apiPost("/v1/checkin", {
         checkIn: {
           dateISO: currentDateISO,
           stress: stressBefore,
-          sleepQuality: 6,
+          energy: energyScore,
+          sleepHours,
+          sleepQuality: Math.max(1, Math.min(10, Math.round((sleepHours / 12) * 10))),
           timeAvailableMin: timeMin,
         },
       });
       currentContract = res;
       currentDateISO = res?.dateISO || currentDateISO;
       if (statusEl) statusEl.textContent = "";
-      const titleEl = qs("#reset-title");
-      const descEl = qs("#reset-description");
-      if (titleEl) titleEl.textContent = res?.reset?.title || "Your reset";
-      if (descEl) descEl.textContent = res?.reset?.description || "";
-      showStep("reset");
-      startGuidedReset(res?.reset?.phases || []);
+
+      const moveCard = qs("#today-move");
+      const move = res?.movement || res?.move || res?.workout;
+      const moveDesc = qs("#move-description");
+      if (moveCard) moveCard.classList.toggle("hidden", !move);
+      if (moveDesc) moveDesc.textContent = move?.description || "";
+
+      const resetCard = qs("#today-reset");
+      if (resetCard) {
+        const hideReset = stressBefore <= 3 || !res?.reset;
+        resetCard.classList.toggle("hidden", hideReset);
+      }
+      const resetDesc = qs("#today-reset-description");
+      if (resetDesc) resetDesc.textContent = res?.reset?.description || "";
+
+      const nutritionEl = qs("#nutrition-tip");
+      if (nutritionEl) {
+        nutritionEl.textContent = res?.nutrition?.tip || res?.nutrition?.description || (typeof res?.nutrition === "string" ? res.nutrition : "");
+      }
+
+      showStep("today");
     } catch (err) {
       if (isAuthRequiredError(err)) {
         clearTokens();
         redirectToLogin(currentPathWithQuery());
         return;
       }
-      if (statusEl) statusEl.textContent = "Could not load your reset. Try again.";
-      if (timeNext) timeNext.disabled = false;
+      if (statusEl) statusEl.textContent = "Could not load your plan. Try again.";
+      updateCheckinReady();
       reportError(err);
     }
+  });
+
+  qs("#start-move")?.addEventListener("click", () => {
+    const move = currentContract?.movement || currentContract?.move || currentContract?.workout;
+    if (!move) return;
+    const titleEl = qs("#move-title");
+    const descEl = qs("#move-phase-description");
+    if (titleEl) titleEl.textContent = move.title || "Your movement";
+    if (descEl) descEl.textContent = move.description || "";
+    showStep("move");
+    startGuidedExperience(move.phases || [], {
+      instructionEl: "move-instruction",
+      timerEl: "move-timer",
+      skipBtn: "move-skip",
+      titleEl: "move-title",
+      descriptionEl: "move-phase-description",
+      onComplete: () => showStep("today"),
+    });
+  });
+
+  qs("#start-reset")?.addEventListener("click", () => {
+    const reset = currentContract?.reset;
+    if (!reset) return;
+    const titleEl = qs("#reset-title");
+    const descEl = qs("#reset-description");
+    if (titleEl) titleEl.textContent = reset.title || "Your reset";
+    if (descEl) descEl.textContent = reset.description || "";
+    showStep("reset");
+    startGuidedReset(reset.phases || []);
   });
 
   // After (post-reset) slider
@@ -997,61 +1128,8 @@ function initDay({ initialDateISO } = {}) {
     showStep("done");
   });
 
-  showStep("stress");
-}
-
-function startGuidedReset(phases) {
-  const instructionEl = qs("#reset-instruction");
-  const timerEl = qs("#reset-timer");
-  const skipBtn = qs("#reset-skip");
-  let phaseIndex = 0;
-  let intervalId = null;
-
-  const goToAfter = () => {
-    clearInterval(intervalId);
-    document.querySelectorAll("[data-step]").forEach((el) => {
-      el.classList.toggle("hidden", el.dataset.step !== "after");
-    });
-  };
-
-  const runPhase = () => {
-    if (phaseIndex >= phases.length) {
-      goToAfter();
-      return;
-    }
-    const phase = phases[phaseIndex];
-    const totalSec = Math.round((phase.minutes || 1) * 60);
-    let remaining = totalSec;
-    if (phaseIndex > 0) {
-      const titleEl = qs("#reset-title");
-      const descEl = qs("#reset-description");
-      if (titleEl) titleEl.style.display = "none";
-      if (descEl) descEl.style.display = "none";
-    }
-    if (instructionEl) instructionEl.textContent = phase.instruction || "";
-    const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
-    if (timerEl) timerEl.textContent = fmt(remaining);
-    clearInterval(intervalId);
-    intervalId = setInterval(() => {
-      remaining -= 1;
-      if (timerEl) timerEl.textContent = fmt(remaining);
-      if (remaining <= 0) {
-        clearInterval(intervalId);
-        phaseIndex += 1;
-        runPhase();
-      }
-    }, 1000);
-  };
-
-  if (skipBtn) {
-    skipBtn.onclick = () => {
-      clearInterval(intervalId);
-      phaseIndex += 1;
-      runPhase();
-    };
-  }
-
-  runPhase();
+  updateCheckinReady();
+  showStep("checkin");
 }
 
 function initWeek() {

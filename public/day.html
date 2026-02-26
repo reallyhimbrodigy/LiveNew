@@ -58,27 +58,71 @@
     <div class="ln-container">
       <main id="day-app" class="today-shell">
 
-        <!-- Step: stress -->
-        <section id="day-step-stress" class="card today-screen" data-step="stress">
-          <h2 class="today-question">How stressed do you feel right now?</h2>
+        <!-- Step: checkin -->
+        <section id="day-step-checkin" class="card today-screen" data-step="checkin">
+          <h2 class="today-question">Daily check-in</h2>
+
+          <label class="checkin-label">How stressed do you feel?</label>
           <div class="slider-wrap">
             <input id="stress-slider" class="stress-slider" type="range" min="1" max="10" value="5" />
             <div class="slider-labels"><span>1 — calm</span><span>10 — overwhelmed</span></div>
             <div class="slider-value">5</div>
           </div>
-          <button id="stress-next" class="primary today-next" type="button">Continue</button>
-        </section>
 
-        <!-- Step: time -->
-        <section id="day-step-time" class="card today-screen hidden" data-step="time">
-          <h2 class="today-question">How much time do you have?</h2>
+          <label class="checkin-label">Energy level</label>
+          <div class="today-options">
+            <button class="energy-opt" data-value="low" type="button">Low</button>
+            <button class="energy-opt" data-value="med" type="button">Med</button>
+            <button class="energy-opt" data-value="high" type="button">High</button>
+          </div>
+
+          <label class="checkin-label">Hours of sleep last night</label>
+          <div class="slider-wrap">
+            <input id="sleep-slider" class="sleep-slider" type="range" min="0" max="12" step="0.5" value="7" />
+            <div class="slider-labels"><span>0h</span><span>12h</span></div>
+            <div class="slider-value">7</div>
+          </div>
+
+          <label class="checkin-label">Time available</label>
           <div class="today-options">
             <button class="time-opt" data-value="5" type="button">5 min</button>
             <button class="time-opt" data-value="10" type="button">10 min</button>
             <button class="time-opt" data-value="20" type="button">20 min</button>
           </div>
-          <button id="time-next" class="primary today-next" type="button" disabled>Continue</button>
+
+          <button id="checkin-next" class="primary today-next" type="button" disabled>Continue</button>
           <div id="day-status" class="muted"></div>
+        </section>
+
+        <!-- Step: today -->
+        <section id="day-step-today" class="card today-screen hidden" data-step="today">
+          <h2 class="today-question">Your plan for today</h2>
+
+          <div id="today-move" class="today-card">
+            <h3 class="today-card-title">Move</h3>
+            <p id="move-description" class="today-card-desc"></p>
+            <button id="start-move" class="primary" type="button">Start</button>
+          </div>
+
+          <div id="today-reset" class="today-card">
+            <h3 class="today-card-title">Reset</h3>
+            <p id="today-reset-description" class="today-card-desc"></p>
+            <button id="start-reset" class="primary" type="button">Start</button>
+          </div>
+
+          <div id="today-nutrition" class="today-card">
+            <h3 class="today-card-title">Nutrition</h3>
+            <p id="nutrition-tip" class="today-card-desc"></p>
+          </div>
+        </section>
+
+        <!-- Step: move (phases + timer) -->
+        <section id="day-step-move" class="card today-screen hidden" data-step="move">
+          <h2 id="move-title" class="today-question"></h2>
+          <p id="move-phase-description" class="today-sub"></p>
+          <div class="reset-instruction" id="move-instruction"></div>
+          <div class="reset-timer" id="move-timer"></div>
+          <button id="move-skip" class="ghost today-next" type="button" style="margin-top:8px">Skip phase</button>
         </section>
 
         <!-- Step: reset (phases + timer) -->
