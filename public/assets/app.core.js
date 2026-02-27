@@ -1128,24 +1128,69 @@ function initDay({ initialDateISO } = {}) {
       currentContract = res;
       currentDateISO = res?.dateISO || currentDateISO;
       if (statusEl) statusEl.textContent = "";
+      // --- Populate Today screen ---
+      const stress = stressBefore;
+      const headline = qs("#today-headline");
+      const subline = qs("#today-subline");
 
+      // State-aware headline
+      if (headline) {
+        if (stress >= 8) headline.textContent = "Let's bring that stress down";
+        else if (stress >= 5) headline.textContent = "Your plan for today";
+        else headline.textContent = "You're in a good place - let's move";
+      }
+
+      // Subline with summary
+      if (subline) {
+        const parts = [];
+        if (res?.movement || res?.move) parts.push(`${timeMin} min movement`);
+        if (stress > 3 && res?.reset) parts.push("5 min reset");
+        subline.textContent = parts.length ? parts.join(" + ") : "";
+      }
+
+      // Reset card
+      const resetCard = qs("#today-reset");
+      const showReset = stress > 3 && res?.reset;
+      if (resetCard) resetCard.classList.toggle("hidden", !showReset);
+      if (showReset) {
+        const resetTitle = qs("#today-reset-title");
+        const resetDesc = qs("#today-reset-description");
+        if (resetTitle) resetTitle.textContent = res.reset.title || "Your reset";
+        if (resetDesc) resetDesc.textContent = res.reset.description || "";
+      }
+
+      // Move card
       const moveCard = qs("#today-move");
       const move = res?.movement || res?.move || res?.workout;
-      const moveDesc = qs("#move-description");
       if (moveCard) moveCard.classList.toggle("hidden", !move);
-      if (moveDesc) moveDesc.textContent = move?.description || "";
-
-      const resetCard = qs("#today-reset");
-      if (resetCard) {
-        const hideReset = stressBefore <= 3 || !res?.reset;
-        resetCard.classList.toggle("hidden", hideReset);
+      if (move) {
+        const moveTitle = qs("#move-card-title");
+        const moveDesc = qs("#move-description");
+        const moveLabel = qs("#move-card-label");
+        const moveDuration = qs("#today-move-duration");
+        if (moveTitle) moveTitle.textContent = move.title || "Your movement";
+        if (moveDesc) moveDesc.textContent = move.description || "";
+        if (moveLabel) moveLabel.textContent = showReset ? "Up next" : "Start here";
+        if (moveDuration) moveDuration.textContent = `${timeMin} min`;
+        // When reset is not showing, make move the primary card
+        if (!showReset) {
+          moveCard.classList.add("today-card-primary");
+        } else {
+          moveCard.classList.remove("today-card-primary");
+        }
       }
-      const resetDesc = qs("#today-reset-description");
-      if (resetDesc) resetDesc.textContent = res?.reset?.description || "";
 
+      // Nutrition tip
       const nutritionEl = qs("#nutrition-tip");
       if (nutritionEl) {
         nutritionEl.textContent = res?.nutrition?.tip || res?.nutrition?.description || (typeof res?.nutrition === "string" ? res.nutrition : "");
+      }
+
+      // Card order: if no reset, move should be first visually
+      const cardsContainer = qs("#today-cards");
+      if (cardsContainer && !showReset) {
+        const moveEl = qs("#today-move");
+        if (moveEl) cardsContainer.insertBefore(moveEl, cardsContainer.firstChild);
       }
 
       showStep("today");

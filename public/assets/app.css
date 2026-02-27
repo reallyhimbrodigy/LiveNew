@@ -219,6 +219,33 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
   color: var(--muted);
   margin: 0 0 12px;
 }
+.today-card-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.today-card-primary {
+  border: 2px solid var(--beige, #c49e70);
+}
+
+.today-card-primary .today-card-label {
+  color: var(--beige, #c49e70);
+}
+
+.today-card-subtle {
+  opacity: 0.85;
+  border-style: dashed;
+}
+
+.today-card-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin: 4px 0 8px;
+}
 
 .choice-grid {
   display: grid;

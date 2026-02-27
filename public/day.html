@@ -174,24 +174,34 @@
 
         <!-- Step: today -->
         <section id="day-step-today" class="card today-screen hidden" data-step="today">
-          <h2 class="today-question">Your plan for today</h2>
+          <h2 id="today-headline" class="today-question">Your plan for today</h2>
+          <p id="today-subline" class="today-sub muted"></p>
 
-          <div id="today-move" class="today-card">
-            <h3 class="today-card-title">Move</h3>
-            <p id="move-description" class="today-card-desc"></p>
-            <button id="start-move" class="primary" type="button">Start</button>
+          <div id="today-cards">
+
+            <div id="today-reset" class="today-card today-card-primary hidden">
+              <div class="today-card-label">Start here</div>
+              <h3 id="today-reset-title" class="today-card-title">Reset</h3>
+              <p id="today-reset-description" class="today-card-desc"></p>
+              <div class="today-card-meta"><span id="today-reset-duration">5 min</span></div>
+              <button id="start-reset" class="primary" type="button">Start reset</button>
+            </div>
+
+            <div id="today-move" class="today-card">
+              <div id="move-card-label" class="today-card-label"></div>
+              <h3 id="move-card-title" class="today-card-title">Move</h3>
+              <p id="move-description" class="today-card-desc"></p>
+              <div class="today-card-meta"><span id="today-move-duration"></span></div>
+              <button id="start-move" class="primary" type="button">Start</button>
+            </div>
+
+            <div id="today-nutrition" class="today-card today-card-subtle">
+              <h3 class="today-card-title">Nutrition</h3>
+              <p id="nutrition-tip" class="today-card-desc"></p>
+            </div>
+
           </div>
 
-          <div id="today-reset" class="today-card">
-            <h3 class="today-card-title">Reset</h3>
-            <p id="today-reset-description" class="today-card-desc"></p>
-            <button id="start-reset" class="primary" type="button">Start</button>
-          </div>
-
-          <div id="today-nutrition" class="today-card">
-            <h3 class="today-card-title">Nutrition</h3>
-            <p id="nutrition-tip" class="today-card-desc"></p>
-          </div>
           <a href="/progress" class="btn ghost" style="margin-top:16px;display:block;text-align:center">View progress</a>
         </section>
 

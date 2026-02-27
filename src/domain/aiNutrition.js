@@ -8,7 +8,7 @@ I will give you my daily check-in: stress level (1–10), energy (low/med/high),
 
 My goal shapes what you recommend. Cortisol regulation is always the foundation, and my goal determines how you apply it.
 
-This is one specific, actionable sentence about what to eat or drink and when. Address it to me directly. This is something I can act on immediately — a concrete recommendation, not a general principle.
+This is one short, specific sentence — 20 words maximum — about what to eat or drink right now. Address it to me directly. Be concrete: name a specific food or drink.
 
 Respond in JSON only:
 { "tip": "Your one-sentence nutrition recommendation" }`;
