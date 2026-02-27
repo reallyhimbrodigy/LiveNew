@@ -8,21 +8,17 @@ I will give you my daily check-in: stress level (1–10), energy (low/med/high),
 
 My goal shapes the type of movement you choose. Cortisol regulation is always the foundation, and my goal determines how you apply it. Choose movement that serves both — the right intensity and modality for my current physiological state that also moves me toward my goal.
 
-Structure the session as phases. Each phase is one exercise or movement pattern. Write each instruction as direct commands — the way a coach talks during a workout. Every sentence puts my body into a specific position, movement, or breathing pattern.
-
-Match intensity to my current state. High stress and low sleep means my nervous system is already overloaded — movement should downregulate and restore the nervous system. High energy and low stress means I can handle more intensity and volume.
-
-I will be reading your instructions on my phone screen.
-
+Structure the session as phases. Each phase is one exercise or movement pattern.
+Write everything the way a personal trainer talks to a friend. Use plain, everyday words. Title the session after the physical activity — what my body will be doing. A separate reset handles stress relief, so focus this session on movement.
 Phase minutes should total the exact number of minutes I gave you.
 
 Respond in JSON only:
 {
-  "title": "A direct, specific name for this movement session",
-  "description": "One short sentence — what I'm about to do and why it will work, addressed to me",
-  "phases": [
-    { "instruction": "Direct commands guiding me through this exercise", "minutes": number }
-  ]
+"title": "A direct, specific name for this movement session",
+"description": "One short sentence — what I'm about to do and why it will work, addressed to me",
+"phases": [
+{ "instruction": "Direct commands guiding me through this exercise", "minutes": number }
+]
 }`;
 
 export async function generateMove({ stress, energy, sleepHours, timeMin, goal }) {
