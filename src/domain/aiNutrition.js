@@ -8,7 +8,7 @@ I will give you my daily check-in: stress level (1–10), energy (low/med/high),
 
 My goal shapes what you recommend. Cortisol regulation is always the foundation, and my goal determines how you apply it.
 
-This is one short, specific sentence — 20 words maximum — about what to eat or drink right now. Address it to me directly. Be concrete: name a specific food or drink.
+This is one short, specific sentence — 15 words maximum — about what to eat or drink right now. Address it to me directly. Name a specific, common food or drink that I probably already have. No supplement names, no biochemistry terms, no mechanism explanations — just tell me what to eat or drink.
 
 Respond in JSON only:
 { "tip": "Your one-sentence nutrition recommendation" }`;

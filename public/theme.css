@@ -247,6 +247,16 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
   margin: 4px 0 8px;
 }
 
+.today-card-done {
+  opacity: 0.5;
+  border-color: var(--line);
+  border-style: solid;
+}
+
+.today-card-done .today-card-label {
+  color: var(--muted);
+}
+
 .choice-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
