@@ -18,7 +18,9 @@ import { runContentChecks } from "../domain/content/checks.js";
 import { hashJSON, sanitizeContentItem, sanitizePack } from "../domain/content/snapshotHash.js";
 import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
-import { generateAIPlan } from "../domain/aiPlan.js";
+import { generateMove } from "../domain/aiMove.js";
+import { generateReset } from "../domain/aiReset.js";
+import { generateNutrition } from "../domain/aiNutrition.js";
 import { buildWeekSkeleton } from "../domain/weekPlanner.js";
 import { computeContinuityMeta } from "../domain/continuity.js";
 import { applyQuickSignal } from "../domain/swap.js";
@@ -2601,6 +2603,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         return true;
       }
       const checkIn = normalizeCheckInInput(checkInRaw, dateKey);
+      checkIn.sleepHours = checkInRaw.sleepHours ?? checkInRaw.sleep_hours ?? null;
       const idempotencyKey = getIdempotencyKey(req);
       parityCounters.recordCheckin(Boolean(idempotencyKey));
       await persist.upsertCheckin(auth.userId, dateKey, checkIn);
@@ -2644,46 +2647,70 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
 
       // AI-powered personalized plan
       const checkinData = context.checkIn || {};
-      const aiPlan = await generateAIPlan({
+      const userGoal = baselineResolved?.constraints?.goal || null;
+      const rawEnergy = checkinData.energy;
+      const energyLabel =
+        typeof rawEnergy === "string"
+          ? rawEnergy
+          : rawEnergy <= 4
+            ? "low"
+            : rawEnergy >= 8
+              ? "high"
+              : "med";
+      const sleepQualityNum = Number(checkinData.sleepQuality);
+      const actualSleepHours =
+        checkinData.sleepHours ??
+        (Number.isFinite(sleepQualityNum) ? Math.round((sleepQualityNum / 10) * 12 * 2) / 2 : 7);
+      const aiInput = {
         stress: checkinData.stress ?? 5,
-        energy: checkinData.energy || "med",
-        sleepHours: checkinData.sleepHours ?? checkinData.sleepQuality ?? 7,
+        energy: energyLabel,
+        sleepHours: actualSleepHours,
         timeMin: checkinData.timeAvailableMin ?? 10,
-      });
-      if (aiPlan) {
-        if (aiPlan.move) {
-          today.movement = {
-            id: aiPlan.move.id,
-            title: aiPlan.move.title,
-            description: aiPlan.move.description,
-            phases: aiPlan.move.phases,
-            durationMin: checkinData.timeAvailableMin ?? 10,
-            minutes: checkinData.timeAvailableMin ?? 10,
-            intensity: "adaptive",
-          };
-        }
+        goal: userGoal,
+      };
 
-        if (aiPlan.reset) {
-          today.reset = {
-            id: aiPlan.reset.id,
-            title: aiPlan.reset.title,
-            description: aiPlan.reset.description,
-            phases: aiPlan.reset.phases,
-            durationSec: 300,
-            seconds: 300,
-            steps: [],
-          };
-        }
+      const [moveResult, resetResult, nutritionResult] = await Promise.allSettled([
+        generateMove(aiInput),
+        aiInput.stress > 3 ? generateReset(aiInput) : Promise.resolve(null),
+        generateNutrition(aiInput),
+      ]);
 
-        if (aiPlan.nutrition) {
-          today.nutrition = {
-            id: today.nutrition?.id || `ai_nutrition_${Date.now()}`,
-            title: "Today's nutrition",
-            tip: aiPlan.nutrition,
-            description: aiPlan.nutrition,
-            bullets: [aiPlan.nutrition],
-          };
-        }
+      const aiMove = moveResult.status === "fulfilled" ? moveResult.value : null;
+      const aiReset = resetResult.status === "fulfilled" ? resetResult.value : null;
+      const aiNutrition = nutritionResult.status === "fulfilled" ? nutritionResult.value : null;
+
+      if (aiMove) {
+        today.movement = {
+          id: aiMove.id,
+          title: aiMove.title,
+          description: aiMove.description,
+          phases: aiMove.phases,
+          durationMin: aiInput.timeMin,
+          minutes: aiInput.timeMin,
+          intensity: "adaptive",
+        };
+      }
+
+      if (aiReset) {
+        today.reset = {
+          id: aiReset.id,
+          title: aiReset.title,
+          description: aiReset.description,
+          phases: aiReset.phases,
+          durationSec: 300,
+          seconds: 300,
+          steps: [],
+        };
+      }
+
+      if (aiNutrition) {
+        today.nutrition = {
+          id: today.nutrition?.id || `ai_nutrition_${Date.now()}`,
+          title: "Today's nutrition",
+          tip: aiNutrition,
+          description: aiNutrition,
+          bullets: [aiNutrition],
+        };
       }
 
       const normalizedToday = ensureTodayContract(today, res);
@@ -2842,6 +2869,29 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     return true;
   }
 
+  if (pathname === "/v1/move/complete" && req.method === "POST") {
+    try {
+      const body = await parseJson(req);
+      const dateKey = body?.dateISO || body?.dateKey;
+      if (!dateKey) {
+        sendErrorCodeOnly(res, 400, "MISSING_DATE");
+        return true;
+      }
+      await persist.insertEventOncePerDay(
+        auth.userId,
+        dateKey,
+        "movement_completed",
+        { movementId: body?.movementId || null },
+        getIdempotencyKey(req)
+      );
+      sendJson(res, 200, { ok: true }, auth.userId);
+    } catch (err) {
+      console.error("[MOVE_COMPLETE_ERROR]", err?.message);
+      sendError(res, 500, "internal", "Failed to record movement completion");
+    }
+    return true;
+  }
+
   if (pathname === "/v1/outcomes") {
     if (req.method !== "GET") {
       sendError(res, 405, "method_not_allowed", "Method not allowed");
@@ -2894,7 +2944,12 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     return true;
   }
 
-  if (pathname === "/v1/checkin" || pathname === "/v1/quick" || pathname === "/v1/reset/complete") {
+  if (
+    pathname === "/v1/checkin" ||
+    pathname === "/v1/quick" ||
+    pathname === "/v1/reset/complete" ||
+    pathname === "/v1/move/complete"
+  ) {
     sendError(res, 405, "method_not_allowed", "Method not allowed");
     return true;
   }
@@ -6678,200 +6733,6 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
-    if (pathname === "/v1/checkin" && req.method === "POST") {
-      if (config.writesDisabled) {
-        monitoring.increment("writes_disabled");
-        sendErrorCodeOnly(res, 503, "WRITES_DISABLED");
-        return;
-      }
-      if (config.disableCheckinWrites) {
-        monitoring.increment("checkin_disabled");
-        sendErrorCodeOnly(res, 503, "CHECKIN_DISABLED");
-        return;
-      }
-      const guards = getEngineGuardsSnapshot();
-      if (guards.checkinsEnabled === false) {
-        sendError(res, 403, "feature_disabled", "Check-ins are disabled");
-        return;
-      }
-      const now = new Date();
-      const body = await parseJson(req);
-      const baseline = await getUserBaseline(userId);
-      if (!baseline) {
-        sendError(res, 400, "baseline_required", "Baseline required before check-in");
-        return;
-      }
-      let dateKey =
-        body?.dateKey ||
-        body?.dateISO ||
-        body?.checkIn?.dateISO ||
-        getDateKey({ now, timezone: baseline.timezone, dayBoundaryHour: baseline.dayBoundaryHour });
-      const dateValidation = validateDateParam(dateKey, "dateISO");
-      if (!dateValidation.ok) {
-        sendError(res, 400, dateValidation.error.code, dateValidation.error.message, dateValidation.error.field);
-        return;
-      }
-      dateKey = dateValidation.value;
-      const checkInRaw = body?.checkIn && typeof body.checkIn === "object" ? body.checkIn : body;
-      const checkinValidation = validateCheckInPayload(checkInRaw);
-      if (!checkinValidation.ok) {
-        sendErrorCodeOnly(res, 400, "INVALID_CHECKIN");
-        return;
-      }
-      const checkIn = normalizeCheckInInput(checkInRaw, dateKey);
-      const idempotencyKey = getIdempotencyKey(req);
-      parityCounters.recordCheckin(Boolean(idempotencyKey));
-      const idempotencyRoute = res.livenewRouteKey;
-      let idempotencyHash = null;
-      if (!idempotencyKey) {
-        const requestHash = hashRequestPayload({ dateKey, checkIn });
-        trackMissingIdempotency({ userId, route: idempotencyRoute, requestHash, requestId });
-      }
-      if (idempotencyKey) {
-        idempotencyHash = hashRequestPayload({ dateKey, checkIn });
-        const existing = await getIdempotencyRecord(userId, idempotencyRoute, idempotencyKey);
-        if (existing && existing.requestHash !== idempotencyHash) {
-          monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
-          sendErrorCodeOnly(res, 409, "IDEMPOTENCY_CONFLICT");
-          return;
-        }
-        if (existing?.response) {
-          monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 200 });
-          send(200, existing.response);
-          return;
-        }
-        if (existing) {
-          monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
-          sendErrorCodeOnly(res, 409, "IDEMPOTENCY_IN_PROGRESS");
-          return;
-        }
-      }
-      if (isWriteStorm({ userId, dateKey, route: idempotencyRoute, requestId })) {
-        sendErrorCodeOnly(res, 429, "WRITE_STORM");
-        return;
-      }
-      if (idempotencyKey) {
-        const inserted = await insertIdempotencyRecord(userId, idempotencyRoute, idempotencyKey, idempotencyHash);
-        if (!inserted) {
-          const existing = await getIdempotencyRecord(userId, idempotencyRoute, idempotencyKey);
-          if (existing && existing.requestHash !== idempotencyHash) {
-            monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
-            sendErrorCodeOnly(res, 409, "IDEMPOTENCY_CONFLICT");
-            return;
-          }
-          if (existing?.response) {
-            monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 200 });
-            send(200, existing.response);
-            return;
-          }
-          if (existing) {
-            monitoring.increment("idempotency_duplicate", { route: idempotencyRoute, status: 409 });
-          }
-          sendErrorCodeOnly(res, 409, "IDEMPOTENCY_IN_PROGRESS");
-          return;
-        }
-        logInfo({ event: "idempotency_inserted", requestId, userId, route: idempotencyRoute });
-      }
-      await upsertDailyCheckIn(userId, dateKey, checkIn);
-      const checkinEventPayload = ensureEventPayload(
-        "checkin_submitted",
-        {
-          stress: checkIn.stress,
-          sleep: checkIn.sleepQuality,
-          energy: checkIn.energy,
-          timeMin: checkIn.timeAvailableMin,
-        },
-        res
-      );
-      if (!checkinEventPayload) return;
-      await insertDailyEvent({
-        userId,
-        dateISO: dateKey,
-        type: "checkin_submitted",
-        atISO: now.toISOString(),
-        props: checkinEventPayload,
-      });
-      invalidateOutcomesCache(userId, dateKey);
-      const dayState = await getDayState(userId, dateKey);
-      const weekSeed = await ensureWeekSeed(userId, dateKey, baseline, requestId);
-      const { continuity, eventsToday } = await loadContinuityMeta(
-        userId,
-        dateKey,
-        baseline.timezone,
-        baseline.dayBoundaryHour,
-        now
-      );
-      const priorProfile = await resolvePriorProfile(userId, dateKey);
-      const today = buildToday({
-        userId,
-        dateKey,
-        timezone: baseline.timezone,
-        dayBoundaryHour: baseline.dayBoundaryHour,
-        baseline,
-        latestCheckin: checkIn,
-        dayState,
-        weekSeed,
-        eventsToday,
-        panicMode: checkIn?.safety?.panic === true,
-        libVersion: LIB_VERSION,
-        continuity,
-        priorProfile,
-      });
-      const normalizedToday = ensureTodayContract(today, res);
-      if (!normalizedToday) return;
-      const nextState = {
-        resetId: normalizedToday.reset?.id || null,
-        movementId: normalizedToday.movement?.id || null,
-        nutritionId: normalizedToday.nutrition?.id || null,
-        lastQuickSignal: dayState?.lastQuickSignal || null,
-        lastInputHash: normalizedToday.meta?.inputHash || null,
-      };
-      const selectionChanged = shouldUpdateDayState(dayState, nextState);
-      if (selectionChanged) {
-        await upsertDayState(userId, dateKey, nextState);
-      }
-      logInfo({ event: "checkin_contract", requestId, userId, dateKey, inputHash: normalizedToday.meta?.inputHash });
-      if (idempotencyKey && idempotencyHash) {
-        const responsePayload = unwrapTodayEnvelope(normalizedToday);
-        const saved = await setIdempotencyResponse(
-          userId,
-          idempotencyRoute,
-          idempotencyKey,
-          idempotencyHash,
-          responsePayload
-        );
-        if (!saved) {
-          logError({ event: "idempotency_response_failed", requestId, userId, route: idempotencyRoute });
-        }
-      }
-      trackDeterminism(
-        buildDeterminismKey({
-          userId,
-          dateKey,
-          checkIn,
-          dayState,
-          weekSeed,
-          libVersion: LIB_VERSION,
-          priorProfile,
-        }),
-        normalizedToday.meta?.inputHash,
-        { requestId, userId, dateKey }
-      );
-      logInfo({
-        event: "checkin_selection",
-        requestId,
-        userId,
-        dateKey,
-        inputHash: normalizedToday.meta?.inputHash,
-        changed: selectionChanged,
-        resetId: nextState.resetId,
-        movementId: nextState.movementId,
-        nutritionId: nextState.nutritionId,
-      });
-      send(200, normalizedToday);
-      return;
-    }
-
     if (pathname === "/v1/quick" && req.method === "POST") {
       if (config.writesDisabled) {
         monitoring.increment("writes_disabled");
@@ -7479,6 +7340,8 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       let checkIns = state.checkIns || [];
+      let moveEvents = [];
+      let resetEvents = [];
       if (SUPABASE_URL && userId) {
         try {
           const { data: checkInRows, error: checkInError } = await supabaseAdmin()
@@ -7496,6 +7359,23 @@ const server = http.createServer(async (req, res) => {
               timeMin: row.time_available_min,
             }));
           }
+          const { data: moveRows, error: moveError } = await supabaseAdmin()
+            .from("event")
+            .select("date_key")
+            .eq("user_id", userId)
+            .eq("type", "movement_completed");
+          if (!moveError && Array.isArray(moveRows)) {
+            moveEvents = moveRows;
+          }
+
+          const { data: resetRows, error: resetError } = await supabaseAdmin()
+            .from("event")
+            .select("date_key")
+            .eq("user_id", userId)
+            .eq("type", "reset_completed");
+          if (!resetError && Array.isArray(resetRows)) {
+            resetEvents = resetRows;
+          }
         } catch (err) {
           logWarn({ event: "progress_checkin_query_failed", userId, error: err?.message || String(err) });
         }
@@ -7505,6 +7385,9 @@ const server = http.createServer(async (req, res) => {
         weekPlan: state.weekPlan,
         completions: state.partCompletionByDate || {},
       });
+      progress.consistency = progress.consistency || {};
+      progress.consistency.movementCompleted = moveEvents.length;
+      progress.consistency.resetsCompleted = resetEvents.length;
       const payload = { ok: true, progress };
       setCachedResponse(userId, pathname, url.search, payload);
       send(200, payload);

@@ -58,6 +58,84 @@
     <div class="ln-container">
       <main id="day-app" class="today-shell">
 
+        <section class="card hidden" id="onboard-card">
+
+          <div class="onboard-step" data-onboard-step="0">
+            <h1>LiveNew</h1>
+            <p class="onboard-value-prop">A daily plan - movement, stress resets, and nutrition - matched to how you feel today.</p>
+            <p class="muted">Takes about 1 minute to set up.</p>
+          </div>
+
+          <div class="onboard-step hidden" data-onboard-step="1">
+            <h2>What's your primary goal?</h2>
+            <div class="today-options onboard-goals">
+              <button class="goal-opt" data-value="calmer" type="button">Feel calmer</button>
+              <button class="goal-opt" data-value="energy" type="button">More energy</button>
+              <button class="goal-opt" data-value="sleep" type="button">Better sleep</button>
+              <button class="goal-opt" data-value="weight" type="button">Weight stability</button>
+            </div>
+          </div>
+
+          <div class="onboard-step hidden" data-onboard-step="2">
+            <h2>How are you feeling right now?</h2>
+
+            <label class="checkin-label">Stress</label>
+            <div class="slider-wrap">
+              <input id="onboard-stress" class="stress-slider" type="range" min="1" max="10" value="5" />
+              <div class="slider-labels"><span>1 - calm</span><span>10 - overwhelmed</span></div>
+              <div class="slider-value" id="onboard-stress-display">5</div>
+            </div>
+
+            <label class="checkin-label">Energy level</label>
+            <div class="today-options">
+              <button class="onboard-energy-opt" data-value="low" type="button">Low</button>
+              <button class="onboard-energy-opt" data-value="med" type="button">Med</button>
+              <button class="onboard-energy-opt" data-value="high" type="button">High</button>
+            </div>
+
+            <label class="checkin-label">Hours of sleep last night</label>
+            <div class="slider-wrap">
+              <input id="onboard-sleep" class="sleep-slider" type="range" min="0" max="12" step="0.5" value="7" />
+              <div class="slider-labels"><span>0h</span><span>12h</span></div>
+              <div class="slider-value" id="onboard-sleep-display">7</div>
+            </div>
+
+            <label class="checkin-label">Time for movement</label>
+            <div class="today-options">
+              <button class="onboard-time-opt" data-value="5" type="button">5 min</button>
+              <button class="onboard-time-opt" data-value="10" type="button">10 min</button>
+              <button class="onboard-time-opt" data-value="20" type="button">20 min</button>
+            </div>
+          </div>
+
+          <div class="onboard-step hidden" data-onboard-step="3">
+            <h2>Any injuries or limitations?</h2>
+            <p class="muted">Optional - helps us tailor your movement.</p>
+            <div class="onboard-checks">
+              <label><input id="onboard-injury-knee" type="checkbox" /> Knee</label>
+              <label><input id="onboard-injury-shoulder" type="checkbox" /> Shoulder</label>
+              <label><input id="onboard-injury-back" type="checkbox" /> Back</label>
+              <label><input id="onboard-injury-none" type="checkbox" /> None</label>
+            </div>
+          </div>
+
+          <div class="onboard-step hidden" data-onboard-step="4">
+            <h2>Almost there</h2>
+            <div class="onboard-checks">
+              <label><input id="onboard-consent-terms" type="checkbox" /> I agree to the <a href="/terms.html" target="_blank">Terms</a></label>
+              <label><input id="onboard-consent-privacy" type="checkbox" /> I agree to the <a href="/privacy.html" target="_blank">Privacy Policy</a></label>
+              <label><input id="onboard-consent-alpha" type="checkbox" /> I agree to <a href="/contact.html" target="_blank">Alpha Data Processing</a></label>
+            </div>
+          </div>
+
+          <div class="onboard-nav">
+            <button id="onboard-back" class="ghost" type="button" style="visibility:hidden">Back</button>
+            <button id="onboard-next" class="primary" type="button">Get Started</button>
+            <button id="onboard-submit" class="primary hidden" type="button">Start my plan</button>
+          </div>
+          <div id="onboard-status" class="muted"></div>
+        </section>
+
         <!-- Step: checkin -->
         <section id="day-step-checkin" class="card today-screen" data-step="checkin">
           <h2 class="today-question">Daily check-in</h2>
@@ -83,7 +161,7 @@
             <div class="slider-value">7</div>
           </div>
 
-          <label class="checkin-label">Time available</label>
+          <label class="checkin-label">Time for movement</label>
           <div class="today-options">
             <button class="time-opt" data-value="5" type="button">5 min</button>
             <button class="time-opt" data-value="10" type="button">10 min</button>

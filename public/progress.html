@@ -72,6 +72,11 @@
           </div>
         </section>
 
+        <section id="wins-section" class="card progress-section hidden">
+          <h2 class="today-question">Wins</h2>
+          <div class="wins-list"></div>
+        </section>
+
         <section class="card progress-section">
           <h2 class="today-question">Summary</h2>
           <p id="progress-summary" class="today-sub">Complete your first check-in to start tracking.</p>
@@ -108,7 +113,13 @@
   </footer>
 
   <script type="module">
-    import { apiFetch, getToken, clearTokens } from "/assets/app.api.js";
+    (async () => {
+      const manifest = await fetch("/assets/build.json", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : {}))
+        .catch(() => ({}));
+      const buildId = manifest?.buildId || "";
+      const apiFile = manifest?.files?.["app.api"] || (buildId ? `app.api.${buildId}.js` : "app.api.js");
+      const { apiFetch, getToken, clearTokens } = await import(`/assets/${apiFile}`);
 
     function currentPathWithQuery() {
       const { pathname = "/progress", search = "", hash = "" } = window.location || {};
@@ -260,6 +271,20 @@
       document.getElementById("stat-movement").textContent = String(consistency?.movementCompleted || 0);
     }
 
+    function renderWins(wins) {
+      const container = document.getElementById("wins-section");
+      if (!container) return;
+      if (!wins || wins.length === 0) {
+        container.classList.add("hidden");
+        return;
+      }
+      container.classList.remove("hidden");
+      const list = container.querySelector(".wins-list");
+      if (list) {
+        list.innerHTML = wins.map((w) => `<div class="win-card">${w}</div>`).join("");
+      }
+    }
+
     function renderSummary(stressAvg7) {
       const el = document.getElementById("progress-summary");
       if (!el) return;
@@ -280,6 +305,7 @@
         latestTrend = p.stressTrend || [];
         renderStressTrend(latestTrend);
         renderConsistency(p.consistency || {});
+        renderWins(p.wins || []);
         renderSummary(p.stressAvg7);
       } catch (err) {
         if (err?.code === "AUTH_REQUIRED" || Number(err?.httpStatus) === 401) {
@@ -291,14 +317,15 @@
       }
     }
 
-    if (!getToken()) {
-      clearTokens();
-      redirectToLogin();
-    } else {
-      setupAccountMenu();
-      loadProgress();
-      window.addEventListener("resize", () => renderStressTrend(latestTrend));
-    }
+      if (!getToken()) {
+        clearTokens();
+        redirectToLogin();
+      } else {
+        setupAccountMenu();
+        loadProgress();
+        window.addEventListener("resize", () => renderStressTrend(latestTrend));
+      }
+    })();
   </script>
 </body>
 </html>
