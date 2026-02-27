@@ -15,7 +15,7 @@ Phase minutes should total the exact number of minutes I gave you.
 Respond in JSON only:
 {
 "title": "A direct, specific name for this movement session",
-"description": "One short sentence — what I'm about to do and why it will work, addressed to me",
+"description": "One short sentence — what I'm about to do, addressed to me",
 "phases": [
 { "instruction": "Direct commands guiding me through this exercise", "minutes": number }
 ]
