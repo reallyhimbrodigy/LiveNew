@@ -2293,6 +2293,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/checkin",
     "/v1/quick",
     "/v1/reset/complete",
+    "/v1/move/complete",
     "/v1/outcomes",
     "/v1/consent/accept",
     "/v1/consents/accept",
@@ -5098,6 +5099,7 @@ const server = http.createServer(async (req, res) => {
     "/v1/checkin",
     "/v1/quick",
     "/v1/reset/complete",
+    "/v1/move/complete",
     "/v1/outcomes",
     "/v1/consent/accept",
     "/v1/consents/accept",
@@ -6105,6 +6107,7 @@ const server = http.createServer(async (req, res) => {
       pathname === "/v1/checkin" ||
       pathname === "/v1/quick" ||
       pathname === "/v1/reset/complete" ||
+      pathname === "/v1/move/complete" ||
       pathname === "/v1/outcomes"
     ) {
       if (!userId) {

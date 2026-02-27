@@ -8,10 +8,10 @@ I will give you my daily check-in: stress level (1–10), energy (low/med/high),
 
 My goal shapes what you recommend. Stress management is always the foundation, and my goal determines how you apply it.
 
-Give me one short, specific sentence — the food or drink and when to have it. Address it to me directly. Use plain, everyday language. Name common foods I probably already have at home.
+Give me one short, specific sentence — just the food or drink and when to have it. The sentence ends after the recommendation. Address it to me directly. Use plain, everyday language. Name common foods I probably already have at home.
 
 Respond in JSON only:
-{ "tip": "Your one-sentence nutrition recommendation" }`;
+{ "tip": "Eat [specific food] [when to have it]." }`;
 
 export async function generateNutrition({ stress, energy, sleepHours, goal }) {
   const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Goal: ${goal || "feel calmer"}.`;
