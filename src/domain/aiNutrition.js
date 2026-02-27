@@ -18,7 +18,7 @@ export async function generateNutrition({ stress, energy, sleepHours, goal }) {
 
   try {
     const stream = client.messages.stream({
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-opus-4-6",
       max_tokens: 200,
       temperature: 0.7,
       system: SYSTEM_PROMPT,

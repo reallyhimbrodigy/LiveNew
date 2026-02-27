@@ -28,9 +28,9 @@ export async function generateMove({ stress, energy, sleepHours, timeMin, goal }
 
   try {
     const stream = client.messages.stream({
-      model: "claude-sonnet-4-5-20250929",
+      model: "claude-opus-4-6",
       max_tokens: 1500,
-      temperature: 0.7,
+      temperature: 0.6,
       system: SYSTEM_PROMPT,
       messages: [{ role: "user", content: userMessage }],
     });
