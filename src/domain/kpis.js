@@ -3,8 +3,10 @@ export function computeProgress({ checkIns, weekPlan, completions }) {
   const sleepAvg7 = averageLast7(checkIns, "sleepQuality");
   const adherencePct = computeAdherence(weekPlan, completions);
   const downshiftMinutes7 = computeDownshiftMinutes(weekPlan);
+  const stressTrend = buildTrend(checkIns, "stress");
+  const consistency = buildConsistency(checkIns, completions);
 
-  return { stressAvg7, sleepAvg7, adherencePct, downshiftMinutes7 };
+  return { stressAvg7, sleepAvg7, adherencePct, downshiftMinutes7, stressTrend, consistency };
 }
 
 function averageLast7(checkIns, key) {
@@ -44,4 +46,41 @@ function computeDownshiftMinutes(weekPlan) {
     }
   });
   return sum;
+}
+
+function buildTrend(checkIns, key) {
+  const sorted = [...checkIns].sort((a, b) => a.dateISO.localeCompare(b.dateISO));
+  const seen = new Map();
+  for (const c of sorted) {
+    const date = c.dateISO || c.dateKey || c.date_key;
+    if (!date) continue;
+    const value = Number(c[key]);
+    if (!Number.isFinite(value)) continue;
+    seen.set(date, value);
+  }
+  return Array.from(seen.entries()).map(([date, value]) => ({ date, value }));
+}
+
+function buildConsistency(checkIns, completions) {
+  const uniqueDates = new Set();
+  for (const c of checkIns) {
+    const date = c.dateISO || c.dateKey || c.date_key;
+    if (date) uniqueDates.add(date);
+  }
+
+  let resetsCompleted = 0;
+  let movementCompleted = 0;
+  if (completions && typeof completions === "object") {
+    for (const dateKey of Object.keys(completions)) {
+      const day = completions[dateKey];
+      if (day?.reset) resetsCompleted++;
+      if (day?.movement) movementCompleted++;
+    }
+  }
+
+  return {
+    checkinDays: uniqueDates.size,
+    resetsCompleted,
+    movementCompleted,
+  };
 }

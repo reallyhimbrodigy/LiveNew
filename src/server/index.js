@@ -18,7 +18,7 @@ import { runContentChecks } from "../domain/content/checks.js";
 import { hashJSON, sanitizeContentItem, sanitizePack } from "../domain/content/snapshotHash.js";
 import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
-import { generateAIReset } from "../domain/aiReset.js";
+import { generateAIPlan } from "../domain/aiPlan.js";
 import { buildWeekSkeleton } from "../domain/weekPlanner.js";
 import { computeContinuityMeta } from "../domain/continuity.js";
 import { applyQuickSignal } from "../domain/swap.js";
@@ -505,6 +505,8 @@ const PUBLIC_POST_ROUTES = new Set([
 const PROTECTED_PAGE_PATHS = new Set([
   "/day",
   "/day.html",
+  "/progress",
+  "/progress.html",
   "/week",
   "/week.html",
   "/trends",
@@ -2640,22 +2642,48 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         if (!res.writableEnded) res.write(' ');
       }, 10000);
 
-      // AI-powered personalized reset
+      // AI-powered personalized plan
       const checkinData = context.checkIn || {};
-      const aiReset = await generateAIReset({
+      const aiPlan = await generateAIPlan({
         stress: checkinData.stress ?? 5,
+        energy: checkinData.energy || "med",
+        sleepHours: checkinData.sleepHours ?? checkinData.sleepQuality ?? 7,
         timeMin: checkinData.timeAvailableMin ?? 10,
       });
-      if (aiReset) {
-        today.reset = {
-          id: aiReset.id,
-          title: aiReset.title,
-          description: aiReset.description,
-          phases: aiReset.phases,
-          durationSec: 180,
-          seconds: 180,
-          steps: [],
-        };
+      if (aiPlan) {
+        if (aiPlan.move) {
+          today.movement = {
+            id: aiPlan.move.id,
+            title: aiPlan.move.title,
+            description: aiPlan.move.description,
+            phases: aiPlan.move.phases,
+            durationMin: checkinData.timeAvailableMin ?? 10,
+            minutes: checkinData.timeAvailableMin ?? 10,
+            intensity: "adaptive",
+          };
+        }
+
+        if (aiPlan.reset) {
+          today.reset = {
+            id: aiPlan.reset.id,
+            title: aiPlan.reset.title,
+            description: aiPlan.reset.description,
+            phases: aiPlan.reset.phases,
+            durationSec: 300,
+            seconds: 300,
+            steps: [],
+          };
+        }
+
+        if (aiPlan.nutrition) {
+          today.nutrition = {
+            id: today.nutrition?.id || `ai_nutrition_${Date.now()}`,
+            title: "Today's nutrition",
+            tip: aiPlan.nutrition,
+            description: aiPlan.nutrition,
+            bullets: [aiPlan.nutrition],
+          };
+        }
       }
 
       const normalizedToday = ensureTodayContract(today, res);
@@ -4886,6 +4914,8 @@ const server = http.createServer(async (req, res) => {
     ["/reset-access.html", "reset-access.html"],
     ["/day", "day.html"],
     ["/day.html", "day.html"],
+    ["/progress", "progress.html"],
+    ["/progress.html", "progress.html"],
     ["/smoke-frontend", "smoke-frontend.html"],
     ["/smoke-frontend.html", "smoke-frontend.html"],
     ["/week", "week.html"],
@@ -7448,8 +7478,30 @@ const server = http.createServer(async (req, res) => {
         send(200, cached);
         return;
       }
+      let checkIns = state.checkIns || [];
+      if (SUPABASE_URL && userId) {
+        try {
+          const { data: checkInRows, error: checkInError } = await supabaseAdmin()
+            .from("checkin")
+            .select("date_key, stress, sleep_quality, energy, time_available_min, created_at")
+            .eq("user_id", userId)
+            .order("date_key", { ascending: true });
+          if (!checkInError && Array.isArray(checkInRows) && checkInRows.length) {
+            checkIns = checkInRows.map((row) => ({
+              dateISO: row.date_key,
+              dateKey: row.date_key,
+              stress: row.stress,
+              sleepQuality: row.sleep_quality,
+              energy: row.energy,
+              timeMin: row.time_available_min,
+            }));
+          }
+        } catch (err) {
+          logWarn({ event: "progress_checkin_query_failed", userId, error: err?.message || String(err) });
+        }
+      }
       const progress = domain.computeProgress({
-        checkIns: state.checkIns || [],
+        checkIns,
         weekPlan: state.weekPlan,
         completions: state.partCompletionByDate || {},
       });

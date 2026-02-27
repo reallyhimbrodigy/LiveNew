@@ -1,0 +1,304 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="icon" href="/favicon.ico" />
+  <script>
+    (function loadInAppAssets() {
+      const addCss = (href) => {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = href;
+        document.head.appendChild(link);
+      };
+      fetch("/assets/build.json", { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error("build.json"))))
+        .then((manifest) => {
+          const buildId = String(manifest?.buildId || "").trim();
+          const cssHref = `/assets/app.css?v=${encodeURIComponent(buildId || Date.now().toString())}`;
+          addCss(cssHref);
+        })
+        .catch(() => {
+          const bust = String(Date.now());
+          addCss(`/assets/app.css?v=${bust}`);
+        });
+    })();
+  </script>
+  <title>LiveNew · Progress</title>
+</head>
+<body class="page" data-page="progress">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand" data-i18n="appName">LiveNew</div>
+      <nav class="nav nav-muted">
+        <a href="/day">Reset</a>
+        <a href="/progress" class="active">Progress</a>
+      </nav>
+      <div class="account">
+        <button id="account-menu-btn" class="ghost account-btn" type="button" aria-expanded="false">Account</button>
+        <div id="account-menu" class="account-menu hidden">
+          <a href="/profile">Profile</a>
+          <button id="account-logout-btn" type="button">Logout</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="ln-main">
+    <div class="ln-container">
+      <main class="today-shell">
+        <section class="card progress-section">
+          <h2 class="today-question">Stress trend</h2>
+          <canvas id="stress-trend-canvas" class="trend-canvas" width="900" height="320" aria-label="Stress trend chart"></canvas>
+          <p id="trend-empty" class="muted hidden">Check in for a few days to see your stress trend.</p>
+        </section>
+
+        <section class="card progress-section">
+          <h2 class="today-question">Consistency</h2>
+          <div class="stat-cards">
+            <div class="stat-card">
+              <div id="stat-checkins" class="stat-number">0</div>
+              <div class="stat-label">Check-ins</div>
+            </div>
+            <div class="stat-card">
+              <div id="stat-resets" class="stat-number">0</div>
+              <div class="stat-label">Resets</div>
+            </div>
+            <div class="stat-card">
+              <div id="stat-movement" class="stat-number">0</div>
+              <div class="stat-label">Movement</div>
+            </div>
+          </div>
+        </section>
+
+        <section class="card progress-section">
+          <h2 class="today-question">Summary</h2>
+          <p id="progress-summary" class="today-sub">Complete your first check-in to start tracking.</p>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <footer class="footer" id="footer-root">
+    <div class="footer-panel">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-head">LIVENEW</div>
+          <div class="footer-links">Reset-first stress regulation for a healthy daily rhythm.</div>
+        </div>
+        <div>
+          <div class="footer-head">Resources</div>
+          <div class="footer-links">
+            <a href="/help-center.html">Help Center</a>
+            <a href="/terms.html">Terms</a>
+            <a href="/privacy.html">Privacy</a>
+          </div>
+        </div>
+        <div>
+          <div class="footer-head">Company</div>
+          <div class="footer-links">
+            <a href="/contact.html">Contact</a>
+            <a href="/reset-access.html">Reset Access</a>
+          </div>
+        </div>
+      </div>
+      <div class="footer-bottom">© 2026 LiveNew. All rights reserved.</div>
+    </div>
+  </footer>
+
+  <script type="module">
+    import { apiFetch, getToken, clearTokens } from "/assets/app.api.js";
+
+    function currentPathWithQuery() {
+      const { pathname = "/progress", search = "", hash = "" } = window.location || {};
+      return `${pathname}${search}${hash}`;
+    }
+
+    function redirectToLogin() {
+      const next = currentPathWithQuery();
+      window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+    }
+
+    function setupAccountMenu() {
+      const accountBtn = document.getElementById("account-menu-btn");
+      const accountMenu = document.getElementById("account-menu");
+      const accountLogoutBtn = document.getElementById("account-logout-btn");
+      if (!accountBtn || !accountMenu) return;
+      const closeMenu = () => {
+        accountMenu.classList.add("hidden");
+        accountBtn.setAttribute("aria-expanded", "false");
+      };
+      accountBtn.addEventListener("click", (event) => {
+        event.stopPropagation();
+        const nextHidden = !accountMenu.classList.contains("hidden");
+        accountMenu.classList.toggle("hidden", nextHidden);
+        accountBtn.setAttribute("aria-expanded", nextHidden ? "false" : "true");
+      });
+      document.addEventListener("click", (event) => {
+        if (!accountMenu.classList.contains("hidden") && !accountMenu.contains(event.target) && event.target !== accountBtn) {
+          closeMenu();
+        }
+      });
+      accountLogoutBtn?.addEventListener("click", async () => {
+        clearTokens();
+        closeMenu();
+        redirectToLogin();
+      });
+    }
+
+    function formatDateLabel(dateISO) {
+      const date = new Date(`${dateISO}T00:00:00`);
+      if (Number.isNaN(date.getTime())) return dateISO;
+      return date.toLocaleDateString(undefined, { weekday: "short", month: "numeric", day: "numeric" });
+    }
+
+    function renderStressTrend(points) {
+      const canvas = document.getElementById("stress-trend-canvas");
+      const empty = document.getElementById("trend-empty");
+      if (!canvas) return;
+      if (!Array.isArray(points) || points.length < 2) {
+        canvas.classList.add("hidden");
+        if (empty) empty.classList.remove("hidden");
+        return;
+      }
+      canvas.classList.remove("hidden");
+      if (empty) empty.classList.add("hidden");
+
+      const ctx = canvas.getContext("2d");
+      const dpr = window.devicePixelRatio || 1;
+      const cssWidth = canvas.clientWidth || 900;
+      const cssHeight = 220;
+      canvas.style.height = `${cssHeight}px`;
+      canvas.width = Math.floor(cssWidth * dpr);
+      canvas.height = Math.floor(cssHeight * dpr);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.scale(dpr, dpr);
+      ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+      const padding = { top: 16, right: 16, bottom: 44, left: 36 };
+      const plotW = cssWidth - padding.left - padding.right;
+      const plotH = cssHeight - padding.top - padding.bottom;
+      const minY = 1;
+      const maxY = 10;
+
+      const xFor = (index) => padding.left + (index / (points.length - 1)) * plotW;
+      const yFor = (value) => padding.top + ((maxY - value) / (maxY - minY)) * plotH;
+
+      ctx.strokeStyle = "#e7decf";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      for (let y = minY; y <= maxY; y += 1) {
+        const py = yFor(y);
+        ctx.moveTo(padding.left, py);
+        ctx.lineTo(padding.left + plotW, py);
+      }
+      ctx.stroke();
+
+      ctx.fillStyle = "#7f6a4f";
+      ctx.font = "12px system-ui, -apple-system, sans-serif";
+      ctx.textAlign = "right";
+      ctx.textBaseline = "middle";
+      for (let y = minY; y <= maxY; y += 1) {
+        ctx.fillText(String(y), padding.left - 8, yFor(y));
+      }
+
+      const coords = points.map((point, index) => ({
+        x: xFor(index),
+        y: yFor(Number(point.value)),
+        label: formatDateLabel(point.date),
+      }));
+
+      const gradient = ctx.createLinearGradient(0, padding.top, 0, padding.top + plotH);
+      gradient.addColorStop(0, "rgba(196, 158, 112, 0.30)");
+      gradient.addColorStop(1, "rgba(196, 158, 112, 0.05)");
+
+      ctx.beginPath();
+      coords.forEach((pt, i) => {
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      });
+      ctx.lineTo(coords[coords.length - 1].x, padding.top + plotH);
+      ctx.lineTo(coords[0].x, padding.top + plotH);
+      ctx.closePath();
+      ctx.fillStyle = gradient;
+      ctx.fill();
+
+      ctx.beginPath();
+      coords.forEach((pt, i) => {
+        if (i === 0) ctx.moveTo(pt.x, pt.y);
+        else ctx.lineTo(pt.x, pt.y);
+      });
+      ctx.strokeStyle = "#8e6f49";
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      ctx.fillStyle = "#8e6f49";
+      coords.forEach((pt) => {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 3.5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      const maxLabels = Math.min(5, coords.length);
+      const step = Math.max(1, Math.floor((coords.length - 1) / (maxLabels - 1)));
+      ctx.fillStyle = "#7f6a4f";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      for (let i = 0; i < coords.length; i += 1) {
+        const isFirst = i === 0;
+        const isLast = i === coords.length - 1;
+        if (!isFirst && !isLast && i % step !== 0) continue;
+        const pt = coords[i];
+        ctx.fillText(pt.label, pt.x, padding.top + plotH + 10);
+      }
+    }
+
+    function renderConsistency(consistency) {
+      document.getElementById("stat-checkins").textContent = String(consistency?.checkinDays || 0);
+      document.getElementById("stat-resets").textContent = String(consistency?.resetsCompleted || 0);
+      document.getElementById("stat-movement").textContent = String(consistency?.movementCompleted || 0);
+    }
+
+    function renderSummary(stressAvg7) {
+      const el = document.getElementById("progress-summary");
+      if (!el) return;
+      if (Number.isFinite(Number(stressAvg7))) {
+        el.textContent = `Your average stress this week: ${Number(stressAvg7).toFixed(1)}/10`;
+      } else {
+        el.textContent = "Complete your first check-in to start tracking.";
+      }
+    }
+
+    let latestTrend = [];
+
+    async function loadProgress() {
+      try {
+        const data = await apiFetch("/v1/progress");
+        if (!data?.ok) return;
+        const p = data.progress || {};
+        latestTrend = p.stressTrend || [];
+        renderStressTrend(latestTrend);
+        renderConsistency(p.consistency || {});
+        renderSummary(p.stressAvg7);
+      } catch (err) {
+        if (err?.code === "AUTH_REQUIRED" || Number(err?.httpStatus) === 401) {
+          clearTokens();
+          redirectToLogin();
+          return;
+        }
+        console.error("[PROGRESS]", err);
+      }
+    }
+
+    if (!getToken()) {
+      clearTokens();
+      redirectToLogin();
+    } else {
+      setupAccountMenu();
+      loadProgress();
+      window.addEventListener("resize", () => renderStressTrend(latestTrend));
+    }
+  </script>
+</body>
+</html>
