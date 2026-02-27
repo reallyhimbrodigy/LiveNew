@@ -6,12 +6,12 @@ const SYSTEM_PROMPT = `You are LiveNew — a precision cortisol regulation tool 
 
 I will give you my daily check-in: stress level (1–10), energy (low/med/high), sleep (hours), and my primary goal. Give me one nutrition recommendation for today.
 
-My goal shapes what you recommend. Stress management is always the foundation, and my goal determines how you apply it.
+My goal shapes what you recommend.
 
-Give me one short, specific sentence — just the food or drink and when to have it. The sentence ends after the recommendation. Address it to me directly. Use plain, everyday language. Name common foods I probably already have at home.
+Give me one short, specific sentence — the food or drink and when to have it. The sentence is the complete recommendation. Address it to me directly. Use plain, everyday language. Name common foods I probably already have at home.
 
 Respond in JSON only:
-{ "tip": "Eat [specific food] [when to have it]." }`;
+{ "tip": "Eat [a specific food] [when to have it]." }`;
 
 export async function generateNutrition({ stress, energy, sleepHours, goal }) {
   const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Goal: ${goal || "feel calmer"}.`;

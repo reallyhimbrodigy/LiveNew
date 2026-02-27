@@ -23,7 +23,7 @@ Phases should total 5 minutes.
 Respond in JSON only:
 {
   "title": "A direct, specific name for this reset",
-  "description": "One short sentence — what I'm physically about to do, addressed to me",
+  "description": "What I'll physically be doing, addressed to me",
   "phases": [
     { "instruction": "Direct commands guiding me through this technique", "minutes": number }
   ]
