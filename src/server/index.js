@@ -2299,6 +2299,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/consents/accept",
     "/v1/onboard/complete",
   ]);
+  console.log("[SUPABASE_ROUTE_CHECK]", pathname, supabaseRoutes.has(pathname));
   if (!supabaseRoutes.has(pathname)) return false;
 
   const flags = await getFeatureFlags();
@@ -2867,13 +2868,16 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       return true;
     }
     const stressAfterNum = Number(body?.stressAfter);
+    const stressBeforeNum = Number(body?.stressBefore);
     const result = await persist.insertEventOncePerDay(
       auth.userId,
       dateKey,
       "reset_completed",
       {
+        v: 1,
         resetId: body?.resetId || null,
         stressAfter: Number.isFinite(stressAfterNum) ? stressAfterNum : null,
+        stressBefore: Number.isFinite(stressBeforeNum) ? stressBeforeNum : null,
       }
     );
     if (result?.inserted) {
@@ -7150,9 +7154,15 @@ const server = http.createServer(async (req, res) => {
       }
       const completedAtISO = now.toISOString();
       const stressAfterNum = Number(body?.stressAfter);
+      const stressBeforeNum = Number(body?.stressBefore);
       const resetPayload = ensureEventPayload(
         "reset_completed",
-        { resetId: body?.resetId || null, stressAfter: Number.isFinite(stressAfterNum) ? stressAfterNum : null },
+        {
+          v: 1,
+          resetId: body?.resetId || null,
+          stressAfter: Number.isFinite(stressAfterNum) ? stressAfterNum : null,
+          stressBefore: Number.isFinite(stressBeforeNum) ? stressBeforeNum : null,
+        },
         res
       );
       if (!resetPayload) return;

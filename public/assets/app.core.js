@@ -991,6 +991,21 @@ function initDay({ initialDateISO } = {}) {
   let sleepHours = 7;
   let timeMin = null;
 
+  function loadExistingPlan() {
+    try {
+      const raw = localStorage.getItem("livenew_today");
+      if (!raw) return null;
+      const saved = JSON.parse(raw);
+      if (saved?.date !== currentDateISO) {
+        localStorage.removeItem("livenew_today");
+        return null;
+      }
+      return saved;
+    } catch {
+      return null;
+    }
+  }
+
   const showStep = (name) => {
     document.querySelectorAll("[data-step]").forEach((el) => {
       el.classList.toggle("hidden", el.dataset.step !== name);
@@ -1077,6 +1092,122 @@ function initDay({ initialDateISO } = {}) {
     });
   }
 
+  function populateTodayScreen(res, stress) {
+    const resolvedStress = Number.isFinite(Number(stress)) ? Number(stress) : stressBefore;
+    const move = res?.movement || res?.move || res?.workout;
+    const resolvedTimeMin = move?.minutes || move?.durationMin || timeMin || 10;
+
+    const headline = qs("#today-headline");
+    if (headline) {
+      if (resolvedStress >= 8) headline.textContent = "Let's bring that stress down";
+      else if (resolvedStress >= 5) headline.textContent = "Your plan for today";
+      else headline.textContent = "You're in a good place — let's move";
+    }
+
+    const subline = qs("#today-subline");
+    if (subline) {
+      const parts = [];
+      if (resolvedStress > 3 && res?.reset) parts.push("5 min reset");
+      if (move) parts.push(`${resolvedTimeMin} min movement`);
+      subline.textContent = parts.join(" + ");
+    }
+
+    const resetCard = qs("#today-reset");
+    const showReset = resolvedStress > 3 && res?.reset;
+    if (resetCard) {
+      resetCard.classList.toggle("hidden", !showReset);
+      resetCard.classList.remove("today-card-done");
+    }
+    if (showReset) {
+      const el = (id) => qs(`#${id}`);
+      const titleEl = el("today-reset-title");
+      const descEl = el("today-reset-description");
+      const resetBtn = el("start-reset");
+      const resetLabel = resetCard?.querySelector(".today-card-label");
+      if (titleEl) titleEl.textContent = res.reset.title || "Your reset";
+      if (descEl) descEl.textContent = res.reset.description || "";
+      if (resetBtn) {
+        resetBtn.textContent = "Start reset";
+        resetBtn.disabled = false;
+      }
+      if (resetLabel) resetLabel.textContent = "Start here";
+    }
+
+    const moveCard = qs("#today-move");
+    if (moveCard) {
+      moveCard.classList.toggle("hidden", !move);
+      moveCard.classList.remove("today-card-done");
+    }
+    if (move) {
+      const titleEl = qs("#move-card-title");
+      const descEl = qs("#move-description");
+      const labelEl = qs("#move-card-label");
+      const durationEl = qs("#today-move-duration");
+      const moveBtn = qs("#start-move");
+      if (titleEl) titleEl.textContent = move.title || "Your movement";
+      if (descEl) descEl.textContent = move.description || "";
+      if (labelEl) labelEl.textContent = showReset ? "Up next" : "Start here";
+      if (durationEl) durationEl.textContent = `${resolvedTimeMin} min`;
+      if (moveBtn) {
+        moveBtn.textContent = "Start";
+        moveBtn.disabled = false;
+      }
+
+      if (!showReset) {
+        moveCard.classList.add("today-card-primary");
+      } else {
+        moveCard.classList.remove("today-card-primary");
+      }
+    }
+
+    const nutritionEl = qs("#nutrition-tip");
+    const nutritionTitle = qs("#today-nutrition .today-card-title");
+    if (nutritionEl) {
+      nutritionEl.textContent = res?.nutrition?.tip || res?.nutrition?.description || "";
+    }
+    if (nutritionTitle) {
+      nutritionTitle.textContent = res?.nutrition?.title || "Nutrition";
+    }
+
+    const cardsContainer = qs("#today-cards");
+    if (cardsContainer && !showReset && moveCard) {
+      cardsContainer.insertBefore(moveCard, cardsContainer.firstChild);
+    }
+    if (cardsContainer && showReset && resetCard) {
+      cardsContainer.insertBefore(resetCard, cardsContainer.firstChild);
+    }
+
+    const saved = loadExistingPlan();
+    if (saved?.resetCompleted) {
+      if (resetCard) {
+        resetCard.classList.add("today-card-done");
+        const btn = resetCard.querySelector("#start-reset");
+        if (btn) {
+          btn.textContent = "Done ✓";
+          btn.disabled = true;
+        }
+        const label = resetCard.querySelector(".today-card-label");
+        if (label) label.textContent = "Done";
+      }
+      if (moveCard && !moveCard.classList.contains("hidden")) {
+        moveCard.classList.add("today-card-primary");
+        const moveLabel = qs("#move-card-label");
+        if (moveLabel) moveLabel.textContent = "Start here";
+      }
+    }
+    if (saved?.moveCompleted && moveCard) {
+      moveCard.classList.add("today-card-done");
+      moveCard.classList.remove("today-card-primary");
+      const btn = moveCard.querySelector("#start-move");
+      if (btn) {
+        btn.textContent = "Done ✓";
+        btn.disabled = true;
+      }
+      const label = moveCard.querySelector("#move-card-label");
+      if (label) label.textContent = "Done";
+    }
+  }
+
   const checkinNext = qs("#checkin-next");
   const statusEl = qs("#day-status");
   const updateCheckinReady = () => {
@@ -1122,6 +1253,11 @@ function initDay({ initialDateISO } = {}) {
   });
 
   qs("#recheckin-btn")?.addEventListener("click", () => {
+    try {
+      localStorage.removeItem("livenew_today");
+    } catch {
+      // ignore
+    }
     showStep("checkin");
   });
 
@@ -1145,99 +1281,17 @@ function initDay({ initialDateISO } = {}) {
       });
       currentContract = res;
       currentDateISO = res?.dateISO || currentDateISO;
+      try {
+        localStorage.setItem("livenew_today", JSON.stringify({
+          date: currentDateISO,
+          contract: res,
+          stress: stressBefore,
+        }));
+      } catch {
+        // ignore
+      }
       if (statusEl) statusEl.textContent = "";
-      // ===== Populate Today screen =====
-      const stress = stressBefore;
-
-      // State-aware headline
-      const headline = qs("#today-headline");
-      if (headline) {
-        if (stress >= 8) headline.textContent = "Let's bring that stress down";
-        else if (stress >= 5) headline.textContent = "Your plan for today";
-        else headline.textContent = "You're in a good place — let's move";
-      }
-
-      // Subline with time summary
-      const subline = qs("#today-subline");
-      if (subline) {
-        const parts = [];
-        const move = res?.movement || res?.move;
-        if (stress > 3 && res?.reset) parts.push("5 min reset");
-        if (move) parts.push(`${timeMin} min movement`);
-        subline.textContent = parts.join(" + ");
-      }
-
-      // --- Reset card ---
-      const resetCard = qs("#today-reset");
-      const showReset = stress > 3 && res?.reset;
-      if (resetCard) {
-        resetCard.classList.toggle("hidden", !showReset);
-        resetCard.classList.remove("today-card-done");
-      }
-      if (showReset) {
-        const el = (id) => qs(`#${id}`);
-        const titleEl = el("today-reset-title");
-        const descEl = el("today-reset-description");
-        const resetBtn = el("start-reset");
-        const resetLabel = resetCard?.querySelector(".today-card-label");
-        if (titleEl) titleEl.textContent = res.reset.title || "Your reset";
-        if (descEl) descEl.textContent = res.reset.description || "";
-        if (resetBtn) {
-          resetBtn.textContent = "Start reset";
-          resetBtn.disabled = false;
-        }
-        if (resetLabel) resetLabel.textContent = "Start here";
-      }
-
-      // --- Move card ---
-      const moveCard = qs("#today-move");
-      const move = res?.movement || res?.move || res?.workout;
-      if (moveCard) {
-        moveCard.classList.toggle("hidden", !move);
-        moveCard.classList.remove("today-card-done");
-      }
-      if (move) {
-        const titleEl = qs("#move-card-title");
-        const descEl = qs("#move-description");
-        const labelEl = qs("#move-card-label");
-        const durationEl = qs("#today-move-duration");
-        const moveBtn = qs("#start-move");
-        if (titleEl) titleEl.textContent = move.title || "Your movement";
-        if (descEl) descEl.textContent = move.description || "";
-        if (labelEl) labelEl.textContent = showReset ? "Up next" : "Start here";
-        if (durationEl) durationEl.textContent = `${move.minutes || move.durationMin || timeMin} min`;
-        if (moveBtn) {
-          moveBtn.textContent = "Start";
-          moveBtn.disabled = false;
-        }
-
-        if (!showReset) {
-          moveCard.classList.add("today-card-primary");
-        } else {
-          moveCard.classList.remove("today-card-primary");
-        }
-      }
-
-      // --- Nutrition tip ---
-      const nutritionEl = qs("#nutrition-tip");
-      const nutritionTitle = qs("#today-nutrition .today-card-title");
-      if (nutritionEl) {
-        nutritionEl.textContent = res?.nutrition?.tip || res?.nutrition?.description || "";
-      }
-      if (nutritionTitle) {
-        nutritionTitle.textContent = res?.nutrition?.title || "Nutrition";
-      }
-
-      // --- Card order: move first when no reset ---
-      const cardsContainer = qs("#today-cards");
-      if (cardsContainer && !showReset && moveCard) {
-        cardsContainer.insertBefore(moveCard, cardsContainer.firstChild);
-      }
-      // When reset is showing, ensure reset is first
-      if (cardsContainer && showReset && resetCard) {
-        cardsContainer.insertBefore(resetCard, cardsContainer.firstChild);
-      }
-
+      populateTodayScreen(res, stressBefore);
       showStep("today");
     } catch (err) {
       if (isAuthRequiredError(err)) {
@@ -1289,6 +1343,16 @@ function initDay({ initialDateISO } = {}) {
           const label = moveCard.querySelector("#move-card-label");
           if (label) label.textContent = "Done";
         }
+        try {
+          const raw = localStorage.getItem("livenew_today");
+          if (raw) {
+            const saved = JSON.parse(raw);
+            saved.moveCompleted = true;
+            localStorage.setItem("livenew_today", JSON.stringify(saved));
+          }
+        } catch {
+          // ignore
+        }
         showStep("today");
       },
     });
@@ -1319,6 +1383,7 @@ function initDay({ initialDateISO } = {}) {
         dateISO: currentContract?.dateISO || currentDateISO,
         resetId: currentContract?.reset?.id || null,
         stressAfter,
+        stressBefore,
       });
     } catch (err) {
       reportError(err);
@@ -1342,11 +1407,29 @@ function initDay({ initialDateISO } = {}) {
       moveCard.classList.add("today-card-primary");
       if (moveLabel) moveLabel.textContent = "Start here";
     }
+    try {
+      const raw = localStorage.getItem("livenew_today");
+      if (raw) {
+        const saved = JSON.parse(raw);
+        saved.resetCompleted = true;
+        localStorage.setItem("livenew_today", JSON.stringify(saved));
+      }
+    } catch {
+      // ignore
+    }
     showStep("today");
   });
 
   updateCheckinReady();
-  showStep("checkin");
+  const existing = loadExistingPlan();
+  if (existing?.contract) {
+    currentContract = existing.contract;
+    stressBefore = Number(existing.stress || 5);
+    populateTodayScreen(existing.contract, stressBefore);
+    showStep("today");
+  } else {
+    showStep("checkin");
+  }
 }
 
 function initWeek() {
