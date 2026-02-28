@@ -20,7 +20,7 @@ Go beyond the basics. The common techniques everyone already knows are your last
 
 Phases should total 5 minutes.
 
-Every sentence in every phase instruction puts my body into a specific position, movement, or breathing pattern.
+Every sentence in every phase instruction puts my body into a specific position, movement, or breathing pattern. Keep instructions tight. Every word earns its place.
 
 Respond in JSON only:
 {

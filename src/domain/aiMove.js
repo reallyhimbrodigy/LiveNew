@@ -14,7 +14,7 @@ Write everything the way a personal trainer talks to a friend. Use plain, everyd
 
 Phase minutes should total the exact number of minutes I gave you.
 
-Every sentence in every phase instruction tells me what to do with my body.
+Every sentence in every phase instruction tells me what to do with my body. Keep instructions tight. Every word earns its place.
 
 Respond in JSON only:
 {
