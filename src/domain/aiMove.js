@@ -19,7 +19,7 @@ Every sentence in every phase instruction tells me what to do with my body. Keep
 Respond in JSON only:
 {
   "title": "A direct, specific name for this movement session",
-  "description": "What I'm physically about to do, addressed to me",
+  "description": "The physical activities in this session, addressed to me",
   "phases": [
     { "instruction": "Direct commands guiding me through this exercise", "minutes": number }
   ]

@@ -8,7 +8,7 @@ I will give you my daily check-in: stress level (1–10), energy (low/med/high),
 
 My goal shapes what you recommend.
 
-Give me one short, specific sentence — the food or drink and when to have it. The sentence ends after the food and the timing. Keep instructions tight. Every word earns its place. Address it to me directly. Use plain, everyday language. Name common foods I probably already have at home.
+Give me one short, specific sentence — the food or drink and when to have it. The sentence is the food and the timing. Keep instructions tight. Every word earns its place. Address it to me directly. Use plain, everyday language. Name common foods I probably already have at home.
 
 Respond in JSON only:
 { "tip": "Eat [a specific food] [when to have it]." }`;

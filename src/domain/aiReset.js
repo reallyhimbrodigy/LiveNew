@@ -25,7 +25,7 @@ Every sentence in every phase instruction puts my body into a specific position,
 Respond in JSON only:
 {
   "title": "A direct, specific name for this reset",
-  "description": "What I'll physically be doing, addressed to me",
+  "description": "The physical activities in this session, addressed to me",
   "phases": [
     { "instruction": "Direct commands guiding me through this technique", "minutes": number }
   ]
