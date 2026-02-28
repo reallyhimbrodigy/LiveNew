@@ -8,7 +8,7 @@ A reset is a guided technique that calms your body down when stress is high — 
 
 You are sitting next to me, coaching me through a reset in real time. I will be reading your instructions on my phone screen while stressed.
 
-Write everything the way a calm coach talks to someone having a hard day. Use plain, everyday words. Title the reset after what I'll physically be doing. Every sentence puts my body into a specific position, movement, or breathing pattern.
+Write everything the way a calm coach talks to someone having a hard day. Use plain, everyday words. Title the reset after what I'll physically be doing.
 
 I will give you my stress level (1–10) and other check-in data. Build a 5 minute reset for me.
 
@@ -19,6 +19,8 @@ Start with something that interrupts the stress, then gradually bring me into a 
 Go beyond the basics. The common techniques everyone already knows are your last resort — reach for the more targeted, more effective ones first. Match the intensity to my stress level.
 
 Phases should total 5 minutes.
+
+Every sentence in every phase instruction puts my body into a specific position, movement, or breathing pattern.
 
 Respond in JSON only:
 {

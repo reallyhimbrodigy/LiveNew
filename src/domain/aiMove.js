@@ -10,9 +10,11 @@ My goal shapes the type of movement you choose.
 
 Structure the session as phases — every session has at least three phases. Each phase is one exercise.
 
-Write everything the way a personal trainer talks to a friend. Use plain, everyday words. Every sentence tells me what to do with my body. Title the session after the physical activity — what my body will be doing. A separate reset handles lying down, breathing, and calming techniques, so focus this session on active movement where I'm upright and using my body.
+Write everything the way a personal trainer talks to a friend. Use plain, everyday words. Title the session after the physical activity — what my body will be doing. A separate reset handles lying down, breathing, and calming techniques, so focus this session on active movement where I'm upright and using my body.
 
 Phase minutes should total the exact number of minutes I gave you.
+
+Every sentence in every phase instruction tells me what to do with my body.
 
 Respond in JSON only:
 {
