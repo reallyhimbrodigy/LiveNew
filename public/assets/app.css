@@ -257,6 +257,27 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
   color: var(--muted);
 }
 
+#day-status:not(:empty) {
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
+.phase-progress {
+  font-size: 0.8rem;
+  color: var(--muted);
+  text-align: center;
+  margin-bottom: 8px;
+}
+
+.exit-session {
+  font-size: 0.8rem;
+  margin-top: 8px;
+}
+
 .choice-grid {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
@@ -352,6 +373,7 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
   .ln-container { padding: 92px 16px 24px; }
   .footer { padding: 0 16px 28px; }
   button, .btn { width: 100%; }
+  .today-options button { width: auto; }
 }
 
 /* Day page — guided reset */
@@ -421,6 +443,7 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
   line-height: 1.5;
   margin: 20px 0 12px;
   color: var(--text);
+  text-align: left;
 }
 .reset-timer {
   font-size: clamp(48px, 8vw, 80px);

@@ -40,8 +40,8 @@
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand" data-i18n="appName">LiveNew</div>
-      <nav class="nav nav-muted">
-        <a href="/day" class="active">Reset</a>
+      <nav class="nav">
+        <a href="/day" class="active">Today</a>
         <a href="/progress">Progress</a>
       </nav>
       <div class="account">
@@ -202,6 +202,7 @@
 
           </div>
 
+          <button id="recheckin-btn" class="btn ghost" type="button" style="margin-top:12px;display:block;width:100%;text-align:center">Check in again</button>
           <a href="/progress" class="btn ghost" style="margin-top:16px;display:block;text-align:center">View progress</a>
         </section>
 
@@ -209,18 +210,22 @@
         <section id="day-step-move" class="card today-screen hidden" data-step="move">
           <h2 id="move-title" class="today-question"></h2>
           <p id="move-phase-description" class="today-sub"></p>
+          <div class="phase-progress" id="move-phase-progress"></div>
           <div class="reset-instruction" id="move-instruction"></div>
           <div class="reset-timer" id="move-timer"></div>
           <button id="move-skip" class="ghost today-next" type="button" style="margin-top:8px">Skip phase</button>
+          <button id="move-exit" class="btn ghost exit-session" type="button">Exit session</button>
         </section>
 
         <!-- Step: reset (phases + timer) -->
         <section id="day-step-reset" class="card today-screen hidden" data-step="reset">
           <h2 id="reset-title" class="today-question"></h2>
           <p id="reset-description" class="today-sub"></p>
+          <div class="phase-progress" id="reset-phase-progress"></div>
           <div class="reset-instruction" id="reset-instruction"></div>
           <div class="reset-timer" id="reset-timer"></div>
           <button id="reset-skip" class="ghost today-next" type="button" style="margin-top:8px">Skip phase</button>
+          <button id="reset-exit" class="btn ghost exit-session" type="button">Exit session</button>
         </section>
 
         <!-- Step: after (post-reset stress check) -->
@@ -234,13 +239,6 @@
           <button id="after-next" class="primary today-next" type="button">Done</button>
         </section>
 
-        <!-- Step: done -->
-        <section id="day-step-done" class="card today-screen hidden" data-step="done">
-          <h2 class="today-question">Reset complete.</h2>
-          <p id="done-message" class="today-sub"></p>
-          <a href="/progress" class="btn primary" style="display:inline-flex;align-items:center;justify-content:center;margin-top:12px">See your progress</a>
-        </section>
-
       </main>
     </div>
   </div>
@@ -250,7 +248,7 @@
       <div class="footer-grid">
         <div>
           <div class="footer-head">LIVENEW</div>
-          <div class="footer-links">Reset-first stress regulation for a healthy daily rhythm.</div>
+          <div class="footer-links">Daily stress regulation - movement, resets, and nutrition matched to how you feel.</div>
         </div>
         <div>
           <div class="footer-head">Resources</div>

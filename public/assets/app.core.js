@@ -1001,8 +1001,10 @@ function initDay({ initialDateISO } = {}) {
     const instructionEl = qs(`#${config.instructionEl}`);
     const timerEl = qs(`#${config.timerEl}`);
     const skipBtn = qs(`#${config.skipBtn}`);
+    const progressEl = qs(`#${config.progressEl || ""}`);
     const titleEl = qs(`#${config.titleEl || ""}`);
     const descEl = qs(`#${config.descriptionEl || ""}`);
+    const exitEl = config.exitBtn ? qs(config.exitBtn) : null;
     let phaseIndex = 0;
     let intervalId = null;
 
@@ -1019,6 +1021,9 @@ function initDay({ initialDateISO } = {}) {
       const phase = phases[phaseIndex];
       const totalSec = Math.round((phase.minutes || 1) * 60);
       let remaining = totalSec;
+      if (progressEl) {
+        progressEl.textContent = `${phaseIndex + 1} of ${phases.length}`;
+      }
       if (phaseIndex > 0) {
         if (titleEl) titleEl.style.display = "none";
         if (descEl) descEl.style.display = "none";
@@ -1049,6 +1054,13 @@ function initDay({ initialDateISO } = {}) {
       };
     }
 
+    if (exitEl) {
+      exitEl.onclick = () => {
+        clearInterval(intervalId);
+        showStep("today");
+      };
+    }
+
     runPhase();
   };
 
@@ -1057,6 +1069,8 @@ function initDay({ initialDateISO } = {}) {
       instructionEl: "reset-instruction",
       timerEl: "reset-timer",
       skipBtn: "reset-skip",
+      progressEl: "reset-phase-progress",
+      exitBtn: "#reset-exit",
       titleEl: "reset-title",
       descriptionEl: "reset-description",
       onComplete: () => showStep("after"),
@@ -1107,11 +1121,15 @@ function initDay({ initialDateISO } = {}) {
     });
   });
 
+  qs("#recheckin-btn")?.addEventListener("click", () => {
+    showStep("checkin");
+  });
+
   checkinNext?.addEventListener("click", async () => {
     stressBefore = Number(stressSlider?.value || 5);
     sleepHours = Number(sleepSlider?.value || 7);
     if (!energy || !timeMin || !Number.isFinite(sleepHours)) return;
-    if (statusEl) statusEl.textContent = "Building your plan…";
+    if (statusEl) statusEl.textContent = "Building your plan...";
     if (checkinNext) checkinNext.disabled = true;
     try {
       const energyScore = energy === "low" ? 3 : energy === "high" ? 9 : 6;
@@ -1160,8 +1178,15 @@ function initDay({ initialDateISO } = {}) {
         const el = (id) => qs(`#${id}`);
         const titleEl = el("today-reset-title");
         const descEl = el("today-reset-description");
+        const resetBtn = el("start-reset");
+        const resetLabel = resetCard?.querySelector(".today-card-label");
         if (titleEl) titleEl.textContent = res.reset.title || "Your reset";
         if (descEl) descEl.textContent = res.reset.description || "";
+        if (resetBtn) {
+          resetBtn.textContent = "Start reset";
+          resetBtn.disabled = false;
+        }
+        if (resetLabel) resetLabel.textContent = "Start here";
       }
 
       // --- Move card ---
@@ -1176,10 +1201,15 @@ function initDay({ initialDateISO } = {}) {
         const descEl = qs("#move-description");
         const labelEl = qs("#move-card-label");
         const durationEl = qs("#today-move-duration");
+        const moveBtn = qs("#start-move");
         if (titleEl) titleEl.textContent = move.title || "Your movement";
         if (descEl) descEl.textContent = move.description || "";
         if (labelEl) labelEl.textContent = showReset ? "Up next" : "Start here";
         if (durationEl) durationEl.textContent = `${move.minutes || move.durationMin || timeMin} min`;
+        if (moveBtn) {
+          moveBtn.textContent = "Start";
+          moveBtn.disabled = false;
+        }
 
         if (!showReset) {
           moveCard.classList.add("today-card-primary");
@@ -1190,8 +1220,12 @@ function initDay({ initialDateISO } = {}) {
 
       // --- Nutrition tip ---
       const nutritionEl = qs("#nutrition-tip");
+      const nutritionTitle = qs("#today-nutrition .today-card-title");
       if (nutritionEl) {
         nutritionEl.textContent = res?.nutrition?.tip || res?.nutrition?.description || "";
+      }
+      if (nutritionTitle) {
+        nutritionTitle.textContent = res?.nutrition?.title || "Nutrition";
       }
 
       // --- Card order: move first when no reset ---
@@ -1211,7 +1245,7 @@ function initDay({ initialDateISO } = {}) {
         redirectToLogin(currentPathWithQuery());
         return;
       }
-      if (statusEl) statusEl.textContent = "Could not load your plan. Try again.";
+      if (statusEl) statusEl.textContent = "Something went wrong. Try again.";
       updateCheckinReady();
       reportError(err);
     }
@@ -1229,16 +1263,16 @@ function initDay({ initialDateISO } = {}) {
       instructionEl: "move-instruction",
       timerEl: "move-timer",
       skipBtn: "move-skip",
+      progressEl: "move-phase-progress",
+      exitBtn: "#move-exit",
       titleEl: "move-title",
       descriptionEl: "move-phase-description",
       onComplete: async () => {
         try {
-          if (move.id) {
-            await apiPost("/v1/move/complete", {
-              dateISO: currentContract?.dateISO || currentDateISO,
-              movementId: move.id,
-            });
-          }
+          await apiPost("/v1/move/complete", {
+            dateISO: currentContract?.dateISO || currentDateISO,
+            movementId: move.id || null,
+          });
         } catch (err) {
           reportError(err);
         }
@@ -1249,7 +1283,7 @@ function initDay({ initialDateISO } = {}) {
           moveCard.classList.remove("today-card-primary");
           const btn = moveCard.querySelector("#start-move");
           if (btn) {
-            btn.textContent = "Completed ✓";
+            btn.textContent = "Done ✓";
             btn.disabled = true;
           }
           const label = moveCard.querySelector("#move-card-label");
@@ -1280,20 +1314,12 @@ function initDay({ initialDateISO } = {}) {
 
   qs("#after-next")?.addEventListener("click", async () => {
     const stressAfter = Number(afterSlider?.value || 5);
-    const doneMsg = qs("#done-message");
-    const delta = stressBefore - stressAfter;
-    if (doneMsg) {
-      if (delta > 0) doneMsg.textContent = `You went from ${stressBefore} to ${stressAfter}. That's a real shift.`;
-      else if (delta === 0) doneMsg.textContent = "Sometimes just pausing is enough.";
-      else doneMsg.textContent = "Keep going — small resets add up.";
-    }
     try {
-      if (currentContract?.reset?.id) {
-        await apiPost("/v1/reset/complete", {
-          dateISO: currentContract.dateISO || currentDateISO,
-          resetId: currentContract.reset.id,
-        });
-      }
+      await apiPost("/v1/reset/complete", {
+        dateISO: currentContract?.dateISO || currentDateISO,
+        resetId: currentContract?.reset?.id || null,
+        stressAfter,
+      });
     } catch (err) {
       reportError(err);
     }
@@ -1303,7 +1329,7 @@ function initDay({ initialDateISO } = {}) {
       resetCard.classList.add("today-card-done");
       const btn = resetCard.querySelector("#start-reset");
       if (btn) {
-        btn.textContent = "Completed ✓";
+        btn.textContent = "Done ✓";
         btn.disabled = true;
       }
       const label = resetCard.querySelector(".today-card-label");

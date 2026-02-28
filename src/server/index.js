@@ -2707,7 +2707,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       if (aiNutrition) {
         today.nutrition = {
           id: today.nutrition?.id || `ai_nutrition_${Date.now()}`,
-          title: "Today's nutrition",
+          title: "Nutrition",
           tip: aiNutrition,
           description: aiNutrition,
           bullets: [aiNutrition],
@@ -2852,17 +2852,30 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
   }
 
   if (pathname === "/v1/reset/complete" && req.method === "POST") {
+    const body = await parseJson(req);
     const now = new Date();
-    const dateKey = getDateKeyWithMinute({
-      now,
-      timezone: baselineResolved.timezone,
-      dayBoundaryMinute: baselineResolved.dayBoundaryMinute,
-    });
+    const dateKey =
+      body?.dateISO ||
+      body?.dateKey ||
+      getDateKeyWithMinute({
+        now,
+        timezone: baselineResolved.timezone,
+        dayBoundaryMinute: baselineResolved.dayBoundaryMinute,
+      });
     if (!dateKey) {
       sendError(res, 400, "date_invalid", "Unable to resolve date key");
       return true;
     }
-    const result = await persist.insertEventOncePerDay(auth.userId, dateKey, "reset_completed", { v: 1 });
+    const stressAfterNum = Number(body?.stressAfter);
+    const result = await persist.insertEventOncePerDay(
+      auth.userId,
+      dateKey,
+      "reset_completed",
+      {
+        resetId: body?.resetId || null,
+        stressAfter: Number.isFinite(stressAfterNum) ? stressAfterNum : null,
+      }
+    );
     if (result?.inserted) {
       invalidateOutcomesCache(auth.userId, dateKey);
     }
@@ -7121,11 +7134,6 @@ const server = http.createServer(async (req, res) => {
         sendError(res, 400, "baseline_required", "Baseline required before reset completion");
         return;
       }
-      const resetId = typeof body?.resetId === "string" ? body.resetId : null;
-      if (!resetId) {
-        sendError(res, 400, "reset_id_required", "resetId is required", "resetId");
-        return;
-      }
       let dateKey =
         body?.dateKey ||
         body?.dateISO ||
@@ -7141,7 +7149,12 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const completedAtISO = now.toISOString();
-      const resetPayload = ensureEventPayload("reset_completed", { resetId }, res);
+      const stressAfterNum = Number(body?.stressAfter);
+      const resetPayload = ensureEventPayload(
+        "reset_completed",
+        { resetId: body?.resetId || null, stressAfter: Number.isFinite(stressAfterNum) ? stressAfterNum : null },
+        res
+      );
       if (!resetPayload) return;
       const inserted = await insertDailyEventOnce({
         userId,
@@ -7227,6 +7240,64 @@ const server = http.createServer(async (req, res) => {
         nutritionId: nextState.nutritionId,
       });
       send(200, normalizedToday);
+      return;
+    }
+
+    if (pathname === "/v1/move/complete" && req.method === "POST") {
+      if (config.writesDisabled) {
+        monitoring.increment("writes_disabled");
+        sendErrorCodeOnly(res, 503, "WRITES_DISABLED");
+        return;
+      }
+      if (config.disableResetWrites) {
+        monitoring.increment("move_disabled");
+        sendErrorCodeOnly(res, 503, "MOVE_DISABLED");
+        return;
+      }
+      const now = new Date();
+      const body = await parseJson(req);
+      const baseline = await getUserBaseline(userId);
+      if (!baseline) {
+        sendError(res, 400, "baseline_required", "Baseline required before movement completion");
+        return;
+      }
+      const movementId = typeof body?.movementId === "string" ? body.movementId : null;
+      let dateKey =
+        body?.dateKey ||
+        body?.dateISO ||
+        getDateKey({ now, timezone: baseline.timezone, dayBoundaryHour: baseline.dayBoundaryHour });
+      const dateValidation = validateDateParam(dateKey, "dateISO");
+      if (!dateValidation.ok) {
+        sendError(res, 400, dateValidation.error.code, dateValidation.error.message, dateValidation.error.field);
+        return;
+      }
+      dateKey = dateValidation.value;
+      if (isWriteStorm({ userId, dateKey, route: res.livenewRouteKey, requestId })) {
+        sendErrorCodeOnly(res, 429, "WRITE_STORM");
+        return;
+      }
+      const completedAtISO = now.toISOString();
+      const movePayload = ensureEventPayload("movement_completed", { movementId }, res);
+      if (!movePayload) return;
+      const inserted = await insertDailyEventOnce({
+        userId,
+        dateISO: dateKey,
+        type: "movement_completed",
+        atISO: completedAtISO,
+        props: movePayload,
+      });
+      logInfo({
+        event: "daily_event_insert",
+        requestId,
+        userId,
+        dateKey,
+        type: "movement_completed",
+        inserted: inserted?.inserted === true,
+      });
+      if (inserted?.inserted === true) {
+        invalidateOutcomesCache(userId, dateKey);
+      }
+      send(200, { ok: true });
       return;
     }
 
@@ -7337,11 +7408,6 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === "/v1/progress" && req.method === "GET") {
-      const cached = getCachedResponse(userId, pathname, url.search);
-      if (cached) {
-        send(200, cached);
-        return;
-      }
       let checkIns = state.checkIns || [];
       let moveEvents = [];
       let resetEvents = [];
@@ -7362,6 +7428,7 @@ const server = http.createServer(async (req, res) => {
               timeMin: row.time_available_min,
             }));
           }
+          console.log("[PROGRESS_CHECKINS]", JSON.stringify((checkIns || []).slice(0, 3)));
           const { data: moveRows, error: moveError } = await supabaseAdmin()
             .from("event")
             .select("date_key")
@@ -7391,8 +7458,12 @@ const server = http.createServer(async (req, res) => {
       progress.consistency = progress.consistency || {};
       progress.consistency.movementCompleted = moveEvents.length;
       progress.consistency.resetsCompleted = resetEvents.length;
+      console.log("[PROGRESS_DEBUG]", {
+        checkInCount: checkIns?.length || 0,
+        resetEvents: resetEvents?.length || 0,
+        moveEvents: moveEvents?.length || 0,
+      });
       const payload = { ok: true, progress };
-      setCachedResponse(userId, pathname, url.search, payload);
       send(200, payload);
       return;
     }
