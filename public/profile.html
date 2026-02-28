@@ -34,17 +34,15 @@
         });
     })();
   </script>
-  <title>LiveNew · Profile</title>
+  <title>LiveNew - Profile</title>
 </head>
 <body class="page" data-page="profile">
   <header class="topbar">
     <div class="topbar-inner">
       <div class="brand" data-i18n="appName">LiveNew</div>
-      <nav class="nav nav-muted">
-        <a href="/day" data-i18n="nav.day">Day</a>
-        <a href="/week" data-i18n="nav.week">Week</a>
-        <a href="/trends" data-i18n="nav.trends">Trends</a>
-        <a href="/profile" class="active" data-i18n="nav.profile">Profile</a>
+      <nav class="nav">
+        <a href="/day">Today</a>
+        <a href="/progress">Progress</a>
       </nav>
       <div class="account">
         <button id="account-menu-btn" class="ghost account-btn" type="button" aria-expanded="false">Account</button>
@@ -56,115 +54,46 @@
     </div>
   </header>
 
-  <main class="ln-main">
-    <div class="ln-container secondary-page progressive">
-      <section id="consent-card" class="card hidden">
-        <h2>Consent required</h2>
-        <p class="muted">Please accept to continue.</p>
-        <button id="consent-accept" class="primary">I agree</button>
-        <div id="consent-status" class="muted"></div>
-      </section>
-
-      <section class="card">
-        <h2>Edit profile</h2>
-        <p class="muted">Keep this simple. Expand sections only when needed.</p>
-
-        <details open>
-          <summary>Daily rhythm</summary>
-          <div class="grid-2">
-            <label><span data-i18n="profile.wake">Wake time</span><input id="profile-wake" type="time" /></label>
-            <label><span data-i18n="profile.bed">Bed time</span><input id="profile-bed" type="time" /></label>
-            <label><span data-i18n="profile.sleepRegularity">Sleep regularity (1-10)</span><input id="profile-sleep-regular" type="number" min="1" max="10" /></label>
-            <label><span data-i18n="profile.sunlight">Sunlight minutes/day</span><input id="profile-sunlight" type="number" min="0" max="120" /></label>
-            <label><span data-i18n="profile.timezone">Timezone</span><input id="profile-timezone" type="text" placeholder="America/Los_Angeles" /></label>
-            <label><span data-i18n="profile.pack">Content pack</span><select id="profile-pack"><option value="balanced_routine" data-i18n="profile.packBalanced">Balanced routine</option><option value="calm_reset" data-i18n="profile.packCalm">Calm reset</option><option value="rebuild_strength" data-i18n="profile.packRebuild">Rebuild strength</option></select></label>
+  <div class="ln-main">
+    <div class="ln-container">
+      <main class="today-shell">
+        <section class="card progress-section">
+          <h2 class="today-question">Your goal</h2>
+          <div class="today-options" id="profile-goals">
+            <button class="goal-opt" data-value="calmer" type="button">Feel calmer</button>
+            <button class="goal-opt" data-value="energy" type="button">More energy</button>
+            <button class="goal-opt" data-value="sleep" type="button">Better sleep</button>
+            <button class="goal-opt" data-value="weight" type="button">Weight stability</button>
           </div>
-        </details>
+          <button id="profile-goal-save" class="primary" type="button" style="margin-top:12px" disabled>Save</button>
+          <div id="profile-goal-status" class="muted"></div>
+        </section>
 
-        <details>
-          <summary>Habits & load</summary>
-          <div class="grid-2">
-            <label><span data-i18n="profile.caffeine">Caffeine cups/day</span><input id="profile-caffeine" type="number" min="0" max="5" /></label>
-            <label><span data-i18n="profile.lateCaffeine">Late caffeine days/week</span><input id="profile-late-caffeine" type="number" min="0" max="7" /></label>
-            <label><span data-i18n="profile.screen">Late screen minutes/night</span><input id="profile-screen" type="number" min="0" max="240" /></label>
-            <label><span data-i18n="profile.alcohol">Alcohol nights/week</span><input id="profile-alcohol" type="number" min="0" max="7" /></label>
-            <label><span data-i18n="profile.meal">Meal timing consistency (1-10)</span><input id="profile-meal" type="number" min="1" max="10" /></label>
+        <section class="card progress-section">
+          <h2 class="today-question">Injuries or limitations</h2>
+          <div class="onboard-checks" id="profile-injuries">
+            <label><input id="profile-injury-knee" type="checkbox" /> Knee</label>
+            <label><input id="profile-injury-shoulder" type="checkbox" /> Shoulder</label>
+            <label><input id="profile-injury-back" type="checkbox" /> Back</label>
+            <label><input id="profile-injury-none" type="checkbox" /> None</label>
           </div>
-        </details>
+          <button id="profile-injury-save" class="primary" type="button" style="margin-top:12px">Save</button>
+          <div id="profile-injury-status" class="muted"></div>
+        </section>
 
-        <details>
-          <summary>Constraints</summary>
-          <div class="grid-2">
-            <label><input id="constraint-injury-knee" type="checkbox" /> <span data-i18n="profile.injuryKnee">Knee injury</span></label>
-            <label><input id="constraint-injury-shoulder" type="checkbox" /> <span data-i18n="profile.injuryShoulder">Shoulder injury</span></label>
-            <label><input id="constraint-injury-back" type="checkbox" /> <span data-i18n="profile.injuryBack">Back injury</span></label>
-            <label><input id="constraint-eq-none" type="checkbox" /> <span data-i18n="profile.equipmentNone">No equipment</span></label>
-            <label><input id="constraint-eq-dumbbells" type="checkbox" /> <span data-i18n="profile.equipmentDumbbells">Dumbbells</span></label>
-            <label><input id="constraint-eq-bands" type="checkbox" /> <span data-i18n="profile.equipmentBands">Bands</span></label>
-            <label><input id="constraint-eq-gym" type="checkbox" /> <span data-i18n="profile.equipmentGym">Gym access</span></label>
-            <label><span data-i18n="profile.timePref">Preferred time of day</span><select id="constraint-time-pref"><option value="any" data-i18n="profile.timeAny">Any</option><option value="morning" data-i18n="profile.timeMorning">Morning</option><option value="midday" data-i18n="profile.timeMidday">Midday</option><option value="evening" data-i18n="profile.timeEvening">Evening</option></select></label>
-          </div>
-        </details>
-
-        <details>
-          <summary>Privacy & community</summary>
-          <div class="grid-2">
-            <label><input id="privacy-enabled" type="checkbox" /> <span data-i18n="profile.dataMin">Data minimization</span></label>
-            <label><input id="privacy-store-notes" type="checkbox" /> <span data-i18n="profile.storeNotes">Store notes</span></label>
-            <label><input id="privacy-store-traces" type="checkbox" /> <span data-i18n="profile.storeTraces">Store traces</span></label>
-            <label><span data-i18n="profile.eventRetention">Event retention days</span><input id="privacy-event-days" type="number" min="1" max="365" /></label>
-            <label><span data-i18n="profile.historyRetention">History retention days</span><input id="privacy-history-days" type="number" min="1" max="365" /></label>
-            <label><input id="community-opt-in" type="checkbox" /> <span data-i18n="profile.communityOptIn">Share anonymous “what worked” responses</span></label>
-          </div>
-        </details>
-
-        <div class="row">
-          <button id="profile-save" class="primary" data-i18n="profile.save">Save profile</button>
-          <button id="constraints-save" class="ghost" data-i18n="profile.saveConstraints">Save constraints</button>
-          <button id="privacy-save" class="ghost" data-i18n="profile.savePrivacy">Save privacy settings</button>
-          <button id="community-opt-save" class="ghost" data-i18n="profile.saveCommunity">Save community preference</button>
-          <button id="hard-reset" class="ghost hidden" data-i18n="profile.hardReset">Hard reset</button>
-        </div>
-        <div id="privacy-status" class="muted"></div>
-      </section>
-
-      <section class="card">
-        <h3>Sessions</h3>
-        <div class="row">
-          <input id="device-name" type="text" placeholder="Device name" data-i18n-placeholder="profile.deviceName" />
-          <button id="device-name-save" class="ghost" data-i18n="profile.saveDevice">Save device name</button>
-        </div>
-        <div id="sessions-list" class="list"></div>
-      </section>
-
-      <section class="card">
-        <h3>Reminders & changes</h3>
-        <div class="row">
-          <input id="reminders-date" type="date" />
-          <button id="reminders-load" class="ghost" data-i18n="profile.loadReminders">Load reminders</button>
-        </div>
-        <div id="reminders-list" class="list"></div>
-        <div class="row" style="margin-top:10px;">
-          <input id="changes-date" type="date" />
-          <button id="changes-load" class="ghost" data-i18n="profile.loadChanges">Load changes</button>
-        </div>
-        <div id="changes-list" class="list"></div>
-      </section>
-
-      <section class="card">
-        <h3>Release notes</h3>
-        <button id="profile-changelog-load" class="ghost" data-i18n="profile.loadChangelog">Load notes</button>
-        <div id="profile-changelog-list" class="list"></div>
-      </section>
+        <section class="card progress-section" style="text-align:center">
+          <button id="profile-logout" class="ghost" type="button">Log out</button>
+        </section>
+      </main>
     </div>
-  </main>
+  </div>
 
   <footer class="footer" id="footer-root">
     <div class="footer-panel">
       <div class="footer-grid">
         <div>
           <div class="footer-head">LIVENEW</div>
-          <div class="footer-links">Reset-first stress regulation for a healthy daily rhythm.</div>
+          <div class="footer-links">Daily stress regulation - movement, resets, and nutrition matched to how you feel.</div>
         </div>
         <div>
           <div class="footer-head">Resources</div>

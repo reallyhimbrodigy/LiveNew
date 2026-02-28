@@ -1445,262 +1445,113 @@ function initTrends() {
   loadTrends();
 }
 
-function initProfile() {
-  const saveBtn = qs("#profile-save");
-  const constraintsSave = qs("#constraints-save");
-  const communityOptSave = qs("#community-opt-save");
-  const hardResetBtn = qs("#hard-reset");
-  const sessionsList = qs("#sessions-list");
-  const deviceInput = qs("#device-name");
-  const deviceSave = qs("#device-name-save");
-  const privacySave = qs("#privacy-save");
-  const privacyStatus = qs("#privacy-status");
-  const remindersDate = qs("#reminders-date");
-  const remindersLoad = qs("#reminders-load");
-  const remindersList = qs("#reminders-list");
-  const changesDate = qs("#changes-date");
-  const changesLoad = qs("#changes-load");
-  const changesList = qs("#changes-list");
-  const changelogLoad = qs("#profile-changelog-load");
-  const changelogList = qs("#profile-changelog-list");
-  const appState = getAppState();
+async function initProfile() {
+  const goalSave = qs("#profile-goal-save");
+  const goalStatus = qs("#profile-goal-status");
+  const injurySave = qs("#profile-injury-save");
+  const injuryStatus = qs("#profile-injury-status");
+  const injuryNone = qs("#profile-injury-none");
+  const injuryKeys = ["knee", "shoulder", "back"];
+  let selectedGoal = null;
 
-  if (hardResetBtn) {
-    const allowHardReset =
-      appState.envMode === "dev" ||
-      appState.envMode === "internal" ||
-      appState.auth?.isAdmin === true;
-    hardResetBtn.classList.toggle("hidden", !allowHardReset);
-    hardResetBtn.addEventListener("click", async () => {
-      try {
-        await logoutAuth();
-      } catch {
-        // ignore
-      }
-      clearTokens();
-      window.location.href = "/";
-    });
-  }
-
-  const loadProfile = async () => {
-    try {
-      const res = await apiGet("/v1/account/export");
-      const profile = res.export?.userProfile || {};
-      qs("#profile-wake").value = profile.wakeTime || "07:00";
-      qs("#profile-bed").value = profile.bedTime || "23:00";
-      qs("#profile-sleep-regular").value = profile.sleepRegularity || 5;
-      qs("#profile-caffeine").value = profile.caffeineCupsPerDay || 1;
-      qs("#profile-late-caffeine").value = profile.lateCaffeineDaysPerWeek || 1;
-      qs("#profile-sunlight").value = profile.sunlightMinutesPerDay || 10;
-      qs("#profile-screen").value = profile.lateScreenMinutesPerNight || 45;
-      qs("#profile-alcohol").value = profile.alcoholNightsPerWeek || 1;
-      qs("#profile-meal").value = profile.mealTimingConsistency || 5;
-      if (qs("#profile-timezone")) qs("#profile-timezone").value = profile.timezone || "America/Los_Angeles";
-      qs("#profile-pack").value = profile.contentPack || "balanced_routine";
-      if (qs("#privacy-enabled")) qs("#privacy-enabled").checked = Boolean(profile.dataMinimization?.enabled);
-      if (qs("#privacy-store-notes")) qs("#privacy-store-notes").checked = profile.dataMinimization?.storeNotes !== false;
-      if (qs("#privacy-store-traces")) qs("#privacy-store-traces").checked = profile.dataMinimization?.storeTraces !== false;
-      if (qs("#privacy-event-days")) qs("#privacy-event-days").value = profile.dataMinimization?.eventRetentionDays || 90;
-      if (qs("#privacy-history-days")) qs("#privacy-history-days").value = profile.dataMinimization?.historyRetentionDays || 90;
-      const constraints = profile.constraints || {};
-      const injuries = constraints.injuries || {};
-      const equipment = constraints.equipment || {};
-      if (qs("#constraint-injury-knee")) qs("#constraint-injury-knee").checked = Boolean(injuries.knee);
-      if (qs("#constraint-injury-shoulder")) qs("#constraint-injury-shoulder").checked = Boolean(injuries.shoulder);
-      if (qs("#constraint-injury-back")) qs("#constraint-injury-back").checked = Boolean(injuries.back);
-      if (qs("#constraint-eq-none")) qs("#constraint-eq-none").checked = equipment.none !== false;
-      if (qs("#constraint-eq-dumbbells")) qs("#constraint-eq-dumbbells").checked = Boolean(equipment.dumbbells);
-      if (qs("#constraint-eq-bands")) qs("#constraint-eq-bands").checked = Boolean(equipment.bands);
-      if (qs("#constraint-eq-gym")) qs("#constraint-eq-gym").checked = Boolean(equipment.gym);
-      if (qs("#constraint-time-pref")) {
-        qs("#constraint-time-pref").value = constraints.timeOfDayPreference || "any";
-      }
-      try {
-        const community = await apiGet("/v1/community/opt-in");
-        if (qs("#community-opt-in")) qs("#community-opt-in").checked = Boolean(community.optedIn);
-      } catch {
-        // ignore
-      }
-    } catch (err) {
-      if (isAuthRequiredError(err)) {
-        clearTokens();
-        redirectToLogin(currentPathWithQuery());
-        return;
-      }
-      // ignore non-auth errors
-    }
+  const setCheck = (id, value) => {
+    const node = qs(`#${id}`);
+    if (node) node.checked = Boolean(value);
   };
 
-  const loadSessions = async () => {
-    if (!getToken() && !getRefreshToken()) return;
-    let res = null;
-    try {
-      res = await apiGet("/v1/account/sessions");
-    } catch (err) {
-      if (isAuthRequiredError(err)) {
-        clearTokens();
-        redirectToLogin(currentPathWithQuery());
-        return;
-      }
-      reportError(err);
+  const clearStatusLater = (node) => {
+    if (!node) return;
+    window.setTimeout(() => {
+      node.textContent = "";
+    }, 2000);
+  };
+
+  try {
+    const res = await apiGet("/v1/profile");
+    const profile = res?.profile || res?.userProfile || {};
+    const currentGoal = profile.goal || profile.primaryGoal || profile?.constraints?.goal || "";
+    if (currentGoal) {
+      selectedGoal = currentGoal;
+      qsa("#profile-goals .goal-opt").forEach((btn) => {
+        btn.classList.toggle("active", btn.dataset.value === currentGoal);
+      });
+    }
+
+    const injuries = profile?.constraints?.injuries || {};
+    setCheck("profile-injury-knee", injuries.knee);
+    setCheck("profile-injury-shoulder", injuries.shoulder);
+    setCheck("profile-injury-back", injuries.back);
+    setCheck("profile-injury-none", injuries.none || (!injuries.knee && !injuries.shoulder && !injuries.back));
+  } catch (err) {
+    if (isAuthRequiredError(err)) {
+      clearTokens();
+      redirectToLogin(currentPathWithQuery());
       return;
     }
-    clear(sessionsList);
-    (res.sessions || []).forEach((session) => {
-      const row = el("div", { class: "list-item" }, [
-        el("div", { text: session.deviceName || t("misc.unnamedDevice") }),
-        el("div", { class: "muted", text: `${t("misc.lastSeen")}: ${session.lastSeenAt || session.createdAt}` }),
-      ]);
-      if (!session.isCurrent) {
-        const btn = el("button", { text: t("misc.revoke"), class: "ghost" });
-        btn.addEventListener("click", async () => {
-          await apiPost("/v1/account/sessions/revoke", { token: session.token });
-          loadSessions();
-        });
-        row.appendChild(btn);
-      } else {
-        row.appendChild(el("div", { class: "muted", text: t("misc.currentSession") }));
-      }
-      sessionsList.appendChild(row);
-    });
-  };
+  }
 
-  const buildProfileFromForm = () => ({
-    wakeTime: qs("#profile-wake").value,
-    bedTime: qs("#profile-bed").value,
-    sleepRegularity: Number(qs("#profile-sleep-regular").value),
-    caffeineCupsPerDay: Number(qs("#profile-caffeine").value),
-    lateCaffeineDaysPerWeek: Number(qs("#profile-late-caffeine").value),
-    sunlightMinutesPerDay: Number(qs("#profile-sunlight").value),
-    lateScreenMinutesPerNight: Number(qs("#profile-screen").value),
-    alcoholNightsPerWeek: Number(qs("#profile-alcohol").value),
-    mealTimingConsistency: Number(qs("#profile-meal").value),
-    contentPack: qs("#profile-pack").value,
-    timezone: qs("#profile-timezone")?.value?.trim() || "America/Los_Angeles",
-    constraints: {
-      injuries: {
-        knee: Boolean(qs("#constraint-injury-knee")?.checked),
-        shoulder: Boolean(qs("#constraint-injury-shoulder")?.checked),
-        back: Boolean(qs("#constraint-injury-back")?.checked),
-      },
-      equipment: {
-        none: Boolean(qs("#constraint-eq-none")?.checked),
-        dumbbells: Boolean(qs("#constraint-eq-dumbbells")?.checked),
-        bands: Boolean(qs("#constraint-eq-bands")?.checked),
-        gym: Boolean(qs("#constraint-eq-gym")?.checked),
-      },
-      timeOfDayPreference: qs("#constraint-time-pref")?.value || "any",
-    },
-  });
-
-  saveBtn?.addEventListener("click", async () => {
-    const userProfile = buildProfileFromForm();
-    await apiPost("/v1/profile", { userProfile });
-  });
-
-  constraintsSave?.addEventListener("click", async () => {
-    const userProfile = buildProfileFromForm();
-    await apiPost("/v1/profile", { userProfile });
-  });
-
-  communityOptSave?.addEventListener("click", async () => {
-    const optedIn = Boolean(qs("#community-opt-in")?.checked);
-    await apiPost("/v1/community/opt-in", { optedIn });
-  });
-
-  privacySave?.addEventListener("click", async () => {
-    const dataMinimization = {
-      enabled: Boolean(qs("#privacy-enabled")?.checked),
-      storeNotes: Boolean(qs("#privacy-store-notes")?.checked),
-      storeTraces: Boolean(qs("#privacy-store-traces")?.checked),
-      eventRetentionDays: Number(qs("#privacy-event-days")?.value || 90),
-      historyRetentionDays: Number(qs("#privacy-history-days")?.value || 90),
-    };
-    await apiPatch("/v1/account/privacy", { dataMinimization });
-    if (privacyStatus) privacyStatus.textContent = t("misc.saved");
-  });
-
-  const loadReminders = async () => {
-    if (!remindersDate?.value) return;
-    const res = await apiGet(`/v1/reminders?date=${remindersDate.value}`);
-    clear(remindersList);
-    (res.items || []).forEach((item) => {
-      const row = el("div", { class: "list-item" }, [
-        el("div", { text: `${item.intentKey} • ${item.status}` }),
-        el("div", { class: "muted", text: item.scheduledForISO }),
-      ]);
-      if (item.status === "scheduled") {
-        const dismissBtn = el("button", { text: "Dismiss", class: "ghost" });
-        dismissBtn.addEventListener("click", async () => {
-          await apiPost(`/v1/reminders/${item.id}/dismiss`, {});
-          loadReminders();
-        });
-        const completeBtn = el("button", { text: "Complete", class: "ghost" });
-        completeBtn.addEventListener("click", async () => {
-          await apiPost(`/v1/reminders/${item.id}/complete`, {});
-          loadReminders();
-        });
-        row.appendChild(dismissBtn);
-        row.appendChild(completeBtn);
-      }
-      remindersList.appendChild(row);
-    });
-  };
-
-  remindersLoad?.addEventListener("click", loadReminders);
-  if (remindersDate) remindersDate.value = todayISO();
-
-  const loadChanges = async () => {
-    if (!changesDate?.value) return;
-    try {
-      const res = await apiGet(`/v1/plan/changes?date=${changesDate.value}`);
-      clear(changesList);
-      (res.items || []).forEach((item) => {
-        const row = el("div", { class: "list-item" }, [
-          el("div", { text: item.summary?.short || t("misc.planUpdated") }),
-          el("div", { class: "muted", text: item.createdAt }),
-        ]);
-        changesList.appendChild(row);
+  qsa("#profile-goals .goal-opt").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      selectedGoal = btn.dataset.value || null;
+      qsa("#profile-goals .goal-opt").forEach((opt) => {
+        opt.classList.toggle("active", opt === btn);
       });
-    } catch (err) {
-      reportError(err);
-    }
-  };
-
-  changesLoad?.addEventListener("click", loadChanges);
-  if (changesDate) changesDate.value = todayISO();
-
-  const loadUserChangelog = async () => {
-    const res = await apiGet("/v1/changelog?audience=user&limit=5");
-    if (!changelogList) return;
-    clear(changelogList);
-    (res.items || []).forEach((item) => {
-      changelogList.appendChild(
-        el("div", { class: "list-item" }, [
-          el("div", { text: `${item.version} • ${item.title}` }),
-          el("div", { class: "muted", text: item.createdAt }),
-          el("div", { text: item.notes }),
-        ])
-      );
+      if (goalSave) goalSave.disabled = !selectedGoal;
     });
-  };
-
-  changelogLoad?.addEventListener("click", loadUserChangelog);
-
-  deviceSave?.addEventListener("click", async () => {
-    const name = deviceInput?.value?.trim();
-    if (!name) return;
-    setDeviceName(name);
-    if (getToken() || getRefreshToken()) await apiPost("/v1/account/sessions/name", { deviceName: name });
-    loadSessions();
   });
 
-  if (getDeviceName() && deviceInput) deviceInput.value = getDeviceName();
-  loadProfile();
-  loadSessions();
-  loadReminders();
-  loadChanges();
-  loadUserChangelog();
+  goalSave?.addEventListener("click", async () => {
+    if (!selectedGoal) return;
+    try {
+      await apiPost("/v1/profile", { userProfile: { goal: selectedGoal } });
+      if (goalStatus) goalStatus.textContent = "Saved";
+      if (goalSave) goalSave.disabled = true;
+      clearStatusLater(goalStatus);
+    } catch {
+      if (goalStatus) goalStatus.textContent = "Failed to save";
+      clearStatusLater(goalStatus);
+    }
+  });
+
+  injuryNone?.addEventListener("change", () => {
+    if (!injuryNone.checked) return;
+    injuryKeys.forEach((key) => {
+      setCheck(`profile-injury-${key}`, false);
+    });
+  });
+  injuryKeys.forEach((key) => {
+    qs(`#profile-injury-${key}`)?.addEventListener("change", () => {
+      if (qs(`#profile-injury-${key}`)?.checked) {
+        setCheck("profile-injury-none", false);
+      }
+    });
+  });
+
+  injurySave?.addEventListener("click", async () => {
+    const injuries = {
+      knee: Boolean(qs("#profile-injury-knee")?.checked),
+      shoulder: Boolean(qs("#profile-injury-shoulder")?.checked),
+      back: Boolean(qs("#profile-injury-back")?.checked),
+    };
+    try {
+      await apiPost("/v1/profile", { userProfile: { constraints: { injuries } } });
+      if (injuryStatus) injuryStatus.textContent = "Saved";
+      clearStatusLater(injuryStatus);
+    } catch {
+      if (injuryStatus) injuryStatus.textContent = "Failed to save";
+      clearStatusLater(injuryStatus);
+    }
+  });
+
+  qs("#profile-logout")?.addEventListener("click", async () => {
+    try {
+      await logoutAuth();
+    } catch {
+      // ignore
+    }
+    clearTokens();
+    window.location.href = "/login";
+  });
 }
 
 function initAdmin() {
