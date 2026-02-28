@@ -1446,42 +1446,27 @@ function initTrends() {
 }
 
 async function initProfile() {
-  const goalSave = qs("#profile-goal-save");
-  const goalStatus = qs("#profile-goal-status");
-  const injurySave = qs("#profile-injury-save");
-  const injuryStatus = qs("#profile-injury-status");
-  const injuryNone = qs("#profile-injury-none");
-  const injuryKeys = ["knee", "shoulder", "back"];
-  let selectedGoal = null;
-
-  const setCheck = (id, value) => {
-    const node = qs(`#${id}`);
-    if (node) node.checked = Boolean(value);
+  const goalLabels = {
+    calmer: "Feel calmer",
+    energy: "More energy",
+    sleep: "Better sleep",
+    weight: "Weight stability",
   };
 
-  const clearStatusLater = (node) => {
-    if (!node) return;
-    window.setTimeout(() => {
-      node.textContent = "";
-    }, 2000);
-  };
+  let currentGoal = "";
 
   try {
     const res = await apiGet("/v1/profile");
     const profile = res?.profile || res?.userProfile || {};
-    const currentGoal = profile.goal || profile.primaryGoal || profile?.constraints?.goal || "";
-    if (currentGoal) {
-      selectedGoal = currentGoal;
-      qsa("#profile-goals .goal-opt").forEach((btn) => {
-        btn.classList.toggle("active", btn.dataset.value === currentGoal);
-      });
-    }
+    currentGoal = profile.goal || profile.primaryGoal || "";
 
-    const injuries = profile?.constraints?.injuries || {};
-    setCheck("profile-injury-knee", injuries.knee);
-    setCheck("profile-injury-shoulder", injuries.shoulder);
-    setCheck("profile-injury-back", injuries.back);
-    setCheck("profile-injury-none", injuries.none || (!injuries.knee && !injuries.shoulder && !injuries.back));
+    const emailEl = qs("#profile-email");
+    if (emailEl && profile.email) emailEl.textContent = profile.email;
+
+    const goalDisplay = qs("#profile-goal-display");
+    if (goalDisplay) {
+      goalDisplay.textContent = goalLabels[currentGoal] || currentGoal || "Not set";
+    }
   } catch (err) {
     if (isAuthRequiredError(err)) {
       clearTokens();
@@ -1490,57 +1475,50 @@ async function initProfile() {
     }
   }
 
-  qsa("#profile-goals .goal-opt").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      selectedGoal = btn.dataset.value || null;
-      qsa("#profile-goals .goal-opt").forEach((opt) => {
-        opt.classList.toggle("active", opt === btn);
-      });
-      if (goalSave) goalSave.disabled = !selectedGoal;
-    });
-  });
-
-  goalSave?.addEventListener("click", async () => {
-    if (!selectedGoal) return;
-    try {
-      await apiPost("/v1/profile", { userProfile: { goal: selectedGoal } });
-      if (goalStatus) goalStatus.textContent = "Saved";
-      if (goalSave) goalSave.disabled = true;
-      clearStatusLater(goalStatus);
-    } catch {
-      if (goalStatus) goalStatus.textContent = "Failed to save";
-      clearStatusLater(goalStatus);
+  try {
+    const data = await apiGet("/v1/progress");
+    if (data?.ok) {
+      const p = data.progress || {};
+      const checkinsEl = qs("#profile-stat-checkins");
+      const stressEl = qs("#profile-stat-stress");
+      const resetsEl = qs("#profile-stat-resets");
+      if (checkinsEl) checkinsEl.textContent = String(p.consistency?.checkinDays || 0);
+      if (stressEl) stressEl.textContent = p.stressAvg7 != null ? Number(p.stressAvg7).toFixed(1) : "—";
+      if (resetsEl) resetsEl.textContent = String(p.consistency?.resetsCompleted || 0);
     }
-  });
+  } catch {
+    // Stats fail silently — show dashes
+  }
 
-  injuryNone?.addEventListener("change", () => {
-    if (!injuryNone.checked) return;
-    injuryKeys.forEach((key) => {
-      setCheck(`profile-injury-${key}`, false);
+  const changeBtn = qs("#profile-goal-change");
+  const picker = qs("#profile-goal-picker");
+  const goalDisplay = qs("#profile-goal-display");
+  const goalStatus = qs("#profile-goal-status");
+
+  changeBtn?.addEventListener("click", () => {
+    picker?.classList.toggle("hidden");
+    qsa("#profile-goals .goal-opt").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.value === currentGoal);
     });
   });
-  injuryKeys.forEach((key) => {
-    qs(`#profile-injury-${key}`)?.addEventListener("change", () => {
-      if (qs(`#profile-injury-${key}`)?.checked) {
-        setCheck("profile-injury-none", false);
+
+  qsa("#profile-goals .goal-opt").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const newGoal = btn.dataset.value;
+      qsa("#profile-goals .goal-opt").forEach((b) => b.classList.toggle("active", b === btn));
+      try {
+        await apiPost("/v1/profile", { userProfile: { goal: newGoal } });
+        currentGoal = newGoal;
+        if (goalDisplay) goalDisplay.textContent = goalLabels[newGoal] || newGoal;
+        if (goalStatus) goalStatus.textContent = "Saved";
+        setTimeout(() => {
+          if (goalStatus) goalStatus.textContent = "";
+          picker?.classList.add("hidden");
+        }, 1000);
+      } catch {
+        if (goalStatus) goalStatus.textContent = "Failed to save";
       }
     });
-  });
-
-  injurySave?.addEventListener("click", async () => {
-    const injuries = {
-      knee: Boolean(qs("#profile-injury-knee")?.checked),
-      shoulder: Boolean(qs("#profile-injury-shoulder")?.checked),
-      back: Boolean(qs("#profile-injury-back")?.checked),
-    };
-    try {
-      await apiPost("/v1/profile", { userProfile: { constraints: { injuries } } });
-      if (injuryStatus) injuryStatus.textContent = "Saved";
-      clearStatusLater(injuryStatus);
-    } catch {
-      if (injuryStatus) injuryStatus.textContent = "Failed to save";
-      clearStatusLater(injuryStatus);
-    }
   });
 
   qs("#profile-logout")?.addEventListener("click", async () => {

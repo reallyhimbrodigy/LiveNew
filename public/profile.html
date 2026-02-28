@@ -57,28 +57,44 @@
   <div class="ln-main">
     <div class="ln-container">
       <main class="today-shell">
-        <section class="card progress-section">
-          <h2 class="today-question">Your goal</h2>
-          <div class="today-options" id="profile-goals">
-            <button class="goal-opt" data-value="calmer" type="button">Feel calmer</button>
-            <button class="goal-opt" data-value="energy" type="button">More energy</button>
-            <button class="goal-opt" data-value="sleep" type="button">Better sleep</button>
-            <button class="goal-opt" data-value="weight" type="button">Weight stability</button>
-          </div>
-          <button id="profile-goal-save" class="primary" type="button" style="margin-top:12px" disabled>Save</button>
-          <div id="profile-goal-status" class="muted"></div>
+        <section class="card progress-section" style="text-align:center">
+          <h2 class="today-question" style="margin-bottom:4px">Your profile</h2>
+          <p class="muted" id="profile-email"></p>
         </section>
 
         <section class="card progress-section">
-          <h2 class="today-question">Injuries or limitations</h2>
-          <div class="onboard-checks" id="profile-injuries">
-            <label><input id="profile-injury-knee" type="checkbox" /> Knee</label>
-            <label><input id="profile-injury-shoulder" type="checkbox" /> Shoulder</label>
-            <label><input id="profile-injury-back" type="checkbox" /> Back</label>
-            <label><input id="profile-injury-none" type="checkbox" /> None</label>
+          <div style="display:flex;align-items:baseline;justify-content:space-between">
+            <h3>Goal</h3>
+            <button id="profile-goal-change" class="ghost" type="button" style="font-size:0.85rem;height:auto;padding:4px 8px">Change</button>
           </div>
-          <button id="profile-injury-save" class="primary" type="button" style="margin-top:12px">Save</button>
-          <div id="profile-injury-status" class="muted"></div>
+          <p id="profile-goal-display" style="font-size:1.1rem;margin-top:4px"></p>
+          <div id="profile-goal-picker" class="hidden" style="margin-top:12px">
+            <div class="today-options" id="profile-goals" style="margin:0">
+              <button class="goal-opt" data-value="calmer" type="button">Feel calmer</button>
+              <button class="goal-opt" data-value="energy" type="button">More energy</button>
+              <button class="goal-opt" data-value="sleep" type="button">Better sleep</button>
+              <button class="goal-opt" data-value="weight" type="button">Weight stability</button>
+            </div>
+            <div id="profile-goal-status" class="muted" style="margin-top:8px"></div>
+          </div>
+        </section>
+
+        <section class="card progress-section">
+          <h3>This week</h3>
+          <div class="stat-cards" style="margin-top:12px">
+            <div class="stat-card">
+              <div id="profile-stat-checkins" class="stat-number">—</div>
+              <div class="stat-label">Check-ins</div>
+            </div>
+            <div class="stat-card">
+              <div id="profile-stat-stress" class="stat-number">—</div>
+              <div class="stat-label">Avg stress</div>
+            </div>
+            <div class="stat-card">
+              <div id="profile-stat-resets" class="stat-number">—</div>
+              <div class="stat-label">Resets</div>
+            </div>
+          </div>
         </section>
 
         <section class="card progress-section" style="text-align:center">
