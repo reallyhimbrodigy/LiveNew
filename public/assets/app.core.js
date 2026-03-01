@@ -994,31 +994,69 @@ function initDay({ initialDateISO } = {}) {
 
   function saveTodayPlan(dateISO, contract, stress) {
     try {
-      localStorage.setItem("livenew_today", JSON.stringify({
+      const slim = {
+        dateISO: contract?.dateISO || dateISO,
+        movement: contract?.movement || contract?.move || contract?.workout || null,
+        reset: contract?.reset || null,
+        nutrition: contract?.nutrition || null,
+      };
+      if (slim.movement) {
+        slim.movement = {
+          id: slim.movement.id || null,
+          title: slim.movement.title || "",
+          description: slim.movement.description || "",
+          phases: slim.movement.phases || [],
+          minutes: slim.movement.minutes || slim.movement.durationMin || null,
+        };
+      }
+      if (slim.reset) {
+        slim.reset = {
+          id: slim.reset.id || null,
+          title: slim.reset.title || "",
+          description: slim.reset.description || "",
+          phases: slim.reset.phases || [],
+        };
+      }
+      if (slim.nutrition) {
+        slim.nutrition = {
+          id: slim.nutrition.id || null,
+          title: slim.nutrition.title || "",
+          tip: slim.nutrition.tip || slim.nutrition.description || "",
+        };
+      }
+      const payload = JSON.stringify({
         date: dateISO,
-        contract,
+        contract: slim,
         stress,
         resetCompleted: false,
         moveCompleted: false,
         savedAt: Date.now(),
-      }));
-    } catch {
-      // ignore
+      });
+      console.log("[SAVE_TODAY]", "size:", payload.length, "date:", dateISO);
+      localStorage.setItem("livenew_today", payload);
+    } catch (err) {
+      console.error("[SAVE_TODAY_ERROR]", err?.message || err);
     }
   }
 
   function loadTodayPlan() {
     try {
       const raw = localStorage.getItem("livenew_today");
-      if (!raw) return null;
+      if (!raw) {
+        console.log("[LOAD_TODAY]", "nothing stored");
+        return null;
+      }
       const saved = JSON.parse(raw);
       const today = currentDateISO || todayISO();
+      console.log("[LOAD_TODAY]", "stored date:", saved.date, "today:", today);
       if (saved?.date !== today) {
+        console.log("[LOAD_TODAY]", "date mismatch, clearing");
         localStorage.removeItem("livenew_today");
         return null;
       }
       return saved;
-    } catch {
+    } catch (err) {
+      console.error("[LOAD_TODAY_ERROR]", err?.message || err);
       localStorage.removeItem("livenew_today");
       return null;
     }
