@@ -990,18 +990,49 @@ function initDay({ initialDateISO } = {}) {
   let energy = null;
   let sleepHours = 7;
   let timeMin = null;
+  let activeSessionInterval = null;
 
-  function loadExistingPlan() {
+  function saveTodayPlan(dateISO, contract, stress) {
+    try {
+      localStorage.setItem("livenew_today", JSON.stringify({
+        date: dateISO,
+        contract,
+        stress,
+        resetCompleted: false,
+        moveCompleted: false,
+        savedAt: Date.now(),
+      }));
+    } catch {
+      // ignore
+    }
+  }
+
+  function loadTodayPlan() {
     try {
       const raw = localStorage.getItem("livenew_today");
       if (!raw) return null;
       const saved = JSON.parse(raw);
-      if (saved?.date !== currentDateISO) {
+      const today = currentDateISO || todayISO();
+      if (saved?.date !== today) {
         localStorage.removeItem("livenew_today");
         return null;
       }
       return saved;
     } catch {
+      localStorage.removeItem("livenew_today");
+      return null;
+    }
+  }
+
+  function updateTodayPlan(updates) {
+    try {
+      const raw = localStorage.getItem("livenew_today");
+      if (!raw) return;
+      const saved = JSON.parse(raw);
+      Object.assign(saved, updates);
+      localStorage.setItem("livenew_today", JSON.stringify(saved));
+    } catch {
+      // ignore
       return null;
     }
   }
@@ -1019,12 +1050,12 @@ function initDay({ initialDateISO } = {}) {
     const progressEl = qs(`#${config.progressEl || ""}`);
     const titleEl = qs(`#${config.titleEl || ""}`);
     const descEl = qs(`#${config.descriptionEl || ""}`);
-    const exitEl = config.exitBtn ? qs(config.exitBtn) : null;
     let phaseIndex = 0;
     let intervalId = null;
 
     const finish = () => {
       clearInterval(intervalId);
+      activeSessionInterval = null;
       if (typeof config.onComplete === "function") config.onComplete();
     };
 
@@ -1050,29 +1081,26 @@ function initDay({ initialDateISO } = {}) {
       const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
       if (timerEl) timerEl.textContent = fmt(remaining);
       clearInterval(intervalId);
+      activeSessionInterval = null;
       intervalId = setInterval(() => {
         remaining -= 1;
         if (timerEl) timerEl.textContent = fmt(remaining);
         if (remaining <= 0) {
           clearInterval(intervalId);
+          activeSessionInterval = null;
           phaseIndex += 1;
           runPhase();
         }
       }, 1000);
+      activeSessionInterval = intervalId;
     };
 
     if (skipBtn) {
       skipBtn.onclick = () => {
         clearInterval(intervalId);
+        activeSessionInterval = null;
         phaseIndex += 1;
         runPhase();
-      };
-    }
-
-    if (exitEl) {
-      exitEl.onclick = () => {
-        clearInterval(intervalId);
-        showStep("today");
       };
     }
 
@@ -1162,7 +1190,7 @@ function initDay({ initialDateISO } = {}) {
       cardsContainer.insertBefore(resetCard, cardsContainer.firstChild);
     }
 
-    const saved = loadExistingPlan();
+    const saved = loadTodayPlan();
     const resetDone = Boolean(saved?.resetCompleted);
     const moveDone = Boolean(saved?.moveCompleted);
     const allDone = hasReset ? resetDone && moveDone : moveDone;
@@ -1328,15 +1356,7 @@ function initDay({ initialDateISO } = {}) {
       });
       currentContract = res;
       currentDateISO = res?.dateISO || currentDateISO;
-      try {
-        localStorage.setItem("livenew_today", JSON.stringify({
-          date: currentDateISO,
-          contract: res,
-          stress: stressBefore,
-        }));
-      } catch {
-        // ignore
-      }
+      saveTodayPlan(currentDateISO, res, stressBefore);
       if (statusEl) statusEl.textContent = "";
       populateTodayScreen(res, stressBefore);
       showStep("today");
@@ -1377,16 +1397,7 @@ function initDay({ initialDateISO } = {}) {
         } catch (err) {
           reportError(err);
         }
-        try {
-          const raw = localStorage.getItem("livenew_today");
-          if (raw) {
-            const saved = JSON.parse(raw);
-            saved.moveCompleted = true;
-            localStorage.setItem("livenew_today", JSON.stringify(saved));
-          }
-        } catch {
-          // ignore
-        }
+        updateTodayPlan({ moveCompleted: true });
         populateTodayScreen(currentContract, stressBefore);
         showStep("today");
       },
@@ -1402,6 +1413,22 @@ function initDay({ initialDateISO } = {}) {
     if (descEl) descEl.textContent = reset.description || "";
     showStep("reset");
     startGuidedReset(reset.phases || []);
+  });
+
+  qs("#move-exit")?.addEventListener("click", () => {
+    if (activeSessionInterval) {
+      clearInterval(activeSessionInterval);
+      activeSessionInterval = null;
+    }
+    showStep("today");
+  });
+
+  qs("#reset-exit")?.addEventListener("click", () => {
+    if (activeSessionInterval) {
+      clearInterval(activeSessionInterval);
+      activeSessionInterval = null;
+    }
+    showStep("today");
   });
 
   // After (post-reset) slider
@@ -1423,26 +1450,17 @@ function initDay({ initialDateISO } = {}) {
     } catch (err) {
       reportError(err);
     }
-    try {
-      const raw = localStorage.getItem("livenew_today");
-      if (raw) {
-        const saved = JSON.parse(raw);
-        saved.resetCompleted = true;
-        localStorage.setItem("livenew_today", JSON.stringify(saved));
-      }
-    } catch {
-      // ignore
-    }
+    updateTodayPlan({ resetCompleted: true });
     populateTodayScreen(currentContract, stressBefore);
     showStep("today");
   });
 
   updateCheckinReady();
-  const existing = loadExistingPlan();
-  if (existing?.contract) {
-    currentContract = existing.contract;
-    stressBefore = Number(existing.stress || 5);
-    populateTodayScreen(existing.contract, stressBefore);
+  const existingPlan = loadTodayPlan();
+  if (existingPlan?.contract) {
+    currentContract = existingPlan.contract;
+    stressBefore = Number(existingPlan.stress || 5);
+    populateTodayScreen(existingPlan.contract, existingPlan.stress);
     showStep("today");
   } else {
     showStep("checkin");
