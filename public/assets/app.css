@@ -273,6 +273,18 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
   margin-bottom: 8px;
 }
 
+.today-complete-summary {
+  text-align: center;
+  padding: 20px 16px;
+  margin-top: 8px;
+}
+
+.today-complete-text {
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.5;
+}
+
 .exit-session {
   font-size: 0.8rem;
   margin-top: 8px;
