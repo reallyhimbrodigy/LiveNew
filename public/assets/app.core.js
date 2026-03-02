@@ -994,70 +994,48 @@ function initDay({ initialDateISO } = {}) {
 
   function saveTodayPlan(dateISO, contract, stress) {
     try {
+      const m = contract?.movement || contract?.move || contract?.workout || null;
+      const r = contract?.reset || null;
+      const n = contract?.nutrition || null;
       const slim = {
         dateISO: contract?.dateISO || dateISO,
-        movement: contract?.movement || contract?.move || contract?.workout || null,
-        reset: contract?.reset || null,
-        nutrition: contract?.nutrition || null,
+        movement: m ? { id: m.id, title: m.title, description: m.description, phases: m.phases, minutes: m.minutes || m.durationMin } : null,
+        reset: r ? { id: r.id, title: r.title, description: r.description, phases: r.phases } : null,
+        nutrition: n ? { id: n.id, title: n.title, tip: n.tip || n.description } : null,
       };
-      if (slim.movement) {
-        slim.movement = {
-          id: slim.movement.id || null,
-          title: slim.movement.title || "",
-          description: slim.movement.description || "",
-          phases: slim.movement.phases || [],
-          minutes: slim.movement.minutes || slim.movement.durationMin || null,
-        };
-      }
-      if (slim.reset) {
-        slim.reset = {
-          id: slim.reset.id || null,
-          title: slim.reset.title || "",
-          description: slim.reset.description || "",
-          phases: slim.reset.phases || [],
-        };
-      }
-      if (slim.nutrition) {
-        slim.nutrition = {
-          id: slim.nutrition.id || null,
-          title: slim.nutrition.title || "",
-          tip: slim.nutrition.tip || slim.nutrition.description || "",
-        };
-      }
-      const payload = JSON.stringify({
-        date: dateISO,
-        contract: slim,
-        stress,
-        resetCompleted: false,
-        moveCompleted: false,
-        savedAt: Date.now(),
-      });
-      console.log("[SAVE_TODAY]", "size:", payload.length, "date:", dateISO);
-      localStorage.setItem("livenew_today", payload);
+      localStorage.setItem(
+        "livenew_today",
+        JSON.stringify({
+          date: dateISO,
+          contract: slim,
+          stress,
+          resetCompleted: false,
+          moveCompleted: false,
+        })
+      );
+      console.log("[SAVE_TODAY] saved, date:", dateISO);
     } catch (err) {
-      console.error("[SAVE_TODAY_ERROR]", err?.message || err);
+      console.error("[SAVE_TODAY] failed:", err);
     }
   }
 
   function loadTodayPlan() {
     try {
       const raw = localStorage.getItem("livenew_today");
-      if (!raw) {
-        console.log("[LOAD_TODAY]", "nothing stored");
-        return null;
-      }
+      if (!raw) return null;
       const saved = JSON.parse(raw);
-      const today = currentDateISO || todayISO();
-      console.log("[LOAD_TODAY]", "stored date:", saved.date, "today:", today);
-      if (saved?.date !== today) {
-        console.log("[LOAD_TODAY]", "date mismatch, clearing");
+      const today = currentDateISO || new Date().toISOString().slice(0, 10);
+      if (saved.date !== today) {
         localStorage.removeItem("livenew_today");
         return null;
       }
+      console.log("[LOAD_TODAY] found plan for", today);
       return saved;
     } catch (err) {
-      console.error("[LOAD_TODAY_ERROR]", err?.message || err);
-      localStorage.removeItem("livenew_today");
+      console.error("[LOAD_TODAY] failed:", err);
+      try {
+        localStorage.removeItem("livenew_today");
+      } catch {}
       return null;
     }
   }
@@ -1394,6 +1372,16 @@ function initDay({ initialDateISO } = {}) {
       });
       currentContract = res;
       currentDateISO = res?.dateISO || currentDateISO;
+      const move = res?.movement || res?.move || res?.workout;
+      const reset = res?.reset;
+      const hasRealMove = move && Array.isArray(move.phases) && move.phases.length > 0;
+      const hasRealReset = reset && Array.isArray(reset.phases) && reset.phases.length > 0;
+
+      if (!hasRealMove && !hasRealReset) {
+        if (statusEl) statusEl.textContent = "Our servers are busy. Please try again in a moment.";
+        if (checkinNext) checkinNext.disabled = false;
+        return;
+      }
       saveTodayPlan(currentDateISO, res, stressBefore);
       if (statusEl) statusEl.textContent = "";
       populateTodayScreen(res, stressBefore);

@@ -2298,6 +2298,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/consent/accept",
     "/v1/consents/accept",
     "/v1/onboard/complete",
+    "/v1/progress",
   ]);
   console.log("[SUPABASE_ROUTE_CHECK]", pathname, supabaseRoutes.has(pathname));
   if (!supabaseRoutes.has(pathname)) return false;
@@ -2681,6 +2682,29 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       const aiReset = resetResult.status === "fulfilled" ? resetResult.value : null;
       const aiNutrition = nutritionResult.status === "fulfilled" ? nutritionResult.value : null;
 
+      if (!aiMove && !aiReset && !aiNutrition) {
+        console.error("[AI_ALL_FAILED]", {
+          move: moveResult.reason?.message || "null",
+          reset: resetResult.reason?.message || "null",
+          nutrition: nutritionResult.reason?.message || "null",
+        });
+        clearInterval(keepAlive);
+        keepAlive = null;
+        if (!res.writableEnded) {
+          if (res.headersSent) {
+            res.end(
+              JSON.stringify({
+                ok: false,
+                error: { code: "ai_unavailable", message: "Our servers are busy. Please try again in a moment." },
+              })
+            );
+          } else {
+            sendError(res, 503, "ai_unavailable", "Our servers are busy. Please try again in a moment.");
+          }
+        }
+        return true;
+      }
+
       if (aiMove) {
         today.movement = {
           id: aiMove.id,
@@ -2907,6 +2931,72 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       console.error("[MOVE_COMPLETE_ERROR]", err?.message);
       sendError(res, 500, "internal", "Failed to record movement completion");
     }
+    return true;
+  }
+
+  if (pathname === "/v1/progress") {
+    if (req.method !== "GET") {
+      sendError(res, 405, "method_not_allowed", "Method not allowed");
+      return true;
+    }
+    let checkIns = [];
+    let moveEvents = [];
+    let resetEvents = [];
+    try {
+      const userSupabase = supabaseForUser(auth.jwt);
+      const { data: checkInRows, error: checkInError } = await userSupabase
+        .from("checkin")
+        .select("date_key, stress, sleep_quality, energy, time_available_min")
+        .eq("user_id", auth.userId)
+        .order("date_key", { ascending: true });
+      if (checkInError) throw checkInError;
+      checkIns = Array.isArray(checkInRows)
+        ? checkInRows.map((row) => ({
+            dateISO: row.date_key,
+            dateKey: row.date_key,
+            stress: row.stress,
+            sleepQuality: row.sleep_quality,
+            energy: row.energy,
+            timeMin: row.time_available_min,
+          }))
+        : [];
+      const { data: eventRows, error: eventError } = await userSupabase
+        .from("event")
+        .select("date_key, type")
+        .eq("user_id", auth.userId)
+        .in("type", ["movement_completed", "reset_completed"]);
+      if (eventError) throw eventError;
+      if (Array.isArray(eventRows)) {
+        moveEvents = eventRows.filter((row) => row.type === "movement_completed");
+        resetEvents = eventRows.filter((row) => row.type === "reset_completed");
+      }
+    } catch (err) {
+      logWarn({ event: "progress_query_failed", userId: auth.userId, error: err?.message || String(err) });
+    }
+
+    const completions = {};
+    moveEvents.forEach((row) => {
+      const key = row?.date_key;
+      if (!key) return;
+      if (!completions[key]) completions[key] = {};
+      completions[key].movement = true;
+    });
+    resetEvents.forEach((row) => {
+      const key = row?.date_key;
+      if (!key) return;
+      if (!completions[key]) completions[key] = {};
+      completions[key].reset = true;
+    });
+
+    const progress = domain.computeProgress({
+      checkIns,
+      weekPlan: null,
+      completions,
+    });
+    progress.consistency = progress.consistency || {};
+    progress.consistency.movementCompleted = moveEvents.length;
+    progress.consistency.resetsCompleted = resetEvents.length;
+    sendJson(res, 200, { ok: true, progress }, auth.userId);
     return true;
   }
 
@@ -7414,67 +7504,6 @@ const server = http.createServer(async (req, res) => {
           created_at: entry.createdAt,
         })),
       });
-      return;
-    }
-
-    if (pathname === "/v1/progress" && req.method === "GET") {
-      let checkIns = state.checkIns || [];
-      let moveEvents = [];
-      let resetEvents = [];
-      if (SUPABASE_URL && userId) {
-        try {
-          const { data: checkInRows, error: checkInError } = await supabaseAdmin()
-            .from("checkin")
-            .select("date_key, stress, sleep_quality, energy, time_available_min, created_at")
-            .eq("user_id", userId)
-            .order("date_key", { ascending: true });
-          if (!checkInError && Array.isArray(checkInRows) && checkInRows.length) {
-            checkIns = checkInRows.map((row) => ({
-              dateISO: row.date_key,
-              dateKey: row.date_key,
-              stress: row.stress,
-              sleepQuality: row.sleep_quality,
-              energy: row.energy,
-              timeMin: row.time_available_min,
-            }));
-          }
-          console.log("[PROGRESS_CHECKINS]", JSON.stringify((checkIns || []).slice(0, 3)));
-          const { data: moveRows, error: moveError } = await supabaseAdmin()
-            .from("event")
-            .select("date_key")
-            .eq("user_id", userId)
-            .eq("type", "movement_completed");
-          if (!moveError && Array.isArray(moveRows)) {
-            moveEvents = moveRows;
-          }
-
-          const { data: resetRows, error: resetError } = await supabaseAdmin()
-            .from("event")
-            .select("date_key")
-            .eq("user_id", userId)
-            .eq("type", "reset_completed");
-          if (!resetError && Array.isArray(resetRows)) {
-            resetEvents = resetRows;
-          }
-        } catch (err) {
-          logWarn({ event: "progress_checkin_query_failed", userId, error: err?.message || String(err) });
-        }
-      }
-      const progress = domain.computeProgress({
-        checkIns,
-        weekPlan: state.weekPlan,
-        completions: state.partCompletionByDate || {},
-      });
-      progress.consistency = progress.consistency || {};
-      progress.consistency.movementCompleted = moveEvents.length;
-      progress.consistency.resetsCompleted = resetEvents.length;
-      console.log("[PROGRESS_DEBUG]", {
-        checkInCount: checkIns?.length || 0,
-        resetEvents: resetEvents?.length || 0,
-        moveEvents: moveEvents?.length || 0,
-      });
-      const payload = { ok: true, progress };
-      send(200, payload);
       return;
     }
 
