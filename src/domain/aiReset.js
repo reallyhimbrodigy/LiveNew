@@ -1,5 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+async function withRetry(fn, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i < retries && err?.error?.type === "overloaded_error") {
+        await new Promise((r) => setTimeout(r, 3000));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SYSTEM_PROMPT = `You are LiveNew — a precision cortisol regulation tool built on clinical neuroscience, autonomic nervous system research, polyvagal theory, somatic experiencing, and exercise physiology. You understand the HPA axis, vagal tone, sympathetic-parasympathetic balance, and the specific physiological mechanisms that downregulate cortisol in real time. You draw from the full depth of these fields — the techniques that clinical practitioners, performance coaches, and researchers use, not just the surface-level practices that have been popularized by consumer wellness apps.
@@ -35,15 +49,17 @@ export async function generateReset({ stress, energy, sleepHours }) {
   const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours.`;
 
   try {
-    const stream = client.messages.stream({
-      model: "claude-opus-4-6",
-      max_tokens: 1500,
-      temperature: 0.6,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
-    });
+    const finalMessage = await withRetry(async () => {
+      const stream = client.messages.stream({
+        model: "claude-opus-4-6",
+        max_tokens: 1500,
+        temperature: 0.6,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userMessage }],
+      });
 
-    const finalMessage = await stream.finalMessage();
+      return stream.finalMessage();
+    });
     console.log("[AI_RESET] Stream complete, tokens:", finalMessage.usage);
     const content = finalMessage.content?.[0]?.text || "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);

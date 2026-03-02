@@ -1,5 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+async function withRetry(fn, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i < retries && err?.error?.type === "overloaded_error") {
+        await new Promise((r) => setTimeout(r, 3000));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SYSTEM_PROMPT = `You are LiveNew — a precision cortisol regulation tool built on clinical neuroscience and nutritional science. You understand how food timing, what you eat, and specific nutrients affect stress and energy levels. You draw from the full depth of this field — the nutritional strategies that clinical practitioners and researchers use, not just generic wellness advice.
@@ -17,15 +31,17 @@ export async function generateNutrition({ stress, energy, sleepHours, goal }) {
   const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Goal: ${goal || "feel calmer"}.`;
 
   try {
-    const stream = client.messages.stream({
-      model: "claude-opus-4-6",
-      max_tokens: 200,
-      temperature: 0.7,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
-    });
+    const finalMessage = await withRetry(async () => {
+      const stream = client.messages.stream({
+        model: "claude-opus-4-6",
+        max_tokens: 200,
+        temperature: 0.7,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userMessage }],
+      });
 
-    const finalMessage = await stream.finalMessage();
+      return stream.finalMessage();
+    });
     console.log("[AI_NUTRITION] Stream complete, tokens:", finalMessage.usage);
     const content = finalMessage.content?.[0]?.text || "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);

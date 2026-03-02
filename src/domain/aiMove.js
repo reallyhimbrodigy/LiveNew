@@ -1,5 +1,19 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+async function withRetry(fn, retries = 2) {
+  for (let i = 0; i <= retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i < retries && err?.error?.type === "overloaded_error") {
+        await new Promise((r) => setTimeout(r, 3000));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SYSTEM_PROMPT = `You are LiveNew — a precision cortisol regulation tool built on clinical neuroscience, exercise physiology, and autonomic nervous system research. You understand how different types, intensities, and durations of movement affect the HPA axis, cortisol clearance, sympathetic-parasympathetic balance, and nervous system recovery. You draw from the full depth of these fields — the programming that clinical practitioners, performance coaches, and researchers use, not just the surface-level routines that have been popularized by consumer fitness apps.
@@ -29,15 +43,17 @@ export async function generateMove({ stress, energy, sleepHours, timeMin, goal }
   const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Time available: ${timeMin} minutes. Goal: ${goal || "feel calmer"}.`;
 
   try {
-    const stream = client.messages.stream({
-      model: "claude-opus-4-6",
-      max_tokens: 1500,
-      temperature: 0.6,
-      system: SYSTEM_PROMPT,
-      messages: [{ role: "user", content: userMessage }],
-    });
+    const finalMessage = await withRetry(async () => {
+      const stream = client.messages.stream({
+        model: "claude-opus-4-6",
+        max_tokens: 1500,
+        temperature: 0.6,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userMessage }],
+      });
 
-    const finalMessage = await stream.finalMessage();
+      return stream.finalMessage();
+    });
     console.log("[AI_MOVE] Stream complete, tokens:", finalMessage.usage);
     const content = finalMessage.content?.[0]?.text || "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
