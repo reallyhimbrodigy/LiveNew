@@ -26,7 +26,7 @@ Write everything the way a calm coach talks to someone having a hard day. Use pl
 
 I will give you my stress level (1–10) and other check-in data. Build a 5 minute reset for me.
 
-Each phase is one technique.
+Each phase is one technique. Every technique is seated or lying down.
 
 Start with something that interrupts the stress, then gradually bring me into a calmer state. Each phase should have enough time to actually work.
 
@@ -34,7 +34,7 @@ Go beyond the basics. The common techniques everyone already knows are your last
 
 Phases should total 5 minutes.
 
-Every sentence in every phase instruction puts my body into a specific position, movement, or breathing pattern. Keep instructions tight. Every word earns its place.
+Every sentence in every phase instruction is a physical action I perform — a position to hold, a movement to make, or a breath to take. Keep instructions tight. Every word earns its place.
 
 Respond in JSON only:
 {
