@@ -310,6 +310,7 @@ export function renderOnboardScreen({ onComplete, onError, defaults = {} } = {})
   let currentStep = 0;
   let onboardGoal = null;
   let onboardEnergy = null;
+  let onboardWakeTime = null;
   let onboardTimeMin = null;
   const status = qs("#onboard-status");
   if (status) status.textContent = "";
@@ -329,7 +330,7 @@ export function renderOnboardScreen({ onComplete, onError, defaults = {} } = {})
     if (step === 1) {
       if (nextBtn) nextBtn.disabled = !onboardGoal;
     } else if (step === 2) {
-      if (nextBtn) nextBtn.disabled = !onboardEnergy || !onboardTimeMin;
+      if (nextBtn) nextBtn.disabled = !onboardEnergy || !onboardWakeTime || !onboardTimeMin;
     } else if (step === 4) {
       const allChecked = qs("#onboard-consent-terms")?.checked
         && qs("#onboard-consent-privacy")?.checked
@@ -379,6 +380,13 @@ export function renderOnboardScreen({ onComplete, onError, defaults = {} } = {})
       if (currentStep < 4) showOnboardStep(currentStep + 1);
     });
 
+    document.querySelectorAll(".onboard-next").forEach((btn) => {
+      if (btn.id === "onboard-next") return;
+      btn.addEventListener("click", () => {
+        if (currentStep < 4) showOnboardStep(currentStep + 1);
+      });
+    });
+
     document.querySelectorAll(".goal-opt").forEach((btn) => {
       btn.addEventListener("click", () => {
         onboardGoal = btn.dataset.value;
@@ -399,6 +407,14 @@ export function renderOnboardScreen({ onComplete, onError, defaults = {} } = {})
       btn.addEventListener("click", () => {
         onboardTimeMin = Number(btn.dataset.value);
         document.querySelectorAll(".onboard-time-opt").forEach((b) => b.classList.toggle("active", b === btn));
+        updateOnboardNextEnabled(2);
+      });
+    });
+
+    document.querySelectorAll(".onboard-wake-opt").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        onboardWakeTime = String(btn.dataset.value || "").trim() || null;
+        document.querySelectorAll(".onboard-wake-opt").forEach((b) => b.classList.toggle("active", b === btn));
         updateOnboardNextEnabled(2);
       });
     });
@@ -465,9 +481,22 @@ export function renderOnboardScreen({ onComplete, onError, defaults = {} } = {})
         sleepQuality: Math.max(1, Math.min(10, Math.round((sleepHours / 12) * 10))),
         energy: onboardEnergy || "med",
         timeAvailableMin: onboardTimeMin || 10,
+        wakeTime: onboardWakeTime || "normal",
       };
       try {
         const res = await apiPost("/v1/onboard/complete", { consent, baseline, firstCheckIn });
+        try {
+          localStorage.setItem(
+            "livenew_onboard_first_checkin",
+            JSON.stringify({
+              stress: firstCheckIn.stress,
+              energy: onboardEnergy || "med",
+              sleepHours: firstCheckIn.sleepHours,
+              wakeTime: firstCheckIn.wakeTime,
+              timeMin: firstCheckIn.timeAvailableMin,
+            })
+          );
+        } catch {}
         if (status) status.textContent = "";
         if (card) card.classList.add("hidden");
         if (typeof onboardHandlers.onComplete === "function") {
@@ -989,19 +1018,22 @@ function initDay({ initialDateISO } = {}) {
   let stressBefore = 5;
   let energy = null;
   let sleepHours = 7;
+  let wakeTime = null;
   let timeMin = null;
   let activeSessionInterval = null;
 
-  function saveTodayPlan(dateISO, contract, stress) {
+  function saveTodayPlan(dateISO, contract, stress, wakeTimeValue) {
     try {
       const m = contract?.movement || contract?.move || contract?.workout || null;
       const r = contract?.reset || null;
       const n = contract?.nutrition || null;
+      const w = contract?.winddown || null;
       const slim = {
         dateISO: contract?.dateISO || dateISO,
         movement: m ? { id: m.id, title: m.title, description: m.description, phases: m.phases, minutes: m.minutes || m.durationMin } : null,
         reset: r ? { id: r.id, title: r.title, description: r.description, phases: r.phases } : null,
-        nutrition: n ? { id: n.id, title: n.title, tip: n.tip || n.description } : null,
+        nutrition: n ? { id: n.id, title: n.title, morning: n.morning || n.tip || null, evening: n.evening || null } : null,
+        winddown: w ? { id: w.id, title: w.title, description: w.description, phases: w.phases } : null,
       };
       localStorage.setItem(
         "livenew_today",
@@ -1009,8 +1041,10 @@ function initDay({ initialDateISO } = {}) {
           date: dateISO,
           contract: slim,
           stress,
+          wakeTime: wakeTimeValue,
           resetCompleted: false,
           moveCompleted: false,
+          winddownCompleted: false,
         })
       );
       console.log("[SAVE_TODAY] saved, date:", dateISO);
@@ -1136,140 +1170,151 @@ function initDay({ initialDateISO } = {}) {
     });
   }
 
-  function populateTodayScreen(res, stress) {
+  function computeSchedule(wakeTimeValue) {
+    const wakeHourMap = { early: 6, normal: 8, late: 10 };
+    const wakeHour = wakeHourMap[wakeTimeValue] || 8;
+    return {
+      morning: { label: "Morning", startHour: wakeHour, endHour: wakeHour + 3 },
+      midday: { label: "Midday", startHour: wakeHour + 4, endHour: wakeHour + 7 },
+      evening: { label: "Evening", startHour: wakeHour + 12, endHour: wakeHour + 15 },
+    };
+  }
+
+  function formatHour(h) {
+    const hour = h % 24;
+    if (hour === 0) return "12am";
+    if (hour < 12) return `${hour}am`;
+    if (hour === 12) return "12pm";
+    return `${hour - 12}pm`;
+  }
+
+  function getCurrentWindow(schedule) {
+    const now = new Date().getHours();
+    if (now < schedule.midday.startHour) return "morning";
+    if (now < schedule.evening.startHour) return "midday";
+    return "evening";
+  }
+
+  function populateTodayScreen(res, stress, wakeTimeValue) {
     const resolvedStress = Number.isFinite(Number(stress)) ? Number(stress) : stressBefore;
-    const move = res?.movement || res?.move || res?.workout;
-    const resolvedTimeMin = move?.minutes || move?.durationMin || timeMin || 10;
-    const hasReset = resolvedStress > 3;
-
-    const resetCard = qs("#today-reset");
-    const showReset = hasReset && res?.reset;
-    if (resetCard) {
-      resetCard.classList.toggle("hidden", !showReset);
-      resetCard.classList.remove("today-card-done");
-    }
-    if (showReset) {
-      const el = (id) => qs(`#${id}`);
-      const titleEl = el("today-reset-title");
-      const descEl = el("today-reset-description");
-      const resetBtn = el("start-reset");
-      const resetLabel = resetCard?.querySelector(".today-card-label");
-      if (titleEl) titleEl.textContent = res.reset.title || "Your reset";
-      if (descEl) descEl.textContent = res.reset.description || "";
-      if (resetBtn) {
-        resetBtn.textContent = "Start reset";
-        resetBtn.disabled = false;
-      }
-      if (resetLabel) resetLabel.textContent = "Start here";
-    }
-
-    const moveCard = qs("#today-move");
-    if (moveCard) {
-      moveCard.classList.toggle("hidden", !move);
-      moveCard.classList.remove("today-card-done");
-    }
-    if (move) {
-      const titleEl = qs("#move-card-title");
-      const descEl = qs("#move-description");
-      const labelEl = qs("#move-card-label");
-      const durationEl = qs("#today-move-duration");
-      const moveBtn = qs("#start-move");
-      if (titleEl) titleEl.textContent = move.title || "Your movement";
-      if (descEl) descEl.textContent = move.description || "";
-      if (labelEl) labelEl.textContent = showReset ? "Up next" : "Start here";
-      if (durationEl) durationEl.textContent = `${resolvedTimeMin} min`;
-      if (moveBtn) {
-        moveBtn.textContent = "Start";
-        moveBtn.disabled = false;
-      }
-      if (!showReset) {
-        moveCard.classList.add("today-card-primary");
-      } else {
-        moveCard.classList.remove("today-card-primary");
-      }
-    }
-
-    const nutritionEl = qs("#nutrition-tip");
-    const nutritionTitle = qs("#today-nutrition .today-card-title");
-    if (nutritionEl) {
-      nutritionEl.textContent = res?.nutrition?.tip || res?.nutrition?.description || "";
-    }
-    if (nutritionTitle) {
-      nutritionTitle.textContent = res?.nutrition?.title || "Nutrition";
-    }
-
-    const cardsContainer = qs("#today-cards");
-    if (cardsContainer && !showReset && moveCard) {
-      cardsContainer.insertBefore(moveCard, cardsContainer.firstChild);
-    }
-    if (cardsContainer && showReset && resetCard) {
-      cardsContainer.insertBefore(resetCard, cardsContainer.firstChild);
-    }
-
+    const schedule = computeSchedule(wakeTimeValue || "normal");
     const saved = loadTodayPlan();
-    const resetDone = Boolean(saved?.resetCompleted);
-    const moveDone = Boolean(saved?.moveCompleted);
-    const allDone = hasReset ? resetDone && moveDone : moveDone;
+    const move = res?.movement || res?.move || res?.workout;
+    const reset = res?.reset;
+    const hasReset = resolvedStress > 3 && reset;
+    const windows = {
+      morning: { session: move, type: "move", title: move?.title || "Movement", desc: move?.description || "", done: saved?.moveCompleted || false },
+      midday: hasReset
+        ? { session: reset, type: "reset", title: reset?.title || "Reset", desc: reset?.description || "", done: saved?.resetCompleted || false }
+        : null,
+      evening: res?.winddown
+        ? {
+            session: res.winddown,
+            type: "winddown",
+            title: res.winddown.title || "Wind-down",
+            desc: res.winddown.description || "",
+            done: saved?.winddownCompleted || false,
+          }
+        : null,
+    };
+    const windowOrder = ["morning", "midday", "evening"];
+    const currentWindow = windowOrder.find((k) => windows[k] && !windows[k].done) || getCurrentWindow(schedule);
 
-    if (resetDone && resetCard) {
-      resetCard.classList.add("today-card-done");
-      const btn = resetCard.querySelector("#start-reset");
-      if (btn) {
-        btn.textContent = "Done ✓";
-        btn.disabled = true;
-      }
-      const label = resetCard.querySelector(".today-card-label");
-      if (label) label.textContent = "Done";
-      if (moveCard && !moveCard.classList.contains("hidden")) {
-        moveCard.classList.add("today-card-primary");
-        const moveLabel = qs("#move-card-label");
-        if (moveLabel) moveLabel.textContent = "Start here";
-      }
-    }
+    Object.keys(windows).forEach((key) => {
+      const slot = windows[key];
+      const timeEl = qs(`#${key}-time`);
+      const titleEl = qs(`#${key}-title`);
+      const statusEl = qs(`#${key}-status`);
+      const slotEl = qs(`#timeline-${key}`);
 
-    if (moveDone && moveCard) {
-      moveCard.classList.add("today-card-done");
-      moveCard.classList.remove("today-card-primary");
-      const btn = moveCard.querySelector("#start-move");
-      if (btn) {
-        btn.textContent = "Done ✓";
-        btn.disabled = true;
+      if (timeEl) timeEl.textContent = formatHour(schedule[key].startHour);
+
+      if (!slot) {
+        if (slotEl) slotEl.classList.add("hidden");
+        return;
       }
-      const label = moveCard.querySelector("#move-card-label");
-      if (label) label.textContent = "Done";
+      if (slotEl) slotEl.classList.remove("hidden");
+      if (titleEl) titleEl.textContent = slot.title;
+      if (statusEl) {
+        if (slot.done) {
+          statusEl.textContent = "Done ✓";
+        } else {
+          const now = new Date().getHours();
+          if (now >= schedule[key].endHour) {
+            statusEl.textContent = "Ready";
+          } else if (now >= schedule[key].startHour) {
+            statusEl.textContent = "Now";
+          } else {
+            statusEl.textContent = formatHour(schedule[key].startHour);
+          }
+        }
+      }
+    });
+
+    const activeWindow = windows[currentWindow];
+    const activeCardTime = qs("#active-card-time");
+    const activeCardTitle = qs("#active-card-title");
+    const activeCardDesc = qs("#active-card-desc");
+    const activeCardBtn = qs("#active-card-btn");
+    const activeCard = qs("#today-active-card");
+
+    if (activeWindow && !activeWindow.done) {
+      if (activeCard) activeCard.classList.remove("hidden");
+      if (activeCardTime) activeCardTime.textContent = schedule[currentWindow].label;
+      if (activeCardTitle) activeCardTitle.textContent = activeWindow.title;
+      if (activeCardDesc) activeCardDesc.textContent = activeWindow.desc;
+      if (activeCardBtn) {
+        activeCardBtn.textContent = "Start";
+        activeCardBtn.disabled = false;
+        activeCardBtn.onclick = () => {
+          if (activeWindow.type === "move") qs("#start-move")?.click();
+          else if (activeWindow.type === "reset") qs("#start-reset")?.click();
+          else if (activeWindow.type === "winddown") qs("#start-winddown")?.click();
+        };
+      }
+    } else if (activeWindow && activeWindow.done) {
+      const nextKey = windowOrder.find((k) => windows[k] && !windows[k].done);
+      if (nextKey) {
+        const next = windows[nextKey];
+        if (activeCard) activeCard.classList.remove("hidden");
+        if (activeCardTime) activeCardTime.textContent = `Up next: ${schedule[nextKey].label}`;
+        if (activeCardTitle) activeCardTitle.textContent = next.title;
+        if (activeCardDesc) activeCardDesc.textContent = next.desc;
+        if (activeCardBtn) {
+          activeCardBtn.textContent = "Start";
+          activeCardBtn.disabled = false;
+          activeCardBtn.onclick = () => {
+            if (next.type === "move") qs("#start-move")?.click();
+            else if (next.type === "reset") qs("#start-reset")?.click();
+            else if (next.type === "winddown") qs("#start-winddown")?.click();
+          };
+        }
+      } else {
+        if (activeCard) activeCard.classList.add("hidden");
+      }
+    } else {
+      if (activeCard) activeCard.classList.add("hidden");
     }
 
     const headline = qs("#today-headline");
+    const allDone = Object.values(windows).every((w) => !w || w.done);
     if (headline) {
-      if (resetDone && moveDone) {
-        headline.textContent = "You're done for today";
-      } else if (resetDone && !moveDone) {
-        headline.textContent = "Reset done — movement is up next";
-      } else if (!hasReset && moveDone) {
-        headline.textContent = "You're done for today";
-      } else if (resolvedStress >= 8) {
+      if (allDone) headline.textContent = "You're done for today";
+      else if (resolvedStress >= 8) {
         headline.textContent = "Let's bring that stress down";
-      } else if (resolvedStress >= 5) {
-        headline.textContent = "Your plan for today";
-      } else {
-        headline.textContent = "You're in a good place — let's move";
-      }
+      } else if (resolvedStress >= 5) headline.textContent = "Your plan for today";
+      else headline.textContent = "You're in a good place — here's your day";
     }
 
     const subline = qs("#today-subline");
     if (subline) {
-      if (allDone) {
-        const parts = [];
-        if (hasReset) parts.push("reset");
-        parts.push("movement");
-        subline.textContent = `${parts.join(" + ")} completed`;
-      } else {
-        const parts = [];
-        if (hasReset && res?.reset) parts.push("5 min reset");
-        if (move) parts.push(`${resolvedTimeMin} min movement`);
-        subline.textContent = parts.join(" + ");
-      }
+      subline.textContent = `${formatHour(schedule.morning.startHour)} to ${formatHour(schedule.evening.endHour)} plan`;
     }
+
+    const morningTip = qs("#nutrition-morning-tip");
+    const eveningTip = qs("#nutrition-evening-tip");
+    if (morningTip) morningTip.textContent = res?.nutrition?.morning || "";
+    if (eveningTip) eveningTip.textContent = res?.nutrition?.evening || "";
 
     const summaryEl = qs("#today-complete-summary");
     const summaryText = qs("#today-complete-text");
@@ -1286,23 +1331,21 @@ function initDay({ initialDateISO } = {}) {
     if (recheckinBtn) {
       recheckinBtn.textContent = allDone ? "Feeling different? Check in again" : "Check in again";
     }
-
-    const progressLink = qs("#today-progress-link");
-    if (progressLink) {
-      if (allDone) {
-        progressLink.classList.remove("ghost");
-        progressLink.classList.add("primary");
-      } else {
-        progressLink.classList.add("ghost");
-        progressLink.classList.remove("primary");
-      }
-    }
   }
 
   const checkinNext = qs("#checkin-next");
   const statusEl = qs("#day-status");
   const updateCheckinReady = () => {
-    const ready = Number.isFinite(stressBefore) && stressBefore >= 1 && stressBefore <= 10 && !!energy && Number.isFinite(sleepHours) && sleepHours >= 0 && sleepHours <= 12 && !!timeMin;
+    const ready =
+      Number.isFinite(stressBefore) &&
+      stressBefore >= 1 &&
+      stressBefore <= 10 &&
+      !!energy &&
+      Number.isFinite(sleepHours) &&
+      sleepHours >= 0 &&
+      sleepHours <= 12 &&
+      !!wakeTime &&
+      !!timeMin;
     if (checkinNext) checkinNext.disabled = !ready;
   };
 
@@ -1333,6 +1376,15 @@ function initDay({ initialDateISO } = {}) {
     });
   });
 
+  const wakeOpts = Array.from(document.querySelectorAll(".wake-opt"));
+  wakeOpts.forEach((btn) => {
+    btn.addEventListener("click", () => {
+      wakeTime = String(btn.dataset.value || "").trim() || null;
+      wakeOpts.forEach((other) => other.classList.toggle("active", other === btn));
+      updateCheckinReady();
+    });
+  });
+
   // Time option buttons
   const timeOpts = Array.from(document.querySelectorAll(".time-opt"));
   timeOpts.forEach((btn) => {
@@ -1352,22 +1404,21 @@ function initDay({ initialDateISO } = {}) {
     showStep("checkin");
   });
 
-  checkinNext?.addEventListener("click", async () => {
-    stressBefore = Number(stressSlider?.value || 5);
-    sleepHours = Number(sleepSlider?.value || 7);
-    if (!energy || !timeMin || !Number.isFinite(sleepHours)) return;
+  async function submitDailyCheckIn({ stressValue, energyValue, sleepHoursValue, timeMinValue, wakeTimeValue }) {
+    if (!energyValue || !timeMinValue || !wakeTimeValue || !Number.isFinite(sleepHoursValue)) return;
     if (statusEl) statusEl.textContent = "Building your plan...";
     if (checkinNext) checkinNext.disabled = true;
     try {
-      const energyScore = energy === "low" ? 3 : energy === "high" ? 9 : 6;
+      const energyScore = energyValue === "low" ? 3 : energyValue === "high" ? 9 : 6;
       const res = await apiPost("/v1/checkin", {
         checkIn: {
           dateISO: currentDateISO,
-          stress: stressBefore,
+          stress: stressValue,
           energy: energyScore,
-          sleepHours,
-          sleepQuality: Math.max(1, Math.min(10, Math.round((sleepHours / 12) * 10))),
-          timeAvailableMin: timeMin,
+          sleepHours: sleepHoursValue,
+          sleepQuality: Math.max(1, Math.min(10, Math.round((sleepHoursValue / 12) * 10))),
+          timeAvailableMin: timeMinValue,
+          wakeTime: wakeTimeValue,
         },
       });
       currentContract = res;
@@ -1382,9 +1433,9 @@ function initDay({ initialDateISO } = {}) {
         if (checkinNext) checkinNext.disabled = false;
         return;
       }
-      saveTodayPlan(currentDateISO, res, stressBefore);
+      saveTodayPlan(currentDateISO, res, stressValue, wakeTimeValue);
       if (statusEl) statusEl.textContent = "";
-      populateTodayScreen(res, stressBefore);
+      populateTodayScreen(res, stressValue, wakeTimeValue);
       showStep("today");
     } catch (err) {
       if (isAuthRequiredError(err)) {
@@ -1396,6 +1447,18 @@ function initDay({ initialDateISO } = {}) {
       updateCheckinReady();
       reportError(err);
     }
+  }
+
+  checkinNext?.addEventListener("click", async () => {
+    stressBefore = Number(stressSlider?.value || 5);
+    sleepHours = Number(sleepSlider?.value || 7);
+    await submitDailyCheckIn({
+      stressValue: stressBefore,
+      energyValue: energy,
+      sleepHoursValue: sleepHours,
+      timeMinValue: timeMin,
+      wakeTimeValue: wakeTime,
+    });
   });
 
   qs("#start-move")?.addEventListener("click", () => {
@@ -1424,7 +1487,7 @@ function initDay({ initialDateISO } = {}) {
           reportError(err);
         }
         updateTodayPlan({ moveCompleted: true });
-        populateTodayScreen(currentContract, stressBefore);
+        populateTodayScreen(currentContract, stressBefore, wakeTime);
         showStep("today");
       },
     });
@@ -1441,6 +1504,37 @@ function initDay({ initialDateISO } = {}) {
     startGuidedReset(reset.phases || []);
   });
 
+  qs("#start-winddown")?.addEventListener("click", () => {
+    const winddown = currentContract?.winddown;
+    if (!winddown) return;
+    const titleEl = qs("#winddown-title");
+    const descEl = qs("#winddown-phase-description");
+    if (titleEl) titleEl.textContent = winddown.title || "Wind-down";
+    if (descEl) descEl.textContent = winddown.description || "";
+    showStep("winddown");
+    startGuidedExperience(winddown.phases || [], {
+      instructionEl: "winddown-instruction",
+      timerEl: "winddown-timer",
+      skipBtn: "winddown-skip",
+      progressEl: "winddown-phase-progress",
+      exitBtn: "#winddown-exit",
+      titleEl: "winddown-title",
+      descriptionEl: "winddown-phase-description",
+      onComplete: async () => {
+        try {
+          await apiPost("/v1/winddown/complete", {
+            dateISO: currentContract?.dateISO || currentDateISO,
+          });
+        } catch (err) {
+          reportError(err);
+        }
+        updateTodayPlan({ winddownCompleted: true });
+        populateTodayScreen(currentContract, stressBefore, wakeTime);
+        showStep("today");
+      },
+    });
+  });
+
   qs("#move-exit")?.addEventListener("click", () => {
     if (activeSessionInterval) {
       clearInterval(activeSessionInterval);
@@ -1450,6 +1544,14 @@ function initDay({ initialDateISO } = {}) {
   });
 
   qs("#reset-exit")?.addEventListener("click", () => {
+    if (activeSessionInterval) {
+      clearInterval(activeSessionInterval);
+      activeSessionInterval = null;
+    }
+    showStep("today");
+  });
+
+  qs("#winddown-exit")?.addEventListener("click", () => {
     if (activeSessionInterval) {
       clearInterval(activeSessionInterval);
       activeSessionInterval = null;
@@ -1477,7 +1579,7 @@ function initDay({ initialDateISO } = {}) {
       reportError(err);
     }
     updateTodayPlan({ resetCompleted: true });
-    populateTodayScreen(currentContract, stressBefore);
+    populateTodayScreen(currentContract, stressBefore, wakeTime);
     showStep("today");
   });
 
@@ -1486,10 +1588,36 @@ function initDay({ initialDateISO } = {}) {
   if (existingPlan?.contract) {
     currentContract = existingPlan.contract;
     stressBefore = Number(existingPlan.stress || 5);
-    populateTodayScreen(existingPlan.contract, existingPlan.stress);
+    wakeTime = existingPlan.wakeTime || wakeTime;
+    populateTodayScreen(existingPlan.contract, existingPlan.stress, existingPlan.wakeTime);
     showStep("today");
   } else {
-    showStep("checkin");
+    let onboardPrefill = null;
+    try {
+      const raw = localStorage.getItem("livenew_onboard_first_checkin");
+      onboardPrefill = raw ? JSON.parse(raw) : null;
+    } catch {}
+    if (onboardPrefill) {
+      stressBefore = Number(onboardPrefill.stress || 5);
+      energy = onboardPrefill.energy || null;
+      sleepHours = Number(onboardPrefill.sleepHours || 7);
+      wakeTime = onboardPrefill.wakeTime || "normal";
+      timeMin = Number(onboardPrefill.timeMin || 10);
+      showStep("checkin");
+      void submitDailyCheckIn({
+        stressValue: stressBefore,
+        energyValue: energy,
+        sleepHoursValue: sleepHours,
+        timeMinValue: timeMin,
+        wakeTimeValue: wakeTime,
+      }).finally(() => {
+        try {
+          localStorage.removeItem("livenew_onboard_first_checkin");
+        } catch {}
+      });
+    } else {
+      showStep("checkin");
+    }
   }
 }
 

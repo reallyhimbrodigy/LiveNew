@@ -21,6 +21,8 @@ import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
 import { generateMove } from "../domain/aiMove.js";
 import { generateReset } from "../domain/aiReset.js";
 import { generateNutrition } from "../domain/aiNutrition.js";
+import { generateWindDown } from "../domain/aiWindDown.js";
+import { generateInsight } from "../domain/aiInsight.js";
 import { buildWeekSkeleton } from "../domain/weekPlanner.js";
 import { computeContinuityMeta } from "../domain/continuity.js";
 import { applyQuickSignal } from "../domain/swap.js";
@@ -2294,6 +2296,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/quick",
     "/v1/reset/complete",
     "/v1/move/complete",
+    "/v1/winddown/complete",
     "/v1/outcomes",
     "/v1/consent/accept",
     "/v1/consents/accept",
@@ -2670,17 +2673,21 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         sleepHours: actualSleepHours,
         timeMin: checkinData.timeAvailableMin ?? 10,
         goal: userGoal,
+        wakeTime: checkInRaw?.wakeTime || "normal",
       };
 
-      const [moveResult, resetResult, nutritionResult] = await Promise.allSettled([
+      const [moveResult, resetResult, nutritionResult, windDownResult] = await Promise.allSettled([
         generateMove(aiInput),
         aiInput.stress > 3 ? generateReset(aiInput) : Promise.resolve(null),
         generateNutrition(aiInput),
+        generateWindDown(aiInput),
       ]);
 
       const aiMove = moveResult.status === "fulfilled" ? moveResult.value : null;
       const aiReset = resetResult.status === "fulfilled" ? resetResult.value : null;
       const aiNutrition = nutritionResult.status === "fulfilled" ? nutritionResult.value : null;
+      const aiWindDown = windDownResult.status === "fulfilled" ? windDownResult.value : null;
+      if (windDownResult.status === "rejected") console.error("[AI_WINDDOWN_FAILED]", windDownResult.reason?.message);
 
       if (!aiMove && !aiReset && !aiNutrition) {
         console.error("[AI_ALL_FAILED]", {
@@ -2729,15 +2736,14 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         };
       }
 
-      if (aiNutrition) {
-        today.nutrition = {
-          id: today.nutrition?.id || `ai_nutrition_${Date.now()}`,
-          title: "Nutrition",
-          tip: aiNutrition,
-          description: aiNutrition,
-          bullets: [aiNutrition],
-        };
-      }
+      today.nutrition = {
+        id: today.nutrition?.id || `ai_nutrition_${Date.now()}`,
+        title: "Nutrition",
+        morning: aiNutrition?.morning || null,
+        evening: aiNutrition?.evening || null,
+      };
+
+      today.winddown = aiWindDown || null;
 
       const normalizedToday = ensureTodayContract(today, res);
       if (!normalizedToday) {
@@ -2934,69 +2940,108 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     return true;
   }
 
-  if (pathname === "/v1/progress") {
-    if (req.method !== "GET") {
-      sendError(res, 405, "method_not_allowed", "Method not allowed");
-      return true;
-    }
+  if (pathname === "/v1/winddown/complete" && req.method === "POST") {
+    const body = await parseJson(req);
+    const dateKey = body?.dateISO || body?.dateKey;
+    await persist.insertEventOncePerDay(auth.userId, dateKey, "winddown_completed", { v: 1 });
+    sendJson(res, 200, { ok: true }, auth.userId);
+    return true;
+  }
+
+  if (pathname === "/v1/progress" && req.method === "GET") {
     let checkIns = [];
     let moveEvents = [];
     let resetEvents = [];
+    let winddownEvents = [];
     try {
       const userSupabase = supabaseForUser(auth.jwt);
       const { data: checkInRows, error: checkInError } = await userSupabase
         .from("checkin")
-        .select("date_key, stress, sleep_quality, energy, time_available_min")
+        .select("date_key, stress, sleep_quality, energy, time_available_min, created_at")
         .eq("user_id", auth.userId)
         .order("date_key", { ascending: true });
-      if (checkInError) throw checkInError;
-      checkIns = Array.isArray(checkInRows)
-        ? checkInRows.map((row) => ({
-            dateISO: row.date_key,
-            dateKey: row.date_key,
-            stress: row.stress,
-            sleepQuality: row.sleep_quality,
-            energy: row.energy,
-            timeMin: row.time_available_min,
-          }))
-        : [];
-      const { data: eventRows, error: eventError } = await userSupabase
-        .from("event")
-        .select("date_key, type")
-        .eq("user_id", auth.userId)
-        .in("type", ["movement_completed", "reset_completed"]);
-      if (eventError) throw eventError;
-      if (Array.isArray(eventRows)) {
-        moveEvents = eventRows.filter((row) => row.type === "movement_completed");
-        resetEvents = eventRows.filter((row) => row.type === "reset_completed");
+      if (!checkInError && Array.isArray(checkInRows)) {
+        checkIns = checkInRows.map((row) => ({
+          dateISO: row.date_key,
+          dateKey: row.date_key,
+          stress: row.stress,
+          sleepQuality: row.sleep_quality,
+          energy: row.energy,
+          timeMin: row.time_available_min,
+        }));
       }
+      const { data: moveRows, error: moveError } = await userSupabase
+        .from("event")
+        .select("date_key")
+        .eq("user_id", auth.userId)
+        .eq("type", "movement_completed");
+      if (!moveError && Array.isArray(moveRows)) moveEvents = moveRows;
+
+      const { data: resetRows, error: resetError } = await userSupabase
+        .from("event")
+        .select("date_key")
+        .eq("user_id", auth.userId)
+        .eq("type", "reset_completed");
+      if (!resetError && Array.isArray(resetRows)) resetEvents = resetRows;
+
+      const { data: winddownRows, error: winddownError } = await userSupabase
+        .from("event")
+        .select("date_key")
+        .eq("user_id", auth.userId)
+        .eq("type", "winddown_completed");
+      if (!winddownError && Array.isArray(winddownRows)) winddownEvents = winddownRows;
     } catch (err) {
-      logWarn({ event: "progress_query_failed", userId: auth.userId, error: err?.message || String(err) });
+      console.error("[PROGRESS_QUERY_ERROR]", err?.message);
     }
 
-    const completions = {};
-    moveEvents.forEach((row) => {
-      const key = row?.date_key;
-      if (!key) return;
-      if (!completions[key]) completions[key] = {};
-      completions[key].movement = true;
-    });
-    resetEvents.forEach((row) => {
-      const key = row?.date_key;
-      if (!key) return;
-      if (!completions[key]) completions[key] = {};
-      completions[key].reset = true;
+    console.log("[PROGRESS_CHECKINS]", JSON.stringify(checkIns?.slice(0, 3)));
+    console.log("[PROGRESS_DEBUG]", {
+      checkInCount: checkIns.length,
+      resetEvents: resetEvents.length,
+      moveEvents: moveEvents.length,
+      winddownEvents: winddownEvents.length,
     });
 
-    const progress = domain.computeProgress({
-      checkIns,
-      weekPlan: null,
-      completions,
-    });
-    progress.consistency = progress.consistency || {};
-    progress.consistency.movementCompleted = moveEvents.length;
-    progress.consistency.resetsCompleted = resetEvents.length;
+    const uniqueDates = new Set(checkIns.map((c) => c.dateKey));
+    const stressValues = checkIns.filter((c) => c.stress != null).map((c) => c.stress);
+    const stressAvg7 =
+      stressValues.length > 0
+        ? stressValues.slice(-7).reduce((a, b) => a + b, 0) / Math.min(stressValues.length, 7)
+        : null;
+
+    const progress = {
+      stressTrend: checkIns.map((c) => ({ date: c.dateKey, stress: c.stress })),
+      stressAvg7,
+      consistency: {
+        checkinDays: uniqueDates.size,
+        resetsCompleted: resetEvents.length,
+        movementCompleted: moveEvents.length,
+        winddownsCompleted: winddownEvents.length,
+      },
+    };
+
+    let insight = null;
+    if (checkIns.length >= 2) {
+      try {
+        const last7 = checkIns.slice(-7);
+        insight = await generateInsight({
+          checkIns: last7,
+          resetsCompleted: resetEvents.length,
+          movesCompleted: moveEvents.length,
+          winddownsCompleted: winddownEvents.length,
+        });
+      } catch (err) {
+        console.error("[INSIGHT_ERROR]", err?.message);
+      }
+    }
+
+    progress.insight = insight;
     sendJson(res, 200, { ok: true, progress }, auth.userId);
+    return true;
+  }
+
+  if (pathname === "/v1/progress") {
+    sendError(res, 405, "method_not_allowed", "Method not allowed");
     return true;
   }
 
@@ -3056,7 +3101,8 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     pathname === "/v1/checkin" ||
     pathname === "/v1/quick" ||
     pathname === "/v1/reset/complete" ||
-    pathname === "/v1/move/complete"
+    pathname === "/v1/move/complete" ||
+    pathname === "/v1/winddown/complete"
   ) {
     sendError(res, 405, "method_not_allowed", "Method not allowed");
     return true;
@@ -5207,6 +5253,7 @@ const server = http.createServer(async (req, res) => {
     "/v1/quick",
     "/v1/reset/complete",
     "/v1/move/complete",
+    "/v1/winddown/complete",
     "/v1/outcomes",
     "/v1/consent/accept",
     "/v1/consents/accept",

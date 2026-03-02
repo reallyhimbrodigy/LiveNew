@@ -61,9 +61,9 @@
         <section class="card hidden" id="onboard-card">
 
           <div class="onboard-step" data-onboard-step="0">
-            <h1>LiveNew</h1>
-            <p class="onboard-value-prop">A daily plan - movement, stress resets, and nutrition - matched to how you feel today.</p>
-            <p class="muted">Takes about 1 minute to set up.</p>
+            <h2 class="today-question">LiveNew builds your day around lowering stress</h2>
+            <p class="today-sub">A morning movement, a midday reset, evening wind-down, and nutrition — all matched to how you feel today.</p>
+            <button class="primary onboard-next" type="button">Get started</button>
           </div>
 
           <div class="onboard-step hidden" data-onboard-step="1">
@@ -100,6 +100,13 @@
               <div class="slider-value" id="onboard-sleep-display">7</div>
             </div>
 
+            <label class="checkin-label">When do you usually wake up?</label>
+            <div class="today-options">
+              <button class="onboard-wake-opt" data-value="early" type="button">Before 7am</button>
+              <button class="onboard-wake-opt" data-value="normal" type="button">7–9am</button>
+              <button class="onboard-wake-opt" data-value="late" type="button">After 9am</button>
+            </div>
+
             <label class="checkin-label">Time for movement</label>
             <div class="today-options">
               <button class="onboard-time-opt" data-value="5" type="button">5 min</button>
@@ -130,7 +137,7 @@
 
           <div class="onboard-nav">
             <button id="onboard-back" class="ghost" type="button" style="visibility:hidden">Back</button>
-            <button id="onboard-next" class="primary" type="button">Get Started</button>
+            <button id="onboard-next" class="primary onboard-next" type="button">Get Started</button>
             <button id="onboard-submit" class="primary hidden" type="button">Start my plan</button>
           </div>
           <div id="onboard-status" class="muted"></div>
@@ -161,6 +168,13 @@
             <div class="slider-value">7</div>
           </div>
 
+          <label class="checkin-label">What time did you wake up?</label>
+          <div class="today-options">
+            <button class="wake-opt" data-value="early" type="button">Before 7am</button>
+            <button class="wake-opt" data-value="normal" type="button">7–9am</button>
+            <button class="wake-opt" data-value="late" type="button">After 9am</button>
+          </div>
+
           <label class="checkin-label">Time for movement</label>
           <div class="today-options">
             <button class="time-opt" data-value="5" type="button">5 min</button>
@@ -174,40 +188,58 @@
 
         <!-- Step: today -->
         <section id="day-step-today" class="card today-screen hidden" data-step="today">
-          <h2 id="today-headline" class="today-question">Your plan for today</h2>
-          <p id="today-subline" class="today-sub muted"></p>
+          <h2 id="today-headline" class="today-question"></h2>
+          <p id="today-subline" class="muted"></p>
 
-          <div id="today-cards">
+          <div id="today-active-card" class="today-active-card">
+            <div id="active-card-time" class="today-time-label"></div>
+            <h3 id="active-card-title" class="today-card-title"></h3>
+            <p id="active-card-desc" class="today-card-desc"></p>
+            <button id="active-card-btn" class="primary" type="button">Start</button>
+          </div>
 
-            <div id="today-reset" class="today-card today-card-primary hidden">
-              <div class="today-card-label">Start here</div>
-              <h3 id="today-reset-title" class="today-card-title">Reset</h3>
-              <p id="today-reset-description" class="today-card-desc"></p>
-              <div class="today-card-meta"><span id="today-reset-duration">5 min</span></div>
-              <button id="start-reset" class="primary" type="button">Start reset</button>
+          <div class="today-timeline">
+            <div id="timeline-morning" class="timeline-slot">
+              <div class="timeline-time" id="morning-time"></div>
+              <div class="timeline-content">
+                <div class="timeline-title" id="morning-title"></div>
+                <div class="timeline-status" id="morning-status"></div>
+              </div>
             </div>
-
-            <div id="today-move" class="today-card">
-              <div id="move-card-label" class="today-card-label"></div>
-              <h3 id="move-card-title" class="today-card-title">Move</h3>
-              <p id="move-description" class="today-card-desc"></p>
-              <div class="today-card-meta"><span id="today-move-duration"></span></div>
-              <button id="start-move" class="primary" type="button">Start</button>
+            <div id="timeline-midday" class="timeline-slot">
+              <div class="timeline-time" id="midday-time"></div>
+              <div class="timeline-content">
+                <div class="timeline-title" id="midday-title"></div>
+                <div class="timeline-status" id="midday-status"></div>
+              </div>
             </div>
-
-            <div id="today-nutrition" class="today-card today-card-subtle">
-              <h3 class="today-card-title">Nutrition</h3>
-              <p id="nutrition-tip" class="today-card-desc"></p>
+            <div id="timeline-evening" class="timeline-slot">
+              <div class="timeline-time" id="evening-time"></div>
+              <div class="timeline-content">
+                <div class="timeline-title" id="evening-title"></div>
+                <div class="timeline-status" id="evening-status"></div>
+              </div>
             </div>
+          </div>
 
+          <div id="today-nutrition-morning" class="today-nutrition-bar">
+            <span class="nutrition-label">Morning</span>
+            <span id="nutrition-morning-tip"></span>
+          </div>
+          <div id="today-nutrition-evening" class="today-nutrition-bar">
+            <span class="nutrition-label">Evening</span>
+            <span id="nutrition-evening-tip"></span>
           </div>
 
           <div id="today-complete-summary" class="today-complete-summary hidden">
             <p id="today-complete-text" class="today-complete-text"></p>
           </div>
 
-          <button id="recheckin-btn" class="btn ghost" type="button" style="margin-top:12px;display:block;width:100%;text-align:center">Check in again</button>
-          <a id="today-progress-link" href="/progress" class="btn ghost" style="margin-top:16px;display:block;text-align:center">View progress</a>
+          <button id="recheckin-btn" class="ghost" type="button" style="margin-top:16px;width:100%">Check in again</button>
+          <a id="today-progress-link" href="/progress" class="btn ghost" style="margin-top:8px;display:block;text-align:center;width:100%">View progress</a>
+          <button id="start-move" class="hidden" type="button">Start move</button>
+          <button id="start-reset" class="hidden" type="button">Start reset</button>
+          <button id="start-winddown" class="hidden" type="button">Start wind-down</button>
         </section>
 
         <!-- Step: move (phases + timer) -->
@@ -230,6 +262,16 @@
           <div class="reset-timer" id="reset-timer"></div>
           <button id="reset-skip" class="ghost today-next" type="button" style="margin-top:8px">Skip phase</button>
           <button id="reset-exit" class="btn ghost exit-session" type="button">Exit session</button>
+        </section>
+
+        <section id="day-step-winddown" class="card today-screen hidden" data-step="winddown">
+          <h2 id="winddown-title" class="today-question"></h2>
+          <p id="winddown-phase-description" class="today-sub"></p>
+          <div class="phase-progress" id="winddown-phase-progress"></div>
+          <div class="reset-instruction" id="winddown-instruction"></div>
+          <div class="reset-timer" id="winddown-timer"></div>
+          <button id="winddown-skip" class="ghost today-next" type="button" style="margin-top:8px">Skip phase</button>
+          <button id="winddown-exit" class="btn ghost exit-session" type="button">Exit session</button>
         </section>
 
         <!-- Step: after (post-reset stress check) -->

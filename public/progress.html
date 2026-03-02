@@ -49,27 +49,38 @@
     <div class="ln-container">
       <main class="today-shell">
         <section class="card progress-section">
-          <h2 class="today-question">Stress trend</h2>
-          <canvas id="stress-trend-canvas" class="trend-canvas" width="900" height="320" aria-label="Stress trend chart"></canvas>
-          <p id="trend-empty" class="muted hidden">Check in for a few days to see your stress trend.</p>
-        </section>
-
-        <section class="card progress-section">
-          <h2 class="today-question">Consistency</h2>
+          <div id="progress-insight" class="progress-insight hidden">
+            <p id="progress-insight-text"></p>
+          </div>
+          <h2 class="today-question">This week</h2>
           <div class="stat-cards">
             <div class="stat-card">
-              <div id="stat-checkins" class="stat-number">0</div>
+              <div id="stat-checkins" class="stat-number">—</div>
               <div class="stat-label">Check-ins</div>
             </div>
             <div class="stat-card">
-              <div id="stat-resets" class="stat-number">0</div>
+              <div id="stat-stress" class="stat-number">—</div>
+              <div class="stat-label">Avg stress</div>
+            </div>
+            <div class="stat-card">
+              <div id="stat-resets" class="stat-number">—</div>
               <div class="stat-label">Resets</div>
             </div>
             <div class="stat-card">
-              <div id="stat-movement" class="stat-number">0</div>
-              <div class="stat-label">Movement</div>
+              <div id="stat-moves" class="stat-number">—</div>
+              <div class="stat-label">Moves</div>
+            </div>
+            <div class="stat-card">
+              <div id="stat-winddowns" class="stat-number">—</div>
+              <div class="stat-label">Wind-downs</div>
             </div>
           </div>
+        </section>
+
+        <section class="card progress-section">
+          <h2 class="today-question">Stress trend</h2>
+          <canvas id="stress-trend-canvas" class="trend-canvas" width="900" height="320" aria-label="Stress trend chart"></canvas>
+          <p id="trend-empty" class="muted hidden">Check in for a few days to see your stress trend.</p>
         </section>
 
         <section id="wins-section" class="card progress-section hidden">
@@ -266,9 +277,14 @@
     }
 
     function renderConsistency(consistency) {
-      document.getElementById("stat-checkins").textContent = String(consistency?.checkinDays || 0);
-      document.getElementById("stat-resets").textContent = String(consistency?.resetsCompleted || 0);
-      document.getElementById("stat-movement").textContent = String(consistency?.movementCompleted || 0);
+      const checkinsEl = document.getElementById("stat-checkins");
+      const resetsEl = document.getElementById("stat-resets");
+      const movesEl = document.getElementById("stat-moves");
+      const winddownsEl = document.getElementById("stat-winddowns");
+      if (checkinsEl) checkinsEl.textContent = String(consistency?.checkinDays || 0);
+      if (resetsEl) resetsEl.textContent = String(consistency?.resetsCompleted || 0);
+      if (movesEl) movesEl.textContent = String(consistency?.movementCompleted || 0);
+      if (winddownsEl) winddownsEl.textContent = String(consistency?.winddownsCompleted || 0);
     }
 
     function renderWins(wins) {
@@ -302,7 +318,21 @@
         const data = await apiFetch("/v1/progress");
         if (!data?.ok) return;
         const p = data.progress || {};
+        const c = p.consistency || {};
         latestTrend = p.stressTrend || [];
+        const insightEl = document.getElementById("progress-insight");
+        const insightText = document.getElementById("progress-insight-text");
+        if (insightEl && insightText && p.insight) {
+          insightText.textContent = p.insight;
+          insightEl.classList.remove("hidden");
+        } else if (insightEl) {
+          insightEl.classList.add("hidden");
+        }
+        if (document.getElementById("stat-checkins")) document.getElementById("stat-checkins").textContent = c.checkinDays || 0;
+        if (document.getElementById("stat-stress")) document.getElementById("stat-stress").textContent = p.stressAvg7 != null ? Number(p.stressAvg7).toFixed(1) : "—";
+        if (document.getElementById("stat-resets")) document.getElementById("stat-resets").textContent = c.resetsCompleted || 0;
+        if (document.getElementById("stat-moves")) document.getElementById("stat-moves").textContent = c.movementCompleted || 0;
+        if (document.getElementById("stat-winddowns")) document.getElementById("stat-winddowns").textContent = c.winddownsCompleted || 0;
         renderStressTrend(latestTrend);
         renderConsistency(p.consistency || {});
         renderWins(p.wins || []);

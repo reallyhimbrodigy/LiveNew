@@ -41,8 +41,9 @@ Respond in JSON only:
   ]
 }`;
 
-export async function generateMove({ stress, energy, sleepHours, timeMin, goal }) {
-  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Time available: ${timeMin} minutes. Goal: ${goal || "feel calmer"}.`;
+export async function generateMove({ stress, energy, sleepHours, timeMin, goal, wakeTime }) {
+  const wakeLabel = wakeTime === "early" ? "before 7am" : wakeTime === "late" ? "after 9am" : "7–9am";
+  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Time available: ${timeMin} minutes. Goal: ${goal || "feel calmer"}. Woke up: ${wakeLabel}. This is my morning session.`;
 
   try {
     const finalMessage = await withRetry(async () => {

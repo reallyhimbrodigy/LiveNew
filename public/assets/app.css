@@ -257,6 +257,72 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
   color: var(--muted);
 }
 
+.today-active-card {
+  border: 2px solid var(--primary);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+}
+
+.today-time-label {
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: 8px;
+}
+
+.today-timeline {
+  margin: 16px 0;
+}
+
+.timeline-slot {
+  display: flex;
+  align-items: center;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.timeline-slot:last-child {
+  border-bottom: none;
+}
+
+.timeline-time {
+  width: 60px;
+  font-size: 0.85rem;
+  color: var(--muted);
+  flex-shrink: 0;
+}
+
+.timeline-content {
+  flex: 1;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.timeline-title {
+  font-weight: 600;
+}
+
+.timeline-status {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.today-nutrition-bar {
+  background: var(--surface, #f8f8f6);
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 16px 0;
+  font-size: 0.95rem;
+}
+
+.nutrition-label {
+  font-weight: 600;
+  margin-right: 8px;
+}
+
 #day-status:not(:empty) {
   animation: pulse 1.5s ease-in-out infinite;
 }
@@ -283,6 +349,19 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
   color: var(--muted);
   font-size: 1rem;
   line-height: 1.5;
+}
+
+.progress-insight {
+  background: var(--surface, #f8f8f6);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 24px;
+  line-height: 1.6;
+}
+
+.progress-insight p {
+  margin: 0;
+  font-size: 1rem;
 }
 
 .exit-session {
@@ -434,8 +513,10 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 }
 .today-options .time-opt,
 .today-options .energy-opt,
+.today-options .wake-opt,
 .today-options .goal-opt,
 .today-options .onboard-energy-opt,
+.today-options .onboard-wake-opt,
 .today-options .onboard-time-opt {
   flex: 1;
   min-width: 80px;
@@ -443,11 +524,67 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 }
 .today-options .time-opt.active,
 .today-options .energy-opt.active,
+.today-options .wake-opt.active,
 .today-options .goal-opt.active,
 .today-options .onboard-energy-opt.active,
+.today-options .onboard-wake-opt.active,
 .today-options .onboard-time-opt.active {
   background: #f3eadb;
   border-color: #dccfb9;
+}
+
+@media (max-width: 560px) {
+  .today-active-card {
+    padding: 16px;
+  }
+
+  .timeline-slot {
+    padding: 10px 0;
+  }
+
+  .timeline-time {
+    width: 50px;
+    font-size: 0.8rem;
+  }
+
+  .timeline-title {
+    font-size: 0.95rem;
+  }
+
+  .today-nutrition-bar {
+    padding: 10px 12px;
+    font-size: 0.9rem;
+  }
+
+  .nutrition-label {
+    display: block;
+    margin-bottom: 4px;
+    margin-right: 0;
+  }
+
+  .stat-cards {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+
+  .stat-card {
+    padding: 12px;
+  }
+
+  .progress-insight {
+    padding: 16px;
+    font-size: 0.95rem;
+  }
+
+  .today-complete-summary {
+    padding: 16px 12px;
+  }
+
+  .wake-opt,
+  .onboard-wake-opt {
+    width: auto;
+  }
 }
 
 .reset-instruction {

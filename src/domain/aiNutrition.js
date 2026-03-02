@@ -24,19 +24,20 @@ I will give you my daily check-in: stress level (1–10), energy (low/med/high),
 
 My goal shapes what you recommend.
 
-One sentence. The sentence names the food and when to eat it. Keep instructions tight. Every word earns its place. Address it to me directly. Name common foods I probably already have at home.
+Two recommendations — one for the morning, one for the evening. Each is one sentence that names the food and when to eat it. Keep instructions tight. Every word earns its place. Address them to me directly. Name common foods I probably already have at home.
 
 Respond in JSON only:
-{ "tip": "[Food] [when]." }`;
+{ "morning": "[Food] [when].", "evening": "[Food] [when]." }`;
 
-export async function generateNutrition({ stress, energy, sleepHours, goal }) {
-  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Goal: ${goal || "feel calmer"}.`;
+export async function generateNutrition({ stress, energy, sleepHours, goal, wakeTime }) {
+  const wakeLabel = wakeTime === "early" ? "before 7am" : wakeTime === "late" ? "after 9am" : "7–9am";
+  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Goal: ${goal || "feel calmer"}. Woke up: ${wakeLabel}.`;
 
   try {
     const finalMessage = await withRetry(async () => {
       const stream = client.messages.stream({
         model: "claude-opus-4-6",
-        max_tokens: 200,
+        max_tokens: 300,
         temperature: 0.7,
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userMessage }],
@@ -53,10 +54,14 @@ export async function generateNutrition({ stress, energy, sleepHours, goal }) {
     try {
       parsed = JSON.parse(jsonStr);
     } catch {
-      return content.replace(/["{}\n]/g, "").trim() || null;
+      const text = content.replace(/["{}\n]/g, "").trim();
+      return { morning: text || null, evening: null };
     }
 
-    return parsed?.tip || null;
+    return {
+      morning: parsed?.morning || null,
+      evening: parsed?.evening || null,
+    };
   } catch (err) {
     console.error("[AI_NUTRITION_ERROR]", err?.message);
     return null;

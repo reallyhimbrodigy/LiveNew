@@ -16,40 +16,30 @@ async function withRetry(fn, retries = 2) {
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const SYSTEM_PROMPT = `Build a reset that brings me from stressed to calm in 5 minutes.
+const SYSTEM_PROMPT = `Build a 10-minute wind-down that prepares my body for sleep.
 
-You are LiveNew — a stress reset coach with deep expertise in somatic techniques, breathing methods, and how to release tension. You know the techniques that top practitioners and coaches use — not just the surface-level practices from consumer wellness apps. Write the way a calm coach talks — name the body part, name the position, say when to breathe. Plain, everyday words.
+You are LiveNew — a wind-down coach with deep expertise in somatic techniques, breathing methods, and how to release tension. You know the techniques that top practitioners and coaches use — not just the surface-level practices from consumer wellness apps. Write the way a calm coach talks at the end of someone's day — name the body part, name the position, say when to breathe. Plain, everyday words.
 
-A reset is a guided technique that calms you down when stress is high.
+I will give you my stress level (1–10), energy, and sleep from last night.
 
-You are sitting next to me, coaching me through a reset in real time. I will be reading your instructions on my phone screen while stressed.
+Structure: phases totaling 10 minutes. Each phase is one technique. Every technique is lying down or reclined. Start with releasing whatever tension the day built up, then progressively slow everything down toward sleep.
 
-Title the reset after what I'll physically be doing.
-
-I will give you my stress level (1–10) and other check-in data.
-
-Each phase is one technique. Every technique is seated or lying down.
-
-Start with something that interrupts the stress, then gradually bring me into a calmer state. Each phase should have enough time to actually work.
-
-Go beyond the basics. The common techniques everyone already knows are your last resort — reach for the more targeted, more effective ones first. Match the intensity to my stress level.
-
-Phases should total 5 minutes.
+Go beyond the basics — reach for the targeted, effective techniques first.
 
 Every sentence in every phase instruction is a physical action I perform — a position to hold, a movement to make, or a breath to take. Keep instructions tight. Every word earns its place.
 
 Respond in JSON only:
 {
-  "title": "A direct, specific name for this reset",
-  "description": "One sentence listing the techniques in this reset",
+  "title": "Name of what I'll physically be doing",
+  "description": "One sentence listing the techniques in this wind-down",
   "phases": [
     { "instruction": "Direct commands guiding me through this technique", "minutes": number }
   ]
 }`;
 
-export async function generateReset({ stress, energy, sleepHours, wakeTime }) {
+export async function generateWindDown({ stress, energy, sleepHours, wakeTime }) {
   const wakeLabel = wakeTime === "early" ? "before 7am" : wakeTime === "late" ? "after 9am" : "7–9am";
-  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Woke up: ${wakeLabel}. This is my midday session.`;
+  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep last night: ${sleepHours} hours. Woke up: ${wakeLabel}. This is my evening session before bed.`;
 
   try {
     const finalMessage = await withRetry(async () => {
@@ -60,10 +50,9 @@ export async function generateReset({ stress, energy, sleepHours, wakeTime }) {
         system: SYSTEM_PROMPT,
         messages: [{ role: "user", content: userMessage }],
       });
-
       return stream.finalMessage();
     });
-    console.log("[AI_RESET] Stream complete, tokens:", finalMessage.usage);
+    console.log("[AI_WINDDOWN] Stream complete, tokens:", finalMessage.usage);
     const content = finalMessage.content?.[0]?.text || "";
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     let jsonStr = jsonMatch ? jsonMatch[0] : content;
@@ -78,26 +67,24 @@ export async function generateReset({ stress, energy, sleepHours, wakeTime }) {
           jsonStr = jsonStr.substring(0, lastComplete + 1) + "]}";
           try {
             parsed = JSON.parse(jsonStr);
-          } catch {
-            // fall through
-          }
+          } catch {}
         }
       }
     }
 
     if (!parsed) {
-      console.error("[AI_RESET_ERROR] Could not parse:", content.substring(0, 300));
+      console.error("[AI_WINDDOWN_ERROR] Could not parse:", content.substring(0, 300));
       return null;
     }
 
     return {
-      id: `ai_reset_${Date.now()}`,
-      title: parsed.title || "Your reset",
+      id: `ai_winddown_${Date.now()}`,
+      title: parsed.title || "Wind-down",
       description: parsed.description || "",
       phases: Array.isArray(parsed.phases) ? parsed.phases : [],
     };
   } catch (err) {
-    console.error("[AI_RESET_ERROR]", err?.message);
+    console.error("[AI_WINDDOWN_ERROR]", err?.message);
     return null;
   }
 }
