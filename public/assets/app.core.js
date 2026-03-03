@@ -1203,27 +1203,26 @@ function initDay({ initialDateISO } = {}) {
       const cached = localStorage.getItem("livenew_profile");
       if (cached) {
         const profile = JSON.parse(cached);
-        if (profile.goal) return { ...profile, hasProfile: true };
+        if (profile.goal) return profile;
       }
     } catch {}
 
     try {
-      const res = await apiGet("/v1/profile");
-      const profile = res?.profile || res?.userProfile || {};
-      const normalized = {
-        goal: profile.goal || profile.primaryGoal || "feel calmer",
-        wakeTime: profile.wakeTime || "normal",
-        energy: profile.energy || "med",
-        sleepHours: profile.sleepHours || 7,
-        timeMin: profile.timeMin || profile.timeAvailableMin || 10,
-        hasProfile: true,
+      const res = await apiGet("/v1/bootstrap");
+      const p = res?.profile || {};
+      const profile = {
+        goal: p.goal || p.primaryGoal || "feel calmer",
+        stressBaseline: p.stressBaseline || "sometimes",
+        wakeTime: p.wakeTime || "normal",
+        timeMin: p.timeMin || p.timeAvailableMin || 10,
+        injuries: p.injuries || [],
       };
       try {
-        localStorage.setItem("livenew_profile", JSON.stringify(normalized));
+        localStorage.setItem("livenew_profile", JSON.stringify(profile));
       } catch {}
-      return normalized;
+      return profile;
     } catch {
-      return { goal: "feel calmer", wakeTime: "normal", energy: "med", sleepHours: 7, timeMin: 10, hasProfile: false };
+      return { goal: "feel calmer", stressBaseline: "sometimes", wakeTime: "normal", timeMin: 10, injuries: [] };
     }
   }
 
@@ -1243,7 +1242,7 @@ function initDay({ initialDateISO } = {}) {
       winddown ? { key: "evening", type: "winddown", title: winddown.title || "Wind-down", desc: winddown.description || "", done: saved?.winddownCompleted || false } : null,
     ].filter(Boolean);
 
-    const allDone = sessions.every((s) => s.done);
+    const allDone = sessions.length > 0 && sessions.every((s) => s.done);
     const nextSession = sessions.find((s) => !s.done);
 
     const activeCard = qs("#today-active-card");
@@ -1282,6 +1281,16 @@ function initDay({ initialDateISO } = {}) {
         if (nextText) nextText.textContent = `Up next: ${afterNext.title} · ${formatHour(schedule[afterNext.key].startHour)}`;
       } else if (nextUp) {
         nextUp.classList.add("hidden");
+      }
+    } else {
+      if (activeCard) activeCard.classList.add("hidden");
+      if (nextUp) nextUp.classList.add("hidden");
+      if (allDoneEl) {
+        allDoneEl.classList.remove("hidden");
+        const doneTitle = allDoneEl.querySelector("h2");
+        const doneBody = allDoneEl.querySelector("p");
+        if (doneTitle) doneTitle.textContent = "No sessions today";
+        if (doneBody) doneBody.textContent = "Check back tomorrow.";
       }
     }
 
@@ -1326,89 +1335,185 @@ function initDay({ initialDateISO } = {}) {
     const recheckinBtn = qs("#recheckin-btn");
     if (recheckinBtn) {
       recheckinBtn.textContent = allDone ? "Check back tomorrow" : "Feeling different? Re-check";
-      recheckinBtn.disabled = allDone;
+      if (allDone) recheckinBtn.disabled = true;
+      else recheckinBtn.disabled = false;
     }
   }
 
-  const checkinNext = qs("#checkin-next");
-  const statusEl = qs("#day-status");
-  const updateCheckinReady = () => {
-    const ready =
-      Number.isFinite(stressBefore) &&
-      stressBefore >= 1 &&
-      stressBefore <= 10 &&
-      !!energy &&
-      Number.isFinite(sleepHours) &&
-      sleepHours >= 0 &&
-      sleepHours <= 12 &&
-      !!wakeTime &&
-      !!timeMin;
-    if (checkinNext) checkinNext.disabled = !ready;
-  };
+  const onboardData = {};
+  const onboardSteps = ["goal", "stress-baseline", "wake", "time", "injuries"];
+  let onboardIndex = 0;
+  const injuries = [];
 
-  // Stress slider
-  const stressSlider = qs("#stress-slider");
-  const stressValEl = qs("#stress-slider")?.closest(".slider-wrap")?.querySelector(".slider-value");
-  stressSlider?.addEventListener("input", () => {
-    stressBefore = Number(stressSlider.value);
-    if (stressValEl) stressValEl.textContent = stressSlider.value;
-    updateCheckinReady();
-  });
-
-  const sleepSlider = qs("#sleep-slider");
-  const sleepValEl = sleepSlider?.closest(".slider-wrap")?.querySelector(".slider-value");
-  sleepHours = Number(sleepSlider?.value || 7);
-  sleepSlider?.addEventListener("input", () => {
-    sleepHours = Number(sleepSlider.value);
-    if (sleepValEl) sleepValEl.textContent = sleepSlider.value;
-    updateCheckinReady();
-  });
-
-  const energyOpts = Array.from(document.querySelectorAll(".energy-opt"));
-  energyOpts.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      energy = String(btn.dataset.value || "").trim() || null;
-      energyOpts.forEach((other) => other.classList.toggle("active", other === btn));
-      updateCheckinReady();
+  function showOnboardStep(name) {
+    document.querySelectorAll("#day-step-onboard .onboard-step").forEach((el) => {
+      el.classList.toggle("hidden", el.dataset.onboard !== name);
     });
-  });
+  }
 
-  const wakeOpts = Array.from(document.querySelectorAll(".wake-opt"));
-  wakeOpts.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      wakeTime = btn.dataset.value;
-      wakeOpts.forEach((other) => {
-        if (other === btn) {
-          other.classList.add("active");
-          other.style.background = "var(--primary, #f3eadb)";
-          other.style.color = "#fff";
-          other.style.borderColor = "var(--primary, #f3eadb)";
-        } else {
-          other.classList.remove("active");
-          other.style.background = "";
-          other.style.color = "";
-          other.style.borderColor = "";
-        }
-      });
-      updateCheckinReady();
-    });
-  });
+  async function finishOnboarding() {
+    const profile = {
+      goal: onboardData.goal || "feel calmer",
+      stressBaseline: onboardData.stressBaseline || "sometimes",
+      wakeTime: onboardData.wakeTime || "normal",
+      timeMin: Number(onboardData.timeMin) || 10,
+      injuries: onboardData.injuries || [],
+    };
 
-  // Time option buttons
-  const timeOpts = Array.from(document.querySelectorAll(".time-opt"));
-  timeOpts.forEach((btn) => {
-    btn.addEventListener("click", () => {
-      timeMin = Number(btn.dataset.value);
-      timeOpts.forEach((other) => other.classList.toggle("active", other === btn));
-      updateCheckinReady();
-    });
-  });
-
-  qs("#recheckin-btn")?.addEventListener("click", () => {
     try {
-      localStorage.removeItem("livenew_today");
+      await apiPost("/v1/onboard/complete", { profile });
+    } catch (err) {
+      console.error("[ONBOARD_SAVE_ERROR]", err);
+    }
+
+    try {
+      localStorage.setItem("livenew_profile", JSON.stringify(profile));
     } catch {}
+
     showStep("stress-tap");
+  }
+
+  document.querySelectorAll("#day-step-onboard .onboard-opt:not(.onboard-toggle)").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const key = btn.dataset.key;
+      const value = btn.dataset.value;
+      const parent = btn.parentElement;
+      if (parent) {
+        parent.querySelectorAll(".onboard-opt").forEach((b) => {
+          b.style.background = b === btn ? "var(--primary, #b5a07c)" : "";
+          b.style.color = b === btn ? "#fff" : "";
+          b.style.borderColor = b === btn ? "var(--primary, #b5a07c)" : "";
+        });
+      }
+
+      if (key === "injuries") {
+        onboardData.injuries = value === "none" ? [] : [value];
+      } else {
+        onboardData[key] = value;
+      }
+
+      setTimeout(() => {
+        onboardIndex += 1;
+        if (onboardIndex < onboardSteps.length) {
+          showOnboardStep(onboardSteps[onboardIndex]);
+        } else {
+          void finishOnboarding();
+        }
+      }, 300);
+    });
+  });
+
+  document.querySelectorAll("#day-step-onboard .onboard-toggle").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const value = btn.dataset.value;
+      const idx = injuries.indexOf(value);
+      if (idx >= 0) {
+        injuries.splice(idx, 1);
+        btn.style.background = "";
+        btn.style.color = "";
+        btn.style.borderColor = "";
+      } else {
+        injuries.push(value);
+        btn.style.background = "var(--primary, #b5a07c)";
+        btn.style.color = "#fff";
+        btn.style.borderColor = "var(--primary, #b5a07c)";
+      }
+    });
+  });
+
+  const injuryStep = document.querySelector('#day-step-onboard [data-onboard="injuries"]');
+  if (injuryStep) {
+    const doneLink = document.createElement("button");
+    doneLink.className = "ghost hidden";
+    doneLink.style.cssText = "margin-top:16px;width:100%;font-size:0.9rem";
+    doneLink.textContent = "Continue";
+    injuryStep.appendChild(doneLink);
+
+    doneLink.addEventListener("click", () => {
+      onboardData.injuries = injuries.length > 0 ? injuries.slice() : [];
+      onboardIndex += 1;
+      void finishOnboarding();
+    });
+
+    document.querySelectorAll("#day-step-onboard .onboard-toggle").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        doneLink.classList.remove("hidden");
+      });
+    });
+  }
+
+  document.querySelectorAll(".stress-tap-btn").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const stressValue = Number(btn.dataset.value);
+      stressBefore = stressValue;
+
+      document.querySelectorAll(".stress-tap-btn").forEach((b) => {
+        b.style.background = b === btn ? "var(--primary, #b5a07c)" : "";
+        b.style.color = b === btn ? "#fff" : "";
+        b.style.borderColor = b === btn ? "var(--primary, #b5a07c)" : "";
+        b.disabled = true;
+      });
+      btn.textContent = "Building your plan...";
+
+      const profile = await loadUserProfile();
+      const stressBaselineMap = { rarely: 3, sometimes: 5, often: 7, always: 9 };
+      const energyMap = { rarely: "high", sometimes: "med", often: "low", always: "low" };
+      const baselineStress = stressBaselineMap[profile.stressBaseline] || 5;
+      const energyLabel = energyMap[profile.stressBaseline] || "med";
+      const energyScore = energyLabel === "low" ? 3 : energyLabel === "high" ? 9 : 6;
+      const effectiveStress = Math.max(stressValue, baselineStress);
+
+      try {
+        const res = await apiPost("/v1/checkin", {
+          checkIn: {
+            dateISO: currentDateISO,
+            stress: effectiveStress,
+            energy: energyScore,
+            sleepHours: 7,
+            sleepQuality: 5,
+            timeAvailableMin: profile.timeMin || 10,
+            wakeTime: profile.wakeTime || "normal",
+            goal: profile.goal || "feel calmer",
+            injuries: profile.injuries || [],
+          },
+        });
+
+        currentContract = res;
+        currentDateISO = res?.dateISO || currentDateISO;
+        wakeTime = profile.wakeTime || "normal";
+
+        const move = res?.movement || res?.move || res?.workout;
+        const reset = res?.reset;
+        const winddown = res?.winddown;
+        const hasContent =
+          (move?.phases?.length > 0) ||
+          (reset?.phases?.length > 0) ||
+          (winddown?.phases?.length > 0);
+
+        if (!hasContent) {
+          btn.textContent = "Servers busy — tap again";
+          document.querySelectorAll(".stress-tap-btn").forEach((b) => {
+            b.disabled = false;
+          });
+          return;
+        }
+
+        saveTodayPlan(currentDateISO, res, effectiveStress, wakeTime);
+        populateTodayScreen(res, effectiveStress, wakeTime);
+        showStep("today");
+      } catch (err) {
+        if (isAuthRequiredError?.(err)) {
+          clearTokens?.();
+          redirectToLogin?.(currentPathWithQuery?.() || "/day");
+          return;
+        }
+        btn.textContent = "Something went wrong — tap again";
+        document.querySelectorAll(".stress-tap-btn").forEach((b) => {
+          b.disabled = false;
+        });
+        reportError?.(err);
+      }
+    });
   });
 
   qs("#toggle-full-day")?.addEventListener("click", () => {
@@ -1420,120 +1525,9 @@ function initDay({ initialDateISO } = {}) {
     }
   });
 
-  document.querySelectorAll(".stress-tap-btn").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      stressBefore = Number(btn.dataset.value);
-
-      document.querySelectorAll(".stress-tap-btn").forEach((b) => {
-        b.style.background = b === btn ? "var(--primary, #b5a07c)" : "";
-        b.style.color = b === btn ? "#fff" : "";
-        b.style.borderColor = b === btn ? "var(--primary, #b5a07c)" : "";
-      });
-      btn.textContent = "Building your plan...";
-      btn.disabled = true;
-
-      const profile = await loadUserProfile();
-      const energyScore = profile.energy === "low" ? 3 : profile.energy === "high" ? 9 : 6;
-
-      try {
-        const res = await apiPost("/v1/checkin", {
-          checkIn: {
-            dateISO: currentDateISO,
-            stress: stressBefore,
-            energy: energyScore,
-            sleepHours: profile.sleepHours || 7,
-            sleepQuality: Math.max(1, Math.min(10, Math.round(((profile.sleepHours || 7) / 12) * 10))),
-            timeAvailableMin: profile.timeMin || 10,
-            wakeTime: profile.wakeTime || "normal",
-          },
-        });
-
-        currentContract = res;
-        currentDateISO = res?.dateISO || currentDateISO;
-        wakeTime = profile.wakeTime || "normal";
-
-        const move = res?.movement || res?.move || res?.workout;
-        const reset = res?.reset;
-        const hasRealMove = move && Array.isArray(move.phases) && move.phases.length > 0;
-        const hasRealReset = reset && Array.isArray(reset.phases) && reset.phases.length > 0;
-
-        if (!hasRealMove && !hasRealReset) {
-          btn.textContent = "Servers busy — tap again";
-          btn.disabled = false;
-          return;
-        }
-
-        saveTodayPlan(currentDateISO, res, stressBefore, wakeTime);
-        populateTodayScreen(res, stressBefore, wakeTime);
-        showStep("today");
-      } catch (err) {
-        if (isAuthRequiredError(err)) {
-          clearTokens();
-          redirectToLogin(currentPathWithQuery());
-          return;
-        }
-        btn.textContent = "Something went wrong — tap again";
-        btn.disabled = false;
-        reportError(err);
-      }
-    });
-  });
-
-  async function submitDailyCheckIn({ stressValue, energyValue, sleepHoursValue, timeMinValue, wakeTimeValue }) {
-    if (!energyValue || !timeMinValue || !wakeTimeValue || !Number.isFinite(sleepHoursValue)) return;
-    if (statusEl) statusEl.textContent = "Building your plan...";
-    if (checkinNext) checkinNext.disabled = true;
-    try {
-      const energyScore = energyValue === "low" ? 3 : energyValue === "high" ? 9 : 6;
-      const res = await apiPost("/v1/checkin", {
-        checkIn: {
-          dateISO: currentDateISO,
-          stress: stressValue,
-          energy: energyScore,
-          sleepHours: sleepHoursValue,
-          sleepQuality: Math.max(1, Math.min(10, Math.round((sleepHoursValue / 12) * 10))),
-          timeAvailableMin: timeMinValue,
-          wakeTime: wakeTimeValue,
-        },
-      });
-      currentContract = res;
-      currentDateISO = res?.dateISO || currentDateISO;
-      const move = res?.movement || res?.move || res?.workout;
-      const reset = res?.reset;
-      const hasRealMove = move && Array.isArray(move.phases) && move.phases.length > 0;
-      const hasRealReset = reset && Array.isArray(reset.phases) && reset.phases.length > 0;
-
-      if (!hasRealMove && !hasRealReset) {
-        if (statusEl) statusEl.textContent = "Our servers are busy. Please try again in a moment.";
-        if (checkinNext) checkinNext.disabled = false;
-        return;
-      }
-      saveTodayPlan(currentDateISO, res, stressValue, wakeTimeValue);
-      if (statusEl) statusEl.textContent = "";
-      populateTodayScreen(res, stressValue, wakeTimeValue);
-      showStep("today");
-    } catch (err) {
-      if (isAuthRequiredError(err)) {
-        clearTokens();
-        redirectToLogin(currentPathWithQuery());
-        return;
-      }
-      if (statusEl) statusEl.textContent = "Something went wrong. Try again.";
-      updateCheckinReady();
-      reportError(err);
-    }
-  }
-
-  checkinNext?.addEventListener("click", async () => {
-    stressBefore = Number(stressSlider?.value || 5);
-    sleepHours = Number(sleepSlider?.value || 7);
-    await submitDailyCheckIn({
-      stressValue: stressBefore,
-      energyValue: energy,
-      sleepHoursValue: sleepHours,
-      timeMinValue: timeMin,
-      wakeTimeValue: wakeTime,
-    });
+  qs("#recheckin-btn")?.addEventListener("click", () => {
+    try { localStorage.removeItem("livenew_today"); } catch {}
+    showStep("stress-tap");
   });
 
   qs("#start-move")?.addEventListener("click", () => {
@@ -1658,46 +1652,32 @@ function initDay({ initialDateISO } = {}) {
     showStep("today");
   });
 
-  updateCheckinReady();
   const existingPlan = loadTodayPlan();
   if (existingPlan?.contract) {
     currentContract = existingPlan.contract;
     stressBefore = Number(existingPlan.stress || 5);
-    wakeTime = existingPlan.wakeTime || wakeTime;
+    wakeTime = existingPlan.wakeTime || "normal";
     populateTodayScreen(existingPlan.contract, existingPlan.stress, existingPlan.wakeTime);
     showStep("today");
   } else {
-    let onboardPrefill = null;
-    try {
-      const raw = localStorage.getItem("livenew_onboard_first_checkin");
-      onboardPrefill = raw ? JSON.parse(raw) : null;
-    } catch {}
-    if (onboardPrefill) {
-      stressBefore = Number(onboardPrefill.stress || 5);
-      energy = onboardPrefill.energy || null;
-      sleepHours = Number(onboardPrefill.sleepHours || 7);
-      wakeTime = onboardPrefill.wakeTime || "normal";
-      timeMin = Number(onboardPrefill.timeMin || 10);
-      void submitDailyCheckIn({
-        stressValue: stressBefore,
-        energyValue: energy,
-        sleepHoursValue: sleepHours,
-        timeMinValue: timeMin,
-        wakeTimeValue: wakeTime,
-      }).finally(() => {
+    loadUserProfile().then((profile) => {
+      if (profile && profile.goal && profile.goal !== "feel calmer") {
+        showStep("stress-tap");
+      } else {
         try {
-          localStorage.removeItem("livenew_onboard_first_checkin");
+          const cached = localStorage.getItem("livenew_profile");
+          if (cached) {
+            const p = JSON.parse(cached);
+            if (p.goal) {
+              showStep("stress-tap");
+              return;
+            }
+          }
         } catch {}
-      });
-    } else {
-      loadUserProfile().then((profile) => {
-        if (profile?.hasProfile) {
-          showStep("stress-tap");
-        } else {
-          showStep("checkin");
-        }
-      });
-    }
+        showStep("onboard");
+        showOnboardStep("goal");
+      }
+    });
   }
 }
 

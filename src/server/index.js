@@ -2160,6 +2160,14 @@ async function buildSupabaseBootstrapPayload({ userId, userProfile, flags }) {
   const incidentMode = resolveIncidentMode(flags);
   const canaryAllowed = isCanaryAllowed({ userId });
   const onboardingComplete = Boolean(userProfile?.onboardingCompletedAt);
+  const constraints = baseline?.constraints && typeof baseline.constraints === "object" ? baseline.constraints : {};
+  const injuryFlags = constraints?.injuries && typeof constraints.injuries === "object" ? constraints.injuries : {};
+  const injuries =
+    Array.isArray(constraints?.injuriesList)
+      ? constraints.injuriesList
+      : Object.entries(injuryFlags)
+          .filter(([, enabled]) => Boolean(enabled))
+          .map(([key]) => (key === "knee" ? "knees" : key === "shoulder" ? "shoulders" : key));
   const uiState = computeSupabaseUiState({
     isAuthenticated,
     consentComplete,
@@ -2188,6 +2196,11 @@ async function buildSupabaseBootstrapPayload({ userId, userProfile, flags }) {
     profile: {
       isComplete: profileStatus.isComplete,
       missingFields: profileStatus.missingFields,
+      goal: constraints.goal || null,
+      stressBaseline: constraints.stressBaseline || null,
+      wakeTime: constraints.wakeTime || null,
+      timeMin: Number.isFinite(Number(constraints.timeMin)) ? Number(constraints.timeMin) : null,
+      injuries,
     },
     baseline: baseline
       ? {
@@ -2404,6 +2417,57 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       return true;
     }
     const body = await parseJson(req);
+    if (
+      body?.profile &&
+      typeof body.profile === "object" &&
+      !body?.baseline &&
+      !body?.firstCheckIn &&
+      !body?.checkIn
+    ) {
+      const profileInput = body.profile || {};
+      const existingProfile = await persist.getOrCreateUserProfile(auth.userId);
+      const existingBaseline = baselineFromSupabaseProfile(existingProfile);
+      const existingConstraints =
+        existingBaseline?.constraints && typeof existingBaseline.constraints === "object"
+          ? { ...existingBaseline.constraints }
+          : {};
+      const injuriesInput = Array.isArray(profileInput?.injuries) ? profileInput.injuries : [];
+      const profileData = {
+        goal: profileInput?.goal || null,
+        stressBaseline: profileInput?.stressBaseline || null,
+        wakeTime: profileInput?.wakeTime || null,
+        timeMin: profileInput?.timeMin ? Number(profileInput.timeMin) : null,
+        injuries: injuriesInput,
+      };
+      const injuryFlags = {
+        knee: injuriesInput.includes("knee") || injuriesInput.includes("knees"),
+        shoulder: injuriesInput.includes("shoulder") || injuriesInput.includes("shoulders"),
+        back: injuriesInput.includes("back"),
+      };
+      const mergedConstraints = {
+        ...existingConstraints,
+        goal: profileData.goal,
+        stressBaseline: profileData.stressBaseline,
+        wakeTime: profileData.wakeTime,
+        timeMin: profileData.timeMin,
+        injuries: injuryFlags,
+        injuriesList: injuriesInput,
+      };
+      const updatedProfile = await persist.updateOnboarding(auth.userId, {
+        timezone: existingProfile?.timezone || DEFAULT_TIMEZONE,
+        dayBoundaryMinute:
+          Number.isFinite(Number(existingProfile?.dayBoundaryMinute)) ? Number(existingProfile.dayBoundaryMinute) : 240,
+        constraintsJson: mergedConstraints,
+        completedAt: existingProfile?.onboardingCompletedAt || new Date().toISOString(),
+      });
+      const bootstrap = await buildSupabaseBootstrapPayload({
+        userId: auth.userId,
+        userProfile: updatedProfile,
+        flags,
+      });
+      sendJson(res, 200, { ok: true, profile: profileData, bootstrap }, auth.userId);
+      return true;
+    }
     const accepted = extractConsentAcceptance(body);
     const missing = REQUIRED_CONSENTS.filter((key) => !accepted.has(key));
     if (missing.length) {

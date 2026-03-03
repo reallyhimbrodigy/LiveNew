@@ -143,49 +143,59 @@
           <div id="onboard-status" class="muted"></div>
         </section>
 
-        <!-- Step: checkin -->
-        <section id="day-step-checkin" class="card today-screen hidden" data-step="checkin">
-          <h2 class="today-question">Daily check-in</h2>
-
-          <label class="checkin-label">How stressed do you feel?</label>
-          <div class="slider-wrap">
-            <input id="stress-slider" class="stress-slider" type="range" min="1" max="10" value="5" />
-            <div class="slider-labels"><span>1 — calm</span><span>10 — overwhelmed</span></div>
-            <div class="slider-value">5</div>
+        <!-- ONBOARDING: shown once for new users -->
+        <section id="day-step-onboard" class="card today-screen hidden" data-step="onboard">
+          <div class="onboard-step" data-onboard="goal">
+            <h2 class="today-question">What's your goal?</h2>
+            <p class="muted">This shapes everything LiveNew builds for you</p>
+            <div class="onboard-options">
+              <button class="onboard-opt" data-key="goal" data-value="feel calmer" type="button">Feel calmer</button>
+              <button class="onboard-opt" data-key="goal" data-value="sleep better" type="button">Sleep better</button>
+              <button class="onboard-opt" data-key="goal" data-value="more energy" type="button">More energy</button>
+              <button class="onboard-opt" data-key="goal" data-value="all" type="button">All of the above</button>
+            </div>
           </div>
 
-          <label class="checkin-label">Energy level</label>
-          <div class="today-options">
-            <button class="energy-opt" data-value="low" type="button">Low</button>
-            <button class="energy-opt" data-value="med" type="button">Med</button>
-            <button class="energy-opt" data-value="high" type="button">High</button>
+          <div class="onboard-step hidden" data-onboard="stress-baseline">
+            <h2 class="today-question">How stressed are you usually?</h2>
+            <div class="onboard-options">
+              <button class="onboard-opt" data-key="stressBaseline" data-value="rarely" type="button">Rarely</button>
+              <button class="onboard-opt" data-key="stressBaseline" data-value="sometimes" type="button">Sometimes</button>
+              <button class="onboard-opt" data-key="stressBaseline" data-value="often" type="button">Often</button>
+              <button class="onboard-opt" data-key="stressBaseline" data-value="always" type="button">Always</button>
+            </div>
           </div>
 
-          <label class="checkin-label">Hours of sleep last night</label>
-          <div class="slider-wrap">
-            <input id="sleep-slider" class="sleep-slider" type="range" min="0" max="12" step="0.5" value="7" />
-            <div class="slider-labels"><span>0h</span><span>12h</span></div>
-            <div class="slider-value">7</div>
+          <div class="onboard-step hidden" data-onboard="wake">
+            <h2 class="today-question">When do you wake up?</h2>
+            <div class="onboard-options">
+              <button class="onboard-opt" data-key="wakeTime" data-value="early" type="button">Before 7am</button>
+              <button class="onboard-opt" data-key="wakeTime" data-value="normal" type="button">7–9am</button>
+              <button class="onboard-opt" data-key="wakeTime" data-value="late" type="button">After 9am</button>
+            </div>
           </div>
 
-          <label class="checkin-label">What time did you wake up?</label>
-          <div class="today-options">
-            <button class="wake-opt" data-value="early" type="button">Before 7am</button>
-            <button class="wake-opt" data-value="normal" type="button">7–9am</button>
-            <button class="wake-opt" data-value="late" type="button">After 9am</button>
+          <div class="onboard-step hidden" data-onboard="time">
+            <h2 class="today-question">How much time do you have for yourself each day?</h2>
+            <div class="onboard-options">
+              <button class="onboard-opt" data-key="timeMin" data-value="5" type="button">5 min</button>
+              <button class="onboard-opt" data-key="timeMin" data-value="10" type="button">10 min</button>
+              <button class="onboard-opt" data-key="timeMin" data-value="20" type="button">20 min</button>
+            </div>
           </div>
 
-          <label class="checkin-label">Time for movement</label>
-          <div class="today-options">
-            <button class="time-opt" data-value="5" type="button">5 min</button>
-            <button class="time-opt" data-value="10" type="button">10 min</button>
-            <button class="time-opt" data-value="20" type="button">20 min</button>
+          <div class="onboard-step hidden" data-onboard="injuries">
+            <h2 class="today-question">Any areas to avoid?</h2>
+            <div class="onboard-options onboard-multi">
+              <button class="onboard-opt onboard-toggle" data-key="injuries" data-value="knees" type="button">Knees</button>
+              <button class="onboard-opt onboard-toggle" data-key="injuries" data-value="shoulders" type="button">Shoulders</button>
+              <button class="onboard-opt onboard-toggle" data-key="injuries" data-value="back" type="button">Back</button>
+              <button class="onboard-opt" data-key="injuries" data-value="none" type="button">None</button>
+            </div>
           </div>
-
-          <button id="checkin-next" class="primary today-next" type="button" disabled>Continue</button>
-          <div id="day-status" class="muted"></div>
         </section>
 
+        <!-- STRESS TAP: shown daily for returning users -->
         <section id="day-step-stress-tap" class="card today-screen hidden" data-step="stress-tap">
           <h2 class="today-question">How are you feeling?</h2>
           <div class="stress-tap-options">
@@ -194,16 +204,14 @@
             <button class="stress-tap-btn" data-value="8" type="button">Stressed</button>
             <button class="stress-tap-btn" data-value="10" type="button">Overwhelmed</button>
           </div>
-          <p class="muted" style="margin-top:12px">This adjusts today's plan</p>
         </section>
 
-        <!-- Step: today -->
         <section id="day-step-today" class="card today-screen hidden" data-step="today">
           <div id="today-active-card" class="today-active-card">
             <div id="active-time-label" class="active-time-label"></div>
             <h2 id="active-title" class="active-title"></h2>
             <p id="active-desc" class="active-desc"></p>
-            <button id="active-start-btn" class="primary" type="button" style="margin-top:12px">Start</button>
+            <button id="active-start-btn" class="primary" type="button" style="margin-top:16px">Start</button>
           </div>
 
           <div id="today-next-up" class="today-next-up hidden">
@@ -213,10 +221,12 @@
           <div id="today-all-done" class="today-all-done hidden">
             <h2>You're done for today</h2>
             <p class="muted">Everything completed. Check back tomorrow.</p>
-            <a href="/progress" class="btn primary" style="margin-top:12px;display:inline-block">View progress</a>
+            <a href="/progress" class="btn primary" style="margin-top:16px;display:inline-block">View progress</a>
           </div>
 
-          <button id="toggle-full-day" class="ghost" type="button" style="margin-top:20px;width:100%;font-size:0.9rem">See full day</button>
+          <div style="margin-top:24px">
+            <button id="toggle-full-day" class="ghost" type="button" style="width:100%;font-size:0.9rem">See full day</button>
+          </div>
 
           <div id="full-day-timeline" class="full-day-timeline hidden">
             <div id="timeline-morning" class="timeline-slot">
@@ -243,7 +253,7 @@
                 <div class="timeline-status" id="evening-status"></div>
               </div>
             </div>
-            <div class="timeline-nutrition">
+            <div style="margin-top:12px">
               <div id="timeline-nutrition-morning" class="today-nutrition-bar">
                 <span class="nutrition-label">Morning</span>
                 <span id="nutrition-morning-tip"></span>
@@ -255,7 +265,9 @@
             </div>
           </div>
 
-          <button id="recheckin-btn" class="ghost" type="button" style="margin-top:12px;width:100%;font-size:0.85rem">Feeling different? Re-check</button>
+          <div style="margin-top:12px">
+            <button id="recheckin-btn" class="ghost" type="button" style="width:100%;font-size:0.85rem">Feeling different? Re-check</button>
+          </div>
           <button id="start-move" class="hidden" type="button">Start move</button>
           <button id="start-reset" class="hidden" type="button">Start reset</button>
           <button id="start-winddown" class="hidden" type="button">Start wind-down</button>

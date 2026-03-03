@@ -258,10 +258,8 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 }
 
 .today-active-card {
-  border: 2px solid var(--primary, #b5a07c);
-  border-radius: 16px;
-  padding: 28px 24px;
   text-align: center;
+  padding: 32px 24px;
 }
 
 .active-time-label {
@@ -270,48 +268,48 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--primary, #b5a07c);
-  margin-bottom: 8px;
+  margin-bottom: 12px;
 }
 
 .active-title {
-  font-size: 1.4rem;
+  font-size: 1.5rem;
   font-weight: 700;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
 }
 
 .active-desc {
-  color: var(--muted);
+  color: var(--muted, #888);
   font-size: 0.95rem;
   line-height: 1.5;
-  margin-bottom: 0;
 }
 
 .today-next-up {
   text-align: center;
-  padding: 12px 0;
+  padding: 16px 0;
 }
 
 .today-all-done {
   text-align: center;
-  padding: 32px 16px;
+  padding: 40px 16px;
 }
 
 .stress-tap-options {
   display: flex;
-  gap: 8px;
+  gap: 10px;
   justify-content: center;
   flex-wrap: wrap;
-  margin-top: 16px;
+  margin-top: 24px;
 }
 
 .stress-tap-btn {
-  padding: 12px 20px;
+  padding: 16px 24px;
   border: 1px solid var(--line, #e0e0e0);
-  border-radius: 8px;
+  border-radius: 10px;
   background: transparent;
-  font-size: 1rem;
+  font-size: 1.05rem;
   cursor: pointer;
   transition: all 0.15s;
+  min-width: 120px;
 }
 
 .stress-tap-btn:hover {
@@ -319,16 +317,16 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 }
 
 .full-day-timeline {
-  margin-top: 16px;
   border-top: 1px solid var(--line, #e0e0e0);
   padding-top: 16px;
+  margin-top: 8px;
 }
 
 .timeline-slot {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   padding: 12px 0;
-  border-bottom: 1px solid var(--line);
+  border-bottom: 1px solid var(--line, #e0e0e0);
 }
 
 .timeline-slot:last-child {
@@ -336,17 +334,15 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 }
 
 .timeline-time {
-  width: 60px;
+  width: 50px;
   font-size: 0.85rem;
-  color: var(--muted);
+  color: var(--muted, #888);
   flex-shrink: 0;
+  padding-top: 2px;
 }
 
 .timeline-content {
   flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
 }
 
 .timeline-context {
@@ -364,17 +360,8 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 
 .timeline-status {
   font-size: 0.85rem;
-  color: var(--muted);
-}
-
-.timeline-done {
-  color: var(--primary);
-  font-weight: 600;
-}
-
-.timeline-ready {
-  color: var(--primary);
-  font-weight: 600;
+  color: var(--muted, #888);
+  margin-top: 2px;
 }
 
 .today-nutrition-bar {
@@ -394,6 +381,35 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
   letter-spacing: 0.05em;
   color: var(--primary);
   margin-bottom: 4px;
+}
+
+.onboard-step {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.onboard-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 20px;
+  max-width: 320px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.onboard-opt {
+  padding: 14px 20px;
+  border: 1px solid var(--line, #e0e0e0);
+  border-radius: 10px;
+  background: transparent;
+  font-size: 1rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.onboard-opt:hover {
+  border-color: var(--primary, #b5a07c);
 }
 
 #day-status:not(:empty) {
@@ -608,16 +624,21 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 
 @media (max-width: 560px) {
   .today-active-card {
-    padding: 20px 16px;
+    padding: 24px 16px;
   }
 
   .active-title {
-    font-size: 1.2rem;
+    font-size: 1.3rem;
   }
 
   .stress-tap-btn {
-    padding: 10px 16px;
+    min-width: 100px;
+    padding: 14px 16px;
     font-size: 0.95rem;
+  }
+
+  .onboard-opt {
+    padding: 12px 16px;
   }
 
   .timeline-slot {
