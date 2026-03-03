@@ -1220,6 +1220,8 @@ function initDay({ initialDateISO } = {}) {
     const windowOrder = ["morning", "midday", "evening"];
     const currentWindow = windowOrder.find((k) => windows[k] && !windows[k].done) || getCurrentWindow(schedule);
 
+    const nowHour = new Date().getHours();
+
     Object.keys(windows).forEach((key) => {
       const slot = windows[key];
       const timeEl = qs(`#${key}-time`);
@@ -1235,19 +1237,22 @@ function initDay({ initialDateISO } = {}) {
       }
       if (slotEl) slotEl.classList.remove("hidden");
       if (titleEl) titleEl.textContent = slot.title;
-      if (statusEl) {
-        if (slot.done) {
-          statusEl.textContent = "Done ✓";
-        } else {
-          const now = new Date().getHours();
-          if (now >= schedule[key].endHour) {
-            statusEl.textContent = "Ready";
-          } else if (now >= schedule[key].startHour) {
-            statusEl.textContent = "Now";
-          } else {
-            statusEl.textContent = formatHour(schedule[key].startHour);
-          }
-        }
+    });
+
+    Object.keys(windows).forEach((key) => {
+      const slot = windows[key];
+      const statusEl = qs(`#${key}-status`);
+      if (!slot || !statusEl) return;
+
+      if (slot.done) {
+        statusEl.textContent = "Done ✓";
+        statusEl.className = "timeline-status timeline-done";
+      } else if (nowHour >= schedule[key].startHour) {
+        statusEl.textContent = "Ready";
+        statusEl.className = "timeline-status timeline-ready";
+      } else {
+        statusEl.textContent = formatHour(schedule[key].startHour);
+        statusEl.className = "timeline-status";
       }
     });
 
@@ -1299,16 +1304,28 @@ function initDay({ initialDateISO } = {}) {
     const headline = qs("#today-headline");
     const allDone = Object.values(windows).every((w) => !w || w.done);
     if (headline) {
-      if (allDone) headline.textContent = "You're done for today";
-      else if (resolvedStress >= 8) {
-        headline.textContent = "Let's bring that stress down";
-      } else if (resolvedStress >= 5) headline.textContent = "Your plan for today";
-      else headline.textContent = "You're in a good place — here's your day";
+      if (allDone) {
+        headline.textContent = "You're done for today";
+      } else if (resolvedStress >= 8) {
+        headline.textContent = "Tough day — here's your plan";
+      } else if (resolvedStress >= 5) {
+        headline.textContent = "Here's your plan for today";
+      } else {
+        headline.textContent = "You're in a good place — here's your day";
+      }
     }
 
     const subline = qs("#today-subline");
     if (subline) {
-      subline.textContent = `${formatHour(schedule.morning.startHour)} to ${formatHour(schedule.evening.endHour)} plan`;
+      if (allDone) {
+        subline.textContent = "Everything completed";
+      } else if (resolvedStress >= 8) {
+        subline.textContent = "High stress day — focus on calming down";
+      } else if (resolvedStress >= 5) {
+        subline.textContent = "Moderate stress — stay steady today";
+      } else {
+        subline.textContent = "Low stress — maintain the momentum";
+      }
     }
 
     const morningTip = qs("#nutrition-morning-tip");

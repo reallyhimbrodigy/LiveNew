@@ -24,7 +24,7 @@ I will give you my daily check-in: stress level (1–10), energy (low/med/high),
 
 My goal shapes what you recommend.
 
-Two recommendations — one for the morning, one for the evening. Each is one sentence that names the food and when to eat it. Keep instructions tight. Every word earns its place. Address them to me directly. Name common foods I probably already have at home.
+Two recommendations — one for the morning, one for the evening. The sentence names the food and when to eat it. Keep instructions tight. Every word earns its place. Address them to me directly. Name common foods I probably already have at home.
 
 Respond in JSON only:
 { "morning": "[Food] [when].", "evening": "[Food] [when]." }`;

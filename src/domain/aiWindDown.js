@@ -26,6 +26,8 @@ Structure: phases totaling 10 minutes. Each phase is one technique. Every techni
 
 Go beyond the basics — reach for the targeted, effective techniques first.
 
+Title the wind-down after what I'll physically be doing.
+
 Every sentence in every phase instruction is a physical action I perform — a position to hold, a movement to make, or a breath to take. Keep instructions tight. Every word earns its place.
 
 Respond in JSON only:
