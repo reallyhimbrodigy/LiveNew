@@ -1396,8 +1396,20 @@ function initDay({ initialDateISO } = {}) {
   const wakeOpts = Array.from(document.querySelectorAll(".wake-opt"));
   wakeOpts.forEach((btn) => {
     btn.addEventListener("click", () => {
-      wakeTime = String(btn.dataset.value || "").trim() || null;
-      wakeOpts.forEach((other) => other.classList.toggle("active", other === btn));
+      wakeTime = btn.dataset.value;
+      wakeOpts.forEach((other) => {
+        if (other === btn) {
+          other.classList.add("active");
+          other.style.background = "var(--primary, #f3eadb)";
+          other.style.color = "#fff";
+          other.style.borderColor = "var(--primary, #f3eadb)";
+        } else {
+          other.classList.remove("active");
+          other.style.background = "";
+          other.style.color = "";
+          other.style.borderColor = "";
+        }
+      });
       updateCheckinReady();
     });
   });
