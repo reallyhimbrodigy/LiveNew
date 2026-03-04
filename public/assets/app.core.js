@@ -1652,32 +1652,38 @@ function initDay({ initialDateISO } = {}) {
     showStep("today");
   });
 
-  const existingPlan = loadTodayPlan();
-  if (existingPlan?.contract) {
-    currentContract = existingPlan.contract;
-    stressBefore = Number(existingPlan.stress || 5);
-    wakeTime = existingPlan.wakeTime || "normal";
-    populateTodayScreen(existingPlan.contract, existingPlan.stress, existingPlan.wakeTime);
-    showStep("today");
+  // Entry point logic — determine which screen to show
+  try {
+    const existingPlan = loadTodayPlan();
+    if (existingPlan?.contract) {
+      currentContract = existingPlan.contract;
+      stressBefore = Number(existingPlan.stress || 5);
+      wakeTime = existingPlan.wakeTime || "normal";
+      populateTodayScreen(existingPlan.contract, existingPlan.stress, existingPlan.wakeTime);
+      showStep("today");
+      return;
+    }
+  } catch (err) {
+    console.error("[ENTRY] loadTodayPlan failed:", err);
+  }
+
+  // Check if user has a saved profile
+  let hasProfile = false;
+  try {
+    const cached = localStorage.getItem("livenew_profile");
+    if (cached) {
+      const p = JSON.parse(cached);
+      if (p && p.goal) hasProfile = true;
+    }
+  } catch {}
+
+  if (hasProfile) {
+    console.log("[ENTRY] has profile, showing stress-tap");
+    showStep("stress-tap");
   } else {
-    loadUserProfile().then((profile) => {
-      if (profile && profile.goal && profile.goal !== "feel calmer") {
-        showStep("stress-tap");
-      } else {
-        try {
-          const cached = localStorage.getItem("livenew_profile");
-          if (cached) {
-            const p = JSON.parse(cached);
-            if (p.goal) {
-              showStep("stress-tap");
-              return;
-            }
-          }
-        } catch {}
-        showStep("onboard");
-        showOnboardStep("goal");
-      }
-    });
+    console.log("[ENTRY] no profile, showing onboard");
+    showStep("onboard");
+    showOnboardStep("goal");
   }
 }
 
