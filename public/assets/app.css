@@ -1726,3 +1726,19 @@ a {
   .summary-stats { gap: 20px; }
   .summary-stat-value { font-size: 1.6rem; }
 }
+
+.onboard-opt-title {
+  display: block;
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 4px;
+}
+
+.onboard-opt-sub {
+  display: block;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-weight: 400;
+  line-height: 1.4;
+  transition: color 0.15s;
+}

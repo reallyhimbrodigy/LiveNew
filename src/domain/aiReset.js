@@ -52,9 +52,9 @@ Respond in JSON only:
   ]
 }`;
 
-export async function generateReset({ stress, energy, sleepHours, wakeTime }) {
+export async function generateReset({ stress, energy, sleepHours, stressSource, wakeTime }) {
   const wakeLabel = wakeTime === "early" ? "before 7am" : wakeTime === "late" ? "after 9am" : "7–9am";
-  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Woke up: ${wakeLabel}. This is my midday session.`;
+  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Main stress source: ${stressSource || "work"}. Woke up: ${wakeLabel}. This is my midday session.`;
 
   try {
     const finalMessage = await withRetry(async () => {

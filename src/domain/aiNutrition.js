@@ -35,9 +35,16 @@ The good sentences name the food and the time. The bad sentences explain why. Wr
 Respond in JSON only:
 { "morning": "sentence", "evening": "sentence" }`;
 
-export async function generateNutrition({ stress, energy, sleepHours, goal, wakeTime }) {
+export async function generateNutrition({ stress, energy, sleepHours, goal, stressSource, wakeTime }) {
+  const goalMap = {
+    perform: "perform better — more energy and focus",
+    sleep: "sleep through the night",
+    weight: "lose stress weight",
+    calm: "feel calmer",
+  };
+  const goalText = goalMap[goal] || goal || "feel calmer";
   const wakeLabel = wakeTime === "early" ? "before 7am" : wakeTime === "late" ? "after 9am" : "7–9am";
-  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Goal: ${goal || "feel calmer"}. Woke up: ${wakeLabel}.`;
+  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Goal: ${goalText}. Main stress source: ${stressSource || "work"}. Woke up: ${wakeLabel}.`;
 
   try {
     const finalMessage = await withRetry(async () => {

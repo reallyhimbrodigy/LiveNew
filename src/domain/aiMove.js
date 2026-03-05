@@ -52,9 +52,17 @@ Respond in JSON only:
   ]
 }`;
 
-export async function generateMove({ stress, energy, sleepHours, timeMin, goal, wakeTime }) {
+export async function generateMove({ stress, energy, sleepHours, timeMin, goal, stressSource, injuries, wakeTime }) {
+  const goalMap = {
+    perform: "perform better — sharper focus, more energy",
+    sleep: "sleep through the night",
+    weight: "lose stress weight — reduce cortisol-driven fat",
+    calm: "feel calmer and more present",
+  };
+  const goalText = goalMap[goal] || goal || "feel calmer";
+  const injuryText = injuries && injuries.length > 0 ? ` Avoid exercises that stress: ${injuries.join(", ")}.` : "";
   const wakeLabel = wakeTime === "early" ? "before 7am" : wakeTime === "late" ? "after 9am" : "7–9am";
-  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Time available: ${timeMin} minutes. Goal: ${goal || "feel calmer"}. Woke up: ${wakeLabel}. This is my morning session.`;
+  const userMessage = `Stress: ${stress}/10. Energy: ${energy}. Sleep: ${sleepHours} hours. Time available: ${timeMin} minutes. Goal: ${goalText}. Main stress source: ${stressSource}.${injuryText} Woke up: ${wakeLabel}. This is my morning session.`;
 
   try {
     const finalMessage = await withRetry(async () => {

@@ -2197,6 +2197,7 @@ async function buildSupabaseBootstrapPayload({ userId, userProfile, flags }) {
       isComplete: profileStatus.isComplete,
       missingFields: profileStatus.missingFields,
       goal: constraints.goal || null,
+      stressSource: constraints.stressSource || null,
       stressBaseline: constraints.stressBaseline || null,
       wakeTime: constraints.wakeTime || null,
       timeMin: Number.isFinite(Number(constraints.timeMin)) ? Number(constraints.timeMin) : null,
@@ -2437,7 +2438,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       const injuriesInput = Array.isArray(profileInput?.injuries) ? profileInput.injuries : [];
       const profileData = {
         goal: profileInput?.goal || null,
-        stressBaseline: profileInput?.stressBaseline || null,
+        stressSource: profileInput?.stressSource || null,
         wakeTime: profileInput?.wakeTime || null,
         timeMin: profileInput?.timeMin ? Number(profileInput.timeMin) : null,
         injuries: injuriesInput,
@@ -2446,11 +2447,12 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         knee: injuriesInput.includes("knee") || injuriesInput.includes("knees"),
         shoulder: injuriesInput.includes("shoulder") || injuriesInput.includes("shoulders"),
         back: injuriesInput.includes("back"),
+        neck: injuriesInput.includes("neck"),
       };
       const mergedConstraints = {
         ...existingConstraints,
         goal: profileData.goal,
-        stressBaseline: profileData.stressBaseline,
+        stressSource: profileData.stressSource,
         wakeTime: profileData.wakeTime,
         timeMin: profileData.timeMin,
         injuries: injuryFlags,
@@ -2734,12 +2736,17 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       const actualSleepHours =
         checkinData.sleepHours ??
         (Number.isFinite(sleepQualityNum) ? Math.round((sleepQualityNum / 10) * 12 * 2) / 2 : 7);
+      const goal = checkInRaw?.goal || "calm";
+      const stressSource = checkInRaw?.stressSource || "work";
+      const injuries = Array.isArray(checkInRaw?.injuries) ? checkInRaw.injuries : [];
       const aiInput = {
         stress: checkinData.stress ?? 5,
         energy: energyLabel,
         sleepHours: actualSleepHours,
         timeMin: checkinData.timeAvailableMin ?? 10,
-        goal: userGoal,
+        goal: goal || userGoal,
+        stressSource,
+        injuries,
         wakeTime: checkInRaw?.wakeTime || "normal",
       };
 

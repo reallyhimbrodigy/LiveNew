@@ -341,17 +341,17 @@ async function loadUserProfile() {
   try {
     const res = await apiGet("/v1/bootstrap");
     const p = res?.profile || {};
-    const profile = {
-      goal: p.goal || p.primaryGoal || "feel calmer",
-      stressBaseline: p.stressBaseline || "sometimes",
+    const normalized = {
+      goal: p.goal || p.primaryGoal || "calm",
+      stressSource: p.stressSource || "work",
       wakeTime: p.wakeTime || "normal",
       timeMin: p.timeMin || p.timeAvailableMin || 10,
       injuries: p.injuries || [],
     };
-    try { localStorage.setItem("livenew_profile", JSON.stringify(profile)); } catch {}
-    return profile;
+    try { localStorage.setItem("livenew_profile", JSON.stringify(normalized)); } catch {}
+    return normalized;
   } catch {
-    return { goal: "feel calmer", stressBaseline: "sometimes", wakeTime: "normal", timeMin: 10, injuries: [] };
+    return { goal: "calm", stressSource: "work", wakeTime: "normal", timeMin: 10, injuries: [] };
   }
 }
 
@@ -1676,15 +1676,15 @@ function initDay({ initialDateISO } = {}) {
 
 
   const onboardData = {};
-  const onboardSteps = ["intro", "goal", "stress-baseline", "wake", "time", "injuries"];
+  const onboardSteps = ["intro", "goal", "stress-source", "wake", "time", "injuries"];
   let onboardIndex = 0;
   const injuries = [];
 
 
   async function finishOnboarding() {
     const profile = {
-      goal: onboardData.goal || "feel calmer",
-      stressBaseline: onboardData.stressBaseline || "sometimes",
+      goal: onboardData.goal || "calm",
+      stressSource: onboardData.stressSource || "work",
       wakeTime: onboardData.wakeTime || "normal",
       timeMin: Number(onboardData.timeMin) || 10,
       injuries: onboardData.injuries || [],
@@ -1808,7 +1808,8 @@ function initDay({ initialDateISO } = {}) {
             sleepQuality: 5,
             timeAvailableMin: profile.timeMin || 10,
             wakeTime: profile.wakeTime || "normal",
-            goal: profile.goal || "feel calmer",
+            goal: profile.goal || "calm",
+            stressSource: profile.stressSource || "work",
             injuries: profile.injuries || [],
           },
         });
@@ -2154,10 +2155,10 @@ function initTrends() {
 
 async function initProfile() {
   const goalLabels = {
-    calmer: "Feel calmer",
-    energy: "More energy",
-    sleep: "Better sleep",
-    weight: "Weight stability",
+    perform: "Perform better",
+    sleep: "Sleep through the night",
+    weight: "Lose stress weight",
+    calm: "Feel like myself again",
   };
 
   let currentGoal = "";
