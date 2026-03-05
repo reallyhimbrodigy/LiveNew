@@ -76,6 +76,227 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+function showStep(name) {
+  document.querySelectorAll("[data-step]").forEach((el) => {
+    el.classList.toggle("hidden", el.dataset.step !== name);
+  });
+}
+
+function showOnboardStep(name) {
+  document.querySelectorAll(".onboard-step").forEach((el) => {
+    el.classList.toggle("hidden", el.dataset.onboard !== name);
+  });
+}
+
+function saveTodayPlan(dateISO, contract, stress, wakeTimeValue) {
+  try {
+    const m = contract?.movement || contract?.move || contract?.workout || null;
+    const r = contract?.reset || null;
+    const n = contract?.nutrition || null;
+    const w = contract?.winddown || null;
+    const slim = {
+      dateISO: contract?.dateISO || dateISO,
+      movement: m ? { id: m.id, title: m.title, description: m.description, phases: m.phases, minutes: m.minutes || m.durationMin } : null,
+      reset: r ? { id: r.id, title: r.title, description: r.description, phases: r.phases } : null,
+      nutrition: n ? { id: n.id, title: n.title, morning: n.morning || n.tip || null, evening: n.evening || null } : null,
+      winddown: w ? { id: w.id, title: w.title, description: w.description, phases: w.phases } : null,
+    };
+    localStorage.setItem(
+      "livenew_today",
+      JSON.stringify({
+        date: dateISO,
+        contract: slim,
+        stress,
+        wakeTime: wakeTimeValue,
+        resetCompleted: false,
+        moveCompleted: false,
+        winddownCompleted: false,
+      })
+    );
+    console.log("[SAVE_TODAY] saved, date:", dateISO);
+  } catch (err) {
+    console.error("[SAVE_TODAY] failed:", err);
+  }
+}
+
+function loadTodayPlan() {
+  try {
+    const raw = localStorage.getItem("livenew_today");
+    if (!raw) return null;
+    const saved = JSON.parse(raw);
+    const today = new Date().toISOString().slice(0, 10);
+    if (saved.date !== today) {
+      localStorage.removeItem("livenew_today");
+      return null;
+    }
+    return saved;
+  } catch (err) {
+    console.error("[LOAD_TODAY] failed:", err);
+    try { localStorage.removeItem("livenew_today"); } catch {}
+    return null;
+  }
+}
+
+function computeSchedule(wakeTimeValue) {
+  const wakeHourMap = { early: 6, normal: 8, late: 10 };
+  const wakeHour = wakeHourMap[wakeTimeValue] || 8;
+  return {
+    morning: { label: "Morning", startHour: wakeHour, endHour: wakeHour + 3 },
+    midday: { label: "Midday", startHour: wakeHour + 4, endHour: wakeHour + 7 },
+    evening: { label: "Evening", startHour: wakeHour + 12, endHour: wakeHour + 15 },
+  };
+}
+
+function formatHour(h) {
+  const hour = h % 24;
+  if (hour === 0) return "12am";
+  if (hour < 12) return `${hour}am`;
+  if (hour === 12) return "12pm";
+  return `${hour - 12}pm`;
+}
+
+function getCurrentWindow(schedule) {
+  const now = new Date().getHours();
+  if (now < schedule.midday.startHour) return "morning";
+  if (now < schedule.evening.startHour) return "midday";
+  return "evening";
+}
+
+async function loadUserProfile() {
+  try {
+    const cached = localStorage.getItem("livenew_profile");
+    if (cached) {
+      const profile = JSON.parse(cached);
+      if (profile.goal) return profile;
+    }
+  } catch {}
+
+  try {
+    const res = await apiGet("/v1/bootstrap");
+    const p = res?.profile || {};
+    const profile = {
+      goal: p.goal || p.primaryGoal || "feel calmer",
+      stressBaseline: p.stressBaseline || "sometimes",
+      wakeTime: p.wakeTime || "normal",
+      timeMin: p.timeMin || p.timeAvailableMin || 10,
+      injuries: p.injuries || [],
+    };
+    try { localStorage.setItem("livenew_profile", JSON.stringify(profile)); } catch {}
+    return profile;
+  } catch {
+    return { goal: "feel calmer", stressBaseline: "sometimes", wakeTime: "normal", timeMin: 10, injuries: [] };
+  }
+}
+
+function populateTodayScreen(res, stress, wake) {
+  const schedule = computeSchedule(wake || "normal");
+  const saved = loadTodayPlan();
+
+  const move = res?.movement || res?.move || res?.workout;
+  const reset = res?.reset;
+  const winddown = res?.winddown;
+  const hasReset = stress > 3 && reset;
+
+  const sessions = [
+    move ? { key: "morning", type: "move", title: move.title || "Movement", desc: move.description || "", done: saved?.moveCompleted || false } : null,
+    hasReset ? { key: "midday", type: "reset", title: reset.title || "Reset", desc: reset.description || "", done: saved?.resetCompleted || false } : null,
+    winddown ? { key: "evening", type: "winddown", title: winddown.title || "Wind-down", desc: winddown.description || "", done: saved?.winddownCompleted || false } : null,
+  ].filter(Boolean);
+
+  const allDone = sessions.length > 0 && sessions.every((s) => s.done);
+  const nextSession = sessions.find((s) => !s.done);
+
+  const activeCard = qs("#today-active-card");
+  const nextUp = qs("#today-next-up");
+  const allDoneEl = qs("#today-all-done");
+
+  if (allDone) {
+    if (activeCard) activeCard.classList.add("hidden");
+    if (nextUp) nextUp.classList.add("hidden");
+    if (allDoneEl) allDoneEl.classList.remove("hidden");
+  } else if (nextSession) {
+    if (allDoneEl) allDoneEl.classList.add("hidden");
+    if (activeCard) activeCard.classList.remove("hidden");
+
+    const timeLabel = qs("#active-time-label");
+    const titleEl = qs("#active-title");
+    const descEl = qs("#active-desc");
+    const startBtn = qs("#active-start-btn");
+
+    const contextMap = { morning: "Get moving", midday: "Bring it down", evening: "Wind down" };
+    if (timeLabel) timeLabel.textContent = contextMap[nextSession.key] || "";
+    if (titleEl) titleEl.textContent = nextSession.title;
+    if (descEl) descEl.textContent = nextSession.desc;
+    if (startBtn) {
+      startBtn.onclick = () => {
+        if (nextSession.type === "move") qs("#start-move")?.click();
+        else if (nextSession.type === "reset") qs("#start-reset")?.click();
+        else if (nextSession.type === "winddown") qs("#start-winddown")?.click();
+      };
+    }
+
+    const afterNext = sessions.find((s) => !s.done && s !== nextSession);
+    if (afterNext && nextUp) {
+      nextUp.classList.remove("hidden");
+      const nextText = qs("#next-up-text");
+      if (nextText) nextText.textContent = `Up next: ${afterNext.title} · ${formatHour(schedule[afterNext.key].startHour)}`;
+    } else if (nextUp) {
+      nextUp.classList.add("hidden");
+    }
+  } else {
+    if (activeCard) activeCard.classList.add("hidden");
+    if (nextUp) nextUp.classList.add("hidden");
+    if (allDoneEl) {
+      allDoneEl.classList.remove("hidden");
+      const doneTitle = allDoneEl.querySelector("h2");
+      const doneBody = allDoneEl.querySelector("p");
+      if (doneTitle) doneTitle.textContent = "No sessions today";
+      if (doneBody) doneBody.textContent = "Check back tomorrow.";
+    }
+  }
+
+  const windowMap = {};
+  sessions.forEach((s) => {
+    windowMap[s.key] = s;
+  });
+
+  ["morning", "midday", "evening"].forEach((key) => {
+    const slot = windowMap[key];
+    const timeEl = qs(`#${key}-time`);
+    const titleEl = qs(`#${key}-title`);
+    const statusEl = qs(`#${key}-status`);
+    const slotEl = qs(`#timeline-${key}`);
+
+    if (timeEl) timeEl.textContent = formatHour(schedule[key].startHour);
+
+    if (!slot) {
+      if (slotEl) slotEl.classList.add("hidden");
+      return;
+    }
+    if (slotEl) slotEl.classList.remove("hidden");
+    if (titleEl) titleEl.textContent = slot.title;
+
+    const nowHour = new Date().getHours();
+    if (statusEl) {
+      if (slot.done) statusEl.textContent = "Done ✓";
+      else if (nowHour >= schedule[key].startHour) statusEl.textContent = "Ready";
+      else statusEl.textContent = formatHour(schedule[key].startHour);
+    }
+  });
+
+  const morningTip = qs("#nutrition-morning-tip");
+  const eveningTip = qs("#nutrition-evening-tip");
+  if (morningTip) morningTip.textContent = res?.nutrition?.morning || "";
+  if (eveningTip) eveningTip.textContent = res?.nutrition?.evening || "";
+
+  const recheckinBtn = qs("#recheckin-btn");
+  if (recheckinBtn) {
+    recheckinBtn.textContent = allDone ? "Check back tomorrow" : "Feeling different? Re-check";
+    if (allDone) recheckinBtn.disabled = true;
+    else recheckinBtn.disabled = false;
+  }
+}
+
 function getErrorCode(err) {
   return err?.code || err?.payload?.error?.code || null;
 }
@@ -1014,7 +1235,7 @@ export async function bootstrapApp({ page } = {}) {
 }
 
 function initDay({ initialDateISO } = {}) {
-  console.log("[LN] initDay called");
+  console.log("[INIT_DAY] starting");
   if (!getToken()) {
     console.log("[LN] no token, redirecting");
     clearTokens();
@@ -1032,57 +1253,6 @@ function initDay({ initialDateISO } = {}) {
   let timeMin = null;
   let activeSessionInterval = null;
 
-  function saveTodayPlan(dateISO, contract, stress, wakeTimeValue) {
-    try {
-      const m = contract?.movement || contract?.move || contract?.workout || null;
-      const r = contract?.reset || null;
-      const n = contract?.nutrition || null;
-      const w = contract?.winddown || null;
-      const slim = {
-        dateISO: contract?.dateISO || dateISO,
-        movement: m ? { id: m.id, title: m.title, description: m.description, phases: m.phases, minutes: m.minutes || m.durationMin } : null,
-        reset: r ? { id: r.id, title: r.title, description: r.description, phases: r.phases } : null,
-        nutrition: n ? { id: n.id, title: n.title, morning: n.morning || n.tip || null, evening: n.evening || null } : null,
-        winddown: w ? { id: w.id, title: w.title, description: w.description, phases: w.phases } : null,
-      };
-      localStorage.setItem(
-        "livenew_today",
-        JSON.stringify({
-          date: dateISO,
-          contract: slim,
-          stress,
-          wakeTime: wakeTimeValue,
-          resetCompleted: false,
-          moveCompleted: false,
-          winddownCompleted: false,
-        })
-      );
-      console.log("[SAVE_TODAY] saved, date:", dateISO);
-    } catch (err) {
-      console.error("[SAVE_TODAY] failed:", err);
-    }
-  }
-
-  function loadTodayPlan() {
-    try {
-      const raw = localStorage.getItem("livenew_today");
-      if (!raw) return null;
-      const saved = JSON.parse(raw);
-      const today = currentDateISO || new Date().toISOString().slice(0, 10);
-      if (saved.date !== today) {
-        localStorage.removeItem("livenew_today");
-        return null;
-      }
-      console.log("[LOAD_TODAY] found plan for", today);
-      return saved;
-    } catch (err) {
-      console.error("[LOAD_TODAY] failed:", err);
-      try {
-        localStorage.removeItem("livenew_today");
-      } catch {}
-      return null;
-    }
-  }
 
   function updateTodayPlan(updates) {
     try {
@@ -1097,11 +1267,6 @@ function initDay({ initialDateISO } = {}) {
     }
   }
 
-  const showStep = (name) => {
-    document.querySelectorAll("[data-step]").forEach((el) => {
-      el.classList.toggle("hidden", el.dataset.step !== name);
-    });
-  };
 
   const startGuidedExperience = (phases, config) => {
     const instructionEl = qs(`#${config.instructionEl}`);
@@ -1180,176 +1345,12 @@ function initDay({ initialDateISO } = {}) {
     });
   }
 
-  function computeSchedule(wakeTimeValue) {
-    const wakeHourMap = { early: 6, normal: 8, late: 10 };
-    const wakeHour = wakeHourMap[wakeTimeValue] || 8;
-    return {
-      morning: { label: "Morning", startHour: wakeHour, endHour: wakeHour + 3 },
-      midday: { label: "Midday", startHour: wakeHour + 4, endHour: wakeHour + 7 },
-      evening: { label: "Evening", startHour: wakeHour + 12, endHour: wakeHour + 15 },
-    };
-  }
-
-  function formatHour(h) {
-    const hour = h % 24;
-    if (hour === 0) return "12am";
-    if (hour < 12) return `${hour}am`;
-    if (hour === 12) return "12pm";
-    return `${hour - 12}pm`;
-  }
-
-  async function loadUserProfile() {
-    try {
-      const cached = localStorage.getItem("livenew_profile");
-      if (cached) {
-        const profile = JSON.parse(cached);
-        if (profile.goal) return profile;
-      }
-    } catch {}
-
-    try {
-      const res = await apiGet("/v1/bootstrap");
-      const p = res?.profile || {};
-      const profile = {
-        goal: p.goal || p.primaryGoal || "feel calmer",
-        stressBaseline: p.stressBaseline || "sometimes",
-        wakeTime: p.wakeTime || "normal",
-        timeMin: p.timeMin || p.timeAvailableMin || 10,
-        injuries: p.injuries || [],
-      };
-      try {
-        localStorage.setItem("livenew_profile", JSON.stringify(profile));
-      } catch {}
-      return profile;
-    } catch {
-      return { goal: "feel calmer", stressBaseline: "sometimes", wakeTime: "normal", timeMin: 10, injuries: [] };
-    }
-  }
-
-  function populateTodayScreen(res, stress, wake) {
-    const stressNum = Number.isFinite(Number(stress)) ? Number(stress) : stressBefore;
-    const schedule = computeSchedule(wake || "normal");
-    const saved = loadTodayPlan();
-
-    const move = res?.movement || res?.move || res?.workout;
-    const reset = res?.reset;
-    const winddown = res?.winddown;
-    const hasReset = stressNum > 3 && reset;
-
-    const sessions = [
-      move ? { key: "morning", type: "move", title: move.title || "Movement", desc: move.description || "", done: saved?.moveCompleted || false } : null,
-      hasReset ? { key: "midday", type: "reset", title: reset.title || "Reset", desc: reset.description || "", done: saved?.resetCompleted || false } : null,
-      winddown ? { key: "evening", type: "winddown", title: winddown.title || "Wind-down", desc: winddown.description || "", done: saved?.winddownCompleted || false } : null,
-    ].filter(Boolean);
-
-    const allDone = sessions.length > 0 && sessions.every((s) => s.done);
-    const nextSession = sessions.find((s) => !s.done);
-
-    const activeCard = qs("#today-active-card");
-    const nextUp = qs("#today-next-up");
-    const allDoneEl = qs("#today-all-done");
-
-    if (allDone) {
-      if (activeCard) activeCard.classList.add("hidden");
-      if (nextUp) nextUp.classList.add("hidden");
-      if (allDoneEl) allDoneEl.classList.remove("hidden");
-    } else if (nextSession) {
-      if (allDoneEl) allDoneEl.classList.add("hidden");
-      if (activeCard) activeCard.classList.remove("hidden");
-
-      const timeLabel = qs("#active-time-label");
-      const titleEl = qs("#active-title");
-      const descEl = qs("#active-desc");
-      const startBtn = qs("#active-start-btn");
-
-      const contextMap = { morning: "Get moving", midday: "Bring it down", evening: "Wind down" };
-      if (timeLabel) timeLabel.textContent = contextMap[nextSession.key] || "";
-      if (titleEl) titleEl.textContent = nextSession.title;
-      if (descEl) descEl.textContent = nextSession.desc;
-      if (startBtn) {
-        startBtn.onclick = () => {
-          if (nextSession.type === "move") qs("#start-move")?.click();
-          else if (nextSession.type === "reset") qs("#start-reset")?.click();
-          else if (nextSession.type === "winddown") qs("#start-winddown")?.click();
-        };
-      }
-
-      const afterNext = sessions.find((s) => !s.done && s !== nextSession);
-      if (afterNext && nextUp) {
-        nextUp.classList.remove("hidden");
-        const nextText = qs("#next-up-text");
-        if (nextText) nextText.textContent = `Up next: ${afterNext.title} · ${formatHour(schedule[afterNext.key].startHour)}`;
-      } else if (nextUp) {
-        nextUp.classList.add("hidden");
-      }
-    } else {
-      if (activeCard) activeCard.classList.add("hidden");
-      if (nextUp) nextUp.classList.add("hidden");
-      if (allDoneEl) {
-        allDoneEl.classList.remove("hidden");
-        const doneTitle = allDoneEl.querySelector("h2");
-        const doneBody = allDoneEl.querySelector("p");
-        if (doneTitle) doneTitle.textContent = "No sessions today";
-        if (doneBody) doneBody.textContent = "Check back tomorrow.";
-      }
-    }
-
-    const windowMap = {};
-    sessions.forEach((s) => {
-      windowMap[s.key] = s;
-    });
-
-    ["morning", "midday", "evening"].forEach((key) => {
-      const slot = windowMap[key];
-      const timeEl = qs(`#${key}-time`);
-      const titleEl = qs(`#${key}-title`);
-      const statusEl = qs(`#${key}-status`);
-      const slotEl = qs(`#timeline-${key}`);
-
-      if (timeEl) timeEl.textContent = formatHour(schedule[key].startHour);
-
-      if (!slot) {
-        if (slotEl) slotEl.classList.add("hidden");
-        return;
-      }
-      if (slotEl) slotEl.classList.remove("hidden");
-      if (titleEl) titleEl.textContent = slot.title;
-
-      const nowHour = new Date().getHours();
-      if (statusEl) {
-        if (slot.done) {
-          statusEl.textContent = "Done ✓";
-        } else if (nowHour >= schedule[key].startHour) {
-          statusEl.textContent = "Ready";
-        } else {
-          statusEl.textContent = formatHour(schedule[key].startHour);
-        }
-      }
-    });
-
-    const morningTip = qs("#nutrition-morning-tip");
-    const eveningTip = qs("#nutrition-evening-tip");
-    if (morningTip) morningTip.textContent = res?.nutrition?.morning || "";
-    if (eveningTip) eveningTip.textContent = res?.nutrition?.evening || "";
-
-    const recheckinBtn = qs("#recheckin-btn");
-    if (recheckinBtn) {
-      recheckinBtn.textContent = allDone ? "Check back tomorrow" : "Feeling different? Re-check";
-      if (allDone) recheckinBtn.disabled = true;
-      else recheckinBtn.disabled = false;
-    }
-  }
 
   const onboardData = {};
   const onboardSteps = ["goal", "stress-baseline", "wake", "time", "injuries"];
   let onboardIndex = 0;
   const injuries = [];
 
-  function showOnboardStep(name) {
-    document.querySelectorAll("#day-step-onboard .onboard-step").forEach((el) => {
-      el.classList.toggle("hidden", el.dataset.onboard !== name);
-    });
-  }
 
   async function finishOnboarding() {
     const profile = {
@@ -1653,6 +1654,7 @@ function initDay({ initialDateISO } = {}) {
   });
 
   // Entry point logic — determine which screen to show
+  console.log("[ENTRY] reached entry point logic");
   try {
     const existingPlan = loadTodayPlan();
     if (existingPlan?.contract) {
@@ -3014,6 +3016,30 @@ function initAdmin() {
 function shouldAutoBoot() {
   return typeof window !== "undefined" && typeof document !== "undefined";
 }
+
+document.addEventListener("DOMContentLoaded", () => {
+  setTimeout(() => {
+    const anyVisible = document.querySelector("[data-step]:not(.hidden)");
+    if (!anyVisible) {
+      console.warn("[SAFETY] No step visible, forcing entry");
+      let hasProfile = false;
+      try {
+        const cached = localStorage.getItem("livenew_profile");
+        if (cached) {
+          const p = JSON.parse(cached);
+          if (p && p.goal) hasProfile = true;
+        }
+      } catch {}
+
+      if (hasProfile) {
+        showStep("stress-tap");
+      } else {
+        showStep("onboard");
+        showOnboardStep("goal");
+      }
+    }
+  }, 2000);
+});
 
 // Legacy auto-boot disabled — bootstrapApp (called from app.init.js) is the sole entry point.
 // if (typeof init === "function" && shouldAutoBoot()) {
