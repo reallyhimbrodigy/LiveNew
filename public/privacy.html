@@ -1,41 +1,61 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="icon" href="/favicon.ico" />
-  <link rel="stylesheet" href="/assets/styles.css" />
-  <title>Privacy Policy · LiveNew</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#1a1714">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/assets/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/app.css">
+  <title>LiveNew — Privacy Policy</title>
 </head>
 <body>
-  <header class="topbar">
-    <div class="brand">LiveNew</div>
-    <nav class="nav">
-      <a href="/index.html">Home</a>
-      <a href="/help-center.html">Help Center</a>
-      <a href="/privacy.html" class="active">Privacy Policy</a>
-      <a href="/terms.html">Terms</a>
-      <a href="/contact.html">Contact</a>
-      <a href="/reset-access.html">Reset Access</a>
-    </nav>
-  </header>
+  <div class="ln-container" style="max-width:640px">
+    <div class="card" style="margin-top:40px">
+      <h1 style="font-family:var(--font-display);font-size:2rem;margin-bottom:8px">Privacy Policy</h1>
+      <p class="muted" style="margin-bottom:24px">Last updated: March 2026</p>
 
-  <main class="page shell container">
-    <section class="card">
-      <h1>Privacy Policy</h1>
-      <p class="muted">We collect the minimum needed to provide the service and improve safety.</p>
-    </section>
-    <section class="card">
-      <h3>What we store</h3>
-      <p class="muted">Your check-ins, reset choices, and account details needed to run LiveNew.</p>
-      <h3>What we don’t do</h3>
-      <p class="muted">No selling of personal data. No third-party marketing profiles.</p>
-      <h3>Questions</h3>
-      <p class="muted">Reach out any time and we’ll respond with a clear, plain-language answer.</p>
-    </section>
-  </main>
+      <div class="legal-section">
+        <h3>What we collect</h3>
+        <p>Email address (for your account). Your preferences (goal, wake time, session length, injury areas). Daily stress check-ins. Session completion data. Post-session feedback.</p>
+      </div>
 
-  <div id="footer-root" class="footer"></div>
-  <script type="module" src="/assets/footer.js"></script>
+      <div class="legal-section">
+        <h3>How we use it</h3>
+        <p>To generate personalized sessions. To track your progress over time. To improve LiveNew. We do not sell your data. We do not share your data with advertisers.</p>
+      </div>
+
+      <div class="legal-section">
+        <h3>AI processing</h3>
+        <p>Your check-in data (stress level, energy, sleep) is sent to Anthropic's Claude API to generate your sessions. This data is not stored by Anthropic after processing. No personally identifiable information is included in AI requests.</p>
+      </div>
+
+      <div class="legal-section">
+        <h3>Where your data lives</h3>
+        <p>Your data is stored securely on Supabase (hosted on AWS). We use HTTPS for all connections.</p>
+      </div>
+
+      <div class="legal-section">
+        <h3>Deleting your data</h3>
+        <p>Email support@livenew.app and we'll delete your account and all associated data within 30 days.</p>
+      </div>
+
+      <div class="legal-section">
+        <h3>Cookies</h3>
+        <p>We use a session cookie to keep you logged in. No tracking cookies. No analytics cookies.</p>
+      </div>
+
+      <div class="legal-section">
+        <h3>Contact</h3>
+        <p>Questions about your privacy? Email <a href="mailto:support@livenew.app">support@livenew.app</a>.</p>
+      </div>
+
+      <div style="margin-top:32px">
+        <a href="/day" class="btn ghost" style="display:inline-block">Back to LiveNew</a>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

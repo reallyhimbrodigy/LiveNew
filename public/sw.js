@@ -1,9 +1,32 @@
-self.addEventListener("install", () => {
+const CACHE_NAME = "livenew-v1";
+const CORE_ASSETS = [
+  "/day",
+  "/progress",
+  "/assets/app.css",
+  "/manifest.json",
+  "/assets/icon-192.png",
+];
+
+self.addEventListener("install", (e) => {
+  e.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(CORE_ASSETS)));
   self.skipWaiting();
 });
 
 self.addEventListener("activate", (e) => {
   e.waitUntil(clients.claim());
+});
+
+self.addEventListener("fetch", (e) => {
+  if (e.request.method !== "GET") return;
+  e.respondWith(
+    fetch(e.request)
+      .then((response) => {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then((cache) => cache.put(e.request, clone)).catch(() => {});
+        return response;
+      })
+      .catch(() => caches.match(e.request))
+  );
 });
 
 self.addEventListener("message", (e) => {

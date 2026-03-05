@@ -511,6 +511,8 @@ const PROTECTED_PAGE_PATHS = new Set([
   "/day.html",
   "/progress",
   "/progress.html",
+  "/account",
+  "/account.html",
   "/week",
   "/week.html",
   "/trends",
@@ -2319,6 +2321,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/stats",
     "/v1/feedback",
     "/v1/subscription/status",
+    "/v1/profile/update",
   ]);
   console.log("[SUPABASE_ROUTE_CHECK]", pathname, supabaseRoutes.has(pathname));
   if (!supabaseRoutes.has(pathname)) return false;
@@ -2412,6 +2415,53 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     const requiredVersion = await getRequiredConsentVersion();
     await persist.updateConsent(auth.userId, { version: requiredVersion, acceptedAt: new Date().toISOString() });
     sendJson(res, 200, { ok: true, accepted: REQUIRED_CONSENTS, consentVersion: requiredVersion }, auth.userId);
+    return true;
+  }
+
+  if (pathname === "/v1/profile/update") {
+    if (req.method !== "POST") {
+      sendError(res, 405, "method_not_allowed", "Method not allowed");
+      return true;
+    }
+    const body = await parseJson(req);
+    const profileInput = body?.profile && typeof body.profile === "object" ? body.profile : {};
+    const existingProfile = await persist.getOrCreateUserProfile(auth.userId);
+    const existingBaseline = baselineFromSupabaseProfile(existingProfile);
+    const existingConstraints =
+      existingBaseline?.constraints && typeof existingBaseline.constraints === "object"
+        ? { ...existingBaseline.constraints }
+        : {};
+    const injuriesInput = Array.isArray(profileInput?.injuries) ? profileInput.injuries : [];
+    const profileData = {
+      goal: profileInput?.goal || null,
+      stressSource: profileInput?.stressSource || null,
+      wakeTime: profileInput?.wakeTime || null,
+      timeMin: profileInput?.timeMin ? Number(profileInput.timeMin) : null,
+      injuries: injuriesInput,
+    };
+    const injuryFlags = {
+      knee: injuriesInput.includes("knee") || injuriesInput.includes("knees"),
+      shoulder: injuriesInput.includes("shoulder") || injuriesInput.includes("shoulders"),
+      back: injuriesInput.includes("back"),
+      neck: injuriesInput.includes("neck"),
+    };
+    const mergedConstraints = {
+      ...existingConstraints,
+      goal: profileData.goal,
+      stressSource: profileData.stressSource,
+      wakeTime: profileData.wakeTime,
+      timeMin: profileData.timeMin,
+      injuries: injuryFlags,
+      injuriesList: injuriesInput,
+    };
+    await persist.updateOnboarding(auth.userId, {
+      timezone: existingProfile?.timezone || DEFAULT_TIMEZONE,
+      dayBoundaryMinute:
+        Number.isFinite(Number(existingProfile?.dayBoundaryMinute)) ? Number(existingProfile.dayBoundaryMinute) : 240,
+      constraintsJson: mergedConstraints,
+      completedAt: existingProfile?.onboardingCompletedAt || new Date().toISOString(),
+    });
+    sendJson(res, 200, { ok: true }, auth.userId);
     return true;
   }
 
@@ -5258,8 +5308,14 @@ const server = http.createServer(async (req, res) => {
     ["/signup.html", "signup.html"],
     ["/auth-callback.html", "auth-callback.html"],
     ["/help-center.html", "help-center.html"],
+    ["/help", "help.html"],
+    ["/help.html", "help.html"],
+    ["/terms", "terms.html"],
     ["/privacy.html", "privacy.html"],
+    ["/privacy", "privacy.html"],
     ["/terms.html", "terms.html"],
+    ["/account", "account.html"],
+    ["/account.html", "account.html"],
     ["/contact.html", "contact.html"],
     ["/reset-access.html", "reset-access.html"],
     ["/day", "day.html"],
@@ -5364,6 +5420,11 @@ const server = http.createServer(async (req, res) => {
     } catch {
       sendError(res, 404, "not_found", "Not found");
     }
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/manifest.json") {
+    await serveFile(res, path.join(PUBLIC_DIR, "manifest.json"));
     return;
   }
 

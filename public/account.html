@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#1a1714">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/assets/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <script>
+    (function loadInAppAssets() {
+      const addCss = (href) => {
+        const link = document.createElement("link");
+        link.rel = "stylesheet";
+        link.href = href;
+        document.head.appendChild(link);
+      };
+      fetch("/assets/build.json", { cache: "no-store" })
+        .then((res) => (res.ok ? res.json() : Promise.reject(new Error("build.json"))))
+        .then((manifest) => {
+          const buildId = String(manifest?.buildId || "").trim();
+          const cssHref = `/assets/app.css?v=${encodeURIComponent(buildId || Date.now().toString())}`;
+          addCss(cssHref);
+        })
+        .catch(() => {
+          const bust = String(Date.now());
+          addCss(`/assets/app.css?v=${bust}`);
+        });
+    })();
+  </script>
+  <title>LiveNew — Account</title>
+</head>
+<body class="page" data-page="account">
+  <header class="topbar">
+    <div class="topbar-inner">
+      <div class="brand">LiveNew</div>
+      <nav class="nav">
+        <a href="/day">Today</a>
+        <a href="/progress">Progress</a>
+      </nav>
+      <div class="account">
+        <button id="account-menu-btn" class="ghost account-btn" type="button" aria-expanded="false">Account</button>
+        <div id="account-menu" class="account-menu hidden">
+          <a href="/account">Account</a>
+          <button id="account-logout-btn" type="button">Logout</button>
+        </div>
+      </div>
+    </div>
+  </header>
+
+  <div class="ln-container">
+    <div class="card">
+      <h2 class="account-heading">Your profile</h2>
+
+      <div class="account-section">
+        <div class="account-label">Email</div>
+        <div class="account-value" id="account-email">—</div>
+      </div>
+
+      <div class="account-section">
+        <div class="account-label">Goal</div>
+        <div class="account-value" id="account-goal">—</div>
+        <button class="account-change" data-field="goal" type="button">Change</button>
+      </div>
+
+      <div class="account-section">
+        <div class="account-label">Stress source</div>
+        <div class="account-value" id="account-stress-source">—</div>
+        <button class="account-change" data-field="stressSource" type="button">Change</button>
+      </div>
+
+      <div class="account-section">
+        <div class="account-label">Wake time</div>
+        <div class="account-value" id="account-wake">—</div>
+        <button class="account-change" data-field="wakeTime" type="button">Change</button>
+      </div>
+
+      <div class="account-section">
+        <div class="account-label">Session length</div>
+        <div class="account-value" id="account-time">—</div>
+        <button class="account-change" data-field="timeMin" type="button">Change</button>
+      </div>
+
+      <div class="account-section">
+        <div class="account-label">Areas to avoid</div>
+        <div class="account-value" id="account-injuries">—</div>
+        <button class="account-change" data-field="injuries" type="button">Change</button>
+      </div>
+
+      <div id="account-edit-overlay" class="account-edit-overlay hidden">
+        <div class="account-edit-content">
+          <h3 id="account-edit-title"></h3>
+          <div id="account-edit-options" class="onboard-options"></div>
+          <button id="account-edit-cancel" class="ghost" type="button" style="width:100%;margin-top:12px">Cancel</button>
+        </div>
+      </div>
+
+      <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line)">
+        <button id="logout-btn" class="ghost" type="button" style="width:100%;color:#c97a7a;border-color:#c97a7a">Log out</button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer" id="footer-root">
+    <div class="footer-panel">
+      <div class="footer-grid">
+        <div>
+          <div class="footer-head">LIVENEW</div>
+          <div class="footer-links">Daily stress regulation - movement, resets, and nutrition matched to how you feel.</div>
+        </div>
+        <div>
+          <div class="footer-head">Resources</div>
+          <div class="footer-links">
+            <a href="/help">Help Center</a>
+            <a href="/terms">Terms</a>
+            <a href="/privacy">Privacy</a>
+          </div>
+        </div>
+        <div>
+          <div class="footer-head">Company</div>
+          <div class="footer-links">
+            <a href="mailto:support@livenew.app">Contact</a>
+            <a href="/reset-access.html">Reset Access</a>
+          </div>
+        </div>
+      </div>
+      <div class="footer-bottom">© 2026 LiveNew. All rights reserved.</div>
+    </div>
+  </footer>
+
+  <script type="module">
+    (async () => {
+      const manifest = await fetch("/assets/build.json", { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : {}))
+        .catch(() => ({}));
+      const buildId = manifest?.buildId || "";
+      const apiFile = manifest?.files?.["app.api"] || (buildId ? `app.api.${buildId}.js` : "app.api.js");
+      const { apiGet, apiPost, clearTokens, getToken } = await import(`/assets/${apiFile}`);
+
+      function setupAccountMenu() {
+        const accountBtn = document.getElementById("account-menu-btn");
+        const accountMenu = document.getElementById("account-menu");
+        const accountLogoutBtn = document.getElementById("account-logout-btn");
+        if (!accountBtn || !accountMenu) return;
+        const closeMenu = () => {
+          accountMenu.classList.add("hidden");
+          accountBtn.setAttribute("aria-expanded", "false");
+        };
+        accountBtn.addEventListener("click", (event) => {
+          event.stopPropagation();
+          const nextHidden = !accountMenu.classList.contains("hidden");
+          accountMenu.classList.toggle("hidden", nextHidden);
+          accountBtn.setAttribute("aria-expanded", nextHidden ? "false" : "true");
+        });
+        document.addEventListener("click", (event) => {
+          if (!accountMenu.classList.contains("hidden") && !accountMenu.contains(event.target) && event.target !== accountBtn) {
+            closeMenu();
+          }
+        });
+        accountLogoutBtn?.addEventListener("click", () => {
+          clearTokens();
+          closeMenu();
+          window.location.assign("/login");
+        });
+      }
+
+      async function loadUserProfile() {
+        try {
+          const cached = localStorage.getItem("livenew_profile");
+          if (cached) {
+            const p = JSON.parse(cached);
+            if (p?.goal) return p;
+          }
+        } catch {}
+
+        try {
+          const res = await apiGet("/v1/bootstrap");
+          const p = res?.profile || {};
+          const normalized = {
+            goal: p.goal || p.primaryGoal || "calm",
+            stressSource: p.stressSource || "work",
+            wakeTime: p.wakeTime || "normal",
+            timeMin: p.timeMin || p.timeAvailableMin || 10,
+            injuries: p.injuries || [],
+          };
+          try { localStorage.setItem("livenew_profile", JSON.stringify(normalized)); } catch {}
+          return normalized;
+        } catch {
+          return { goal: "calm", stressSource: "work", wakeTime: "normal", timeMin: 10, injuries: [] };
+        }
+      }
+
+      async function initAccount() {
+        const goalLabels = { perform: "Perform better", sleep: "Sleep through the night", weight: "Lose stress weight", calm: "Feel like myself again" };
+        const stressLabels = { work: "Work", sleep: "Sleep", relationships: "Relationships", health: "Health" };
+        const wakeLabels = { early: "Before 7am", normal: "7–9am", late: "After 9am" };
+
+        const fieldOptions = {
+          goal: [
+            { value: "perform", label: "Perform better" },
+            { value: "sleep", label: "Sleep through the night" },
+            { value: "weight", label: "Lose stress weight" },
+            { value: "calm", label: "Feel like myself again" },
+          ],
+          stressSource: [
+            { value: "work", label: "Work" },
+            { value: "sleep", label: "Sleep" },
+            { value: "relationships", label: "Relationships" },
+            { value: "health", label: "Health" },
+          ],
+          wakeTime: [
+            { value: "early", label: "Before 7am" },
+            { value: "normal", label: "7–9am" },
+            { value: "late", label: "After 9am" },
+          ],
+          timeMin: [
+            { value: "10", label: "10 min" },
+            { value: "15", label: "15 min" },
+            { value: "20", label: "20 min" },
+          ],
+          injuries: [
+            { value: "knees", label: "Knees" },
+            { value: "shoulders", label: "Shoulders" },
+            { value: "back", label: "Back" },
+            { value: "neck", label: "Neck" },
+            { value: "none", label: "None" },
+          ],
+        };
+
+        const profile = await loadUserProfile();
+        const goalEl = document.getElementById("account-goal");
+        const stressEl = document.getElementById("account-stress-source");
+        const wakeEl = document.getElementById("account-wake");
+        const timeEl = document.getElementById("account-time");
+        const injuriesEl = document.getElementById("account-injuries");
+        if (goalEl) goalEl.textContent = goalLabels[profile.goal] || profile.goal || "—";
+        if (stressEl) stressEl.textContent = stressLabels[profile.stressSource] || profile.stressSource || "—";
+        if (wakeEl) wakeEl.textContent = wakeLabels[profile.wakeTime] || profile.wakeTime || "—";
+        if (timeEl) timeEl.textContent = `${profile.timeMin || 10} min`;
+        if (injuriesEl) {
+          injuriesEl.textContent =
+            profile.injuries && profile.injuries.length > 0
+              ? profile.injuries.map((i) => i.charAt(0).toUpperCase() + i.slice(1)).join(", ")
+              : "None";
+        }
+
+        apiGet("/v1/bootstrap").then((res) => {
+          const email = res?.email || res?.userEmail || "";
+          if (email) {
+            const emailEl = document.getElementById("account-email");
+            if (emailEl) emailEl.textContent = email;
+          }
+        }).catch(() => {});
+
+        document.querySelectorAll(".account-change").forEach((btn) => {
+          btn.addEventListener("click", () => {
+            const field = btn.dataset.field;
+            const overlay = document.getElementById("account-edit-overlay");
+            const title = document.getElementById("account-edit-title");
+            const optionsContainer = document.getElementById("account-edit-options");
+            const options = fieldOptions[field];
+            if (!options || !overlay || !title || !optionsContainer) return;
+
+            const titleMap = {
+              goal: "What would make the biggest difference?",
+              stressSource: "What makes your stress worse?",
+              wakeTime: "When do you wake up?",
+              timeMin: "How long should each session be?",
+              injuries: "Any areas that bother you?",
+            };
+            title.textContent = titleMap[field] || "Change";
+
+            optionsContainer.innerHTML = options
+              .map((opt) => `<button class="onboard-opt account-edit-opt" data-field="${field}" data-value="${opt.value}" type="button">${opt.label}</button>`)
+              .join("");
+
+            overlay.classList.remove("hidden");
+
+            optionsContainer.querySelectorAll(".account-edit-opt").forEach((optBtn) => {
+              optBtn.addEventListener("click", async () => {
+                const value = optBtn.dataset.value;
+                optionsContainer.querySelectorAll(".account-edit-opt").forEach((b) => {
+                  b.style.background = b === optBtn ? "var(--primary)" : "";
+                  b.style.color = b === optBtn ? "#fff" : "";
+                });
+
+                const latest = await loadUserProfile();
+                if (field === "injuries") {
+                  latest.injuries = value === "none" ? [] : [value];
+                } else if (field === "timeMin") {
+                  latest[field] = Number(value);
+                } else {
+                  latest[field] = value;
+                }
+
+                try {
+                  await apiPost("/v1/profile/update", { profile: latest });
+                } catch (err) {
+                  console.error("[PROFILE_UPDATE]", err);
+                }
+
+                try { localStorage.setItem("livenew_profile", JSON.stringify(latest)); } catch {}
+                try { localStorage.removeItem("livenew_today"); } catch {}
+
+                setTimeout(() => {
+                  overlay.classList.add("hidden");
+                  initAccount();
+                }, 300);
+              });
+            });
+          });
+        });
+
+        document.getElementById("account-edit-cancel")?.addEventListener("click", () => {
+          document.getElementById("account-edit-overlay")?.classList.add("hidden");
+        });
+
+        document.getElementById("logout-btn")?.addEventListener("click", () => {
+          try { localStorage.clear(); } catch {}
+          window.location.href = "/";
+        });
+      }
+
+      if (!getToken()) {
+        window.location.assign("/login?next=%2Faccount");
+        return;
+      }
+      setupAccountMenu();
+      document.addEventListener("DOMContentLoaded", initAccount);
+      await initAccount();
+    })();
+  </script>
+</body>
+</html>

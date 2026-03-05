@@ -162,6 +162,61 @@ function getCurrentWindow(schedule) {
   return "evening";
 }
 
+let deferredInstallPrompt = null;
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+  });
+
+  window.addEventListener("offline", () => {
+    if (document.getElementById("offline-banner")) return;
+    const banner = document.createElement("div");
+    banner.id = "offline-banner";
+    banner.className = "offline-banner";
+    banner.textContent = "You're offline. Your current plan is still available.";
+    document.body.appendChild(banner);
+  });
+
+  window.addEventListener("online", () => {
+    const banner = document.getElementById("offline-banner");
+    if (banner) banner.remove();
+  });
+}
+
+function showInstallPrompt() {
+  if (!deferredInstallPrompt) return;
+  const hasShown = localStorage.getItem("livenew_install_shown");
+  if (hasShown) return;
+
+  const banner = document.createElement("div");
+  banner.className = "install-banner";
+  banner.innerHTML = `
+    <div class="install-content">
+      <p>Add LiveNew to your home screen for the full experience</p>
+      <div class="install-actions">
+        <button id="install-yes" class="primary" type="button" style="padding:10px 20px">Add</button>
+        <button id="install-no" class="ghost" type="button" style="padding:10px 20px">Not now</button>
+      </div>
+    </div>
+  `;
+  document.body.appendChild(banner);
+
+  banner.querySelector("#install-yes")?.addEventListener("click", async () => {
+    deferredInstallPrompt.prompt();
+    await deferredInstallPrompt.userChoice;
+    deferredInstallPrompt = null;
+    banner.remove();
+    localStorage.setItem("livenew_install_shown", "1");
+  });
+
+  banner.querySelector("#install-no")?.addEventListener("click", () => {
+    banner.remove();
+    localStorage.setItem("livenew_install_shown", "1");
+  });
+}
+
 const LiveNewAudio = (() => {
   let ctx = null;
 
@@ -1520,6 +1575,7 @@ function initDay({ initialDateISO } = {}) {
         setTimeout(() => {
           overlay.remove();
           onDone();
+          showInstallPrompt();
         }, 400);
       });
     });
@@ -1788,7 +1844,23 @@ function initDay({ initialDateISO } = {}) {
         b.style.borderColor = b === btn ? "var(--primary, #b5a07c)" : "";
         b.disabled = true;
       });
-      btn.textContent = "Building your plan...";
+      showStep("loading");
+      const statusEl = document.getElementById("loading-status");
+      const messages = [
+        "Building your morning movement...",
+        "Creating your midday reset...",
+        "Planning your evening wind-down...",
+        "Choosing your nutrition...",
+        "Finalizing your plan...",
+      ];
+      let msgIndex = 0;
+      if (statusEl) statusEl.textContent = messages[0];
+      const loadingInterval = setInterval(() => {
+        msgIndex += 1;
+        if (msgIndex < messages.length && statusEl) {
+          statusEl.textContent = messages[msgIndex];
+        }
+      }, 3000);
 
       const profile = await loadUserProfile();
       const stressBaselineMap = { rarely: 3, sometimes: 5, often: 7, always: 9 };
@@ -1821,19 +1893,21 @@ function initDay({ initialDateISO } = {}) {
         const move = res?.movement || res?.move || res?.workout;
         const reset = res?.reset;
         const winddown = res?.winddown;
-        const hasContent =
+        const hasAnyContent =
           (move?.phases?.length > 0) ||
           (reset?.phases?.length > 0) ||
           (winddown?.phases?.length > 0);
 
-        if (!hasContent) {
-          btn.textContent = "Servers busy — tap again";
+        if (!hasAnyContent) {
+          clearInterval(loadingInterval);
+          showStep("stress-tap");
           document.querySelectorAll(".stress-tap-btn").forEach((b) => {
             b.disabled = false;
           });
           return;
         }
 
+        clearInterval(loadingInterval);
         saveTodayPlan(currentDateISO, res, effectiveStress, wakeTime);
         populateTodayScreen(res, effectiveStress, wakeTime);
         showStep("today");
@@ -1841,12 +1915,13 @@ function initDay({ initialDateISO } = {}) {
         void requestNotificationPermission();
         scheduleNotifications(wakeTime);
       } catch (err) {
+        clearInterval(loadingInterval);
+        showStep("stress-tap");
         if (isAuthRequiredError?.(err)) {
           clearTokens?.();
           redirectToLogin?.(currentPathWithQuery?.() || "/day");
           return;
         }
-        btn.textContent = "Something went wrong — tap again";
         document.querySelectorAll(".stress-tap-btn").forEach((b) => {
           b.disabled = false;
         });
