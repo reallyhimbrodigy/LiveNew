@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="/favicon.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <script>
     (function loadInAppAssets() {
       const addCss = (href) => {
@@ -49,6 +51,11 @@
     <div class="ln-container">
       <main class="today-shell">
         <section class="card progress-section">
+          <div id="progress-trend" class="progress-trend hidden">
+            <h3 class="progress-section-title">Your stress this week</h3>
+            <canvas id="stress-chart" width="600" height="200"></canvas>
+            <div id="trend-indicator" class="trend-indicator"></div>
+          </div>
           <div id="progress-insight" class="progress-insight hidden">
             <p id="progress-insight-text"></p>
           </div>
@@ -77,16 +84,34 @@
           </div>
         </section>
 
-        <section class="card progress-section">
-          <h2 class="today-question">Stress trend</h2>
-          <canvas id="stress-trend-canvas" class="trend-canvas" width="900" height="320" aria-label="Stress trend chart"></canvas>
-          <p id="trend-empty" class="muted hidden">Check in for a few days to see your stress trend.</p>
-        </section>
-
         <section id="wins-section" class="card progress-section hidden">
           <h2 class="today-question">Wins</h2>
           <div class="wins-list"></div>
         </section>
+
+        <div id="weekly-summary" class="weekly-summary hidden">
+          <div class="summary-card" id="summary-card">
+            <div class="summary-brand">LiveNew</div>
+            <h3 class="summary-title" id="summary-title">Your week with LiveNew</h3>
+            <div class="summary-stats">
+              <div class="summary-stat">
+                <div class="summary-stat-value" id="summary-days">—</div>
+                <div class="summary-stat-label">days active</div>
+              </div>
+              <div class="summary-stat">
+                <div class="summary-stat-value" id="summary-stress-change">—</div>
+                <div class="summary-stat-label">stress change</div>
+              </div>
+              <div class="summary-stat">
+                <div class="summary-stat-value" id="summary-sessions">—</div>
+                <div class="summary-stat-label">sessions</div>
+              </div>
+            </div>
+            <div class="summary-best" id="summary-best"></div>
+            <div class="summary-footer">livenew.app</div>
+          </div>
+          <button id="share-summary" class="ghost" type="button" style="width:100%;margin-top:12px">Share your progress</button>
+        </div>
 
         <section class="card progress-section">
           <h2 class="today-question">Summary</h2>
@@ -169,110 +194,113 @@
       });
     }
 
-    function formatDateLabel(dateISO) {
-      const date = new Date(`${dateISO}T00:00:00`);
-      if (Number.isNaN(date.getTime())) return dateISO;
-      return date.toLocaleDateString(undefined, { weekday: "short", month: "numeric", day: "numeric" });
-    }
+    function drawStressTrend(stressTrend) {
+      const container = document.getElementById("progress-trend");
+      const canvas = document.getElementById("stress-chart");
+      if (!canvas || !Array.isArray(stressTrend)) return;
 
-    function renderStressTrend(points) {
-      const canvas = document.getElementById("stress-trend-canvas");
-      const empty = document.getElementById("trend-empty");
-      if (!canvas) return;
-      if (!Array.isArray(points) || points.length < 2) {
-        canvas.classList.add("hidden");
-        if (empty) empty.classList.remove("hidden");
-        return;
-      }
-      canvas.classList.remove("hidden");
-      if (empty) empty.classList.add("hidden");
+      const points = stressTrend
+        .map((p) => ({ date: p?.date || p?.dateISO || p?.dateKey, stress: Number(p?.stress) }))
+        .filter((p) => p.date && Number.isFinite(p.stress))
+        .slice(-14);
+
+      if (points.length < 2) return;
+      container?.classList.remove("hidden");
 
       const ctx = canvas.getContext("2d");
       const dpr = window.devicePixelRatio || 1;
-      const cssWidth = canvas.clientWidth || 900;
-      const cssHeight = 220;
-      canvas.style.height = `${cssHeight}px`;
-      canvas.width = Math.floor(cssWidth * dpr);
-      canvas.height = Math.floor(cssHeight * dpr);
+      const rect = canvas.parentElement.getBoundingClientRect();
+      canvas.width = rect.width * dpr;
+      canvas.height = 200 * dpr;
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = "200px";
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.scale(dpr, dpr);
-      ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-      const padding = { top: 16, right: 16, bottom: 44, left: 36 };
-      const plotW = cssWidth - padding.left - padding.right;
-      const plotH = cssHeight - padding.top - padding.bottom;
-      const minY = 1;
-      const maxY = 10;
+      const w = rect.width;
+      const h = 200;
+      const padding = { top: 20, right: 20, bottom: 40, left: 40 };
+      const chartW = w - padding.left - padding.right;
+      const chartH = h - padding.top - padding.bottom;
 
-      const xFor = (index) => padding.left + (index / (points.length - 1)) * plotW;
-      const yFor = (value) => padding.top + ((maxY - value) / (maxY - minY)) * plotH;
+      const maxStress = 10;
 
-      ctx.strokeStyle = "#e7decf";
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, w, h);
+
+      ctx.strokeStyle = "#f0f0f0";
       ctx.lineWidth = 1;
-      ctx.beginPath();
-      for (let y = minY; y <= maxY; y += 1) {
-        const py = yFor(y);
-        ctx.moveTo(padding.left, py);
-        ctx.lineTo(padding.left + plotW, py);
-      }
-      ctx.stroke();
+      for (let i = 0; i <= 10; i += 2) {
+        const y = padding.top + chartH - (i / maxStress) * chartH;
+        ctx.beginPath();
+        ctx.moveTo(padding.left, y);
+        ctx.lineTo(w - padding.right, y);
+        ctx.stroke();
 
-      ctx.fillStyle = "#7f6a4f";
-      ctx.font = "12px system-ui, -apple-system, sans-serif";
-      ctx.textAlign = "right";
-      ctx.textBaseline = "middle";
-      for (let y = minY; y <= maxY; y += 1) {
-        ctx.fillText(String(y), padding.left - 8, yFor(y));
+        ctx.fillStyle = "#aaa";
+        ctx.font = "12px -apple-system, sans-serif";
+        ctx.textAlign = "right";
+        ctx.fillText(i.toString(), padding.left - 8, y + 4);
       }
 
-      const coords = points.map((point, index) => ({
-        x: xFor(index),
-        y: yFor(Number(point.value)),
-        label: formatDateLabel(point.date),
-      }));
-
-      const gradient = ctx.createLinearGradient(0, padding.top, 0, padding.top + plotH);
-      gradient.addColorStop(0, "rgba(196, 158, 112, 0.30)");
-      gradient.addColorStop(1, "rgba(196, 158, 112, 0.05)");
+      const getX = (i) => padding.left + (i / (points.length - 1)) * chartW;
+      const getY = (stress) => padding.top + chartH - (stress / maxStress) * chartH;
 
       ctx.beginPath();
-      coords.forEach((pt, i) => {
-        if (i === 0) ctx.moveTo(pt.x, pt.y);
-        else ctx.lineTo(pt.x, pt.y);
-      });
-      ctx.lineTo(coords[coords.length - 1].x, padding.top + plotH);
-      ctx.lineTo(coords[0].x, padding.top + plotH);
+      ctx.moveTo(getX(0), getY(points[0].stress));
+      points.forEach((p, i) => ctx.lineTo(getX(i), getY(p.stress)));
+      ctx.lineTo(getX(points.length - 1), h - padding.bottom);
+      ctx.lineTo(getX(0), h - padding.bottom);
       ctx.closePath();
-      ctx.fillStyle = gradient;
+      ctx.fillStyle = "rgba(181, 160, 124, 0.1)";
       ctx.fill();
 
       ctx.beginPath();
-      coords.forEach((pt, i) => {
-        if (i === 0) ctx.moveTo(pt.x, pt.y);
-        else ctx.lineTo(pt.x, pt.y);
-      });
-      ctx.strokeStyle = "#8e6f49";
-      ctx.lineWidth = 2;
+      ctx.moveTo(getX(0), getY(points[0].stress));
+      points.forEach((p, i) => ctx.lineTo(getX(i), getY(p.stress)));
+      ctx.strokeStyle = "#b5a07c";
+      ctx.lineWidth = 2.5;
+      ctx.lineJoin = "round";
       ctx.stroke();
 
-      ctx.fillStyle = "#8e6f49";
-      coords.forEach((pt) => {
+      points.forEach((p, i) => {
         ctx.beginPath();
-        ctx.arc(pt.x, pt.y, 3.5, 0, Math.PI * 2);
+        ctx.arc(getX(i), getY(p.stress), 4, 0, Math.PI * 2);
+        ctx.fillStyle = "#b5a07c";
         ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 2;
+        ctx.stroke();
       });
 
-      const maxLabels = Math.min(5, coords.length);
-      const step = Math.max(1, Math.floor((coords.length - 1) / (maxLabels - 1)));
-      ctx.fillStyle = "#7f6a4f";
+      ctx.fillStyle = "#aaa";
+      ctx.font = "11px -apple-system, sans-serif";
       ctx.textAlign = "center";
-      ctx.textBaseline = "top";
-      for (let i = 0; i < coords.length; i += 1) {
-        const isFirst = i === 0;
-        const isLast = i === coords.length - 1;
-        if (!isFirst && !isLast && i % step !== 0) continue;
-        const pt = coords[i];
-        ctx.fillText(pt.label, pt.x, padding.top + plotH + 10);
+      const labelIndices = [0, Math.floor(points.length / 2), points.length - 1];
+      labelIndices.forEach((i) => {
+        const p = points[i];
+        if (!p) return;
+        const date = new Date(p.date);
+        const label = `${date.getMonth() + 1}/${date.getDate()}`;
+        ctx.fillText(label, getX(i), h - padding.bottom + 20);
+      });
+
+      const first3 = points.slice(0, 3).reduce((a, p) => a + p.stress, 0) / Math.min(3, points.length);
+      const last3 = points.slice(-3).reduce((a, p) => a + p.stress, 0) / Math.min(3, points.length);
+      const diff = first3 - last3;
+
+      const trendEl = document.getElementById("trend-indicator");
+      if (trendEl) {
+        if (diff > 1) {
+          trendEl.textContent = "↓ Stress is trending down";
+          trendEl.className = "trend-indicator trend-good";
+        } else if (diff < -1) {
+          trendEl.textContent = "↑ Stress has been climbing";
+          trendEl.className = "trend-indicator trend-up";
+        } else {
+          trendEl.textContent = "→ Stress is holding steady";
+          trendEl.className = "trend-indicator trend-steady";
+        }
       }
     }
 
@@ -312,12 +340,49 @@
     }
 
     let latestTrend = [];
+    let latestProgressData = null;
+
+    function renderWeeklySummary(summary) {
+      if (!summary) return;
+      const container = document.getElementById("weekly-summary");
+      if (!container) return;
+      container.classList.remove("hidden");
+
+      const daysEl = document.getElementById("summary-days");
+      const changeEl = document.getElementById("summary-stress-change");
+      const sessionsEl = document.getElementById("summary-sessions");
+      const bestEl = document.getElementById("summary-best");
+
+      if (daysEl) daysEl.textContent = summary.daysActive;
+      if (sessionsEl) sessionsEl.textContent = summary.totalSessions;
+
+      if (changeEl && summary.stressStart != null && summary.stressEnd != null) {
+        const diff = summary.stressStart - summary.stressEnd;
+        if (diff > 0) {
+          changeEl.textContent = `↓${diff}`;
+          changeEl.style.color = "var(--success)";
+        } else if (diff < 0) {
+          changeEl.textContent = `↑${Math.abs(diff)}`;
+          changeEl.style.color = "#c97a7a";
+        } else {
+          changeEl.textContent = "→0";
+          changeEl.style.color = "";
+        }
+      }
+
+      if (bestEl && summary.bestDay) {
+        const date = new Date(summary.bestDay);
+        const dayName = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][date.getDay()];
+        bestEl.textContent = `Best day: ${dayName} (stress ${summary.bestDayStress})`;
+      }
+    }
 
     async function loadProgress() {
       try {
         const data = await apiFetch("/v1/progress");
         if (!data?.ok) return;
         const p = data.progress || {};
+        latestProgressData = p;
         const c = p.consistency || {};
         latestTrend = p.stressTrend || [];
         const insightEl = document.getElementById("progress-insight");
@@ -333,10 +398,15 @@
         if (document.getElementById("stat-resets")) document.getElementById("stat-resets").textContent = c.resetsCompleted || 0;
         if (document.getElementById("stat-moves")) document.getElementById("stat-moves").textContent = c.movementCompleted || 0;
         if (document.getElementById("stat-winddowns")) document.getElementById("stat-winddowns").textContent = c.winddownsCompleted || 0;
-        renderStressTrend(latestTrend);
+        if (data?.progress?.stressTrend) {
+          drawStressTrend(data.progress.stressTrend);
+        }
         renderConsistency(p.consistency || {});
         renderWins(p.wins || []);
         renderSummary(p.stressAvg7);
+        if (p.weeklySummary) {
+          renderWeeklySummary(p.weeklySummary);
+        }
       } catch (err) {
         if (err?.code === "AUTH_REQUIRED" || Number(err?.httpStatus) === 401) {
           clearTokens();
@@ -347,13 +417,33 @@
       }
     }
 
+    document.getElementById("share-summary")?.addEventListener("click", async () => {
+      const summary = `My week with LiveNew: stress went from ${latestProgressData?.weeklySummary?.stressStart || "?"} to ${latestProgressData?.weeklySummary?.stressEnd || "?"}. ${latestProgressData?.weeklySummary?.totalSessions || 0} sessions completed. Try it: livenew.app`;
+
+      if (navigator.share) {
+        try {
+          await navigator.share({ title: "My LiveNew Progress", text: summary });
+        } catch {}
+      } else {
+        try {
+          await navigator.clipboard.writeText(summary);
+          const btn = document.getElementById("share-summary");
+          if (btn) btn.textContent = "Copied!";
+          setTimeout(() => {
+            const shareBtn = document.getElementById("share-summary");
+            if (shareBtn) shareBtn.textContent = "Share your progress";
+          }, 2000);
+        } catch {}
+      }
+    });
+
       if (!getToken()) {
         clearTokens();
         redirectToLogin();
       } else {
         setupAccountMenu();
         loadProgress();
-        window.addEventListener("resize", () => renderStressTrend(latestTrend));
+        window.addEventListener("resize", () => drawStressTrend(latestTrend));
       }
     })();
   </script>

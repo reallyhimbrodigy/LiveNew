@@ -4,6 +4,8 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <link rel="icon" href="/favicon.ico" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <script>
     (function loadInAppAssets() {
       const addCss = (href) => {
@@ -145,7 +147,16 @@
 
         <!-- ONBOARDING: shown once for new users -->
         <section id="day-step-onboard" class="card today-screen hidden" data-step="onboard">
-          <div class="onboard-step" data-onboard="goal">
+          <div class="onboard-step" data-onboard="intro">
+            <div class="onboard-intro">
+              <h2 class="today-question">Lower your stress in 5 minutes a day</h2>
+              <p class="onboard-intro-sub">LiveNew builds a daily plan around calming your body down — morning movement, a midday reset, and an evening wind-down, all matched to how you feel.</p>
+              <p class="onboard-intro-stat">Users report feeling calmer within the first week.</p>
+              <button class="primary onboard-intro-btn" type="button" style="margin-top:24px;padding:16px 48px">Get started</button>
+            </div>
+          </div>
+
+          <div class="onboard-step hidden" data-onboard="goal">
             <h2 class="today-question">What's your goal?</h2>
             <p class="muted">This shapes everything LiveNew builds for you</p>
             <div class="onboard-options">
@@ -206,7 +217,34 @@
           </div>
         </section>
 
+        <section id="day-step-paywall" class="card today-screen hidden" data-step="paywall">
+          <div class="paywall-content">
+            <h2 class="paywall-heading">Your first day is complete</h2>
+            <p class="paywall-sub">You experienced what LiveNew can do. Subscribe to keep building on your progress.</p>
+
+            <div class="paywall-benefits">
+              <div class="paywall-benefit">Daily AI-generated movement, resets, and wind-downs</div>
+              <div class="paywall-benefit">Personalized to your stress level every day</div>
+              <div class="paywall-benefit">Track your stress trend over time</div>
+              <div class="paywall-benefit">Morning, midday, and evening sessions</div>
+            </div>
+
+            <div class="paywall-price">
+              <span class="price-amount">$9.99</span>
+              <span class="price-period">/month</span>
+            </div>
+
+            <button id="paywall-subscribe" class="primary" type="button" style="width:100%;padding:18px;font-size:1.1rem;margin-top:16px">Subscribe</button>
+            <button id="paywall-restore" class="ghost" type="button" style="width:100%;margin-top:8px;font-size:0.85rem">Restore purchase</button>
+          </div>
+        </section>
+
         <section id="day-step-today" class="card today-screen hidden" data-step="today">
+          <div id="today-greeting" class="today-greeting">
+            <h2 id="greeting-text" class="greeting-text"></h2>
+            <p id="greeting-sub" class="greeting-sub"></p>
+          </div>
+
           <div id="today-active-card" class="today-active-card">
             <div id="active-time-label" class="active-time-label"></div>
             <h2 id="active-title" class="active-title"></h2>
@@ -222,6 +260,12 @@
             <h2>You're done for today</h2>
             <p class="muted">Everything completed. Check back tomorrow.</p>
             <a href="/progress" class="btn primary" style="margin-top:16px;display:inline-block">View progress</a>
+          </div>
+
+          <div id="today-completed-list" class="today-completed-list hidden"></div>
+
+          <div id="social-proof" class="social-proof hidden">
+            <span id="social-count"></span>
           </div>
 
           <div style="margin-top:24px">
@@ -279,7 +323,13 @@
           <p id="move-phase-description" class="today-sub"></p>
           <div class="phase-progress" id="move-phase-progress"></div>
           <div class="reset-instruction" id="move-instruction"></div>
-          <div class="reset-timer" id="move-timer"></div>
+          <div class="timer-container">
+            <svg class="timer-ring" width="120" height="120" viewBox="0 0 120 120">
+              <circle class="timer-ring-bg" cx="60" cy="60" r="54" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"/>
+              <circle class="timer-ring-progress" id="move-timer-ring" cx="60" cy="60" r="54" fill="none" stroke="var(--primary)" stroke-width="3" stroke-linecap="round" stroke-dasharray="339.292" stroke-dashoffset="0" transform="rotate(-90 60 60)"/>
+            </svg>
+            <div class="reset-timer" id="move-timer"></div>
+          </div>
           <button id="move-skip" class="ghost today-next" type="button" style="margin-top:8px">Skip phase</button>
           <button id="move-exit" class="btn ghost exit-session" type="button">Exit session</button>
         </section>
@@ -290,7 +340,13 @@
           <p id="reset-description" class="today-sub"></p>
           <div class="phase-progress" id="reset-phase-progress"></div>
           <div class="reset-instruction" id="reset-instruction"></div>
-          <div class="reset-timer" id="reset-timer"></div>
+          <div class="timer-container">
+            <svg class="timer-ring" width="120" height="120" viewBox="0 0 120 120">
+              <circle class="timer-ring-bg" cx="60" cy="60" r="54" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"/>
+              <circle class="timer-ring-progress" id="reset-timer-ring" cx="60" cy="60" r="54" fill="none" stroke="var(--primary)" stroke-width="3" stroke-linecap="round" stroke-dasharray="339.292" stroke-dashoffset="0" transform="rotate(-90 60 60)"/>
+            </svg>
+            <div class="reset-timer" id="reset-timer"></div>
+          </div>
           <button id="reset-skip" class="ghost today-next" type="button" style="margin-top:8px">Skip phase</button>
           <button id="reset-exit" class="btn ghost exit-session" type="button">Exit session</button>
         </section>
@@ -300,7 +356,13 @@
           <p id="winddown-phase-description" class="today-sub"></p>
           <div class="phase-progress" id="winddown-phase-progress"></div>
           <div class="reset-instruction" id="winddown-instruction"></div>
-          <div class="reset-timer" id="winddown-timer"></div>
+          <div class="timer-container">
+            <svg class="timer-ring" width="120" height="120" viewBox="0 0 120 120">
+              <circle class="timer-ring-bg" cx="60" cy="60" r="54" fill="none" stroke="rgba(255,255,255,0.06)" stroke-width="3"/>
+              <circle class="timer-ring-progress" id="winddown-timer-ring" cx="60" cy="60" r="54" fill="none" stroke="var(--primary)" stroke-width="3" stroke-linecap="round" stroke-dasharray="339.292" stroke-dashoffset="0" transform="rotate(-90 60 60)"/>
+            </svg>
+            <div class="reset-timer" id="winddown-timer"></div>
+          </div>
           <button id="winddown-skip" class="ghost today-next" type="button" style="margin-top:8px">Skip phase</button>
           <button id="winddown-exit" class="btn ghost exit-session" type="button">Exit session</button>
         </section>

@@ -2315,6 +2315,9 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/consents/accept",
     "/v1/onboard/complete",
     "/v1/progress",
+    "/v1/stats",
+    "/v1/feedback",
+    "/v1/subscription/status",
   ]);
   console.log("[SUPABASE_ROUTE_CHECK]", pathname, supabaseRoutes.has(pathname));
   if (!supabaseRoutes.has(pathname)) return false;
@@ -3100,12 +3103,79 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     }
 
     progress.insight = insight;
+
+    if (checkIns.length >= 5) {
+      const recentCheckIns = checkIns.slice(-7);
+      const recentKeys = new Set(recentCheckIns.map((c) => c.dateKey));
+      const firstStress = recentCheckIns[0]?.stress;
+      const lastStress = recentCheckIns[recentCheckIns.length - 1]?.stress;
+      const recentResetCount = resetEvents.filter((e) => recentKeys.has(e.date_key)).length;
+      const recentMoveCount = moveEvents.filter((e) => recentKeys.has(e.date_key)).length;
+      const recentWinddownCount = winddownEvents.filter((e) => recentKeys.has(e.date_key)).length;
+      const totalSessions = recentResetCount + recentMoveCount + recentWinddownCount;
+      const bestDay = recentCheckIns.reduce((best, c) => ((c.stress < (best?.stress || 999)) ? c : best), null);
+
+      progress.weeklySummary = {
+        daysActive: new Set(recentCheckIns.map((c) => c.dateKey)).size,
+        stressStart: firstStress,
+        stressEnd: lastStress,
+        totalSessions,
+        bestDay: bestDay?.dateKey || null,
+        bestDayStress: bestDay?.stress || null,
+      };
+    }
+
     sendJson(res, 200, { ok: true, progress }, auth.userId);
     return true;
   }
 
   if (pathname === "/v1/progress") {
     sendError(res, 405, "method_not_allowed", "Method not allowed");
+    return true;
+  }
+
+  if (pathname === "/v1/stats" && req.method === "GET") {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const { count } = await supabaseAdmin()
+        .from("event")
+        .select("*", { count: "exact", head: true })
+        .gte("created_at", `${today}T00:00:00Z`);
+      sendJson(res, 200, { ok: true, todayCount: count || 0 }, auth.userId);
+    } catch {
+      sendJson(res, 200, { ok: true, todayCount: 0 }, auth.userId);
+    }
+    return true;
+  }
+
+  if (pathname === "/v1/feedback" && req.method === "POST") {
+    const body = await parseJson(req);
+    try {
+      await supabaseForUser(auth.jwt)
+        .from("event")
+        .insert({
+          user_id: auth.userId,
+          date_key: body?.dateISO || new Date().toISOString().slice(0, 10),
+          type: "session_feedback",
+          payload: { sessionType: body?.type, feeling: body?.feeling },
+        });
+    } catch {}
+    sendJson(res, 200, { ok: true }, auth.userId);
+    return true;
+  }
+
+  if (pathname === "/v1/subscription/status" && req.method === "GET") {
+    try {
+      const { data } = await supabaseForUser(auth.jwt)
+        .from("subscription")
+        .select("status")
+        .eq("user_id", auth.userId)
+        .eq("status", "active")
+        .single();
+      sendJson(res, 200, { ok: true, active: !!data }, auth.userId);
+    } catch {
+      sendJson(res, 200, { ok: true, active: false }, auth.userId);
+    }
     return true;
   }
 
@@ -5271,6 +5341,22 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && pathname === "/favicon.png") {
     await serveFile(res, path.join(PUBLIC_DIR, "favicon.png"));
+    return;
+  }
+
+  if (req.method === "GET" && pathname === "/sw.js") {
+    const swPath = path.join(PUBLIC_DIR, "sw.js");
+    try {
+      const body = await fs.readFile(swPath, "utf8");
+      res.writeHead(200, {
+        "Content-Type": "application/javascript",
+        "Service-Worker-Allowed": "/",
+        "Cache-Control": "no-cache",
+      });
+      res.end(body);
+    } catch {
+      sendError(res, 404, "not_found", "Not found");
+    }
     return;
   }
 

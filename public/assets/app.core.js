@@ -162,6 +162,173 @@ function getCurrentWindow(schedule) {
   return "evening";
 }
 
+const LiveNewAudio = (() => {
+  let ctx = null;
+
+  function getCtx() {
+    if (!ctx) {
+      ctx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    return ctx;
+  }
+
+  function playTone(freq, duration, type = "sine", volume = 0.15) {
+    try {
+      const c = getCtx();
+      const osc = c.createOscillator();
+      const gain = c.createGain();
+
+      osc.type = type;
+      osc.frequency.setValueAtTime(freq, c.currentTime);
+
+      gain.gain.setValueAtTime(0, c.currentTime);
+      gain.gain.linearRampToValueAtTime(volume, c.currentTime + 0.05);
+      gain.gain.exponentialRampToValueAtTime(0.001, c.currentTime + duration);
+
+      osc.connect(gain);
+      gain.connect(c.destination);
+
+      osc.start(c.currentTime);
+      osc.stop(c.currentTime + duration);
+    } catch {}
+  }
+
+  return {
+    sessionStart() {
+      playTone(523.25, 0.8, "sine", 0.12);
+      setTimeout(() => playTone(659.25, 0.8, "sine", 0.10), 200);
+    },
+    phaseTransition() {
+      playTone(783.99, 0.5, "sine", 0.08);
+    },
+    sessionComplete() {
+      playTone(523.25, 0.6, "sine", 0.12);
+      setTimeout(() => playTone(659.25, 0.6, "sine", 0.10), 150);
+      setTimeout(() => playTone(783.99, 0.8, "sine", 0.10), 300);
+      setTimeout(() => playTone(1046.50, 1.0, "sine", 0.08), 500);
+    },
+  };
+})();
+
+let currentActiveSessionType = null;
+
+function triggerActiveSession() {
+  if (currentActiveSessionType === "move") qs("#start-move")?.click();
+  else if (currentActiveSessionType === "reset") qs("#start-reset")?.click();
+  else if (currentActiveSessionType === "winddown") qs("#start-winddown")?.click();
+}
+
+function showFirstSessionFrame(onContinue) {
+  const overlay = document.createElement("div");
+  overlay.className = "first-session-overlay";
+  overlay.innerHTML = `
+    <div class="first-session-content">
+      <h2>This isn't meditation</h2>
+      <p>You're about to physically reset your stress in a few minutes. Follow each instruction as it appears. That's it.</p>
+      <button class="primary" id="first-session-go" type="button" style="margin-top:20px">Let's go</button>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector("#first-session-go")?.addEventListener("click", () => {
+    overlay.remove();
+    localStorage.setItem("livenew_first_done", "1");
+    onContinue();
+  });
+}
+
+async function registerServiceWorker() {
+  try {
+    const reg = await navigator.serviceWorker.register("/sw.js");
+    console.log("[SW] Registered:", reg.scope);
+  } catch (err) {
+    console.error("[SW] Registration failed:", err);
+  }
+}
+
+async function requestNotificationPermission() {
+  if (!("Notification" in window) || !("serviceWorker" in navigator)) return;
+  if (Notification.permission === "granted") {
+    await registerServiceWorker();
+    return;
+  }
+  if (Notification.permission === "denied") return;
+
+  const result = await Notification.requestPermission();
+  if (result === "granted") {
+    console.log("[NOTIFICATIONS] Permission granted");
+    await registerServiceWorker();
+  }
+}
+
+function scheduleNotifications(wakeTimeValue) {
+  if (!("serviceWorker" in navigator)) return;
+  const schedule = computeSchedule(wakeTimeValue || "normal");
+  navigator.serviceWorker.ready.then((reg) => {
+    reg.active?.postMessage({
+      type: "schedule-notifications",
+      schedule: {
+        midday: schedule.midday.startHour,
+        evening: schedule.evening.startHour,
+      },
+    });
+  });
+}
+
+function getTrialStatus() {
+  try {
+    const data = JSON.parse(localStorage.getItem("livenew_trial") || "{}");
+    return data;
+  } catch {
+    return {};
+  }
+}
+
+function setTrialStarted() {
+  try {
+    const existing = getTrialStatus();
+    if (!existing.startDate) {
+      localStorage.setItem(
+        "livenew_trial",
+        JSON.stringify({
+          startDate: new Date().toISOString().slice(0, 10),
+          isSubscribed: false,
+        })
+      );
+    }
+  } catch {}
+}
+
+function isTrialExpired() {
+  const trial = getTrialStatus();
+  if (trial.isSubscribed) return false;
+  if (!trial.startDate) return false;
+  const today = new Date().toISOString().slice(0, 10);
+  return today > trial.startDate;
+}
+
+function markSubscribed() {
+  try {
+    const trial = getTrialStatus();
+    trial.isSubscribed = true;
+    localStorage.setItem("livenew_trial", JSON.stringify(trial));
+  } catch {}
+}
+
+async function loadSocialProof() {
+  try {
+    const res = await apiGet("/v1/stats");
+    const count = Number(res?.todayCount || 0);
+    const el = qs("#social-proof");
+    const countEl = qs("#social-count");
+    if (el && countEl && count > 0) {
+      countEl.textContent = `${count} sessions completed today`;
+      el.classList.remove("hidden");
+    } else if (el) {
+      el.classList.add("hidden");
+    }
+  } catch {}
+}
+
 async function loadUserProfile() {
   try {
     const cached = localStorage.getItem("livenew_profile");
@@ -198,13 +365,42 @@ function populateTodayScreen(res, stress, wake) {
   const hasReset = stress > 3 && reset;
 
   const sessions = [
-    move ? { key: "morning", type: "move", title: move.title || "Movement", desc: move.description || "", done: saved?.moveCompleted || false } : null,
-    hasReset ? { key: "midday", type: "reset", title: reset.title || "Reset", desc: reset.description || "", done: saved?.resetCompleted || false } : null,
-    winddown ? { key: "evening", type: "winddown", title: winddown.title || "Wind-down", desc: winddown.description || "", done: saved?.winddownCompleted || false } : null,
+    move
+      ? { key: "morning", type: "move", session: move, title: move.title || "Movement", desc: move.description || "", done: saved?.moveCompleted || false }
+      : null,
+    hasReset
+      ? { key: "midday", type: "reset", session: reset, title: reset.title || "Reset", desc: reset.description || "", done: saved?.resetCompleted || false }
+      : null,
+    winddown
+      ? { key: "evening", type: "winddown", session: winddown, title: winddown.title || "Wind-down", desc: winddown.description || "", done: saved?.winddownCompleted || false }
+      : null,
   ].filter(Boolean);
 
   const allDone = sessions.length > 0 && sessions.every((s) => s.done);
   const nextSession = sessions.find((s) => !s.done);
+  currentActiveSessionType = nextSession?.type || null;
+
+  if (allDone) {
+    const trial = getTrialStatus();
+    if (trial?.startDate && !trial?.isSubscribed) {
+      showStep("paywall");
+      return;
+    }
+  }
+
+  const greetingText = qs("#greeting-text");
+  const greetingSub = qs("#greeting-sub");
+  if (greetingText) {
+    const hour = new Date().getHours();
+    const timeOfDay = hour < 12 ? "Morning" : hour < 17 ? "Afternoon" : "Evening";
+    greetingText.textContent = timeOfDay;
+  }
+  if (greetingSub) {
+    if (allDone) greetingSub.textContent = "Everything completed — see you tomorrow";
+    else if (stress >= 8) greetingSub.textContent = "Stress is high — your plan is focused on calming down";
+    else if (stress >= 5) greetingSub.textContent = "Moderate stress — staying steady today";
+    else greetingSub.textContent = "You're in a good place — maintaining the balance";
+  }
 
   const activeCard = qs("#today-active-card");
   const nextUp = qs("#today-next-up");
@@ -213,7 +409,17 @@ function populateTodayScreen(res, stress, wake) {
   if (allDone) {
     if (activeCard) activeCard.classList.add("hidden");
     if (nextUp) nextUp.classList.add("hidden");
-    if (allDoneEl) allDoneEl.classList.remove("hidden");
+    if (allDoneEl) {
+      const contextMap = { morning: "Morning movement", midday: "Midday reset", evening: "Evening wind-down" };
+      const checkmarks = sessions.map((s) => `<div class="done-check">✓ ${contextMap[s.key] || s.title}</div>`).join("");
+      allDoneEl.innerHTML = `
+        <h2 class="done-heading">You're done for today</h2>
+        <div class="done-checklist">${checkmarks}</div>
+        <p class="done-sub">Everything completed. See you tomorrow.</p>
+        <a href="/progress" class="btn primary" style="margin-top:16px;display:inline-block">View your progress</a>
+      `;
+      allDoneEl.classList.remove("hidden");
+    }
   } else if (nextSession) {
     if (allDoneEl) allDoneEl.classList.add("hidden");
     if (activeCard) activeCard.classList.remove("hidden");
@@ -224,14 +430,24 @@ function populateTodayScreen(res, stress, wake) {
     const startBtn = qs("#active-start-btn");
 
     const contextMap = { morning: "Get moving", midday: "Bring it down", evening: "Wind down" };
-    if (timeLabel) timeLabel.textContent = contextMap[nextSession.key] || "";
+    const session = nextSession.session || {};
+    const totalMin = Array.isArray(session.phases)
+      ? Math.round(session.phases.reduce((sum, p) => sum + (p.minutes || 0), 0))
+      : session.minutes || session.durationMin || null;
+    const durationText = totalMin ? ` · ${totalMin} min` : "";
+    if (timeLabel) timeLabel.textContent = `${contextMap[nextSession.key] || ""}${durationText}`;
     if (titleEl) titleEl.textContent = nextSession.title;
     if (descEl) descEl.textContent = nextSession.desc;
     if (startBtn) {
       startBtn.onclick = () => {
-        if (nextSession.type === "move") qs("#start-move")?.click();
-        else if (nextSession.type === "reset") qs("#start-reset")?.click();
-        else if (nextSession.type === "winddown") qs("#start-winddown")?.click();
+        const hasEverCompleted = localStorage.getItem("livenew_first_done");
+        if (!hasEverCompleted) {
+          showFirstSessionFrame(() => {
+            triggerActiveSession();
+          });
+        } else {
+          triggerActiveSession();
+        }
       };
     }
 
@@ -244,6 +460,7 @@ function populateTodayScreen(res, stress, wake) {
       nextUp.classList.add("hidden");
     }
   } else {
+    currentActiveSessionType = null;
     if (activeCard) activeCard.classList.add("hidden");
     if (nextUp) nextUp.classList.add("hidden");
     if (allDoneEl) {
@@ -252,6 +469,21 @@ function populateTodayScreen(res, stress, wake) {
       const doneBody = allDoneEl.querySelector("p");
       if (doneTitle) doneTitle.textContent = "No sessions today";
       if (doneBody) doneBody.textContent = "Check back tomorrow.";
+    }
+  }
+
+  const completedList = qs("#today-completed-list");
+  if (completedList) {
+    const doneSessions = sessions.filter((s) => s.done);
+    if (doneSessions.length > 0 && !allDone) {
+      const contextMap = { morning: "Morning movement", midday: "Midday reset", evening: "Evening wind-down" };
+      completedList.innerHTML = doneSessions
+        .map((s) => `<div class="completed-item">✓ ${contextMap[s.key] || s.title}</div>`)
+        .join("");
+      completedList.classList.remove("hidden");
+    } else {
+      completedList.innerHTML = "";
+      completedList.classList.add("hidden");
     }
   }
 
@@ -295,6 +527,8 @@ function populateTodayScreen(res, stress, wake) {
     if (allDone) recheckinBtn.disabled = true;
     else recheckinBtn.disabled = false;
   }
+
+  void loadSocialProof();
 }
 
 function getErrorCode(err) {
@@ -1253,6 +1487,44 @@ function initDay({ initialDateISO } = {}) {
   let timeMin = null;
   let activeSessionInterval = null;
 
+  function showPostSessionFeedback(sessionType, onDone) {
+    const overlay = document.createElement("div");
+    overlay.className = "post-session-overlay";
+    overlay.innerHTML = `
+      <div class="post-session-content">
+        <h2>How do you feel?</h2>
+        <div class="post-session-options">
+          <button class="post-session-btn" data-value="better" type="button">Better</button>
+          <button class="post-session-btn" data-value="same" type="button">Same</button>
+          <button class="post-session-btn" data-value="not sure" type="button">Not sure</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+
+    overlay.querySelectorAll(".post-session-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const feedback = btn.dataset.value;
+        try {
+          apiPost("/v1/feedback", {
+            type: sessionType,
+            feeling: feedback,
+            dateISO: currentDateISO,
+          }).catch(() => {});
+        } catch {}
+
+        btn.style.background = "var(--primary, #b5a07c)";
+        btn.style.color = "#fff";
+        btn.style.borderColor = "var(--primary, #b5a07c)";
+
+        setTimeout(() => {
+          overlay.remove();
+          onDone();
+        }, 400);
+      });
+    });
+  }
+
 
   function updateTodayPlan(updates) {
     try {
@@ -1269,18 +1541,60 @@ function initDay({ initialDateISO } = {}) {
 
 
   const startGuidedExperience = (phases, config) => {
+    LiveNewAudio.sessionStart();
     const instructionEl = qs(`#${config.instructionEl}`);
     const timerEl = qs(`#${config.timerEl}`);
     const skipBtn = qs(`#${config.skipBtn}`);
     const progressEl = qs(`#${config.progressEl || ""}`);
     const titleEl = qs(`#${config.titleEl || ""}`);
     const descEl = qs(`#${config.descriptionEl || ""}`);
+    const ringEl = qs(`#${config.timerRingEl || ""}`);
     let phaseIndex = 0;
     let intervalId = null;
+    let currentPhaseInstruction = "";
+    const circumference = 339.292;
+
+    function clearRevealTimer(el) {
+      if (el?._revealTimer) {
+        clearInterval(el._revealTimer);
+        el._revealTimer = null;
+      }
+    }
+
+    function revealInstructions(el, fullText, durationMs) {
+      if (!el) return;
+      clearRevealTimer(el);
+      const sentences = fullText.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [fullText];
+      if (sentences.length <= 1) {
+        el.textContent = fullText;
+        return;
+      }
+
+      let current = 0;
+      el.textContent = sentences[0].trim();
+      el.style.transition = "opacity 0.3s ease";
+      const interval = Math.min(durationMs / sentences.length, 8000);
+      const timer = setInterval(() => {
+        current += 1;
+        if (current >= sentences.length) {
+          clearInterval(timer);
+          el._revealTimer = null;
+          return;
+        }
+        el.style.opacity = "0.5";
+        setTimeout(() => {
+          el.textContent = sentences.slice(0, current + 1).join(" ").trim();
+          el.style.opacity = "1";
+        }, 200);
+      }, interval);
+      el._revealTimer = timer;
+    }
 
     const finish = () => {
       clearInterval(intervalId);
+      clearRevealTimer(instructionEl);
       activeSessionInterval = null;
+      LiveNewAudio.sessionComplete();
       if (typeof config.onComplete === "function") config.onComplete();
     };
 
@@ -1292,6 +1606,7 @@ function initDay({ initialDateISO } = {}) {
       const phase = phases[phaseIndex];
       const totalSec = Math.round((phase.minutes || 1) * 60);
       let remaining = totalSec;
+      currentPhaseInstruction = phase?.instruction || "";
       if (progressEl) {
         progressEl.textContent = `${phaseIndex + 1} of ${phases.length}`;
       }
@@ -1302,17 +1617,27 @@ function initDay({ initialDateISO } = {}) {
         if (titleEl) titleEl.style.display = "";
         if (descEl) descEl.style.display = "";
       }
-      if (instructionEl) instructionEl.textContent = phase.instruction || "";
+      revealInstructions(instructionEl, currentPhaseInstruction, (phase.minutes || 1) * 60 * 1000);
       const fmt = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
       if (timerEl) timerEl.textContent = fmt(remaining);
+      if (ringEl) {
+        ringEl.style.strokeDasharray = `${circumference}`;
+        ringEl.style.strokeDashoffset = `${circumference}`;
+      }
       clearInterval(intervalId);
       activeSessionInterval = null;
       intervalId = setInterval(() => {
         remaining -= 1;
         if (timerEl) timerEl.textContent = fmt(remaining);
+        if (ringEl) {
+          const progress = Math.max(0, remaining) / totalSec;
+          ringEl.style.strokeDashoffset = `${circumference * progress}`;
+        }
         if (remaining <= 0) {
           clearInterval(intervalId);
+          clearRevealTimer(instructionEl);
           activeSessionInterval = null;
+          if (phaseIndex < phases.length - 1) LiveNewAudio.phaseTransition();
           phaseIndex += 1;
           runPhase();
         }
@@ -1323,7 +1648,10 @@ function initDay({ initialDateISO } = {}) {
     if (skipBtn) {
       skipBtn.onclick = () => {
         clearInterval(intervalId);
+        clearRevealTimer(instructionEl);
+        if (instructionEl) instructionEl.textContent = currentPhaseInstruction;
         activeSessionInterval = null;
+        if (phaseIndex < phases.length - 1) LiveNewAudio.phaseTransition();
         phaseIndex += 1;
         runPhase();
       };
@@ -1336,6 +1664,7 @@ function initDay({ initialDateISO } = {}) {
     startGuidedExperience(phases, {
       instructionEl: "reset-instruction",
       timerEl: "reset-timer",
+      timerRingEl: "reset-timer-ring",
       skipBtn: "reset-skip",
       progressEl: "reset-phase-progress",
       exitBtn: "#reset-exit",
@@ -1347,7 +1676,7 @@ function initDay({ initialDateISO } = {}) {
 
 
   const onboardData = {};
-  const onboardSteps = ["goal", "stress-baseline", "wake", "time", "injuries"];
+  const onboardSteps = ["intro", "goal", "stress-baseline", "wake", "time", "injuries"];
   let onboardIndex = 0;
   const injuries = [];
 
@@ -1373,6 +1702,11 @@ function initDay({ initialDateISO } = {}) {
 
     showStep("stress-tap");
   }
+
+  document.querySelector(".onboard-intro-btn")?.addEventListener("click", () => {
+    onboardIndex += 1;
+    showOnboardStep(onboardSteps[onboardIndex]);
+  });
 
   document.querySelectorAll("#day-step-onboard .onboard-opt:not(.onboard-toggle)").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -1502,6 +1836,9 @@ function initDay({ initialDateISO } = {}) {
         saveTodayPlan(currentDateISO, res, effectiveStress, wakeTime);
         populateTodayScreen(res, effectiveStress, wakeTime);
         showStep("today");
+        setTrialStarted();
+        void requestNotificationPermission();
+        scheduleNotifications(wakeTime);
       } catch (err) {
         if (isAuthRequiredError?.(err)) {
           clearTokens?.();
@@ -1531,6 +1868,24 @@ function initDay({ initialDateISO } = {}) {
     showStep("stress-tap");
   });
 
+  qs("#paywall-subscribe")?.addEventListener("click", async () => {
+    window.location.href = "https://buy.stripe.com/YOUR_STRIPE_LINK";
+  });
+
+  qs("#paywall-restore")?.addEventListener("click", async () => {
+    try {
+      const res = await apiGet("/v1/subscription/status");
+      if (res?.active) {
+        markSubscribed();
+        showStep("stress-tap");
+      } else {
+        alert("No active subscription found. Please subscribe to continue.");
+      }
+    } catch {
+      alert("Could not check subscription status. Please try again.");
+    }
+  });
+
   qs("#start-move")?.addEventListener("click", () => {
     const move = currentContract?.movement || currentContract?.move || currentContract?.workout;
     if (!move) return;
@@ -1542,6 +1897,7 @@ function initDay({ initialDateISO } = {}) {
     startGuidedExperience(move.phases || [], {
       instructionEl: "move-instruction",
       timerEl: "move-timer",
+      timerRingEl: "move-timer-ring",
       skipBtn: "move-skip",
       progressEl: "move-phase-progress",
       exitBtn: "#move-exit",
@@ -1557,8 +1913,10 @@ function initDay({ initialDateISO } = {}) {
           reportError(err);
         }
         updateTodayPlan({ moveCompleted: true });
-        populateTodayScreen(currentContract, stressBefore, wakeTime);
-        showStep("today");
+        showPostSessionFeedback("move", () => {
+          populateTodayScreen(currentContract, stressBefore, wakeTime);
+          showStep("today");
+        });
       },
     });
   });
@@ -1585,6 +1943,7 @@ function initDay({ initialDateISO } = {}) {
     startGuidedExperience(winddown.phases || [], {
       instructionEl: "winddown-instruction",
       timerEl: "winddown-timer",
+      timerRingEl: "winddown-timer-ring",
       skipBtn: "winddown-skip",
       progressEl: "winddown-phase-progress",
       exitBtn: "#winddown-exit",
@@ -1599,8 +1958,10 @@ function initDay({ initialDateISO } = {}) {
           reportError(err);
         }
         updateTodayPlan({ winddownCompleted: true });
-        populateTodayScreen(currentContract, stressBefore, wakeTime);
-        showStep("today");
+        showPostSessionFeedback("winddown", () => {
+          populateTodayScreen(currentContract, stressBefore, wakeTime);
+          showStep("today");
+        });
       },
     });
   });
@@ -1649,8 +2010,10 @@ function initDay({ initialDateISO } = {}) {
       reportError(err);
     }
     updateTodayPlan({ resetCompleted: true });
-    populateTodayScreen(currentContract, stressBefore, wakeTime);
-    showStep("today");
+    showPostSessionFeedback("reset", () => {
+      populateTodayScreen(currentContract, stressBefore, wakeTime);
+      showStep("today");
+    });
   });
 
   // Entry point logic — determine which screen to show
@@ -1680,12 +2043,16 @@ function initDay({ initialDateISO } = {}) {
   } catch {}
 
   if (hasProfile) {
+    if (isTrialExpired()) {
+      showStep("paywall");
+      return;
+    }
     console.log("[ENTRY] has profile, showing stress-tap");
     showStep("stress-tap");
   } else {
     console.log("[ENTRY] no profile, showing onboard");
     showStep("onboard");
-    showOnboardStep("goal");
+    showOnboardStep("intro");
   }
 }
 
@@ -3032,10 +3399,11 @@ document.addEventListener("DOMContentLoaded", () => {
       } catch {}
 
       if (hasProfile) {
-        showStep("stress-tap");
+        if (isTrialExpired()) showStep("paywall");
+        else showStep("stress-tap");
       } else {
         showStep("onboard");
-        showOnboardStep("goal");
+        showOnboardStep("intro");
       }
     }
   }, 2000);

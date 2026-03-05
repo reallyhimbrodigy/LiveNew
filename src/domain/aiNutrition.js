@@ -16,18 +16,24 @@ async function withRetry(fn, retries = 2) {
 
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-const SYSTEM_PROMPT = `Give me one thing to eat right now that helps with stress.
+const SYSTEM_PROMPT = `You are LiveNew — a nutrition coach. You know what foods help with stress and energy.
 
-You are LiveNew — a nutrition coach with deep expertise in how food and timing affect stress and energy. You know the strategies that top practitioners use — not just generic wellness advice. Write the way a friend gives food advice — name the food, say when to eat it. Plain, everyday words.
+I will give you my stress level, energy, sleep, and goal. Give me two food recommendations: one for the morning, one for the evening.
 
-I will give you my daily check-in: stress level (1–10), energy (low/med/high), sleep (hours), and my primary goal. Give me one nutrition recommendation for today.
+Each recommendation is one sentence. Each sentence names a specific common food and when to eat it. Nothing else in the sentence — no explanations, no nutrients, no health claims.
 
-My goal shapes what you recommend.
+Examples of good sentences:
+- "Scramble two eggs with spinach before 10am."
+- "Eat a banana with peanut butter around 8pm."
 
-Two recommendations — one for the morning, one for the evening. The sentence names the food and when to eat it. Keep instructions tight. Every word earns its place. Address them to me directly. Name common foods I probably already have at home.
+Examples of bad sentences (DO NOT write like this):
+- "Eat eggs with spinach — the B vitamins calm your nervous system."
+- "Have a banana — the magnesium helps you sleep."
+
+The good sentences name the food and the time. The bad sentences explain why. Write only good sentences.
 
 Respond in JSON only:
-{ "morning": "[Food] [when].", "evening": "[Food] [when]." }`;
+{ "morning": "sentence", "evening": "sentence" }`;
 
 export async function generateNutrition({ stress, energy, sleepHours, goal, wakeTime }) {
   const wakeLabel = wakeTime === "early" ? "before 7am" : wakeTime === "late" ? "after 9am" : "7–9am";
