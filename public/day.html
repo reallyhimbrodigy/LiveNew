@@ -407,31 +407,67 @@
     </div>
   </div>
 
-  <footer class="footer" id="footer-root">
-    <div class="footer-panel">
-      <div class="footer-grid">
-        <div>
-          <div class="footer-head">LIVENEW</div>
-          <div class="footer-links">Daily stress regulation - movement, resets, and nutrition matched to how you feel.</div>
+  
+<footer class="sticky-footer">
+  <div class="sticky-footer-inner">
+    <div class="footer-glow" aria-hidden="true"></div>
+    <div class="footer-content">
+      <div class="footer-top">
+        <div class="footer-brand-col">
+          <a href="/" class="footer-logo">LiveNew</a>
+          <p class="footer-tagline">AI-powered cortisol regulation. A personalized day plan — morning, midday, and evening — matched to your stress, your goals, and your body.</p>
         </div>
-        <div>
-          <div class="footer-head">Resources</div>
-          <div class="footer-links">
-            <a href="/help">Help Center</a>
-            <a href="/terms">Terms</a>
-            <a href="/privacy">Privacy</a>
+        <div class="footer-links-col">
+          <div class="footer-group">
+            <h4 class="footer-group-label">Product</h4>
+            <ul class="footer-group-links">
+              <li><a href="/day">Your Day Plan</a></li>
+              <li><a href="/progress">Progress</a></li>
+              <li><a href="/account">Account</a></li>
+            </ul>
           </div>
-        </div>
-        <div>
-          <div class="footer-head">Company</div>
-          <div class="footer-links">
-            <a href="mailto:support@livenew.app">Contact</a>
-            <a href="/reset-access.html">Reset Access</a>
+          <div class="footer-group">
+            <h4 class="footer-group-label">Resources</h4>
+            <ul class="footer-group-links">
+              <li><a href="/help">Help Center</a></li>
+              <li><a href="mailto:support@livenew.app">Contact</a></li>
+            </ul>
+          </div>
+          <div class="footer-group">
+            <h4 class="footer-group-label">Legal</h4>
+            <ul class="footer-group-links">
+              <li><a href="/terms">Terms of Service</a></li>
+              <li><a href="/privacy">Privacy Policy</a></li>
+            </ul>
           </div>
         </div>
       </div>
-      <div class="footer-bottom">© 2026 LiveNew. All rights reserved.</div>
+      <div class="footer-bottom">
+        <p>&copy; 2026 LiveNew. All rights reserved.</p>
+        <p>support@livenew.app</p>
+      </div>
     </div>
-  </footer>
+  </div>
+</footer>
+<script>
+// Footer scroll reveal
+const footerObserver = new IntersectionObserver(entries => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      // Stagger reveal the footer columns
+      const brand = entry.target.querySelector('.footer-brand-col');
+      const groups = entry.target.querySelectorAll('.footer-group');
+      if (brand) setTimeout(() => brand.classList.add('visible'), 100);
+      groups.forEach((g, i) => {
+        setTimeout(() => g.classList.add('visible'), 200 + i * 100);
+      });
+      footerObserver.unobserve(entry.target);
+    }
+  });
+}, { threshold: 0.1 });
+
+const stickyFooter = document.querySelector('.sticky-footer');
+if (stickyFooter) footerObserver.observe(stickyFooter);
+</script>
 </body>
 </html>
