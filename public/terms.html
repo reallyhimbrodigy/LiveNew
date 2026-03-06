@@ -10,6 +10,195 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600;700&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/assets/app.css">
   <title>LiveNew — Terms of Service</title>
+  <style>
+    body {
+      background: var(--bg, #0f0d0a);
+    }
+
+    .ln-container,
+    .card {
+      position: relative;
+      z-index: 1;
+      background: var(--bg, #0f0d0a);
+    }
+
+    .sticky-footer {
+      position: relative;
+      height: 600px;
+      width: 100%;
+      clip-path: polygon(0% 0, 100% 0%, 100% 100%, 0 100%);
+    }
+
+    .sticky-footer .sf-fixed {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 600px;
+      z-index: 0;
+    }
+
+    .sticky-footer .sf-inner {
+      height: 100%;
+      background: #111110;
+      border-top: 1px solid rgba(196, 168, 108, 0.1);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 60px 48px 28px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .sticky-footer .sf-inner::before {
+      content: '';
+      position: absolute;
+      top: -200px;
+      left: 40%;
+      width: 600px;
+      height: 600px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(196,168,108,0.05) 0%, rgba(196,168,108,0.015) 40%, transparent 70%);
+      pointer-events: none;
+      transform: rotate(-30deg);
+    }
+
+    .sticky-footer .sf-inner::after {
+      content: '';
+      position: absolute;
+      top: -250px;
+      left: 15%;
+      width: 400px;
+      height: 500px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(196,168,108,0.03) 0%, transparent 60%);
+      pointer-events: none;
+      transform: rotate(-45deg);
+    }
+
+    .sf-top {
+      display: flex;
+      gap: 64px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .sf-brand {
+      max-width: 320px;
+      min-width: 200px;
+      flex-shrink: 0;
+    }
+
+    .sf-brand-name {
+      font-family: var(--font-display, 'Cormorant Garamond', Georgia, serif);
+      font-size: 1.5rem;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      color: var(--text, #e8e0d4);
+      text-decoration: none;
+      display: block;
+      margin-bottom: 20px;
+    }
+
+    .sf-brand-desc {
+      font-size: 0.85rem;
+      line-height: 1.7;
+      color: var(--text-muted, #8a8070);
+      margin: 0;
+    }
+
+    .sf-links {
+      flex: 1;
+      display: flex;
+      gap: 48px;
+    }
+
+    .sf-col {
+      flex: 1;
+      min-width: 100px;
+    }
+
+    .sf-col h4 {
+      font-family: var(--font-body, 'DM Sans', -apple-system, sans-serif);
+      font-size: 0.7rem;
+      font-weight: 500;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text, #e8e0d4);
+      margin-bottom: 20px;
+    }
+
+    .sf-col ul {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .sf-col li {
+      margin-bottom: 12px;
+    }
+
+    .sf-col a {
+      font-size: 0.82rem;
+      color: var(--text-muted, #8a8070);
+      text-decoration: none;
+      transition: color 0.25s ease;
+    }
+
+    .sf-col a:hover {
+      color: var(--text, #e8e0d4);
+    }
+
+    .sf-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-top: 1px solid rgba(196,168,108,0.08);
+      padding-top: 16px;
+      position: relative;
+      z-index: 1;
+    }
+
+    .sf-bar p {
+      font-size: 0.72rem;
+      color: var(--text-dim, #5a5248);
+      margin: 0;
+    }
+
+    @media (max-width: 768px) {
+      .sticky-footer {
+        height: auto;
+        clip-path: none;
+      }
+      .sticky-footer .sf-fixed {
+        position: relative;
+        height: auto;
+      }
+      .sticky-footer .sf-inner {
+        padding: 36px 20px 20px;
+        height: auto;
+      }
+      .sf-top {
+        flex-direction: column;
+        gap: 32px;
+      }
+      .sf-brand {
+        max-width: none;
+      }
+      .sf-links {
+        flex-wrap: wrap;
+        gap: 28px;
+      }
+      .sf-col {
+        min-width: 45%;
+      }
+      .sf-bar {
+        flex-direction: column;
+        gap: 6px;
+        text-align: center;
+      }
+    }
+  </style>
 </head>
 <body>
   <div class="ln-container" style="max-width:640px;position:relative;z-index:1;background:var(--bg, #0f0d0a)">

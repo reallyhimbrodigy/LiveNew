@@ -145,8 +145,11 @@
       top: 50%;
       transform: translateY(-50%);
       pointer-events: none;
-      transition: color 0.2s;
       color: var(--text-dim);
+      transition: color 0.2s;
+      display: flex;
+      align-items: center;
+      width: 18px;
     }
 
     .field-inner:focus-within .field-icon {
@@ -168,7 +171,7 @@
       background: transparent;
       border: none;
       outline: none;
-      padding: 14px 44px 14px 44px;
+      padding: 14px 44px 14px 42px;
       font-family: var(--font-body);
       font-size: 0.95rem;
       color: var(--text);
@@ -177,6 +180,7 @@
     .field input::placeholder {
       color: var(--text-dim);
       font-size: 0.9rem;
+      padding-left: 0;
     }
     .field-toggle {
       position: absolute;
