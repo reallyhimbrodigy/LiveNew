@@ -429,7 +429,6 @@
 
     .auth-error.show { display: block; }
   </style>
-  <link rel="stylesheet" href="/assets/app.css">
 </head>
 <body>
 
@@ -450,7 +449,7 @@
       <div class="field-inner">
         <div class="field-glow" id="name-glow"></div>
         <div class="field-icon">
-          <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <svg viewBox="0 0 24 24" width="18" height="18"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         </div>
         <input type="text" id="name-input" placeholder="Full Name" autocomplete="name">
       </div>
@@ -460,7 +459,7 @@
       <div class="field-inner">
         <div class="field-glow" id="email-glow"></div>
         <div class="field-icon">
-          <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
+          <svg viewBox="0 0 24 24" width="18" height="18"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
         </div>
         <input type="email" id="email-input" placeholder="Email Address" autocomplete="email">
       </div>
@@ -470,7 +469,7 @@
       <div class="field-inner">
         <div class="field-glow" id="pass-glow"></div>
         <div class="field-icon">
-          <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+          <svg viewBox="0 0 24 24" width="18" height="18"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         </div>
         <input type="password" id="pass-input" placeholder="Password" autocomplete="current-password">
         <button type="button" class="field-toggle" id="pass-toggle">
@@ -481,11 +480,11 @@
     </div>
 
     <div class="auth-row" id="auth-row">
-      <label class="remember-label">
-        <input type="checkbox" id="remember-check">
-        Remember me
-      </label>
       <a href="#" class="forgot-link" id="forgot-link">Forgot password?</a>
+      <label class="remember-label">
+        Remember me
+        <input type="checkbox" id="remember-check">
+      </label>
     </div>
 
     <button class="auth-submit" id="auth-submit" type="button">
