@@ -12,7 +12,7 @@
   <title>LiveNew — Help</title>
 </head>
 <body>
-  <div class="ln-container" style="max-width:640px">
+  <div class="ln-container" style="max-width:640px;position:relative;z-index:1;background:var(--bg, #0f0d0a)">
     <div class="card" style="margin-top:40px">
       <h1 style="font-family:var(--font-display);font-size:2rem;margin-bottom:24px">Help Center</h1>
 
@@ -45,23 +45,19 @@
         <a href="/day" class="btn ghost" style="display:inline-block">Back to LiveNew</a>
       </div>
     </div>
-  </div><footer class="sticky-footer" style="clip-path: polygon(0% 0, 100% 0%, 100% 100%, 0 100%);">
+  </div>
+
+<footer class="sticky-footer">
   <div class="sf-fixed">
-    <div class="sf-sticky">
-      <div class="sf-wrap">
-        <!-- Glow -->
-        <div class="sf-glow" aria-hidden="true">
-          <div class="sf-glow-a"></div>
-          <div class="sf-glow-b"></div>
+    <div class="sf-inner">
+      <div class="sf-top">
+        <div class="sf-brand">
+          <a href="/" class="sf-brand-name">LiveNew</a>
+          <p class="sf-brand-desc">AI-powered cortisol regulation. A personalized day plan — morning, midday, and evening — matched to your stress, your goals, and your body.</p>
         </div>
-        <!-- Columns -->
-        <div class="sf-columns">
-          <div class="sf-brand">
-            <a href="/" class="sf-logo">LiveNew</a>
-            <p class="sf-tagline">AI-powered cortisol regulation. A personalized day plan — morning, midday, and evening — matched to your stress, your goals, and your body.</p>
-          </div>
-          <div class="sf-group">
-            <h4>PRODUCT</h4>
+        <div class="sf-links">
+          <div class="sf-col">
+            <h4>Product</h4>
             <ul>
               <li><a href="/">Home</a></li>
               <li><a href="/day">Your Day Plan</a></li>
@@ -69,29 +65,30 @@
               <li><a href="/account">Account</a></li>
             </ul>
           </div>
-          <div class="sf-group">
-            <h4>RESOURCES</h4>
+          <div class="sf-col">
+            <h4>Resources</h4>
             <ul>
               <li><a href="/help">Help Center</a></li>
               <li><a href="mailto:support@livenew.app">Contact</a></li>
             </ul>
           </div>
-          <div class="sf-group">
-            <h4>LEGAL</h4>
+          <div class="sf-col">
+            <h4>Legal</h4>
             <ul>
               <li><a href="/terms">Terms of Service</a></li>
               <li><a href="/privacy">Privacy Policy</a></li>
             </ul>
           </div>
         </div>
-        <!-- Bottom -->
-        <div class="sf-bottom">
-          <p>&copy; 2026 LiveNew. All rights reserved.</p>
-          <p>support@livenew.app</p>
-        </div>
+      </div>
+      <div class="sf-bar">
+        <p>&copy; 2026 LiveNew. All rights reserved.</p>
+        <p>support@livenew.app</p>
       </div>
     </div>
   </div>
 </footer>
+
+
 </body>
 </html>
