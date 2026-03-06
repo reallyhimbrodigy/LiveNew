@@ -18,10 +18,7 @@ import { runContentChecks } from "../domain/content/checks.js";
 import { hashJSON, sanitizeContentItem, sanitizePack } from "../domain/content/snapshotHash.js";
 import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
-import { generateMove } from "../domain/aiMove.js";
-import { generateReset } from "../domain/aiReset.js";
-import { generateNutrition } from "../domain/aiNutrition.js";
-import { generateWindDown } from "../domain/aiWindDown.js";
+import { generateDayPlan } from "../domain/aiDayPlan.js";
 import { generateInsight } from "../domain/aiInsight.js";
 import { buildWeekSkeleton } from "../domain/weekPlanner.js";
 import { computeContinuityMeta } from "../domain/continuity.js";
@@ -2771,103 +2768,30 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       }, 10000);
 
       // AI-powered personalized plan
-      const checkinData = context.checkIn || {};
-      const userGoal = baselineResolved?.constraints?.goal || null;
-      const rawEnergy = checkinData.energy;
-      const energyLabel =
-        typeof rawEnergy === "string"
-          ? rawEnergy
-          : rawEnergy <= 4
-            ? "low"
-            : rawEnergy >= 8
-              ? "high"
-              : "med";
-      const sleepQualityNum = Number(checkinData.sleepQuality);
-      const actualSleepHours =
-        checkinData.sleepHours ??
-        (Number.isFinite(sleepQualityNum) ? Math.round((sleepQualityNum / 10) * 12 * 2) / 2 : 7);
       const goal = checkInRaw?.goal || "calm";
       const stressSource = checkInRaw?.stressSource || "work";
       const injuries = Array.isArray(checkInRaw?.injuries) ? checkInRaw.injuries : [];
-      const aiInput = {
-        stress: checkinData.stress ?? 5,
-        energy: energyLabel,
-        sleepHours: actualSleepHours,
-        timeMin: checkinData.timeAvailableMin ?? 10,
-        goal: goal || userGoal,
-        stressSource,
-        injuries,
-        wakeTime: checkInRaw?.wakeTime || "normal",
-      };
-
-      const [moveResult, resetResult, nutritionResult, windDownResult] = await Promise.allSettled([
-        generateMove(aiInput),
-        aiInput.stress > 3 ? generateReset(aiInput) : Promise.resolve(null),
-        generateNutrition(aiInput),
-        generateWindDown(aiInput),
-      ]);
-
-      const aiMove = moveResult.status === "fulfilled" ? moveResult.value : null;
-      const aiReset = resetResult.status === "fulfilled" ? resetResult.value : null;
-      const aiNutrition = nutritionResult.status === "fulfilled" ? nutritionResult.value : null;
-      const aiWindDown = windDownResult.status === "fulfilled" ? windDownResult.value : null;
-      if (windDownResult.status === "rejected") console.error("[AI_WINDDOWN_FAILED]", windDownResult.reason?.message);
-
-      if (!aiMove && !aiReset && !aiNutrition) {
-        console.error("[AI_ALL_FAILED]", {
-          move: moveResult.reason?.message || "null",
-          reset: resetResult.reason?.message || "null",
-          nutrition: nutritionResult.reason?.message || "null",
+      let dayPlan = null;
+      try {
+        dayPlan = await generateDayPlan({
+          stress: checkIn.stress,
+          goal: goal || "calm",
+          stressSource: stressSource || "work",
+          timeMin: checkIn.timeAvailableMin || 10,
+          injuries: injuries || [],
         });
-        clearInterval(keepAlive);
-        keepAlive = null;
-        if (!res.writableEnded) {
-          if (res.headersSent) {
-            res.end(
-              JSON.stringify({
-                ok: false,
-                error: { code: "ai_unavailable", message: "Our servers are busy. Please try again in a moment." },
-              })
-            );
-          } else {
-            sendError(res, 503, "ai_unavailable", "Our servers are busy. Please try again in a moment.");
-          }
-        }
-        return true;
+      } catch (err) {
+        console.error("[DAYPLAN_FAILED]", err?.message);
       }
 
-      if (aiMove) {
-        today.movement = {
-          id: aiMove.id,
-          title: aiMove.title,
-          description: aiMove.description,
-          phases: aiMove.phases,
-          durationMin: aiInput.timeMin,
-          minutes: aiInput.timeMin,
-          intensity: "adaptive",
-        };
+      if (!dayPlan) {
+        console.error("[DAYPLAN_NULL] AI returned no plan");
       }
 
-      if (aiReset) {
-        today.reset = {
-          id: aiReset.id,
-          title: aiReset.title,
-          description: aiReset.description,
-          phases: aiReset.phases,
-          durationSec: 300,
-          seconds: 300,
-          steps: [],
-        };
-      }
-
-      today.nutrition = {
-        id: today.nutrition?.id || `ai_nutrition_${Date.now()}`,
-        title: "Nutrition",
-        morning: aiNutrition?.morning || null,
-        evening: aiNutrition?.evening || null,
-      };
-
-      today.winddown = aiWindDown || null;
+      today.movement = dayPlan?.morning || null;
+      today.reset = dayPlan?.midday || null;
+      today.winddown = dayPlan?.evening || null;
+      today.nutrition = dayPlan?.nutrition || { morning: null, evening: null };
 
       const normalizedToday = ensureTodayContract(today, res);
       if (!normalizedToday) {
@@ -2878,7 +2802,14 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
       clearInterval(keepAlive);
       keepAlive = null;
-      body = { userId: auth.userId, ...normalizedToday };
+      const responseContract = {
+        ...normalizedToday,
+        movement: dayPlan?.morning || null,
+        reset: dayPlan?.midday || null,
+        winddown: dayPlan?.evening || null,
+        nutrition: dayPlan?.nutrition || { morning: null, evening: null },
+      };
+      body = { userId: auth.userId, ...responseContract };
       if (res?.livenewRequestId) body.requestId = res.livenewRequestId;
       attachDbStats(res);
       res.end(JSON.stringify(body));

@@ -32,8 +32,8 @@ self.addEventListener("fetch", (e) => {
 self.addEventListener("message", (e) => {
   if (e.data?.type === "schedule-notifications") {
     const { schedule } = e.data;
-    scheduleNotification(schedule.midday, "Your midday reset is ready", "Take 5 minutes to bring your stress down.");
-    scheduleNotification(schedule.evening, "Time to wind down", "Your evening wind-down is ready.");
+    scheduleNotification(schedule.midday, "Your midday plan is ready", "Take 5 minutes to bring your stress down.");
+    scheduleNotification(schedule.evening, "Your evening plan is ready", "Your evening plan is ready.");
   }
 });
 

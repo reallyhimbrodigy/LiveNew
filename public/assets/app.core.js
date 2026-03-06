@@ -465,7 +465,7 @@ function populateTodayScreen(res, stress, wake) {
     if (activeCard) activeCard.classList.add("hidden");
     if (nextUp) nextUp.classList.add("hidden");
     if (allDoneEl) {
-      const contextMap = { morning: "Morning movement", midday: "Midday reset", evening: "Evening wind-down" };
+      const contextMap = { morning: "Morning", midday: "Midday", evening: "Evening" };
       const checkmarks = sessions.map((s) => `<div class="done-check">✓ ${contextMap[s.key] || s.title}</div>`).join("");
       allDoneEl.innerHTML = `
         <h2 class="done-heading">You're done for today</h2>
@@ -484,7 +484,7 @@ function populateTodayScreen(res, stress, wake) {
     const descEl = qs("#active-desc");
     const startBtn = qs("#active-start-btn");
 
-    const contextMap = { morning: "Get moving", midday: "Bring it down", evening: "Wind down" };
+    const contextMap = { morning: "Your morning", midday: "Your midday", evening: "Your evening" };
     const session = nextSession.session || {};
     const totalMin = Array.isArray(session.phases)
       ? Math.round(session.phases.reduce((sum, p) => sum + (p.minutes || 0), 0))
@@ -531,7 +531,7 @@ function populateTodayScreen(res, stress, wake) {
   if (completedList) {
     const doneSessions = sessions.filter((s) => s.done);
     if (doneSessions.length > 0 && !allDone) {
-      const contextMap = { morning: "Morning movement", midday: "Midday reset", evening: "Evening wind-down" };
+      const contextMap = { morning: "Morning", midday: "Midday", evening: "Evening" };
       completedList.innerHTML = doneSessions
         .map((s) => `<div class="completed-item">✓ ${contextMap[s.key] || s.title}</div>`)
         .join("");
@@ -1847,9 +1847,9 @@ function initDay({ initialDateISO } = {}) {
       showStep("loading");
       const statusEl = document.getElementById("loading-status");
       const messages = [
-        "Building your morning movement...",
-        "Creating your midday reset...",
-        "Planning your evening wind-down...",
+        "Building your day...",
+        "Personalizing your plan...",
+        "Almost ready...",
         "Choosing your nutrition...",
         "Finalizing your plan...",
       ];
