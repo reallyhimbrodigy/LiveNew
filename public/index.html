@@ -1,429 +1,713 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <link rel="icon" href="/favicon.ico" />
-  <title>LiveNew</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0f0d0a">
+  <meta name="description" content="LiveNew — daily cortisol regulation. Movement, resets, and nutrition matched to how you feel. Lower your stress in 5 minutes a day.">
+  <link rel="manifest" href="/manifest.json">
+  <link rel="apple-touch-icon" href="/assets/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <title>LiveNew — Lower your stress. Every day.</title>
   <style>
-    :root{
-      --bg:#FBF8F1;
-      --surface:#FFFFFF;
-      --text:#141210;
-      --muted:#5A544B;
-      --line:#E9E2D6;
-      --beige:#C8B08A;
-      --beige-2:#B79F79;
-      --shadow:0 10px 30px rgba(18,18,18,.06);
-      --radius:22px;
-      --radius-sm:16px;
-      --max:1100px;
-      --space-1:8px;
-      --space-2:12px;
-      --space-3:16px;
-      --space-4:24px;
-      --space-5:32px;
-      --space-6:48px;
-      --space-7:72px;
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0f0d0a;
+      --bg-warm: #141210;
+      --gold: #c4a86c;
+      --gold-soft: rgba(196, 168, 108, 0.08);
+      --gold-glow: rgba(196, 168, 108, 0.15);
+      --text: #e8e0d4;
+      --text-muted: #8a8070;
+      --text-dim: #5a5248;
+      --line: rgba(196, 168, 108, 0.12);
+      --font-display: 'Cormorant Garamond', Georgia, serif;
+      --font-body: 'DM Sans', -apple-system, sans-serif;
     }
 
-    *{ box-sizing:border-box; margin:0; padding:0; }
-    html,body{ height:100%; scroll-behavior:smooth; }
-    body.page{
-      background:var(--bg);
-      color:var(--text);
-      font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Inter, Roboto, Helvetica, Arial, "Apple Color Emoji", "Segoe UI Emoji";
-      line-height:1.6;
-      font-size:18px;
-      display:flex;
-      flex-direction:column;
-      min-height:100vh;
-      overflow-x:hidden;
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+      min-height: 100vh;
     }
 
-    a{ color:inherit; text-decoration:none; }
-    a:visited{ color:inherit; }
-    a:hover{ text-decoration:none; }
-
-    .topbar{
-      position:fixed;
-      top:0; left:0; right:0;
-      height:64px;
-      display:flex;
-      align-items:center;
-      background:rgba(255,255,255,.80);
-      backdrop-filter: blur(12px);
-      border-bottom:1px solid rgba(20,20,20,.08);
-      z-index:1000;
-    }
-    .topbar-inner{
-      max-width:var(--max);
-      width:100%;
-      margin:0 auto;
-      padding:0 20px;
-      display:flex;
-      align-items:center;
-      justify-content:space-between;
-      gap:16px;
-    }
-    .brand{
-      font-weight:750;
-      letter-spacing:-0.02em;
-      font-size:18px;
-    }
-    .nav{
-      display:flex;
-      gap:10px;
-      flex-wrap:wrap;
-      justify-content:flex-end;
-    }
-    .nav a{
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      height:36px;
-      padding:0 14px;
-      border-radius:999px;
-      border:1px solid var(--line);
-      color:var(--muted);
-      font-size:13px;
-      background:#fff;
-      transition:transform .08s ease, background .12s ease;
-    }
-    .nav a:hover{ background:rgba(20,20,20,.04); color:var(--text); }
-
-    .main{
-      max-width:var(--max);
-      margin:0 auto;
-      width:100%;
-      padding:96px 20px 60px;
-      flex:1;
+    #mouse-gradient {
+      position: fixed;
+      width: 500px;
+      height: 500px;
+      pointer-events: none;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(196, 168, 108, 0.04), rgba(196, 168, 108, 0.02), transparent 70%);
+      transform: translate(-50%, -50%);
+      will-change: left, top, opacity;
+      transition: left 80ms linear, top 80ms linear, opacity 400ms ease;
+      opacity: 0;
+      z-index: 1;
+      filter: blur(40px);
     }
 
-    .hero{
-      width:100vw;
-      margin-left:calc(50% - 50vw);
-      border-top:1px solid var(--line);
-      border-bottom:1px solid var(--line);
-      background:linear-gradient(180deg, rgba(200,176,138,.10), rgba(200,176,138,.04));
-      padding:72px 20px;
-    }
-    .hero-inner{
-      max-width:var(--max);
-      margin:0 auto;
-      text-align:center;
-    }
-    .kicker{
-      display:inline-flex;
-      align-items:center;
-      padding:6px 12px;
-      border-radius:999px;
-      border:1px solid var(--line);
-      background:#fff;
-      font-size:12px;
-      letter-spacing:.12em;
-      text-transform:uppercase;
-      color:var(--muted);
-    }
-    .h1{
-      margin-top:16px;
-      font-size:clamp(44px, 6vw, 72px);
-      font-weight:700;
-      line-height:1.02;
-      letter-spacing:-0.03em;
-    }
-    .lead{
-      margin:14px auto 0;
-      max-width:68ch;
-      color:var(--muted);
-    }
-    .cta-row{
-      margin-top:24px;
-      display:flex;
-      gap:12px;
-      justify-content:center;
-      flex-wrap:wrap;
+    @media (max-width: 768px) {
+      #mouse-gradient { width: 300px; height: 300px; }
     }
 
-    .btn{
-      height:48px;
-      padding:0 20px;
-      border-radius:var(--radius-sm);
-      border:1px solid var(--line);
-      background:#fff;
-      color:var(--text);
-      font-weight:650;
-      font-size:14px;
-      cursor:pointer;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      transition:transform .08s ease, background .12s ease;
-    }
-    .btn:hover{ transform:translateY(-1px); }
-    .btn-primary{ background:var(--beige); border-color:var(--beige); }
-    .btn-primary:hover{ background:var(--beige-2); }
-    .btn-secondary:hover{ background:rgba(20,20,20,.04); }
-    .btn:focus-visible, .nav a:focus-visible{
-      outline:none;
-      box-shadow:0 0 0 4px rgba(200,176,138,.45);
+    .ripple {
+      position: fixed;
+      width: 6px;
+      height: 6px;
+      background: var(--gold);
+      border-radius: 50%;
+      transform: translate(-50%, -50%);
+      pointer-events: none;
+      opacity: 0.6;
+      animation: ripple-out 0.8s ease-out forwards;
+      z-index: 9999;
     }
 
-    .small{ margin-top:10px; color:var(--muted); font-size:13px; }
-
-    .section{ padding-top:var(--space-6); }
-    .section-title{
-      font-size:clamp(28px, 3.2vw, 40px);
-      letter-spacing:-0.02em;
-    }
-    .section-sub{
-      margin-top:8px;
-      color:var(--muted);
-      max-width:68ch;
+    @keyframes ripple-out {
+      0% { transform: translate(-50%, -50%) scale(1); opacity: 0.6; }
+      100% { transform: translate(-50%, -50%) scale(8); opacity: 0; }
     }
 
-    .split{
-      display:grid;
-      grid-template-columns:1.1fr .9fr;
-      gap:24px;
-      align-items:start;
-      margin-top:18px;
-    }
-    .cards{
-      display:grid;
-      grid-template-columns:repeat(3, 1fr);
-      gap:14px;
-    }
-    .card{
-      background:var(--surface);
-      border:1px solid var(--line);
-      border-radius:var(--radius);
-      padding:18px;
-      box-shadow:var(--shadow);
-    }
-    .card-title{ font-weight:700; letter-spacing:-0.01em; }
-    .card-desc{ margin-top:6px; color:var(--muted); font-size:14px; }
-
-    .steps{
-      display:grid;
-      grid-template-columns:repeat(3, 1fr);
-      gap:14px;
-    }
-    .step-num{
-      width:28px;
-      height:28px;
-      border-radius:999px;
-      background:var(--beige);
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      font-weight:700;
-      font-size:13px;
-      margin-bottom:10px;
+    .bg-grid {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 0;
     }
 
-    .cta-card{
-      max-width:720px;
-      margin:0 auto;
-      text-align:center;
+    .grid-line {
+      stroke: var(--gold);
+      stroke-width: 0.5;
+      opacity: 0;
+      stroke-dasharray: 5 5;
+      stroke-dashoffset: 1000;
+      animation: grid-draw 2.5s ease-out forwards;
     }
 
-    .footer{
-      width:100vw;
-      margin-left:calc(50% - 50vw);
-      background:rgba(200,176,138,0.10);
-      border-top:1px solid var(--line);
-      padding:32px 20px 36px;
-    }
-    .footer-panel{
-      max-width:var(--max);
-      margin:0 auto;
-      background:#fff;
-      border:1px solid var(--line);
-      border-radius:var(--radius);
-      padding:22px;
-      box-shadow:var(--shadow);
-    }
-    .footer-grid{
-      display:grid;
-      grid-template-columns:1.2fr 1fr;
-      gap:24px;
-    }
-    .footer-title{
-      font-size:12px;
-      letter-spacing:.14em;
-      text-transform:uppercase;
-      color:var(--muted);
-      margin-bottom:10px;
-    }
-    .footer-links{
-      display:grid;
-      grid-template-columns:1fr 1fr;
-      gap:8px 18px;
-      color:var(--muted);
-      font-size:14px;
-    }
-    .footer-links a:hover{ color:var(--text); text-decoration:underline; }
-    .footer-bottom{
-      margin-top:18px;
-      padding-top:14px;
-      border-top:1px solid var(--line);
-      color:var(--muted);
-      font-size:13px;
+    @keyframes grid-draw {
+      0% { stroke-dashoffset: 1000; opacity: 0; }
+      50% { opacity: 0.08; }
+      100% { stroke-dashoffset: 0; opacity: 0.04; }
     }
 
-    @media (max-width:900px){
-      .split{ grid-template-columns:1fr; }
-      .cards{ grid-template-columns:1fr; }
-      .steps{ grid-template-columns:1fr; }
-      .nav{ justify-content:center; }
-      .hero{ padding:56px 20px; }
+    .detail-dot {
+      fill: var(--gold);
+      opacity: 0;
+      animation: dot-pulse 4s ease-in-out infinite;
     }
-    @media (max-width:560px){
-      .main{ padding:92px 16px 50px; }
-      .btn{ width:100%; }
-      .footer-links{ grid-template-columns:1fr; }
+
+    @keyframes dot-pulse {
+      0%, 100% { opacity: 0.05; }
+      50% { opacity: 0.15; }
+    }
+
+    .word {
+      display: inline-block;
+      opacity: 0;
+      margin: 0 0.08em;
+      transition: color 0.3s ease, transform 0.3s ease, text-shadow 0.3s ease;
+    }
+
+    .word.visible {
+      animation: word-reveal 0.9s ease-out forwards;
+    }
+
+    .word:hover {
+      color: var(--gold);
+      transform: translateY(-2px);
+      text-shadow: 0 0 30px rgba(196, 168, 108, 0.3);
+    }
+
+    @keyframes word-reveal {
+      0% { opacity: 0; transform: translateY(30px) scale(0.85); filter: blur(8px); }
+      60% { opacity: 0.9; transform: translateY(5px) scale(0.98); filter: blur(1px); }
+      100% { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); }
+    }
+
+    .fade-in {
+      opacity: 0;
+      animation: simple-fade 1s ease-out forwards;
+    }
+
+    @keyframes simple-fade {
+      to { opacity: 1; }
+    }
+
+    .corner {
+      position: absolute;
+      width: 40px;
+      height: 40px;
+      opacity: 0;
+      animation: word-reveal 1s ease-out forwards;
+    }
+
+    .corner-dot {
+      width: 3px;
+      height: 3px;
+      background: var(--gold);
+      border-radius: 50%;
+      opacity: 0.25;
+      position: absolute;
+    }
+
+    .particle {
+      position: absolute;
+      width: 2px;
+      height: 2px;
+      background: var(--gold);
+      border-radius: 50%;
+      opacity: 0;
+      animation: float 5s ease-in-out infinite;
+      animation-play-state: paused;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0) translateX(0); opacity: 0.1; }
+      25% { transform: translateY(-12px) translateX(6px); opacity: 0.3; }
+      50% { transform: translateY(-6px) translateX(-4px); opacity: 0.2; }
+      75% { transform: translateY(-18px) translateX(8px); opacity: 0.4; }
+    }
+
+    .divider {
+      width: 48px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+      opacity: 0.25;
+      margin: 0 auto;
+    }
+
+    @media (min-width: 640px) { .divider { width: 64px; } }
+
+    .page {
+      position: relative;
+      z-index: 10;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      padding: 10vh 24px;
+    }
+
+    @media (min-width: 640px) { .page { padding: 10vh 48px; } }
+    @media (min-width: 1024px) { .page { padding: 12vh 80px; } }
+
+    .top { text-align: center; }
+
+    .top-label {
+      font-family: var(--font-body);
+      font-size: 0.7rem;
+      font-weight: 300;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+
+    @media (min-width: 640px) { .top-label { font-size: 0.75rem; } }
+
+    .center {
+      text-align: center;
+      max-width: 860px;
+      position: relative;
+    }
+
+    .headline {
+      font-family: var(--font-display);
+      font-weight: 300;
+      font-size: 2.2rem;
+      line-height: 1.15;
+      letter-spacing: -0.01em;
+      color: var(--text);
+    }
+
+    @media (min-width: 640px) { .headline { font-size: 3.2rem; } }
+    @media (min-width: 768px) { .headline { font-size: 4rem; } }
+    @media (min-width: 1024px) { .headline { font-size: 4.8rem; } }
+
+    .subline {
+      font-family: var(--font-display);
+      font-weight: 300;
+      font-size: 1.15rem;
+      line-height: 1.6;
+      letter-spacing: 0.02em;
+      color: var(--text-muted);
+      margin-top: 24px;
+    }
+
+    @media (min-width: 640px) { .subline { font-size: 1.5rem; margin-top: 32px; } }
+    @media (min-width: 768px) { .subline { font-size: 1.8rem; } }
+    @media (min-width: 1024px) { .subline { font-size: 2.1rem; } }
+
+    .headline-wrap {
+      position: relative;
+      display: inline;
+    }
+
+    .headline-wrap::after {
+      content: '';
+      position: absolute;
+      bottom: -6px;
+      left: 0;
+      width: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--gold), transparent);
+      animation: underline-grow 2s ease-out forwards;
+      animation-delay: 2.5s;
+    }
+
+    @keyframes underline-grow { to { width: 100%; } }
+
+    .side-line {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      height: 1px;
+      background: var(--gold);
+      opacity: 0;
+      animation: word-reveal 1s ease-out forwards;
+    }
+
+    .side-line-left { left: -32px; width: 16px; animation-delay: 3.5s; }
+    .side-line-right { right: -32px; width: 16px; animation-delay: 3.7s; }
+
+    @media (max-width: 768px) { .side-line { display: none; } }
+
+    .cta-area {
+      margin-top: 48px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+      opacity: 0;
+      animation: simple-fade 1s ease-out forwards;
+      animation-delay: 3.8s;
+    }
+
+    .cta-btn {
+      font-family: var(--font-body);
+      font-size: 0.95rem;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+      padding: 16px 48px;
+      border: 1px solid var(--gold);
+      background: transparent;
+      color: var(--gold);
+      border-radius: 0;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    .cta-btn:hover {
+      background: var(--gold);
+      color: var(--bg);
+    }
+
+    .cta-sub {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      letter-spacing: 0.05em;
+    }
+
+    .bottom { text-align: center; }
+
+    .bottom-label {
+      font-family: var(--font-body);
+      font-size: 0.65rem;
+      font-weight: 300;
+      letter-spacing: 0.25em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+    }
+
+    @media (min-width: 640px) { .bottom-label { font-size: 0.7rem; } }
+
+    .bottom-dots {
+      display: flex;
+      justify-content: center;
+      gap: 12px;
+      margin-top: 20px;
+      opacity: 0;
+      animation: simple-fade 1s ease-out forwards;
+      animation-delay: 5s;
+    }
+
+    .bottom-dot {
+      width: 3px;
+      height: 3px;
+      background: var(--gold);
+      border-radius: 50%;
+    }
+
+    .bottom-dot:nth-child(1) { opacity: 0.2; }
+    .bottom-dot:nth-child(2) { opacity: 0.4; }
+    .bottom-dot:nth-child(3) { opacity: 0.2; }
+
+    .login-link {
+      position: absolute;
+      top: 24px;
+      right: 24px;
+      font-family: var(--font-body);
+      font-size: 0.8rem;
+      font-weight: 400;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      text-decoration: none;
+      transition: color 0.3s ease;
+      z-index: 20;
+      opacity: 0;
+      animation: simple-fade 1s ease-out forwards;
+      animation-delay: 4.5s;
+    }
+
+    .login-link:hover { color: var(--gold); }
+
+    @media (min-width: 640px) { .login-link { top: 32px; right: 40px; } }
+
+    .brand {
+      position: absolute;
+      top: 24px;
+      left: 24px;
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      color: var(--text);
+      z-index: 20;
+      opacity: 0;
+      animation: simple-fade 1s ease-out forwards;
+      animation-delay: 0.3s;
+      text-decoration: none;
+    }
+
+    @media (min-width: 640px) { .brand { top: 32px; left: 40px; font-size: 1.2rem; } }
+
+    .scroll-section {
+      position: relative;
+      z-index: 10;
+      padding: 80px 24px;
+      max-width: 680px;
+      margin: 0 auto;
+    }
+
+    @media (min-width: 640px) { .scroll-section { padding: 120px 48px; } }
+
+    .feature-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 24px;
+      padding: 40px 0;
+      border-bottom: 1px solid var(--line);
+      opacity: 0;
+      transform: translateY(20px);
+      transition: opacity 0.8s ease, transform 0.8s ease;
+    }
+
+    .feature-row.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    .feature-row:last-child { border-bottom: none; }
+
+    .feature-time {
+      font-family: var(--font-body);
+      font-size: 0.7rem;
+      font-weight: 300;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: var(--gold);
+      width: 80px;
+      flex-shrink: 0;
+      padding-top: 4px;
+    }
+
+    .feature-content h3 {
+      font-family: var(--font-display);
+      font-size: 1.4rem;
+      font-weight: 400;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    @media (min-width: 640px) { .feature-content h3 { font-size: 1.6rem; } }
+
+    .feature-content p {
+      font-size: 0.9rem;
+      font-weight: 300;
+      line-height: 1.7;
+      color: var(--text-muted);
+    }
+
+    .final-cta {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      padding: 80px 24px 120px;
+    }
+
+    .final-cta h2 {
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      font-weight: 300;
+      color: var(--text);
+      margin-bottom: 24px;
+    }
+
+    @media (min-width: 640px) { .final-cta h2 { font-size: 2.4rem; } }
+
+    .final-cta p {
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      margin-top: 16px;
+    }
+
+    .footer {
+      position: relative;
+      z-index: 10;
+      text-align: center;
+      padding: 40px 24px;
+      border-top: 1px solid var(--line);
+    }
+
+    .footer-links {
+      display: flex;
+      justify-content: center;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .footer-links a {
+      font-size: 0.75rem;
+      font-weight: 300;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      text-decoration: none;
+      transition: color 0.3s;
+    }
+
+    .footer-links a:hover { color: var(--gold); }
+
+    .footer-copy {
+      font-size: 0.7rem;
+      color: var(--text-dim);
+      margin-top: 20px;
+      opacity: 0.5;
     }
   </style>
 </head>
-<body class="page">
-  <header class="topbar">
-    <div class="topbar-inner">
-      <div class="brand">LiveNew</div>
-      <nav class="nav">
-        <a href="/help-center.html">Help Center</a>
-        <a href="/privacy.html">Privacy</a>
-        <a href="/terms.html">Terms</a>
-        <a href="/contact.html">Contact</a>
-        <a href="/reset-access.html">Reset Access</a>
-      </nav>
+<body>
+
+  <svg class="bg-grid" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+    <defs>
+      <pattern id="grid" width="60" height="60" patternUnits="userSpaceOnUse">
+        <path d="M 60 0 L 0 0 0 60" fill="none" stroke="rgba(196, 168, 108, 0.03)" stroke-width="0.5"/>
+      </pattern>
+    </defs>
+    <rect width="100%" height="100%" fill="url(#grid)"/>
+    <line x1="0" y1="20%" x2="100%" y2="20%" class="grid-line" style="animation-delay: 0.5s"/>
+    <line x1="0" y1="80%" x2="100%" y2="80%" class="grid-line" style="animation-delay: 1s"/>
+    <line x1="20%" y1="0" x2="20%" y2="100%" class="grid-line" style="animation-delay: 1.5s"/>
+    <line x1="80%" y1="0" x2="80%" y2="100%" class="grid-line" style="animation-delay: 2s"/>
+    <circle cx="20%" cy="20%" r="2" class="detail-dot" style="animation-delay: 3s"/>
+    <circle cx="80%" cy="20%" r="2" class="detail-dot" style="animation-delay: 3.3s"/>
+    <circle cx="20%" cy="80%" r="2" class="detail-dot" style="animation-delay: 3.6s"/>
+    <circle cx="80%" cy="80%" r="2" class="detail-dot" style="animation-delay: 3.9s"/>
+  </svg>
+
+  <div id="mouse-gradient"></div>
+
+  <a href="/" class="brand">LiveNew</a>
+  <a href="/login.html" class="login-link">Log in</a>
+
+  <div class="corner" style="top:16px;left:16px;animation-delay:4.2s"><div class="corner-dot" style="top:0;left:0"></div></div>
+  <div class="corner" style="top:16px;right:16px;animation-delay:4.4s"><div class="corner-dot" style="top:0;right:0"></div></div>
+  <div class="corner" style="bottom:16px;left:16px;animation-delay:4.6s"><div class="corner-dot" style="bottom:0;left:0"></div></div>
+  <div class="corner" style="bottom:16px;right:16px;animation-delay:4.8s"><div class="corner-dot" style="bottom:0;right:0"></div></div>
+
+  <div class="particle" style="top:20%;left:12%;animation-delay:0.5s"></div>
+  <div class="particle" style="top:55%;left:88%;animation-delay:1.2s"></div>
+  <div class="particle" style="top:35%;left:8%;animation-delay:1.8s"></div>
+  <div class="particle" style="top:70%;left:92%;animation-delay:2.4s"></div>
+  <div class="particle" style="top:15%;left:75%;animation-delay:3s"></div>
+  <div class="particle" style="top:80%;left:20%;animation-delay:3.5s"></div>
+
+  <div class="page">
+    <div class="top">
+      <div class="top-label">
+        <span class="word" data-delay="0">Daily</span>
+        <span class="word" data-delay="200">cortisol</span>
+        <span class="word" data-delay="400">regulation.</span>
+      </div>
+      <div class="divider" style="margin-top:16px; opacity:0; animation: simple-fade 1s ease-out forwards; animation-delay: 0.8s;"></div>
     </div>
-  </header>
 
-  <main class="main">
-    <section class="hero" id="top">
-      <div class="hero-inner">
-        <span class="kicker">Reset-first stress regulation</span>
-        <h1 class="h1">A calmer day, built on a daily reset.</h1>
-        <p class="lead">A 2–5 minute reset first, then a small plan that adapts without chaos.</p>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="/signup.html">Get started</a>
-          <a class="btn btn-secondary" href="/login.html">Log in</a>
-          <a id="continue-btn" class="btn btn-secondary" href="/day" style="display:none;">Continue</a>
+    <div class="center">
+      <div class="side-line side-line-left"></div>
+      <div class="side-line side-line-right"></div>
+
+      <h1 class="headline">
+        <div style="margin-bottom:16px">
+          <span class="word headline-wrap" data-delay="800">Lower</span>
+          <span class="word" data-delay="950">your</span>
+          <span class="word" data-delay="1100">stress.</span>
         </div>
-        <div class="small">Not medical advice.</div>
-      </div>
-    </section>
-
-    <section class="section" id="different">
-      <div class="split">
         <div>
-          <h2 class="section-title">Why it’s different</h2>
-          <p class="section-sub">Reset-first, today-first, and predictable by design.</p>
+          <span class="word" data-delay="1400">Every</span>
+          <span class="word" data-delay="1550">day.</span>
         </div>
-        <div class="cards">
-          <div class="card">
-            <div class="card-title">Reset-first</div>
-            <div class="card-desc">Regulate before you do more.</div>
-          </div>
-          <div class="card">
-            <div class="card-title">Today-first</div>
-            <div class="card-desc">One doable day. No backlog guilt.</div>
-          </div>
-          <div class="card">
-            <div class="card-title">Deterministic</div>
-            <div class="card-desc">Same inputs → stable plan you can trust.</div>
-          </div>
-        </div>
-      </div>
-    </section>
+      </h1>
 
-    <section class="section" id="how">
-      <div class="split">
-        <div>
-          <h2 class="section-title">How it works</h2>
-          <p class="section-sub">Three steps, no overhead.</p>
-        </div>
-        <div class="steps">
-          <div class="card">
-            <div class="step-num">1</div>
-            <div class="card-title">Check‑in</div>
-            <div class="card-desc">Stress, sleep, energy, time.</div>
-          </div>
-          <div class="card">
-            <div class="step-num">2</div>
-            <div class="card-title">Reset</div>
-            <div class="card-desc">2–5 minutes.</div>
-          </div>
-          <div class="card">
-            <div class="step-num">3</div>
-            <div class="card-title">Optional</div>
-            <div class="card-desc">Movement + nutrition if it fits.</div>
-          </div>
-        </div>
+      <div class="subline">
+        <span class="word" data-delay="2000">Morning</span>
+        <span class="word" data-delay="2150">movement,</span>
+        <span class="word" data-delay="2300">midday</span>
+        <span class="word" data-delay="2450">reset,</span>
+        <span class="word" data-delay="2600">evening</span>
+        <span class="word" data-delay="2750">wind-down</span>
+        <span class="word" data-delay="2900">—</span>
+        <span class="word" data-delay="3050">matched</span>
+        <span class="word" data-delay="3200">to</span>
+        <span class="word" data-delay="3300">how</span>
+        <span class="word" data-delay="3400">you</span>
+        <span class="word" data-delay="3500">feel.</span>
       </div>
-    </section>
 
-    <section class="section" id="start">
-      <div class="cta-card card">
-        <h2 class="section-title">Start</h2>
-        <p class="section-sub">Create an account or log in to continue to Today.</p>
-        <div class="cta-row">
-          <a class="btn btn-primary" href="/signup.html">Get started</a>
-          <a class="btn btn-secondary" href="/login.html">Log in</a>
-        </div>
+      <div class="cta-area">
+        <a href="/signup.html" class="cta-btn">Start free</a>
+        <span class="cta-sub">No credit card. First day free.</span>
       </div>
-    </section>
-  </main>
+    </div>
+
+    <div class="bottom">
+      <div class="bottom-label">
+        <span class="word" data-delay="4000">Five</span>
+        <span class="word" data-delay="4200">minutes</span>
+        <span class="word" data-delay="4400">a</span>
+        <span class="word" data-delay="4500">day</span>
+        <span class="word" data-delay="4600">changes</span>
+        <span class="word" data-delay="4800">everything.</span>
+      </div>
+      <div class="bottom-dots">
+        <div class="bottom-dot"></div>
+        <div class="bottom-dot"></div>
+        <div class="bottom-dot"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="scroll-section">
+    <div class="feature-row" data-reveal>
+      <div class="feature-time">Morning</div>
+      <div class="feature-content">
+        <h3>Movement</h3>
+        <p>AI-generated sessions matched to your stress, energy, and goals. Not a workout — deliberate physical activity designed to discharge tension and sharpen your day.</p>
+      </div>
+    </div>
+
+    <div class="feature-row" data-reveal>
+      <div class="feature-time">Midday</div>
+      <div class="feature-content">
+        <h3>Reset</h3>
+        <p>Five minutes of coached physical techniques that bring you from stressed to calm. Pressure points, jaw releases, targeted breathing — real techniques, not generic advice.</p>
+      </div>
+    </div>
+
+    <div class="feature-row" data-reveal>
+      <div class="feature-time">Evening</div>
+      <div class="feature-content">
+        <h3>Wind-down</h3>
+        <p>The session that changes your cortisol curve. Ten minutes of lying-down techniques that prepare your body for deep sleep. This is where long-term change happens.</p>
+      </div>
+    </div>
+
+    <div class="feature-row" data-reveal>
+      <div class="feature-time">All day</div>
+      <div class="feature-content">
+        <h3>Nutrition</h3>
+        <p>Two timed food recommendations — morning and evening — specific to your goals. The right food at the right time supports everything else.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="final-cta">
+    <h2>Your body knows how to be calm.<br>LiveNew shows it the way.</h2>
+    <a href="/signup.html" class="cta-btn">Start free</a>
+    <p>$9.99/month after your first free day.</p>
+  </div>
 
   <footer class="footer">
-    <div class="footer-panel">
-      <div class="footer-grid">
-        <div>
-          <div class="footer-title">LiveNew</div>
-          <div class="section-sub" style="text-align:left">Reset-first stress regulation for a healthy daily rhythm.</div>
-        </div>
-        <div>
-          <div class="footer-title">Resources &amp; Company</div>
-          <div class="footer-links">
-            <a href="/help-center.html">Help Center</a>
-            <a href="/privacy.html">Privacy Policy</a>
-            <a href="/terms.html">Terms of Service</a>
-            <a href="/contact.html">Contact</a>
-            <a href="/reset-access.html">Reset Access</a>
-          </div>
-        </div>
-      </div>
-      <div class="footer-bottom">© 2026 LiveNew. All rights reserved.</div>
+    <div class="footer-links">
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+      <a href="/help">Help</a>
+      <a href="mailto:support@livenew.app">Contact</a>
     </div>
+    <div class="footer-copy">&copy; 2026 LiveNew. All rights reserved.</div>
   </footer>
 
   <script>
-    (function () {
-      function readCookie(name) {
-        const raw = document.cookie || "";
-        return raw.split(";").map((v) => v.trim()).find((v) => v.startsWith(name + "="))?.split("=")[1] || "";
-      }
-      function parseJwt(token) {
-        if (!token) return null;
-        const parts = token.split(".");
-        if (parts.length < 2) return null;
-        try {
-          const payload = parts[1].replace(/-/g, "+").replace(/_/g, "/");
-          return JSON.parse(atob(payload));
-        } catch {
-          return null;
+    document.addEventListener('DOMContentLoaded', () => {
+      const words = document.querySelectorAll('.word');
+      words.forEach(word => {
+        const delay = parseInt(word.dataset.delay) || 0;
+        setTimeout(() => word.classList.add('visible'), delay + 500);
+      });
+    });
+
+    const grad = document.getElementById('mouse-gradient');
+    document.addEventListener('mousemove', e => {
+      grad.style.left = e.clientX + 'px';
+      grad.style.top = e.clientY + 'px';
+      grad.style.opacity = '1';
+    });
+    document.addEventListener('mouseleave', () => {
+      grad.style.opacity = '0';
+    });
+
+    document.addEventListener('click', e => {
+      const ripple = document.createElement('div');
+      ripple.className = 'ripple';
+      ripple.style.left = e.clientX + 'px';
+      ripple.style.top = e.clientY + 'px';
+      document.body.appendChild(ripple);
+      setTimeout(() => ripple.remove(), 800);
+    });
+
+    const observer = new IntersectionObserver(entries => {
+      entries.forEach(entry => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('visible');
+          observer.unobserve(entry.target);
         }
+      });
+    }, { threshold: 0.15 });
+
+    document.querySelectorAll('[data-reveal]').forEach(el => observer.observe(el));
+
+    let particlesActivated = false;
+    window.addEventListener('scroll', () => {
+      if (!particlesActivated) {
+        particlesActivated = true;
+        document.querySelectorAll('.particle').forEach(p => {
+          p.style.animationPlayState = 'running';
+        });
       }
-      const token = readCookie("ln_token") || localStorage.getItem("livenew_access_token") || "";
-      const payload = parseJwt(token);
-      const exp = payload?.exp ? Number(payload.exp) : 0;
-      const now = Math.floor(Date.now() / 1000);
-      if (token && (!exp || exp > now)) {
-        const btn = document.getElementById("continue-btn");
-        if (btn) btn.style.display = "inline-flex";
-      }
-    })();
+    });
+
+    document.querySelectorAll('.word').forEach(w => {
+      w.addEventListener('mouseenter', () => { w.style.textShadow = '0 0 25px rgba(196, 168, 108, 0.35)'; });
+      w.addEventListener('mouseleave', () => { w.style.textShadow = 'none'; });
+    });
   </script>
+
 </body>
 </html>
