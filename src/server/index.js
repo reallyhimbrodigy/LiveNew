@@ -5854,6 +5854,81 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (pathname === "/v1/auth/login" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
+      const body = await parseJson(req);
+      const email = body?.email;
+      const password = body?.password;
+
+      if (!email || typeof email !== "string") {
+        sendError(res, 400, "email_required", "Email is required", "email");
+        return;
+      }
+      if (!password || typeof password !== "string") {
+        sendError(res, 400, "password_required", "Password is required", "password");
+        return;
+      }
+
+      const emailLower = email.trim().toLowerCase();
+
+      try {
+        const { data, error } = await supabaseAnon().auth.signInWithPassword({
+          email: emailLower,
+          password,
+        });
+
+        if (error) {
+          console.error("[auth][login] error", {
+            email: emailLower,
+            message: error.message,
+            status: error.status,
+          });
+
+          let userMessage = "Invalid email or password.";
+          let code = "INVALID_CREDENTIALS";
+
+          if (error.message?.includes("Email not confirmed")) {
+            userMessage = "Please check your email and confirm your account first.";
+            code = "EMAIL_NOT_CONFIRMED";
+          }
+
+          sendJson(res, 401, { ok: false, code, message: userMessage });
+          return;
+        }
+
+        const session = data?.session;
+        const user = data?.user;
+
+        if (!session) {
+          sendJson(res, 401, { ok: false, code: "NO_SESSION", message: "Could not create session." });
+          return;
+        }
+
+        const accessToken = session.access_token;
+        const refreshToken = session.refresh_token;
+        const maxAge = session.expires_in || 3600;
+        const secure = req.socket.encrypted || !config.isDevLike ? "; Secure" : "";
+
+        res.setHeader("Set-Cookie", [
+          `ln_token=${encodeURIComponent(accessToken)}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${maxAge}`,
+          `ln_refresh=${encodeURIComponent(refreshToken)}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${maxAge * 24}`,
+        ]);
+
+        console.log("[auth][login] ok", { email: emailLower, userId: user?.id });
+
+        sendJson(res, 200, {
+          ok: true,
+          userId: user?.id || null,
+          email: user?.email || emailLower,
+        });
+        return;
+      } catch (err) {
+        console.error("[auth][login] unexpected error", { message: err?.message || String(err) });
+        sendJson(res, 500, { ok: false, code: "LOGIN_FAILED", message: "Login failed. Please try again." });
+        return;
+      }
+    }
+
     if (pathname === "/v1/auth/resend-signup" && req.method === "POST") {
       if (!requireCsrf(req, res)) return;
       const body = await parseJson(req);

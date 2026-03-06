@@ -168,7 +168,7 @@
       background: transparent;
       border: none;
       outline: none;
-      padding: 16px 44px 8px 44px;
+      padding: 22px 44px 8px 44px;
       font-family: var(--font-body);
       font-size: 0.95rem;
       color: var(--text);
@@ -189,11 +189,12 @@
 
     .field input:focus ~ .field-label,
     .field input:not(:placeholder-shown) ~ .field-label {
-      top: 10px;
+      top: 4px;
       transform: translateY(0);
-      font-size: 0.7rem;
+      font-size: 0.65rem;
       color: var(--gold);
       font-weight: 500;
+      letter-spacing: 0.03em;
     }
 
     .field-toggle {
@@ -677,23 +678,79 @@
       submitBtn.disabled = true;
 
       try {
+        // Fetch CSRF token first
+        let csrfToken = null;
+        try {
+          const csrfRes = await fetch('/v1/csrf', { credentials: 'same-origin' });
+          const csrfData = await csrfRes.json();
+          csrfToken = csrfData?.token || csrfData?.csrfToken || null;
+        } catch {}
+
         const endpoint = isSignUp ? '/v1/auth/signup' : '/v1/auth/login';
-        const body = isSignUp ? { email, password, name } : { email, password };
+        const payload = isSignUp
+          ? { email, password, name, consent: true }
+          : { email, password };
+
+        const headers = { 'Content-Type': 'application/json' };
+        if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
 
         const res = await fetch(endpoint, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers,
           credentials: 'same-origin',
-          body: JSON.stringify(body),
+          body: JSON.stringify(payload),
         });
 
         const data = await res.json();
 
-        if (!res.ok || data.error) {
-          throw new Error(data.error?.message || data.message || 'Something went wrong');
+        // Handle specific error codes
+        if (!res.ok) {
+          if (data.code === 'ACCOUNT_EXISTS') {
+            authError.textContent = 'This account already exists.';
+            authError.classList.add('show');
+            submitBtn.classList.remove('loading');
+            submitBtn.disabled = false;
+            // Auto-switch to sign in mode after a moment
+            setTimeout(() => {
+              if (isSignUp) toggleLink.click();
+              // Pre-fill the email
+              document.getElementById('email-input').value = email;
+            }, 1500);
+            return;
+          }
+
+          if (data.code === 'INVALID_CREDENTIALS') {
+            authError.textContent = 'Invalid email or password.';
+            authError.classList.add('show');
+            submitBtn.classList.remove('loading');
+            submitBtn.disabled = false;
+            return;
+          }
+
+          if (data.code === 'EMAIL_NOT_CONFIRMED') {
+            authError.textContent = 'Please check your email and confirm your account first.';
+            authError.classList.add('show');
+            submitBtn.classList.remove('loading');
+            submitBtn.disabled = false;
+            return;
+          }
+
+          throw new Error(data.message || 'Something went wrong');
         }
 
-        // Success — redirect to app
+        // Signup success — may need email confirmation
+        if (isSignUp && data.needsEmailConfirm) {
+          authError.style.background = 'rgba(196, 168, 108, 0.1)';
+          authError.style.borderColor = 'rgba(196, 168, 108, 0.2)';
+          authError.style.color = 'var(--gold)';
+          authError.textContent = 'Check your email to confirm your account.';
+          authError.classList.add('show');
+          submitBtn.classList.remove('loading');
+          submitBtn.disabled = false;
+          return;
+        }
+
+        // Login success — redirect to app
         window.location.href = '/day';
       } catch (err) {
         authError.textContent = err.message || 'Something went wrong. Please try again.';
