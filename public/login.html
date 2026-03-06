@@ -174,34 +174,10 @@
       color: var(--text);
     }
 
-    .field input::placeholder { color: transparent; }
-
-    .field-label {
-      position: absolute;
-      left: 44px;
-      top: 50%;
-      transform: translateY(-50%);
-      font-size: 0.9rem;
+    .field input::placeholder {
       color: var(--text-dim);
-      pointer-events: none;
-      transition: all 0.2s ease;
-      background: var(--bg-field);
-      padding: 0 4px;
+      font-size: 0.9rem;
     }
-
-    .field input:focus ~ .field-label,
-    .field input:not(:placeholder-shown) ~ .field-label {
-      top: -8px;
-      transform: translateY(0);
-      font-size: 0.65rem;
-      color: var(--gold);
-      font-weight: 500;
-      letter-spacing: 0.03em;
-      background: var(--bg-card);
-      padding: 0 6px;
-      left: 40px;
-    }
-
     .field-toggle {
       position: absolute;
       right: 14px;
@@ -471,8 +447,7 @@
         <div class="field-icon">
           <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
         </div>
-        <input type="text" id="name-input" placeholder=" " autocomplete="name">
-        <span class="field-label">Full Name</span>
+        <input type="text" id="name-input" placeholder="Full Name" autocomplete="name">
       </div>
     </div>
 
@@ -482,8 +457,7 @@
         <div class="field-icon">
           <svg viewBox="0 0 24 24"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></svg>
         </div>
-        <input type="email" id="email-input" placeholder=" " autocomplete="email">
-        <span class="field-label">Email Address</span>
+        <input type="email" id="email-input" placeholder="Email Address" autocomplete="email">
       </div>
     </div>
 
@@ -493,8 +467,7 @@
         <div class="field-icon">
           <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
         </div>
-        <input type="password" id="pass-input" placeholder=" " autocomplete="current-password">
-        <span class="field-label">Password</span>
+        <input type="password" id="pass-input" placeholder="Password" autocomplete="current-password">
         <button type="button" class="field-toggle" id="pass-toggle">
           <svg id="eye-open" viewBox="0 0 24 24"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
           <svg id="eye-closed" viewBox="0 0 24 24" style="display:none"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
