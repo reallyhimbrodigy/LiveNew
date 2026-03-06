@@ -2319,6 +2319,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/feedback",
     "/v1/subscription/status",
     "/v1/profile/update",
+    "/v1/account/delete",
   ]);
   console.log("[SUPABASE_ROUTE_CHECK]", pathname, supabaseRoutes.has(pathname));
   if (!supabaseRoutes.has(pathname)) return false;
@@ -2460,6 +2461,54 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     });
     sendJson(res, 200, { ok: true }, auth.userId);
     return true;
+  }
+
+  if (pathname === "/v1/account/delete") {
+    if (req.method !== "POST") {
+      sendError(res, 405, "method_not_allowed", "Method not allowed");
+      return true;
+    }
+    if (!requireCsrf(req, res)) return true;
+
+    const userId = auth.userId;
+    console.log("[ACCOUNT_DELETE] starting", { userId });
+
+    try {
+      const tables = ["checkin", "event", "user_profile", "subscription"];
+      for (const table of tables) {
+        try {
+          await supabaseAdmin()
+            .from(table)
+            .delete()
+            .eq("user_id", userId);
+        } catch (err) {
+          console.error(`[ACCOUNT_DELETE] failed to delete from ${table}:`, err?.message);
+        }
+      }
+
+      try {
+        const { error } = await supabaseAdmin().auth.admin.deleteUser(userId);
+        if (error) {
+          console.error("[ACCOUNT_DELETE] auth delete failed:", error.message);
+        }
+      } catch (err) {
+        console.error("[ACCOUNT_DELETE] auth delete error:", err?.message);
+      }
+
+      const secure = req.socket.encrypted || !config.isDevLike ? "; Secure" : "";
+      res.setHeader("Set-Cookie", [
+        `ln_token=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`,
+        `ln_refresh=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`,
+      ]);
+
+      console.log("[ACCOUNT_DELETE] complete", { userId });
+      sendJson(res, 200, { ok: true }, userId);
+      return true;
+    } catch (err) {
+      console.error("[ACCOUNT_DELETE] unexpected error:", err?.message);
+      sendJson(res, 500, { ok: false, message: "Failed to delete account" }, userId);
+      return true;
+    }
   }
 
   if (pathname === "/v1/onboard/complete") {
@@ -5169,6 +5218,18 @@ async function serveFile(res, filePath, { replaceDevFlag, replacements } = {}) {
   }
 }
 
+async function serveNotFoundPage(res) {
+  try {
+    const notFoundPath = path.join(PUBLIC_DIR, "404.html");
+    const body = await fs.readFile(notFoundPath, "utf8");
+    res.writeHead(404, { "Content-Type": "text/html; charset=utf-8" });
+    res.end(body);
+  } catch {
+    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+    res.end("Not found");
+  }
+}
+
 const server = http.createServer(async (req, res) => {
   return runWithQueryTracker(async () => {
   const url = new URL(req.url, `http://${req.headers.host}`);
@@ -5225,8 +5286,7 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === "GET" && (pathname === "/admin" || pathname === "/admin.html")) {
-    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Not found");
+    await serveNotFoundPage(res);
     return;
   }
 
@@ -10726,6 +10786,10 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    if (req.method === "GET" && !pathname.startsWith("/v1/")) {
+      await serveNotFoundPage(res);
+      return;
+    }
     sendError(res, 404, "not_found", "Not found");
   } catch (err) {
     if (NODE_ENV !== "production") {

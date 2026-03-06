@@ -98,6 +98,20 @@
 
       <div style="margin-top:32px;padding-top:24px;border-top:1px solid var(--line)">
         <button id="logout-btn" class="ghost" type="button" style="width:100%;color:#c97a7a;border-color:#c97a7a">Log out</button>
+        <div style="margin-top:16px">
+          <button id="delete-account-btn" class="ghost" type="button" style="width:100%;color:#c97a7a;border-color:rgba(200,80,80,0.3);font-size:0.85rem">Delete my account</button>
+        </div>
+      </div>
+
+      <div id="delete-confirm-overlay" class="delete-confirm-overlay hidden">
+        <div class="delete-confirm-content">
+          <h3>Delete your account?</h3>
+          <p>This permanently deletes your account, all your data, your progress, and your subscription. This cannot be undone.</p>
+          <div style="margin-top:24px;display:flex;flex-direction:column;gap:10px">
+            <button id="delete-confirm-yes" class="ghost" type="button" style="width:100%;color:#c97a7a;border-color:rgba(200,80,80,0.3)">Yes, delete everything</button>
+            <button id="delete-confirm-cancel" class="ghost" type="button" style="width:100%">Cancel</button>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -297,75 +311,66 @@
         });
       }
 
+      function wireDeleteAccount() {
+        document.getElementById("delete-account-btn")?.addEventListener("click", () => {
+          document.getElementById("delete-confirm-overlay")?.classList.remove("hidden");
+        });
+
+        document.getElementById("delete-confirm-cancel")?.addEventListener("click", () => {
+          document.getElementById("delete-confirm-overlay")?.classList.add("hidden");
+        });
+
+        document.getElementById("delete-confirm-yes")?.addEventListener("click", async () => {
+          const btn = document.getElementById("delete-confirm-yes");
+          if (btn) {
+            btn.textContent = "Deleting...";
+            btn.disabled = true;
+          }
+
+          try {
+            let csrfToken = null;
+            try {
+              const csrfRes = await fetch("/v1/csrf", { credentials: "same-origin" });
+              const csrfData = await csrfRes.json();
+              csrfToken = csrfData?.token || csrfData?.csrfToken || null;
+            } catch {}
+
+            const headers = { "Content-Type": "application/json" };
+            if (csrfToken) headers["X-CSRF-Token"] = csrfToken;
+
+            const res = await fetch("/v1/account/delete", {
+              method: "POST",
+              headers,
+              credentials: "same-origin",
+            });
+
+            const data = await res.json();
+
+            if (!res.ok) {
+              throw new Error(data.message || "Failed to delete account");
+            }
+
+            try { localStorage.clear(); } catch {}
+            window.location.href = "/?deleted=1";
+          } catch (err) {
+            if (btn) {
+              btn.textContent = "Something went wrong — try again";
+              btn.disabled = false;
+            }
+            console.error("[DELETE_ACCOUNT]", err);
+          }
+        });
+      }
+
       if (!getToken()) {
         window.location.assign("/login?next=%2Faccount");
         return;
       }
       setupAccountMenu();
+      wireDeleteAccount();
       document.addEventListener("DOMContentLoaded", initAccount);
       await initAccount();
     })();
   </script>
-<footer class="sticky-footer">
-  <div class="sticky-footer-inner">
-    <div class="footer-glow" aria-hidden="true"></div>
-    <div class="footer-content">
-      <div class="footer-top">
-        <div class="footer-brand-col">
-          <a href="/" class="footer-logo">LiveNew</a>
-          <p class="footer-tagline">AI-powered cortisol regulation. A personalized day plan — morning, midday, and evening — matched to your stress, your goals, and your body.</p>
-        </div>
-        <div class="footer-links-col">
-          <div class="footer-group">
-            <h4 class="footer-group-label">Product</h4>
-            <ul class="footer-group-links">
-              <li><a href="/day">Your Day Plan</a></li>
-              <li><a href="/progress">Progress</a></li>
-              <li><a href="/account">Account</a></li>
-            </ul>
-          </div>
-          <div class="footer-group">
-            <h4 class="footer-group-label">Resources</h4>
-            <ul class="footer-group-links">
-              <li><a href="/help">Help Center</a></li>
-              <li><a href="mailto:support@livenew.app">Contact</a></li>
-            </ul>
-          </div>
-          <div class="footer-group">
-            <h4 class="footer-group-label">Legal</h4>
-            <ul class="footer-group-links">
-              <li><a href="/terms">Terms of Service</a></li>
-              <li><a href="/privacy">Privacy Policy</a></li>
-            </ul>
-          </div>
-        </div>
-      </div>
-      <div class="footer-bottom">
-        <p>&copy; 2026 LiveNew. All rights reserved.</p>
-        <p>support@livenew.app</p>
-      </div>
-    </div>
-  </div>
-</footer>
-<script>
-// Footer scroll reveal
-const footerObserver = new IntersectionObserver(entries => {
-  entries.forEach(entry => {
-    if (entry.isIntersecting) {
-      // Stagger reveal the footer columns
-      const brand = entry.target.querySelector('.footer-brand-col');
-      const groups = entry.target.querySelectorAll('.footer-group');
-      if (brand) setTimeout(() => brand.classList.add('visible'), 100);
-      groups.forEach((g, i) => {
-        setTimeout(() => g.classList.add('visible'), 200 + i * 100);
-      });
-      footerObserver.unobserve(entry.target);
-    }
-  });
-}, { threshold: 0.1 });
-
-const stickyFooter = document.querySelector('.sticky-footer');
-if (stickyFooter) footerObserver.observe(stickyFooter);
-</script>
 </body>
 </html>

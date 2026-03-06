@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#0f0d0a">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/assets/app.css">
+  <title>LiveNew — Page not found</title>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+
+    :root {
+      --bg: #0f0d0a;
+      --gold: #c4a86c;
+      --text: #e8e0d4;
+      --text-muted: #8a8070;
+      --text-dim: #5a5248;
+      --line: rgba(196, 168, 108, 0.12);
+      --font-display: 'Cormorant Garamond', Georgia, serif;
+      --font-body: 'DM Sans', -apple-system, sans-serif;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      -webkit-font-smoothing: antialiased;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .not-found {
+      text-align: center;
+      max-width: 400px;
+    }
+
+    .not-found-code {
+      font-family: var(--font-display);
+      font-size: 6rem;
+      font-weight: 300;
+      color: var(--gold);
+      opacity: 0.3;
+      line-height: 1;
+      margin-bottom: 16px;
+    }
+
+    .not-found h1 {
+      font-family: var(--font-display);
+      font-size: 1.8rem;
+      font-weight: 400;
+      margin-bottom: 12px;
+    }
+
+    .not-found p {
+      font-size: 0.95rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+      margin-bottom: 32px;
+    }
+
+    .not-found-btn {
+      font-family: var(--font-body);
+      font-size: 0.9rem;
+      font-weight: 500;
+      letter-spacing: 0.03em;
+      padding: 14px 40px;
+      border: 1px solid var(--gold);
+      background: transparent;
+      color: var(--gold);
+      border-radius: 0;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-decoration: none;
+      display: inline-block;
+    }
+
+    .not-found-btn:hover {
+      background: var(--gold);
+      color: var(--bg);
+    }
+
+    .not-found-brand {
+      position: absolute;
+      top: 24px;
+      left: 24px;
+      font-family: var(--font-display);
+      font-size: 1.1rem;
+      font-weight: 500;
+      letter-spacing: 0.06em;
+      color: var(--text);
+      text-decoration: none;
+    }
+
+    @media (min-width: 640px) {
+      .not-found-brand { top: 32px; left: 40px; }
+      .not-found-code { font-size: 8rem; }
+    }
+  </style>
+</head>
+<body>
+
+  <a href="/" class="not-found-brand">LiveNew</a>
+
+  <div class="not-found">
+    <div class="not-found-code">404</div>
+    <h1>This page doesn't exist</h1>
+    <p>The page you're looking for may have moved or doesn't exist. Head back to LiveNew.</p>
+    <a href="/" class="not-found-btn">Go home</a>
+  </div>
+
+<footer class="sticky-footer" style="clip-path: polygon(0% 0, 100% 0%, 100% 100%, 0 100%);">
+  <div class="sf-fixed">
+    <div class="sf-sticky">
+      <div class="sf-wrap">
+        <!-- Glow -->
+        <div class="sf-glow" aria-hidden="true">
+          <div class="sf-glow-a"></div>
+          <div class="sf-glow-b"></div>
+        </div>
+        <!-- Columns -->
+        <div class="sf-columns">
+          <div class="sf-brand">
+            <a href="/" class="sf-logo">LiveNew</a>
+            <p class="sf-tagline">AI-powered cortisol regulation. A personalized day plan — morning, midday, and evening — matched to your stress, your goals, and your body.</p>
+          </div>
+          <div class="sf-group">
+            <h4>PRODUCT</h4>
+            <ul>
+              <li><a href="/">Home</a></li>
+              <li><a href="/day">Your Day Plan</a></li>
+              <li><a href="/progress">Progress</a></li>
+              <li><a href="/account">Account</a></li>
+            </ul>
+          </div>
+          <div class="sf-group">
+            <h4>RESOURCES</h4>
+            <ul>
+              <li><a href="/help">Help Center</a></li>
+              <li><a href="mailto:support@livenew.app">Contact</a></li>
+            </ul>
+          </div>
+          <div class="sf-group">
+            <h4>LEGAL</h4>
+            <ul>
+              <li><a href="/terms">Terms of Service</a></li>
+              <li><a href="/privacy">Privacy Policy</a></li>
+            </ul>
+          </div>
+        </div>
+        <!-- Bottom -->
+        <div class="sf-bottom">
+          <p>&copy; 2026 LiveNew. All rights reserved.</p>
+          <p>support@livenew.app</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</footer>
+</body>
+</html>
