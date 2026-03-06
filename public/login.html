@@ -611,6 +611,7 @@
         toggleLink.textContent = 'Sign in';
         nameField.classList.add('show');
         forgotLink.style.display = 'none';
+        document.getElementById('auth-row').style.display = 'none';
       } else {
         authTitle.textContent = 'Welcome Back';
         authSub.textContent = 'Sign in to continue';
@@ -619,6 +620,7 @@
         toggleLink.textContent = 'Sign up';
         nameField.classList.remove('show');
         forgotLink.style.display = '';
+        document.getElementById('auth-row').style.display = '';
       }
 
       // Clear fields
