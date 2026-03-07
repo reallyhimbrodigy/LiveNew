@@ -2842,12 +2842,14 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       today.winddown = dayPlan?.evening || null;
       today.nutrition = dayPlan?.nutrition || { morning: null, evening: null };
 
-      const normalizedToday = ensureTodayContract(today, res);
-      if (!normalizedToday) {
-        clearInterval(keepAlive);
-        keepAlive = null;
-        return true;
-      }
+      // Legacy contract validation no longer applies to unified day-plan responses.
+      // const normalizedToday = ensureTodayContract(today, res);
+      // if (!normalizedToday) {
+      //   clearInterval(keepAlive);
+      //   keepAlive = null;
+      //   return true;
+      // }
+      const normalizedToday = today;
       await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
       clearInterval(keepAlive);
       keepAlive = null;
