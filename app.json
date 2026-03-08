@@ -5,26 +5,23 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/brand/livenew-mark.png",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
       "image": "./assets/brand/livenew-logo.png",
       "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+      "backgroundColor": "#0f0d0a"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": false,
+      "backgroundColor": "#0f0d0a",
+      "bundleIdentifier": "app.livenew.mobile"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/brand/livenew-mark.png",
-        "backgroundColor": "#FFFFFF"
-      },
-      "edgeToEdgeEnabled": true,
-      "predictiveBackGestureEnabled": false
-    },
-    "web": {
-      "favicon": "./assets/brand/livenew-mark.png"
+        "backgroundColor": "#0f0d0a"
+      }
     }
   }
 }

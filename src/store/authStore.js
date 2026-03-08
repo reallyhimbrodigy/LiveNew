@@ -1,0 +1,206 @@
+import { create } from 'zustand';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { api, setTokens, clearTokens } from '../api';
+
+const AUTH_KEY = 'livenew:auth';
+const PROFILE_KEY = 'livenew:profile';
+const PLAN_KEY = 'livenew:plan';
+
+export const useAuthStore = create((set, get) => ({
+  // State
+  isLoading: true,
+  isLoggedIn: false,
+  hasProfile: false,
+  profile: null,
+  todayPlan: null,
+  todayStress: null,
+  todayDate: null,
+
+  // Hydrate from storage
+  hydrate: async () => {
+    try {
+      const [authJson, profileJson, planJson] = await Promise.all([
+        AsyncStorage.getItem(AUTH_KEY),
+        AsyncStorage.getItem(PROFILE_KEY),
+        AsyncStorage.getItem(PLAN_KEY),
+      ]);
+
+      if (authJson) {
+        const auth = JSON.parse(authJson);
+        setTokens(auth.accessToken, auth.refreshToken);
+
+        let profile = null;
+        let hasProfile = false;
+        if (profileJson) {
+          profile = JSON.parse(profileJson);
+          hasProfile = !!(profile && profile.goal);
+        }
+
+        // Check if we have a valid plan for today
+        let todayPlan = null;
+        let todayStress = null;
+        let todayDate = null;
+        if (planJson) {
+          const plan = JSON.parse(planJson);
+          const today = new Date().toISOString().slice(0, 10);
+          if (plan.date === today) {
+            todayPlan = plan.contract;
+            todayStress = plan.stress;
+            todayDate = plan.date;
+          }
+        }
+
+        set({
+          isLoading: false,
+          isLoggedIn: true,
+          hasProfile,
+          profile,
+          todayPlan,
+          todayStress,
+          todayDate,
+        });
+
+        // Refresh profile from server in background
+        try {
+          const bootstrap = await api.bootstrap();
+          const serverProfile = bootstrap?.profile || {};
+          if (serverProfile.goal) {
+            const normalized = {
+              goal: serverProfile.goal,
+              stressSource: serverProfile.stressSource,
+              wakeTime: serverProfile.wakeTime,
+              timeMin: serverProfile.timeMin,
+              injuries: serverProfile.injuries || [],
+            };
+            await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(normalized));
+            set({ profile: normalized, hasProfile: true });
+          }
+        } catch {}
+
+        return;
+      }
+    } catch {}
+
+    set({ isLoading: false, isLoggedIn: false });
+  },
+
+  // Login
+  login: async (email, password) => {
+    const data = await api.login(email, password);
+    const auth = {
+      accessToken: data.accessToken || data.token,
+      refreshToken: data.refreshToken,
+      userId: data.userId,
+    };
+    setTokens(auth.accessToken, auth.refreshToken);
+    await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+
+    // Fetch profile
+    try {
+      const bootstrap = await api.bootstrap();
+      const p = bootstrap?.profile || {};
+      const profile = {
+        goal: p.goal,
+        stressSource: p.stressSource,
+        wakeTime: p.wakeTime,
+        timeMin: p.timeMin,
+        injuries: p.injuries || [],
+      };
+      const hasProfile = !!(profile.goal && profile.goal !== 'all');
+      await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+      set({ isLoggedIn: true, hasProfile, profile });
+    } catch {
+      set({ isLoggedIn: true, hasProfile: false });
+    }
+  },
+
+  // Signup
+  signup: async (email, password, name) => {
+    const data = await api.signup(email, password, name);
+    return data; // May need email confirmation
+  },
+
+  // Save onboarding profile
+  saveProfile: async (profile) => {
+    await api.onboardComplete(profile);
+    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    set({ hasProfile: true, profile });
+  },
+
+  // Generate day plan
+  generatePlan: async (stress) => {
+    const profile = get().profile || {};
+    const stressMap = { good: 2, okay: 5, stressed: 8, overwhelmed: 10 };
+    const stressValue = stressMap[stress] || (typeof stress === 'number' ? stress : 5);
+
+    const data = await api.checkin({
+      dateISO: new Date().toISOString().slice(0, 10),
+      stress: stressValue,
+      energy: 5,
+      sleepHours: 7,
+      sleepQuality: 5,
+      timeAvailableMin: profile.timeMin || 10,
+      wakeTime: profile.wakeTime || 'normal',
+      goal: profile.goal || 'calm',
+      stressSource: profile.stressSource || 'work',
+      injuries: profile.injuries || [],
+    });
+
+    const today = new Date().toISOString().slice(0, 10);
+    const plan = {
+      date: today,
+      contract: data,
+      stress: stressValue,
+      moveCompleted: false,
+      resetCompleted: false,
+      winddownCompleted: false,
+    };
+
+    await AsyncStorage.setItem(PLAN_KEY, JSON.stringify(plan));
+    set({ todayPlan: data, todayStress: stressValue, todayDate: today });
+    return data;
+  },
+
+  // Mark session complete
+  completeSession: async (type) => {
+    const today = new Date().toISOString().slice(0, 10);
+    try {
+      if (type === 'move') await api.completeMove(today);
+      else if (type === 'reset') await api.completeReset(today);
+      else if (type === 'winddown') await api.completeWinddown(today);
+    } catch {}
+
+    // Update local plan
+    const planJson = await AsyncStorage.getItem(PLAN_KEY);
+    if (planJson) {
+      const plan = JSON.parse(planJson);
+      if (type === 'move') plan.moveCompleted = true;
+      else if (type === 'reset') plan.resetCompleted = true;
+      else if (type === 'winddown') plan.winddownCompleted = true;
+      await AsyncStorage.setItem(PLAN_KEY, JSON.stringify(plan));
+
+      set((prev) => ({
+        todayPlan: {
+          ...prev.todayPlan,
+          [`${type}Completed`]: true,
+        },
+      }));
+    }
+  },
+
+  // Logout
+  logout: async () => {
+    try { await api.logout(); } catch {}
+    clearTokens();
+    await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, PLAN_KEY]);
+    set({ isLoggedIn: false, hasProfile: false, profile: null, todayPlan: null });
+  },
+
+  // Delete account
+  deleteAccount: async () => {
+    await api.deleteAccount();
+    clearTokens();
+    await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, PLAN_KEY]);
+    set({ isLoggedIn: false, hasProfile: false, profile: null, todayPlan: null });
+  },
+}));
