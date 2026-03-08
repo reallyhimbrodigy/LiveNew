@@ -1111,7 +1111,7 @@ function initDay({ initialDateISO } = {}) {
     stressBefore = Number(stressSlider?.value || 5);
     sleepHours = Number(sleepSlider?.value || 7);
     if (!energy || !timeMin || !Number.isFinite(sleepHours)) return;
-    if (statusEl) statusEl.textContent = "Building your plan…";
+    if (statusEl) statusEl.textContent = "Building your day plan…";
     if (checkinNext) checkinNext.disabled = true;
     try {
       const energyScore = energy === "low" ? 3 : energy === "high" ? 9 : 6;
