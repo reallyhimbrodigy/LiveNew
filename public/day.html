@@ -149,75 +149,21 @@
 
         <!-- ONBOARDING: shown once for new users -->
         <section id="day-step-onboard" class="card today-screen hidden" data-step="onboard">
-          <div class="onboard-step" data-onboard="intro">
-            <div class="onboard-intro">
-              <h2 class="today-question">Lower your stress in 5 minutes a day</h2>
-              <p class="onboard-intro-sub">LiveNew builds a daily plan around calming your body down — morning plan, a midday plan, and an evening plan, all matched to how you feel.</p>
-              <p class="onboard-intro-stat">Users report feeling calmer within the first week.</p>
-              <button class="primary onboard-intro-btn" type="button" style="margin-top:24px;padding:16px 48px">Get started</button>
-            </div>
+
+          <div class="onboard-step" data-onboard="routine">
+            <h2 class="today-question">Describe your daily routine</h2>
+            <p class="muted" style="margin-bottom:16px">When do you wake up, what do you do, when do you eat, when do you sleep</p>
+            <textarea id="onboard-routine" class="onboard-textarea" rows="5" placeholder="I wake up at 7, work at a desk from 9 to 6, eat lunch around noon, get home at 7, usually in bed by 11 but can't fall asleep until 1am..."></textarea>
+            <button class="primary onboard-next-btn" id="routine-next" type="button" style="width:100%;margin-top:16px" disabled>Continue</button>
           </div>
 
           <div class="onboard-step hidden" data-onboard="goal">
-            <h2 class="today-question">What would make the biggest difference for you?</h2>
-            <div class="onboard-options">
-              <button class="onboard-opt" data-key="goal" data-value="perform" type="button">
-                <span class="onboard-opt-title">Perform better</span>
-                <span class="onboard-opt-sub">Sharper focus, more energy, less brain fog</span>
-              </button>
-              <button class="onboard-opt" data-key="goal" data-value="sleep" type="button">
-                <span class="onboard-opt-title">Sleep through the night</span>
-                <span class="onboard-opt-sub">Fall asleep faster, stay asleep, wake up rested</span>
-              </button>
-              <button class="onboard-opt" data-key="goal" data-value="weight" type="button">
-                <span class="onboard-opt-title">Lose stress weight</span>
-                <span class="onboard-opt-sub">Stop stress eating, reduce cortisol-driven fat</span>
-              </button>
-              <button class="onboard-opt" data-key="goal" data-value="calm" type="button">
-                <span class="onboard-opt-title">Feel like myself again</span>
-                <span class="onboard-opt-sub">Less anxious, less reactive, more present</span>
-              </button>
-            </div>
+            <h2 class="today-question">What is your goal?</h2>
+            <p class="muted" style="margin-bottom:16px">What do you want to change about how you feel</p>
+            <textarea id="onboard-goal" class="onboard-textarea" rows="4" placeholder="I want to sleep through the night and stop feeling anxious all day..."></textarea>
+            <button class="primary onboard-next-btn" id="goal-next" type="button" style="width:100%;margin-top:16px" disabled>Start LiveNew</button>
           </div>
 
-          <div class="onboard-step hidden" data-onboard="stress-source">
-            <h2 class="today-question">What makes your stress worse?</h2>
-            <div class="onboard-options">
-              <button class="onboard-opt" data-key="stressSource" data-value="work" type="button">Work</button>
-              <button class="onboard-opt" data-key="stressSource" data-value="sleep" type="button">Sleep</button>
-              <button class="onboard-opt" data-key="stressSource" data-value="relationships" type="button">Relationships</button>
-              <button class="onboard-opt" data-key="stressSource" data-value="health" type="button">Health</button>
-            </div>
-          </div>
-
-          <div class="onboard-step hidden" data-onboard="wake">
-            <h2 class="today-question">When do you wake up?</h2>
-            <div class="onboard-options">
-              <button class="onboard-opt" data-key="wakeTime" data-value="early" type="button">Before 7am</button>
-              <button class="onboard-opt" data-key="wakeTime" data-value="normal" type="button">7–9am</button>
-              <button class="onboard-opt" data-key="wakeTime" data-value="late" type="button">After 9am</button>
-            </div>
-          </div>
-
-          <div class="onboard-step hidden" data-onboard="time">
-            <h2 class="today-question">How long should each session be?</h2>
-            <div class="onboard-options">
-              <button class="onboard-opt" data-key="timeMin" data-value="10" type="button">10 min</button>
-              <button class="onboard-opt" data-key="timeMin" data-value="15" type="button">15 min</button>
-              <button class="onboard-opt" data-key="timeMin" data-value="20" type="button">20 min</button>
-            </div>
-          </div>
-
-          <div class="onboard-step hidden" data-onboard="injuries">
-            <h2 class="today-question">Any areas that bother you?</h2>
-            <div class="onboard-options onboard-multi">
-              <button class="onboard-opt onboard-toggle" data-key="injuries" data-value="knees" type="button">Knees</button>
-              <button class="onboard-opt onboard-toggle" data-key="injuries" data-value="shoulders" type="button">Shoulders</button>
-              <button class="onboard-opt onboard-toggle" data-key="injuries" data-value="back" type="button">Back</button>
-              <button class="onboard-opt onboard-toggle" data-key="injuries" data-value="neck" type="button">Neck</button>
-              <button class="onboard-opt" data-key="injuries" data-value="none" type="button">None</button>
-            </div>
-          </div>
         </section>
 
         <!-- STRESS TAP: shown daily for returning users -->
@@ -304,40 +250,8 @@
           </div>
 
           <div id="full-day-timeline" class="full-day-timeline hidden">
-            <div id="timeline-morning" class="timeline-slot">
-              <div class="timeline-time" id="morning-time"></div>
-              <div class="timeline-content">
-                <div class="timeline-context">Your morning</div>
-                <div class="timeline-title" id="morning-title"></div>
-                <div class="timeline-status" id="morning-status"></div>
-              </div>
-            </div>
-            <div id="timeline-midday" class="timeline-slot">
-              <div class="timeline-time" id="midday-time"></div>
-              <div class="timeline-content">
-                <div class="timeline-context">Your midday</div>
-                <div class="timeline-title" id="midday-title"></div>
-                <div class="timeline-status" id="midday-status"></div>
-              </div>
-            </div>
-            <div id="timeline-evening" class="timeline-slot">
-              <div class="timeline-time" id="evening-time"></div>
-              <div class="timeline-content">
-                <div class="timeline-context">Your evening</div>
-                <div class="timeline-title" id="evening-title"></div>
-                <div class="timeline-status" id="evening-status"></div>
-              </div>
-            </div>
-            <div style="margin-top:12px">
-              <div id="timeline-nutrition-morning" class="today-nutrition-bar">
-                <span class="nutrition-label">Morning</span>
-                <span id="nutrition-morning-tip"></span>
-              </div>
-              <div id="timeline-nutrition-evening" class="today-nutrition-bar">
-                <span class="nutrition-label">Evening</span>
-                <span id="nutrition-evening-tip"></span>
-              </div>
-            </div>
+            <div id="today-timeline-sessions"></div>
+            <div id="today-meals" style="margin-top:12px"></div>
           </div>
 
           <div style="margin-top:12px">

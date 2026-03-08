@@ -2195,6 +2195,7 @@ async function buildSupabaseBootstrapPayload({ userId, userProfile, flags }) {
     profile: {
       isComplete: profileStatus.isComplete,
       missingFields: profileStatus.missingFields,
+      routine: constraints.routine || null,
       goal: constraints.goal || null,
       stressSource: constraints.stressSource || null,
       stressBaseline: constraints.stressBaseline || null,
@@ -2533,6 +2534,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           : {};
       const injuriesInput = Array.isArray(profileInput?.injuries) ? profileInput.injuries : [];
       const profileData = {
+        routine: profileInput?.routine || null,
         goal: profileInput?.goal || null,
         stressSource: profileInput?.stressSource || null,
         wakeTime: profileInput?.wakeTime || null,
@@ -2547,6 +2549,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       };
       const mergedConstraints = {
         ...existingConstraints,
+        routine: profileData.routine,
         goal: profileData.goal,
         stressSource: profileData.stressSource,
         wakeTime: profileData.wakeTime,
@@ -2767,7 +2770,16 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         return true;
       }
       dateKey = dateValidation.value;
-      const checkInRaw = body?.checkIn && typeof body.checkIn === "object" ? body.checkIn : body;
+      const checkInRawSource = body?.checkIn && typeof body.checkIn === "object" ? body.checkIn : body;
+      const checkInRaw = {
+        ...(checkInRawSource && typeof checkInRawSource === "object" ? checkInRawSource : {}),
+        sleepQuality: Number.isFinite(Number(checkInRawSource?.sleepQuality))
+          ? Number(checkInRawSource.sleepQuality)
+          : 5,
+        timeAvailableMin: Number.isFinite(Number(checkInRawSource?.timeAvailableMin))
+          ? Number(checkInRawSource.timeAvailableMin)
+          : 10,
+      };
       const checkinValidation = validateCheckInPayload(checkInRaw);
       if (!checkinValidation.ok) {
         sendErrorCodeOnly(res, 400, "INVALID_CHECKIN");
@@ -2817,17 +2829,12 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       }, 10000);
 
       // AI-powered personalized plan
-      const goal = checkInRaw?.goal || "calm";
-      const stressSource = checkInRaw?.stressSource || "work";
-      const injuries = Array.isArray(checkInRaw?.injuries) ? checkInRaw.injuries : [];
       let dayPlan = null;
       try {
         dayPlan = await generateDayPlan({
           stress: checkIn.stress,
-          goal: goal || "calm",
-          stressSource: stressSource || "work",
-          timeMin: checkIn.timeAvailableMin || 10,
-          injuries: injuries || [],
+          routine: checkInRaw?.routine || "",
+          goal: checkInRaw?.goal || "",
         });
       } catch (err) {
         console.error("[DAYPLAN_FAILED]", err?.message);
@@ -2837,10 +2844,8 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         console.error("[DAYPLAN_NULL] AI returned no plan");
       }
 
-      today.movement = dayPlan?.morning || null;
-      today.reset = dayPlan?.midday || null;
-      today.winddown = dayPlan?.evening || null;
-      today.nutrition = dayPlan?.nutrition || { morning: null, evening: null };
+      today.sessions = dayPlan?.sessions || [];
+      today.meals = dayPlan?.meals || [];
 
       // Legacy contract validation no longer applies to unified day-plan responses.
       // const normalizedToday = ensureTodayContract(today, res);
@@ -2855,10 +2860,8 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       keepAlive = null;
       const responseContract = {
         ...normalizedToday,
-        movement: dayPlan?.morning || null,
-        reset: dayPlan?.midday || null,
-        winddown: dayPlan?.evening || null,
-        nutrition: dayPlan?.nutrition || { morning: null, evening: null },
+        sessions: dayPlan?.sessions || [],
+        meals: dayPlan?.meals || [],
       };
       body = { userId: auth.userId, ...responseContract };
       if (res?.livenewRequestId) body.requestId = res.livenewRequestId;
