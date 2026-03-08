@@ -5836,7 +5836,14 @@ const server = http.createServer(async (req, res) => {
           redirectTo,
           userId: newUserId,
         });
-        sendJson(res, 200, { ok: true, needsEmailConfirm: !data?.session });
+        sendJson(res, 200, {
+          ok: true,
+          needsEmailConfirm: !data?.session,
+          userId: data?.user?.id || null,
+          email: data?.user?.email || emailLower,
+          accessToken: data?.session?.access_token || null,
+          refreshToken: data?.session?.refresh_token || null,
+        });
         return;
       } catch (err) {
         console.error("[auth][signup] error", { message: err?.message || String(err) });
@@ -5916,6 +5923,8 @@ const server = http.createServer(async (req, res) => {
           ok: true,
           userId: user?.id || null,
           email: user?.email || emailLower,
+          accessToken: session.access_token,
+          refreshToken: session.refresh_token,
         });
         return;
       } catch (err) {

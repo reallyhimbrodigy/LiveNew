@@ -496,6 +496,16 @@
           done(); return;
         }
 
+        if (data.accessToken) {
+          try {
+            localStorage.setItem('livenew_access_token', data.accessToken);
+            localStorage.setItem('livenew_refresh_token', data.refreshToken || '');
+            localStorage.setItem('livenew_token', data.accessToken);
+            localStorage.setItem('livenew_refresh', data.refreshToken || '');
+            localStorage.setItem('livenew_user', JSON.stringify({ userId: data.userId, email: data.email }));
+          } catch {}
+        }
+
         window.location.href = '/day';
       } catch (err) {
         showError(err.message || 'Something went wrong.');
