@@ -136,14 +136,8 @@ export const useAuthStore = create((set, get) => ({
     const data = await api.checkin({
       dateISO: new Date().toISOString().slice(0, 10),
       stress: stressValue,
-      energy: 5,
-      sleepHours: 7,
-      sleepQuality: 5,
-      timeAvailableMin: profile.timeMin || 10,
-      wakeTime: profile.wakeTime || 'normal',
-      goal: profile.goal || 'calm',
-      stressSource: profile.stressSource || 'work',
-      injuries: profile.injuries || [],
+      routine: profile.routine || '',
+      goal: profile.goal || '',
     });
 
     const today = new Date().toISOString().slice(0, 10);
@@ -151,9 +145,7 @@ export const useAuthStore = create((set, get) => ({
       date: today,
       contract: data,
       stress: stressValue,
-      moveCompleted: false,
-      resetCompleted: false,
-      winddownCompleted: false,
+      completedSessions: {},
     };
 
     await AsyncStorage.setItem(PLAN_KEY, JSON.stringify(plan));
