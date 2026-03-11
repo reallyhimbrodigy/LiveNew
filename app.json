@@ -4,23 +4,48 @@
     "slug": "livenew",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/brand/livenew-mark.png",
+    "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
+    "scheme": "livenew",
     "splash": {
-      "image": "./assets/brand/livenew-logo.png",
+      "image": "./assets/splash.png",
       "resizeMode": "contain",
       "backgroundColor": "#0f0d0a"
     },
     "ios": {
       "supportsTablet": false,
+      "bundleIdentifier": "app.livenew.mobile",
       "backgroundColor": "#0f0d0a",
-      "bundleIdentifier": "app.livenew.mobile"
+      "infoPlist": {
+        "NSAppTransportSecurity": {
+          "NSAllowsArbitraryLoads": false
+        }
+      },
+      "config": {
+        "usesNonExemptEncryption": false
+      }
     },
     "android": {
       "adaptiveIcon": {
-        "foregroundImage": "./assets/brand/livenew-mark.png",
+        "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0f0d0a"
+      },
+      "package": "app.livenew.mobile"
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#c4a86c"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "7016e492-3994-4394-9413-4a2978b80130"
       }
     }
   }

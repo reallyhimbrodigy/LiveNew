@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator,
+  View, Text, TouchableOpacity, StyleSheet,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { useAuthStore } from '../store/authStore';
+import { tapMedium } from '../haptics';
 
 const STRESS_OPTIONS = [
   { label: 'Good', value: 'good', emoji: '😌' },
@@ -12,6 +13,41 @@ const STRESS_OPTIONS = [
   { label: 'Stressed', value: 'stressed', emoji: '😰' },
   { label: 'Overwhelmed', value: 'overwhelmed', emoji: '🤯' },
 ];
+
+function LoadingAnimation() {
+  const [messageIndex, setMessageIndex] = useState(0);
+  const messages = [
+    'Reading your stress level...',
+    'Analyzing your routine...',
+    'Building your sessions...',
+    'Selecting your meals...',
+    'Finalizing your plan...',
+  ];
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setMessageIndex(prev => {
+        if (prev < messages.length - 1) return prev + 1;
+        return prev;
+      });
+    }, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <View style={loadingStyles.wrap}>
+      <View style={loadingStyles.dotsRow}>
+        {[0, 1, 2].map(i => (
+          <View key={i} style={[
+            loadingStyles.dot,
+            { opacity: (messageIndex % 3 === i) ? 1 : 0.2 },
+          ]} />
+        ))}
+      </View>
+      <Text style={loadingStyles.message}>{messages[messageIndex]}</Text>
+    </View>
+  );
+}
 
 export default function StressTapScreen({ navigation }) {
   const [loading, setLoading] = useState(false);
@@ -21,19 +57,34 @@ export default function StressTapScreen({ navigation }) {
   const generatePlan = useAuthStore(s => s.generatePlan);
 
   const handleTap = async (option) => {
+    tapMedium();
     setSelected(option.value);
     setError('');
     setLoading(true);
 
+    // Timeout after 45 seconds
+    const timeout = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('TIMEOUT')), 45000)
+    );
+
     try {
-      await generatePlan(option.value);
+      const result = await Promise.race([
+        generatePlan(option.value),
+        timeout,
+      ]);
       navigation.replace('TodayMain');
     } catch (err) {
-      setError('Servers are busy. Tap again.');
+      if (err.message === 'TIMEOUT') {
+        setError('Taking longer than usual. Tap to try again.');
+      } else if (err.message === 'AUTH_EXPIRED') {
+        // Token expired — will be caught by auth store
+        setError('Session expired. Please log in again.');
+      } else {
+        setError('Something went wrong. Tap to try again.');
+      }
       setSelected(null);
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   return (
@@ -49,10 +100,7 @@ export default function StressTapScreen({ navigation }) {
         ) : null}
 
         {loading ? (
-          <View style={s.loadingWrap}>
-            <ActivityIndicator size="large" color={colors.gold} />
-            <Text style={s.loadingText}>Building your day plan...</Text>
-          </View>
+          <LoadingAnimation />
         ) : (
           <View style={s.grid}>
             {STRESS_OPTIONS.map(option => (
@@ -138,20 +186,32 @@ const s = StyleSheet.create({
     color: colors.gold,
   },
 
-  loadingWrap: {
-    alignItems: 'center',
-    gap: 16,
-  },
-
-  loadingText: {
-    color: colors.muted,
-    fontSize: 16,
-  },
-
   error: {
     color: colors.error,
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 16,
+  },
+});
+
+const loadingStyles = StyleSheet.create({
+  wrap: {
+    alignItems: 'center',
+    gap: 20,
+    paddingTop: 20,
+  },
+  dotsRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  dot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    backgroundColor: colors.gold,
+  },
+  message: {
+    color: colors.muted,
+    fontSize: 16,
   },
 });

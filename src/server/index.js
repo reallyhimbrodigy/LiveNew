@@ -1037,6 +1037,9 @@ function normalizeCheckInInput(raw, dateISO) {
     sleepQuality: clampInt(source.sleepQuality, 1, 10, 6),
     energy: clampInt(source.energy, 1, 10, 6),
     timeAvailableMin: clampInt(source.timeAvailableMin, 5, 60, 10),
+    routine: typeof source.routine === "string" ? source.routine : "",
+    goal: typeof source.goal === "string" ? source.goal : "",
+    stressHistory: Array.isArray(source.stressHistory) ? source.stressHistory : [],
     safety: { panic },
   };
 }
@@ -2833,8 +2836,9 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       try {
         dayPlan = await generateDayPlan({
           stress: checkIn.stress,
-          routine: checkInRaw?.routine || "",
-          goal: checkInRaw?.goal || "",
+          routine: checkIn.routine || "",
+          goal: checkIn.goal || "",
+          stressHistory: checkIn.stressHistory || [],
         });
       } catch (err) {
         console.error("[DAYPLAN_FAILED]", err?.message);

@@ -1,41 +1,84 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, AppState,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { useAuthStore } from '../store/authStore';
+import { tapLight, tapSelect } from '../haptics';
 
 export default function TodayScreen({ navigation }) {
   const todayPlan = useAuthStore(s => s.todayPlan);
   const todayDate = useAuthStore(s => s.todayDate);
   const todayStress = useAuthStore(s => s.todayStress);
+  const streak = useAuthStore(s => s.streak);
   const [completedSessions, setCompletedSessions] = useState({});
   const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
-    const today = new Date().toISOString().slice(0, 10);
-    if (!todayPlan || todayDate !== today) {
-      navigation.replace('StressTap');
-    }
-  }, [todayPlan, todayDate]);
-
-  // Load completion state from AsyncStorage
-  useEffect(() => {
-    (async () => {
+    const checkPlan = async () => {
+      const today = new Date().toISOString().slice(0, 10);
+      
+      // If we already have a plan in state for today, we're good
+      if (todayPlan && todayDate === today) return;
+      
+      // Try loading from AsyncStorage
       try {
         const AsyncStorage = require('@react-native-async-storage/async-storage').default;
         const raw = await AsyncStorage.getItem('livenew:plan');
         if (raw) {
-          const plan = JSON.parse(raw);
-          setCompletedSessions(plan.completedSessions || {});
+          const cached = JSON.parse(raw);
+          if (cached.date === today && cached.contract) {
+            // Restore cached plan to state
+            useAuthStore.setState({
+              todayPlan: cached.contract,
+              todayDate: cached.date,
+              todayStress: cached.stress,
+            });
+            setCompletedSessions(cached.completedSessions || {});
+            return;
+          }
         }
       } catch {}
-    })();
-  }, [todayPlan]);
+      
+      // No valid plan — go to stress tap
+      navigation.replace('StressTap');
+    };
+    
+    checkPlan();
+  }, []);
 
-  const sessions = todayPlan?.sessions || [];
-  const meals = todayPlan?.meals || [];
+  useFocusEffect(
+    useCallback(() => {
+      (async () => {
+        try {
+          const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+          const raw = await AsyncStorage.getItem('livenew:plan');
+          if (raw) {
+            const plan = JSON.parse(raw);
+            setCompletedSessions(plan.completedSessions || {});
+          }
+        } catch {}
+      })();
+    }, [])
+  );
+
+  // Recheck when app comes to foreground
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        const today = new Date().toISOString().slice(0, 10);
+        if (todayDate !== today) {
+          navigation.replace('StressTap');
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [todayDate]);
+
+  const sessions = Array.isArray(todayPlan?.sessions) ? todayPlan.sessions : [];
+  const meals = Array.isArray(todayPlan?.meals) ? todayPlan.meals : [];
 
   const sessionList = sessions.map((s, i) => ({
     ...s,
@@ -49,6 +92,7 @@ export default function TodayScreen({ navigation }) {
   const doneSessions = sessionList.filter(s => s.done);
 
   const handleStartSession = (session) => {
+    tapLight();
     navigation.navigate('Session', {
       session,
       onCompleteKey: session.index,
@@ -56,6 +100,7 @@ export default function TodayScreen({ navigation }) {
   };
 
   const handleRecheck = () => {
+    tapSelect();
     navigation.replace('StressTap');
   };
 
@@ -74,6 +119,20 @@ export default function TodayScreen({ navigation }) {
   }, []);
 
   if (!todayPlan) return null;
+
+  if (sessions.length === 0) {
+    return (
+      <SafeAreaView style={s.safe} edges={['top']}>
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+          <Text style={s.greeting}>Something went wrong</Text>
+          <Text style={[s.sub, { marginBottom: 24 }]}>Your plan didn't generate properly.</Text>
+          <TouchableOpacity style={s.startBtn} onPress={handleRecheck} activeOpacity={0.8}>
+            <Text style={s.startBtnText}>Try again</Text>
+          </TouchableOpacity>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   // Calculate total minutes for today
   const totalMin = sessions.reduce((sum, s) =>
@@ -96,6 +155,11 @@ export default function TodayScreen({ navigation }) {
             : `${sessions.length} sessions · ${Math.round(totalMin)} min · ${meals.length} meals`
           }
         </Text>
+        {streak > 1 && (
+          <View style={s.streakRow}>
+            <Text style={s.streakText}>{streak} day streak 🔥</Text>
+          </View>
+        )}
 
         {/* Completed sessions */}
         {doneSessions.length > 0 && !allDone && (
@@ -235,6 +299,15 @@ const s = StyleSheet.create({
     fontSize: 14,
     color: colors.muted,
     marginBottom: 24,
+  },
+
+  streakRow: {
+    marginBottom: 16,
+  },
+  streakText: {
+    fontSize: 14,
+    color: colors.gold,
+    fontWeight: '600',
   },
 
   // Active card

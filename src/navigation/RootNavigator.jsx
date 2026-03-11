@@ -14,22 +14,73 @@ import TodayScreen from '../screens/TodayScreen';
 import SessionScreen from '../screens/SessionScreen';
 import ProgressScreen from '../screens/ProgressScreen';
 import AccountScreen from '../screens/AccountScreen';
+import IntroScreen from '../screens/IntroScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
-function TabIcon({ name, focused }) {
-  const color = focused ? colors.gold : colors.dim;
-  // Simple circle indicator
-  return (
-    <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: focused ? colors.gold : 'transparent', marginBottom: 2 }} />
-  );
+function TabBarIcon({ name, color }) {
+  if (name === 'Today') {
+    return (
+      <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={{
+          width: 20, height: 20,
+          borderWidth: 1.5, borderColor: color, borderRadius: 4,
+        }}>
+          <View style={{
+            position: 'absolute', top: -4, left: 4,
+            width: 1.5, height: 6, backgroundColor: color, borderRadius: 1,
+          }} />
+          <View style={{
+            position: 'absolute', top: -4, right: 4,
+            width: 1.5, height: 6, backgroundColor: color, borderRadius: 1,
+          }} />
+          <View style={{
+            position: 'absolute', top: 6, left: 3, right: 3,
+            height: 1, backgroundColor: color,
+          }} />
+        </View>
+      </View>
+    );
+  }
+
+  if (name === 'Progress') {
+    return (
+      <View style={{ width: 24, height: 24, flexDirection: 'row', alignItems: 'flex-end', justifyContent: 'center', gap: 2, paddingBottom: 2 }}>
+        <View style={{ width: 4, height: 8, backgroundColor: color, borderRadius: 1 }} />
+        <View style={{ width: 4, height: 14, backgroundColor: color, borderRadius: 1 }} />
+        <View style={{ width: 4, height: 10, backgroundColor: color, borderRadius: 1 }} />
+        <View style={{ width: 4, height: 18, backgroundColor: color, borderRadius: 1 }} />
+      </View>
+    );
+  }
+
+  if (name === 'Account') {
+    return (
+      <View style={{ width: 24, height: 24, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={{
+          width: 10, height: 10,
+          borderRadius: 5,
+          borderWidth: 1.5, borderColor: color,
+          marginBottom: 1,
+        }} />
+        <View style={{
+          width: 16, height: 8,
+          borderTopLeftRadius: 8, borderTopRightRadius: 8,
+          borderWidth: 1.5, borderColor: color,
+          borderBottomWidth: 0,
+        }} />
+      </View>
+    );
+  }
+
+  return null;
 }
 
 function MainTabs() {
   return (
     <Tab.Navigator
-      screenOptions={{
+      screenOptions={({ route }) => ({
         headerShown: false,
         tabBarStyle: {
           backgroundColor: '#111110',
@@ -46,7 +97,10 @@ function MainTabs() {
           fontWeight: '500',
           letterSpacing: 0.3,
         },
-      }}
+        tabBarIcon: ({ focused, color, size }) => {
+          return <TabBarIcon name={route.name} color={color} />;
+        },
+      })}
     >
       <Tab.Screen name="Today" component={TodayStack} options={{ tabBarLabel: 'Today' }} />
       <Tab.Screen name="Progress" component={ProgressScreen} options={{ tabBarLabel: 'Progress' }} />
@@ -61,6 +115,15 @@ function TodayStack() {
       <Stack.Screen name="TodayMain" component={TodayScreen} />
       <Stack.Screen name="StressTap" component={StressTapScreen} />
       <Stack.Screen name="Session" component={SessionScreen} options={{ gestureEnabled: false }} />
+    </Stack.Navigator>
+  );
+}
+
+function IntroStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="IntroMain" component={IntroScreen} />
+      <Stack.Screen name="OnboardingFlow" component={OnboardingScreen} />
     </Stack.Navigator>
   );
 }
@@ -107,7 +170,7 @@ export default function RootNavigator() {
         {!isLoggedIn ? (
           <Stack.Screen name="Auth" component={AuthScreen} />
         ) : !hasProfile ? (
-          <Stack.Screen name="Onboarding" component={OnboardingScreen} />
+          <Stack.Screen name="Intro" component={IntroStack} />
         ) : (
           <Stack.Screen name="Main" component={MainTabs} />
         )}
