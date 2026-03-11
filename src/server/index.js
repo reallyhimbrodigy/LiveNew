@@ -2096,6 +2096,7 @@ async function buildBootstrapPayload({ userId, userProfile, userBaseline, userEm
     profile: {
       isComplete: profileStatus.isComplete,
       missingFields: profileStatus.missingFields,
+      routine: baseline?.constraints?.routine || null,
     },
     baseline: baseline
       ? {

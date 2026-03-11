@@ -36,7 +36,7 @@ export const useAuthStore = create((set, get) => ({
         let hasProfile = false;
         if (profileJson) {
           profile = JSON.parse(profileJson);
-          hasProfile = !!(profile && profile.goal);
+          hasProfile = !!(profile && profile.routine && profile.goal) || !!(profile && profile.goal && profile.goal !== 'all');
         }
 
         // Check if we have a valid plan for today
@@ -70,14 +70,16 @@ export const useAuthStore = create((set, get) => ({
           const serverProfile = bootstrap?.profile || {};
           if (serverProfile.goal) {
             const normalized = {
-              goal: serverProfile.goal,
-              stressSource: serverProfile.stressSource,
-              wakeTime: serverProfile.wakeTime,
-              timeMin: serverProfile.timeMin,
+              routine: serverProfile.routine || null,
+              goal: serverProfile.goal || null,
+              stressSource: serverProfile.stressSource || null,
+              wakeTime: serverProfile.wakeTime || null,
+              timeMin: serverProfile.timeMin || null,
               injuries: serverProfile.injuries || [],
             };
             await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(normalized));
-            set({ profile: normalized, hasProfile: true });
+            const refreshedHasProfile = !!(normalized.routine && normalized.goal) || !!(normalized.goal && normalized.goal !== 'all');
+            set({ profile: normalized, hasProfile: refreshedHasProfile });
           }
         } catch {}
 
@@ -104,13 +106,15 @@ export const useAuthStore = create((set, get) => ({
       const bootstrap = await api.bootstrap();
       const p = bootstrap?.profile || {};
       const profile = {
-        goal: p.goal,
-        stressSource: p.stressSource,
-        wakeTime: p.wakeTime,
-        timeMin: p.timeMin,
+        routine: p.routine || null,
+        goal: p.goal || null,
+        stressSource: p.stressSource || null,
+        wakeTime: p.wakeTime || null,
+        timeMin: p.timeMin || null,
         injuries: p.injuries || [],
       };
-      const hasProfile = !!(profile.goal && profile.goal !== 'all');
+      // Check for new onboarding (routine + goal) OR old onboarding (goal as category)
+      const hasProfile = !!(profile.routine && profile.goal) || !!(profile.goal && profile.goal !== 'all');
       await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
       set({ isLoggedIn: true, hasProfile, profile });
     } catch {
