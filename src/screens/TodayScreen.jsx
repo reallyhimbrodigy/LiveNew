@@ -12,6 +12,7 @@ export default function TodayScreen({ navigation }) {
   const todayPlan = useAuthStore(s => s.todayPlan);
   const todayDate = useAuthStore(s => s.todayDate);
   const todayStress = useAuthStore(s => s.todayStress);
+  const isSubscribed = useAuthStore(s => s.isSubscribed);
   const streak = useAuthStore(s => s.streak);
   const [completedSessions, setCompletedSessions] = useState({});
   const [refreshing, setRefreshing] = useState(false);
@@ -77,6 +78,29 @@ export default function TodayScreen({ navigation }) {
     return () => sub.remove();
   }, [todayDate]);
 
+  useEffect(() => {
+    if (isSubscribed) return;
+    
+    (async () => {
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        const firstUse = await AsyncStorage.getItem('livenew:first_use');
+        const today = new Date().toISOString().slice(0, 10);
+        
+        if (!firstUse) {
+          // First day — mark it and allow free use
+          await AsyncStorage.setItem('livenew:first_use', today);
+          return;
+        }
+        
+        if (firstUse !== today) {
+          // Not the first day and not subscribed — show paywall
+          navigation.navigate('Paywall', { planPreview: todayPlan });
+        }
+      } catch {}
+    })();
+  }, [isSubscribed]);
+
   const sessions = Array.isArray(todayPlan?.sessions) ? todayPlan.sessions : [];
   const meals = Array.isArray(todayPlan?.meals) ? todayPlan.meals : [];
 
@@ -92,6 +116,11 @@ export default function TodayScreen({ navigation }) {
   const doneSessions = sessionList.filter(s => s.done);
 
   const handleStartSession = (session) => {
+    if (!isSubscribed) {
+      // Show paywall with plan preview
+      navigation.navigate('Paywall', { planPreview: todayPlan });
+      return;
+    }
     tapLight();
     navigation.navigate('Session', {
       session,
@@ -250,7 +279,9 @@ export default function TodayScreen({ navigation }) {
             {meals.map((m, i) => (
               <View key={i} style={s.mealCard}>
                 <Text style={s.mealTime}>{m.time}</Text>
-                <Text style={s.mealRec}>{m.recommendation}</Text>
+                <Text style={s.mealRec}>
+                  {isSubscribed ? m.recommendation : 'Subscribe to see your meal plan'}
+                </Text>
               </View>
             ))}
           </View>

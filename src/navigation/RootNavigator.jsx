@@ -5,6 +5,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
 import { useAuthStore } from '../store/authStore';
 import { colors } from '../theme';
+import { initPurchases } from '../purchases';
 
 // Screens (we'll create these in the next prompts)
 import AuthScreen from '../screens/AuthScreen';
@@ -15,6 +16,7 @@ import SessionScreen from '../screens/SessionScreen';
 import ProgressScreen from '../screens/ProgressScreen';
 import AccountScreen from '../screens/AccountScreen';
 import IntroScreen from '../screens/IntroScreen';
+import PaywallScreen from '../screens/PaywallScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -115,6 +117,7 @@ function TodayStack() {
       <Stack.Screen name="TodayMain" component={TodayScreen} />
       <Stack.Screen name="StressTap" component={StressTapScreen} />
       <Stack.Screen name="Session" component={SessionScreen} options={{ gestureEnabled: false }} />
+      <Stack.Screen name="Paywall" component={PaywallScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>
   );
 }
@@ -135,7 +138,19 @@ export default function RootNavigator() {
   const hydrate = useAuthStore((s) => s.hydrate);
 
   useEffect(() => {
-    hydrate();
+    (async () => {
+      await hydrate();
+      // Init RevenueCat after we know the userId
+      const auth = useAuthStore.getState();
+      if (auth.isLoggedIn) {
+        try {
+          const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+          const authRaw = await AsyncStorage.getItem('livenew:auth');
+          const authData = authRaw ? JSON.parse(authRaw) : {};
+          await initPurchases(authData.userId || null);
+        } catch {}
+      }
+    })();
   }, []);
 
   if (isLoading) {

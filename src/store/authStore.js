@@ -11,6 +11,7 @@ export const useAuthStore = create((set, get) => ({
   // State
   isLoading: true,
   isLoggedIn: false,
+  isSubscribed: false,
   hasProfile: false,
   profile: null,
   todayPlan: null,
@@ -31,6 +32,12 @@ export const useAuthStore = create((set, get) => ({
       if (authJson) {
         const auth = JSON.parse(authJson);
         setTokens(auth.accessToken, auth.refreshToken);
+        // Check subscription
+        let isSubscribed = false;
+        try {
+          const subRaw = await AsyncStorage.getItem('livenew:subscribed');
+          if (subRaw) isSubscribed = JSON.parse(subRaw);
+        } catch {}
 
         let profile = null;
         let hasProfile = false;
@@ -56,6 +63,7 @@ export const useAuthStore = create((set, get) => ({
         set({
           isLoading: false,
           isLoggedIn: true,
+          isSubscribed,
           hasProfile,
           profile,
           todayPlan,
@@ -80,6 +88,16 @@ export const useAuthStore = create((set, get) => ({
             await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(normalized));
             const refreshedHasProfile = !!(normalized.routine && normalized.goal) || !!(normalized.goal && normalized.goal !== 'all');
             set({ profile: normalized, hasProfile: refreshedHasProfile });
+          }
+        } catch {}
+
+        // Verify subscription with RevenueCat
+        try {
+          const { checkSubscription } = require('../purchases');
+          const active = await checkSubscription();
+          if (active !== get().isSubscribed) {
+            set({ isSubscribed: active });
+            await AsyncStorage.setItem('livenew:subscribed', JSON.stringify(active));
           }
         } catch {}
 
@@ -126,6 +144,13 @@ export const useAuthStore = create((set, get) => ({
   signup: async (email, password, name) => {
     const data = await api.signup(email, password, name);
     return data; // May need email confirmation
+  },
+
+  setSubscribed: async (value) => {
+    try {
+      await AsyncStorage.setItem('livenew:subscribed', JSON.stringify(value));
+    } catch {}
+    set({ isSubscribed: value });
   },
 
   // Save onboarding profile
@@ -260,7 +285,8 @@ export const useAuthStore = create((set, get) => ({
     try { await api.logout(); } catch {}
     clearTokens();
     await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, PLAN_KEY]);
-    set({ isLoggedIn: false, hasProfile: false, profile: null, todayPlan: null });
+    await AsyncStorage.removeItem('livenew:subscribed');
+    set({ isLoggedIn: false, hasProfile: false, profile: null, todayPlan: null, isSubscribed: false });
   },
 
   // Delete account
@@ -268,6 +294,7 @@ export const useAuthStore = create((set, get) => ({
     await api.deleteAccount();
     clearTokens();
     await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, PLAN_KEY]);
-    set({ isLoggedIn: false, hasProfile: false, profile: null, todayPlan: null });
+    await AsyncStorage.removeItem('livenew:subscribed');
+    set({ isLoggedIn: false, hasProfile: false, profile: null, todayPlan: null, isSubscribed: false });
   },
 }));
