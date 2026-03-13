@@ -12,7 +12,7 @@
   <title>LiveNew — Privacy Policy</title>
   <style>
     body {
-      background: var(--bg, #0f0d0a);
+      background: var(--bg);
       display: block;
       overflow: visible;
       overflow-x: hidden;
@@ -22,7 +22,7 @@
     .card {
       position: relative;
       z-index: 1;
-      background: var(--bg, #0f0d0a);
+      background: var(--bg);
     }
 
     .sticky-footer {
@@ -43,8 +43,8 @@
 
     .sticky-footer .sf-inner {
       height: 100%;
-      background: #111110;
-      border-top: 1px solid rgba(196, 168, 108, 0.1);
+      background: var(--bg-card);
+      border-top: 1px solid var(--line);
       display: flex;
       flex-direction: column;
       justify-content: space-between;
@@ -97,7 +97,7 @@
       font-size: 1.5rem;
       font-weight: 500;
       letter-spacing: 0.04em;
-      color: var(--text, #e8e0d4);
+      color: var(--text);
       text-decoration: none;
       display: block;
       margin-bottom: 20px;
@@ -106,7 +106,7 @@
     .sf-brand-desc {
       font-size: 0.85rem;
       line-height: 1.7;
-      color: var(--text-muted, #8a8070);
+      color: var(--text-muted);
       margin: 0;
     }
 
@@ -127,7 +127,7 @@
       font-weight: 500;
       letter-spacing: 0.12em;
       text-transform: uppercase;
-      color: var(--text, #e8e0d4);
+      color: var(--text);
       margin-bottom: 20px;
     }
 
@@ -143,20 +143,20 @@
 
     .sf-col a {
       font-size: 0.82rem;
-      color: var(--text-muted, #8a8070);
+      color: var(--text-muted);
       text-decoration: none;
       transition: color 0.25s ease;
     }
 
     .sf-col a:hover {
-      color: var(--text, #e8e0d4);
+      color: var(--text);
     }
 
     .sf-bar {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      border-top: 1px solid rgba(196,168,108,0.08);
+      border-top: 1px solid var(--line);
       padding-top: 16px;
       position: relative;
       z-index: 1;
@@ -164,7 +164,7 @@
 
     .sf-bar p {
       font-size: 0.72rem;
-      color: var(--text-dim, #5a5248);
+      color: var(--text-dim);
       margin: 0;
     }
 
@@ -201,10 +201,33 @@
         text-align: center;
       }
     }
-  </style>
+  
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #faf8f5;
+    --bg-card: #ffffff;
+    --bg-surface: #f5f2ee;
+    --surface: #f5f2ee;
+    --card: #ffffff;
+    --field: #f0ede8;
+    --text: #1a1714;
+    --text-muted: #6b6560;
+    --muted: #6b6560;
+    --text-dim: #9a9490;
+    --dim: #9a9490;
+    --gold: #a08545;
+    --gold-dim: rgba(160, 133, 69, 0.12);
+    --primary: #a08545;
+    --line: rgba(26, 23, 20, 0.1);
+    --font-display: 'Cormorant Garamond', Georgia, serif;
+    --font-body: 'DM Sans', -apple-system, sans-serif;
+  }
+}
+
+</style>
 </head>
 <body>
-  <div class="ln-container" style="max-width:640px;position:relative;z-index:1;background:var(--bg, #0f0d0a)">
+  <div class="ln-container" style="max-width:640px;position:relative;z-index:1;background: var(--bg)">
     <div class="card" style="margin-top:40px">
       <h1 style="font-family:var(--font-display);font-size:2rem;margin-bottom:8px">Privacy Policy</h1>
       <p class="muted" style="margin-bottom:24px">Last updated: March 2026</p>

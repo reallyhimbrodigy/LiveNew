@@ -553,22 +553,44 @@ label { display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
 
 .onboard-textarea {
   width: 100%;
-  background: var(--surface, #1c1a17);
-  border: 1px solid var(--line, rgba(196,168,108,0.1));
+  background: var(--surface);
+  border: 1px solid var(--line);
   border-radius: 12px;
   padding: 14px 16px;
   font-family: var(--font-body, 'DM Sans', -apple-system, sans-serif);
   font-size: 0.95rem;
-  color: var(--text, #e8e0d4);
+  color: var(--text);
   resize: none;
   outline: none;
   line-height: 1.5;
   transition: border-color 0.2s;
 }
 .onboard-textarea:focus {
-  border-color: var(--gold, #c4a86c);
+  border-color: var(--gold);
 }
 .onboard-textarea::placeholder {
-  color: var(--dim, #5a5248);
+  color: var(--dim);
   font-size: 0.88rem;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #faf8f5;
+    --bg-card: #ffffff;
+    --bg-surface: #f5f2ee;
+    --surface: #f5f2ee;
+    --card: #ffffff;
+    --field: #f0ede8;
+    --text: #1a1714;
+    --text-muted: #6b6560;
+    --muted: #6b6560;
+    --text-dim: #9a9490;
+    --dim: #9a9490;
+    --gold: #a08545;
+    --gold-dim: rgba(160, 133, 69, 0.12);
+    --primary: #a08545;
+    --line: rgba(26, 23, 20, 0.1);
+    --font-display: 'Cormorant Garamond', Georgia, serif;
+    --font-body: 'DM Sans', -apple-system, sans-serif;
+  }
 }
