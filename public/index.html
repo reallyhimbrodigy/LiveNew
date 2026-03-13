@@ -673,7 +673,7 @@
   <div id="mouse-gradient"></div>
 
   <a href="/" class="brand">LiveNew</a>
-  <a href="/login.html" class="login-link">Log in</a>
+  <a href="#download" class="login-link">Log in</a>
 
   <div class="corner" style="top:16px;left:16px;animation-delay:4.2s"><div class="corner-dot" style="top:0;left:0"></div></div>
   <div class="corner" style="top:16px;right:16px;animation-delay:4.4s"><div class="corner-dot" style="top:0;right:0"></div></div>
@@ -729,8 +729,8 @@
       </div>
 
       <div class="cta-area">
-        <a href="/signup.html" class="cta-btn">Start free</a>
-        <span class="cta-sub">No credit card. First day free.</span>
+        <a href="#download" class="cta-btn">Download the app</a>
+        <span class="cta-sub">Free to download. 7-day free trial. $9.99/month.</span>
       </div>
     </div>
 
@@ -787,9 +787,17 @@
 
   <div class="final-cta">
     <h2>Your body knows how to be calm.<br>LiveNew shows it the way.</h2>
-    <a href="/signup.html" class="cta-btn">Start free</a>
-    <p>$9.99/month after your first free day.</p>
+    <a href="#download" class="cta-btn" id="download-btn">Download the app</a>
+    <p class="cta-sub">Free to download. 7-day free trial. $9.99/month.</p>
   </div>
+
+  <section class="download-section" id="download" style="text-align:center;padding:80px 24px;position:relative;z-index:1;background:var(--bg);">
+    <h2 style="font-family:var(--font-display);font-size:2.2rem;font-weight:500;color:var(--text);margin-bottom:12px;">Get LiveNew</h2>
+    <p style="color:var(--text-muted);font-size:1rem;margin-bottom:32px;">Available on the App Store</p>
+    <a href="https://apps.apple.com/app/livenew/id6760437838" target="_blank" rel="noopener" style="display:inline-block;">
+      <img src="https://developer.apple.com/assets/elements/badges/download-on-the-app-store.svg" alt="Download on the App Store" style="height:54px;">
+    </a>
+  </section>
 
   <script>
     document.addEventListener('DOMContentLoaded', () => {
@@ -859,9 +867,7 @@
               <h4>Product</h4>
               <ul>
                 <li><a href="/">Home</a></li>
-                <li><a href="/day">Your Day Plan</a></li>
-                <li><a href="/progress">Progress</a></li>
-                <li><a href="/account">Account</a></li>
+                <li><a href="#download">Download the App</a></li>
               </ul>
             </div>
             <div class="sf-col">

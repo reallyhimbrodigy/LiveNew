@@ -5333,6 +5333,24 @@ const server = http.createServer(async (req, res) => {
     ["/profile.html", "profile.html"],
   ]);
 
+  // App pages redirect to App Store (or landing page until App Store is live)
+  const appRedirectRoutes = new Set(['/day', '/day.html', '/progress', '/progress.html', '/account', '/account.html']);
+  const authRedirectRoutes = new Set(['/login', '/login.html', '/signup', '/signup.html']);
+
+  if (req.method === "GET" && appRedirectRoutes.has(pathname)) {
+    // Once you have an App Store URL, replace this with:
+    // res.writeHead(302, { Location: 'https://apps.apple.com/app/livenew/idXXXXXXXXXX' });
+    res.writeHead(302, { Location: '/' });
+    res.end();
+    return;
+  }
+
+  if (req.method === "GET" && authRedirectRoutes.has(pathname)) {
+    res.writeHead(302, { Location: '/' });
+    res.end();
+    return;
+  }
+
   if (req.method === "GET" && pageRoutes.has(pathname)) {
     const isDayRoute = pathname === "/day" || pathname === "/day.html";
     if (isDayRoute) {
