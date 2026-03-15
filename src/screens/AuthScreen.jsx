@@ -1,11 +1,12 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { useAuthStore } from '../store/authStore';
+import { api } from '../api';
 
 export default function AuthScreen() {
   const [mode, setMode] = useState('login');
@@ -16,9 +17,14 @@ export default function AuthScreen() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [resetEmail, setResetEmail] = useState('');
+  const [resetSent, setResetSent] = useState(false);
+  const [resetLoading, setResetLoading] = useState(false);
 
   const login = useAuthStore(s => s.login);
   const signup = useAuthStore(s => s.signup);
+  const isSignUp = mode === 'signup';
 
   const handleSubmit = async () => {
     setError('');
@@ -71,6 +77,75 @@ export default function AuthScreen() {
     setName('');
   };
 
+  const handleResetPassword = async () => {
+    if (!resetEmail.trim()) return;
+    setResetLoading(true);
+    try {
+      await api.resetPassword(resetEmail.trim().toLowerCase());
+      setResetSent(true);
+    } catch {
+      Alert.alert('Error', 'Could not send reset email. Please try again.');
+    }
+    setResetLoading(false);
+  };
+
+  if (showForgot) {
+    return (
+      <SafeAreaView style={s.safe}>
+        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
+          <View style={s.container}>
+            <TouchableOpacity onPress={() => { setShowForgot(false); setResetSent(false); }} style={{ paddingVertical: 12 }}>
+              <Text style={{ color: colors.muted, fontSize: 15 }}>← Back</Text>
+            </TouchableOpacity>
+
+            <View style={{ flex: 1, justifyContent: 'center' }}>
+              <Text style={s.title}>Reset password</Text>
+
+              {resetSent ? (
+                <>
+                  <Text style={{ color: colors.gold, fontSize: 16, textAlign: 'center', marginTop: 16, lineHeight: 24 }}>
+                    Check your email for a password reset link.
+                  </Text>
+                  <TouchableOpacity
+                    style={[s.btn, { marginTop: 24 }]}
+                    onPress={() => { setShowForgot(false); setResetSent(false); }}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.btnText}>Back to sign in</Text>
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <>
+                  <Text style={{ color: colors.muted, fontSize: 14, textAlign: 'center', marginBottom: 24 }}>
+                    Enter your email and we'll send you a link to reset your password.
+                  </Text>
+                  <TextInput
+                    style={s.input}
+                    value={resetEmail}
+                    onChangeText={setResetEmail}
+                    placeholder="Email address"
+                    placeholderTextColor={colors.dim}
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                    autoFocus
+                  />
+                  <TouchableOpacity
+                    style={[s.btn, (!resetEmail.trim() || resetLoading) && { opacity: 0.4 }]}
+                    onPress={handleResetPassword}
+                    disabled={!resetEmail.trim() || resetLoading}
+                    activeOpacity={0.8}
+                  >
+                    <Text style={s.btnText}>{resetLoading ? 'Sending...' : 'Send reset link'}</Text>
+                  </TouchableOpacity>
+                </>
+              )}
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={s.safe}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.flex}>
@@ -79,13 +154,13 @@ export default function AuthScreen() {
           <Text style={s.logo}>LiveNew</Text>
 
           <Text style={s.heading}>
-            {mode === 'login' ? 'Log in' : 'Create account'}
+            {isSignUp ? 'Create account' : 'Log in'}
           </Text>
 
           {error ? <View style={s.errorBox}><Text style={s.errorText}>{error}</Text></View> : null}
           {success ? <View style={s.successBox}><Text style={s.successText}>{success}</Text></View> : null}
 
-          {mode === 'signup' && (
+          {isSignUp && (
             <TextInput
               style={s.input}
               placeholder="Full name"
@@ -126,23 +201,29 @@ export default function AuthScreen() {
             </TouchableOpacity>
           </View>
 
+          {!isSignUp && (
+            <TouchableOpacity onPress={() => setShowForgot(true)} style={{ alignSelf: 'flex-end', marginBottom: 16, marginTop: -4 }}>
+              <Text style={{ color: colors.gold, fontSize: 13 }}>Forgot password?</Text>
+            </TouchableOpacity>
+          )}
+
           <TouchableOpacity style={s.submitBtn} onPress={handleSubmit} disabled={loading} activeOpacity={0.8}>
             {loading ? (
               <ActivityIndicator color={colors.bg} size="small" />
             ) : (
               <Text style={s.submitText}>
-                {mode === 'login' ? 'Continue' : 'Create Account'}
+                {isSignUp ? 'Create Account' : 'Continue'}
               </Text>
             )}
           </TouchableOpacity>
 
           <View style={s.switchRow}>
             <Text style={s.switchText}>
-              {mode === 'login' ? "Don't have an account? " : "Already have an account? "}
+              {isSignUp ? "Already have an account? " : "Don't have an account? "}
             </Text>
             <TouchableOpacity onPress={toggleMode}>
               <Text style={s.switchLink}>
-                {mode === 'login' ? 'Sign up' : 'Log in'}
+                {isSignUp ? 'Log in' : 'Sign up'}
               </Text>
             </TouchableOpacity>
           </View>
@@ -157,6 +238,19 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   flex: { flex: 1 },
   scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
+  container: { flex: 1, padding: 24 },
+  title: { fontSize: 28, fontWeight: '700', color: colors.text, textAlign: 'center' },
+  btn: {
+    backgroundColor: colors.gold,
+    borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  btnText: {
+    color: colors.bg,
+    fontSize: 16,
+    fontWeight: '600',
+  },
 
   logo: {
     fontSize: 28,

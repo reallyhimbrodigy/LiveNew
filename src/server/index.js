@@ -497,6 +497,7 @@ const PUBLIC_PAGE_PATHS = new Set([
 const PUBLIC_POST_ROUTES = new Set([
   "/v1/auth/signup",
   "/v1/auth/login",
+  "/v1/auth/reset-password",
   "/v1/auth/refresh-session",
   "/v1/auth/resend-signup",
   "/v1/auth/admin/generate-signup-link",
@@ -6001,6 +6002,30 @@ const server = http.createServer(async (req, res) => {
         });
         return;
       }
+    }
+
+    if (pathname === "/v1/auth/reset-password" && req.method === "POST") {
+      const body = await parseJson(req);
+      const email = body?.email;
+      if (!email || typeof email !== "string") {
+        sendJson(res, 400, { ok: false, message: "Email is required" });
+        return;
+      }
+      try {
+        const { error } = await supabaseAnon().auth.resetPasswordForEmail(
+          email.trim().toLowerCase(),
+          { redirectTo: "https://livenew.app/auth-callback" }
+        );
+        if (error) {
+          console.error("[auth][reset-password] error", { message: error.message });
+        }
+        // Always return success to prevent email enumeration
+        sendJson(res, 200, { ok: true });
+      } catch (err) {
+        console.error("[auth][reset-password] error", { message: err?.message });
+        sendJson(res, 200, { ok: true });
+      }
+      return;
     }
 
     if (pathname === "/v1/auth/debug/status" && req.method === "GET") {

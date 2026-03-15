@@ -255,6 +255,20 @@ export default function SessionScreen({ route, navigation }) {
           <View style={[s.progressBarFill, { width: `${progress * 100}%` }]} />
         </View>
 
+        {/* Phase dots */}
+        <View style={s.phaseDots}>
+          {phases.map((_, i) => (
+            <View
+              key={i}
+              style={[
+                s.phaseDot,
+                i < phaseIndex && s.phaseDotDone,
+                i === phaseIndex && s.phaseDotActive,
+              ]}
+            />
+          ))}
+        </View>
+
         {/* Timer */}
         <Text style={s.timer}>{timerDisplay}</Text>
 
@@ -336,6 +350,27 @@ const s = StyleSheet.create({
     height: '100%',
     backgroundColor: colors.gold,
     borderRadius: 2,
+  },
+
+  phaseDots: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 24,
+  },
+  phaseDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.line,
+  },
+  phaseDotDone: {
+    backgroundColor: colors.gold,
+  },
+  phaseDotActive: {
+    backgroundColor: colors.gold,
+    width: 20,
+    borderRadius: 4,
   },
 
   // Timer

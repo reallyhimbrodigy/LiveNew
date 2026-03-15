@@ -64,6 +64,7 @@ export const api = {
   // Auth
   login: (email, password) => request('POST', '/v1/auth/login', { email, password }),
   signup: (email, password, name) => request('POST', '/v1/auth/signup', { email, password, name, consent: true }),
+  resetPassword: (email) => request('POST', '/v1/auth/reset-password', { email }),
   logout: () => request('POST', '/v1/auth/logout', {}),
 
   // Bootstrap

@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect } from '../haptics';
+import { maybePromptReview } from '../reviewPrompt';
 
 export default function TodayScreen({ navigation }) {
   const todayPlan = useAuthStore(s => s.todayPlan);
@@ -58,7 +59,15 @@ export default function TodayScreen({ navigation }) {
           const raw = await AsyncStorage.getItem('livenew:plan');
           if (raw) {
             const plan = JSON.parse(raw);
-            setCompletedSessions(plan.completedSessions || {});
+            const completed = plan.completedSessions || {};
+            setCompletedSessions(completed);
+
+            // Check if all sessions are done
+            const sessions = plan.contract?.sessions || [];
+            const allComplete = sessions.length > 0 && sessions.every((_, i) => completed[i]);
+            if (allComplete) {
+              maybePromptReview();
+            }
           }
         } catch {}
       })();
@@ -78,29 +87,6 @@ export default function TodayScreen({ navigation }) {
     return () => sub.remove();
   }, [todayDate]);
 
-  useEffect(() => {
-    if (isSubscribed) return;
-    
-    (async () => {
-      try {
-        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-        const firstUse = await AsyncStorage.getItem('livenew:first_use');
-        const today = new Date().toISOString().slice(0, 10);
-        
-        if (!firstUse) {
-          // First day — mark it and allow free use
-          await AsyncStorage.setItem('livenew:first_use', today);
-          return;
-        }
-        
-        if (firstUse !== today) {
-          // Not the first day and not subscribed — show paywall
-          navigation.navigate('Paywall', { planPreview: todayPlan });
-        }
-      } catch {}
-    })();
-  }, [isSubscribed]);
-
   const sessions = Array.isArray(todayPlan?.sessions) ? todayPlan.sessions : [];
   const meals = Array.isArray(todayPlan?.meals) ? todayPlan.meals : [];
 
@@ -115,13 +101,31 @@ export default function TodayScreen({ navigation }) {
   const afterNext = sessionList.find(s => !s.done && s !== nextSession);
   const doneSessions = sessionList.filter(s => s.done);
 
-  const handleStartSession = (session) => {
+  const handleStartSession = async (session) => {
     if (!isSubscribed) {
-      // Show paywall with plan preview
-      navigation.navigate('Paywall', { planPreview: todayPlan });
-      return;
+      // Check if this is the first day (free trial)
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        const firstUse = await AsyncStorage.getItem('livenew:first_use');
+        const today = new Date().toISOString().slice(0, 10);
+
+        if (!firstUse) {
+          // First ever use — mark it and allow free access
+          await AsyncStorage.setItem('livenew:first_use', today);
+        } else if (firstUse === today) {
+          // Still the first day — allow free access
+        } else {
+          // Past the first day — show paywall
+          navigation.navigate('Paywall', { planPreview: todayPlan });
+          return;
+        }
+      } catch {
+        // If we can't check, show paywall to be safe
+        navigation.navigate('Paywall', { planPreview: todayPlan });
+        return;
+      }
     }
-    tapLight();
+
     navigation.navigate('Session', {
       session,
       onCompleteKey: session.index,
@@ -204,16 +208,25 @@ export default function TodayScreen({ navigation }) {
 
         {/* All done */}
         {allDone && (
-          <View style={s.allDoneWrap}>
-            <Text style={s.allDoneEmoji}>✓</Text>
-            <Text style={s.allDoneTitle}>Done for today</Text>
-            <Text style={s.allDoneSub}>Every session completed. See you tomorrow.</Text>
-            {doneSessions.map(ds => (
-              <View key={ds.index} style={s.completedRow}>
-                <Text style={s.completedCheck}>✓</Text>
-                <Text style={s.completedText}>{ds.title}</Text>
+          <View style={s.celebrateWrap}>
+            <Text style={s.celebrateEmoji}>🎉</Text>
+            <Text style={s.celebrateTitle}>You did it</Text>
+            <Text style={s.celebrateSub}>Every session complete. Your cortisol is on track tonight.</Text>
+
+            <View style={s.celebrateCard}>
+              {doneSessions.map((ds, i) => (
+                <View key={ds.index} style={[s.celebrateRow, i < doneSessions.length - 1 && s.celebrateRowBorder]}>
+                  <Text style={s.celebrateCheck}>✓</Text>
+                  <Text style={s.celebrateSessionTitle}>{ds.title}</Text>
+                </View>
+              ))}
+            </View>
+
+            {streak > 1 && (
+              <View style={s.celebrateStreak}>
+                <Text style={s.celebrateStreakText}>{streak} day streak 🔥</Text>
               </View>
-            ))}
+            )}
           </View>
         )}
 
@@ -429,29 +442,69 @@ const s = StyleSheet.create({
     fontSize: 14,
   },
 
-  // All done
-  allDoneWrap: {
+  celebrateWrap: {
     alignItems: 'center',
-    paddingVertical: 32,
+    paddingVertical: 40,
   },
-
-  allDoneEmoji: {
-    fontSize: 40,
-    color: colors.gold,
-    marginBottom: 12,
+  celebrateEmoji: {
+    fontSize: 48,
+    marginBottom: 16,
   },
-
-  allDoneTitle: {
-    fontSize: 22,
-    fontWeight: '600',
+  celebrateTitle: {
+    fontSize: 28,
+    fontWeight: '700',
     color: colors.text,
     marginBottom: 8,
   },
-
-  allDoneSub: {
-    fontSize: 14,
+  celebrateSub: {
+    fontSize: 15,
     color: colors.muted,
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+    paddingHorizontal: 20,
+  },
+  celebrateCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    width: '100%',
+    overflow: 'hidden',
     marginBottom: 16,
+  },
+  celebrateRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    paddingHorizontal: 16,
+  },
+  celebrateRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: colors.line,
+  },
+  celebrateCheck: {
+    color: colors.gold,
+    fontSize: 16,
+    fontWeight: '700',
+    marginRight: 12,
+  },
+  celebrateSessionTitle: {
+    fontSize: 15,
+    color: colors.text,
+    fontWeight: '500',
+    flex: 1,
+  },
+  celebrateStreak: {
+    backgroundColor: 'rgba(196,168,108,0.12)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  celebrateStreakText: {
+    color: colors.gold,
+    fontSize: 15,
+    fontWeight: '600',
   },
 
   // Timeline

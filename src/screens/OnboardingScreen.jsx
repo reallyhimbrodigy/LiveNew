@@ -62,6 +62,9 @@ export default function OnboardingScreen() {
 
           {step === 2 && (
             <View>
+              <TouchableOpacity style={backStyles.btn} onPress={() => setStep(1)} activeOpacity={0.7}>
+                <Text style={backStyles.text}>← Back</Text>
+              </TouchableOpacity>
               <Text style={s.heading}>What is your goal?</Text>
               <Text style={s.sub}>What do you want to change about how you feel</Text>
 
@@ -87,10 +90,6 @@ export default function OnboardingScreen() {
                 ) : (
                   <Text style={s.btnText}>Start LiveNew</Text>
                 )}
-              </TouchableOpacity>
-
-              <TouchableOpacity style={s.backBtn} onPress={() => setStep(1)}>
-                <Text style={s.backText}>Back</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -171,5 +170,18 @@ const s = StyleSheet.create({
   backText: {
     color: colors.muted,
     fontSize: 14,
+  },
+});
+
+const backStyles = StyleSheet.create({
+  btn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    marginBottom: 12,
+  },
+  text: {
+    color: colors.muted,
+    fontSize: 15,
   },
 });

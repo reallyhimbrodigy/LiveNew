@@ -138,6 +138,25 @@ export default function AccountScreen() {
               <Text style={s.streakText}>{streak} day streak 🔥</Text>
             </View>
           )}
+          {isSubscribed && (
+            <>
+              <View style={s.settingDivider} />
+              <TouchableOpacity
+                style={s.settingRow}
+                onPress={() => Linking.openURL('https://apps.apple.com/account/subscriptions')}
+                activeOpacity={0.7}
+              >
+                <View style={s.settingIcon}>
+                  <Text style={s.settingEmoji}>⚙️</Text>
+                </View>
+                <View style={s.settingContent}>
+                  <Text style={s.settingTitle}>Manage subscription</Text>
+                  <Text style={s.settingValue}>Change or cancel in App Store</Text>
+                </View>
+                <Text style={s.settingArrow}>›</Text>
+              </TouchableOpacity>
+            </>
+          )}
         </View>
 
         {/* Profile section */}
