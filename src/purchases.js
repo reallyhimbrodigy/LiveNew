@@ -1,11 +1,11 @@
 import { Platform } from 'react-native';
 import Purchases from 'react-native-purchases';
 
-const API_KEY = 'test_SZYJnIvVrooYovFarwJtZZcIAKd';
+const API_KEY = 'appl_iHzKiLwHXhOkGobAjCtIFTtrOSw';
 
 export async function initPurchases(userId) {
   try {
-    Purchases.setLogLevel(Purchases.LOG_LEVEL.DEBUG);
+    Purchases.setLogLevel(Purchases.LOG_LEVEL.ERROR);
     if (Platform.OS === 'ios') {
       await Purchases.configure({ apiKey: API_KEY, appUserID: userId || null });
     }
