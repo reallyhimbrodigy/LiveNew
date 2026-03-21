@@ -24,17 +24,17 @@ export async function requestPermissions() {
   return finalStatus === 'granted';
 }
 
-export async function scheduleSessionReminders(sessions) {
+export async function scheduleSessionReminders(interventions) {
   // Cancel all existing reminders first
   await Notifications.cancelAllScheduledNotificationsAsync();
   
-  if (!sessions || sessions.length === 0) return;
+  if (!interventions || interventions.length === 0) return;
   
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   
-  for (const session of sessions) {
-    const hour = parseTimeToHour(session.time);
+  for (const item of interventions) {
+    const hour = parseTimeToHour(item.moment);
     if (hour === null) continue;
     
     const triggerDate = new Date(`${today}T${String(hour).padStart(2, '0')}:00:00`);
@@ -45,7 +45,7 @@ export async function scheduleSessionReminders(sessions) {
         await Notifications.scheduleNotificationAsync({
           content: {
             title: 'LiveNew',
-            body: `Time for: ${session.title}`,
+            body: `Time for: ${item.title}`,
           },
           trigger: {
             type: 'date',

@@ -201,11 +201,11 @@ export const useAuthStore = create((set, get) => ({
       await AsyncStorage.setItem('livenew:plan_count', (count + 1).toString());
     } catch {}
 
-    // Schedule notifications for sessions
+    // Schedule notifications for interventions
     try {
       const granted = await requestPermissions();
-      if (granted && data?.sessions) {
-        await scheduleSessionReminders(data.sessions);
+      if (granted && data?.interventions) {
+        await scheduleSessionReminders(data.interventions);
       }
     } catch {}
 

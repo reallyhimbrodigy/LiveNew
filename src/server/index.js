@@ -2850,8 +2850,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         console.error("[DAYPLAN_NULL] AI returned no plan");
       }
 
-      today.sessions = dayPlan?.sessions || [];
-      today.meals = dayPlan?.meals || [];
+      today.interventions = dayPlan?.interventions || [];
 
       // Legacy contract validation no longer applies to unified day-plan responses.
       // const normalizedToday = ensureTodayContract(today, res);
@@ -2864,12 +2863,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
       clearInterval(keepAlive);
       keepAlive = null;
-      const responseContract = {
-        ...normalizedToday,
-        sessions: dayPlan?.sessions || [],
-        meals: dayPlan?.meals || [],
-      };
-      body = { userId: auth.userId, ...responseContract };
+      body = { userId: auth.userId, ...normalizedToday, ...(dayPlan || {}) };
       if (res?.livenewRequestId) body.requestId = res.livenewRequestId;
       attachDbStats(res);
       res.end(JSON.stringify(body));

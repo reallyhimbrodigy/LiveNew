@@ -79,23 +79,17 @@ export default function PaywallScreen({ navigation, route }) {
           <Text style={s.title}>Your plan is ready</Text>
 
           {/* Plan preview */}
-          {planPreview && planPreview.sessions && (
+          {planPreview && planPreview.interventions && (
             <View style={s.previewWrap}>
-              {planPreview.sessions.map((ses, i) => (
+              {planPreview.interventions.map((item, i) => (
                 <View key={i} style={s.previewRow}>
                   <View style={s.previewDot} />
                   <View style={s.previewContent}>
-                    <Text style={s.previewTitle}>{ses.title}</Text>
-                    <Text style={s.previewTime}>{ses.time}</Text>
+                    <Text style={s.previewTitle}>{item.title}</Text>
+                    <Text style={s.previewTime}>{item.moment}</Text>
                   </View>
                 </View>
               ))}
-              {planPreview.meals && planPreview.meals.length > 0 && (
-                <View style={s.previewRow}>
-                  <View style={s.previewDot} />
-                  <Text style={s.previewTitle}>{planPreview.meals.length} meals planned</Text>
-                </View>
-              )}
             </View>
           )}
 

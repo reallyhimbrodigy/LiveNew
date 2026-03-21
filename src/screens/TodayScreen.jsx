@@ -2,8 +2,8 @@ import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, AppState,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import { colors } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect } from '../haptics';
@@ -12,45 +12,51 @@ import { maybePromptReview } from '../reviewPrompt';
 export default function TodayScreen({ navigation }) {
   const todayPlan = useAuthStore(s => s.todayPlan);
   const todayDate = useAuthStore(s => s.todayDate);
-  const todayStress = useAuthStore(s => s.todayStress);
   const isSubscribed = useAuthStore(s => s.isSubscribed);
   const streak = useAuthStore(s => s.streak);
-  const [completedSessions, setCompletedSessions] = useState({});
+  const [completedItems, setCompletedItems] = useState({});
   const [refreshing, setRefreshing] = useState(false);
 
+  // Redirect to stress tap if no plan for today
   useEffect(() => {
     const checkPlan = async () => {
       const today = new Date().toISOString().slice(0, 10);
-      
-      // If we already have a plan in state for today, we're good
       if (todayPlan && todayDate === today) return;
-      
-      // Try loading from AsyncStorage
+
       try {
         const AsyncStorage = require('@react-native-async-storage/async-storage').default;
         const raw = await AsyncStorage.getItem('livenew:plan');
         if (raw) {
           const cached = JSON.parse(raw);
           if (cached.date === today && cached.contract) {
-            // Restore cached plan to state
             useAuthStore.setState({
               todayPlan: cached.contract,
               todayDate: cached.date,
               todayStress: cached.stress,
             });
-            setCompletedSessions(cached.completedSessions || {});
+            setCompletedItems(cached.completedSessions || {});
             return;
           }
         }
       } catch {}
-      
-      // No valid plan — go to stress tap
+
       navigation.replace('StressTap');
     };
-    
     checkPlan();
   }, []);
 
+  // New day detection
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        const today = new Date().toISOString().slice(0, 10);
+        if (todayDate !== today) navigation.replace('StressTap');
+      }
+    });
+    return () => sub.remove();
+  }, [todayDate]);
+
+  // Reload completion state on focus
   useFocusEffect(
     useCallback(() => {
       (async () => {
@@ -60,67 +66,65 @@ export default function TodayScreen({ navigation }) {
           if (raw) {
             const plan = JSON.parse(raw);
             const completed = plan.completedSessions || {};
-            setCompletedSessions(completed);
+            setCompletedItems(completed);
 
-            // Check if all sessions are done
-            const sessions = plan.contract?.sessions || [];
-            const allComplete = sessions.length > 0 && sessions.every((_, i) => completed[i]);
-            if (allComplete) {
-              maybePromptReview();
-            }
+            const interventions = plan.contract?.interventions || [];
+            const allComplete = interventions.length > 0 && interventions.every((_, i) => completed[i]);
+            if (allComplete) maybePromptReview();
           }
         } catch {}
       })();
     }, [])
   );
 
-  // Recheck when app comes to foreground
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        const today = new Date().toISOString().slice(0, 10);
-        if (todayDate !== today) {
-          navigation.replace('StressTap');
-        }
-      }
-    });
-    return () => sub.remove();
-  }, [todayDate]);
+  const interventions = todayPlan?.interventions || [];
+  const breatheItems = interventions.filter(i => i.type === 'breathe');
+  const habitItems = interventions.filter(i => i.type === 'habit');
+  const foodItems = interventions.filter(i => i.type === 'food');
+  const allItems = interventions.map((item, i) => ({ ...item, index: i, done: !!completedItems[i] }));
+  const allDone = allItems.length > 0 && allItems.every(i => i.done);
+  const nextItem = allItems.find(i => !i.done);
+  const doneItems = allItems.filter(i => i.done);
 
-  const sessions = Array.isArray(todayPlan?.sessions) ? todayPlan.sessions : [];
-  const meals = Array.isArray(todayPlan?.meals) ? todayPlan.meals : [];
+  const handleTapIntervention = async (item) => {
+    tapLight();
 
-  const sessionList = sessions.map((s, i) => ({
-    ...s,
-    index: i,
-    done: !!completedSessions[i],
-  }));
-
-  const allDone = sessionList.length > 0 && sessionList.every(s => s.done);
-  const nextSession = sessionList.find(s => !s.done);
-  const afterNext = sessionList.find(s => !s.done && s !== nextSession);
-  const doneSessions = sessionList.filter(s => s.done);
-
-  const handleStartSession = async (session) => {
+    // Check trial
     if (!isSubscribed) {
       try {
         const AsyncStorage = require('@react-native-async-storage/async-storage').default;
         const raw = await AsyncStorage.getItem('livenew:plan_count');
         const count = raw ? parseInt(raw, 10) : 0;
-        
         if (count > 7) {
           navigation.navigate('Paywall', { planPreview: todayPlan });
           return;
         }
-      } catch {
-        // If we can't check, allow access
-      }
+      } catch {}
     }
 
-    navigation.navigate('Session', {
-      session,
-      onCompleteKey: session.index,
-    });
+    if (item.type === 'breathe' && item.minutes) {
+      // Navigate to breathing session
+      navigation.navigate('Session', {
+        session: {
+          title: item.title,
+          phases: [{ instruction: item.action, minutes: item.minutes }],
+        },
+        onCompleteKey: item.index,
+      });
+    } else {
+      // Habit or food — mark as done immediately
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        const raw = await AsyncStorage.getItem('livenew:plan');
+        if (raw) {
+          const plan = JSON.parse(raw);
+          if (!plan.completedSessions) plan.completedSessions = {};
+          plan.completedSessions[item.index] = true;
+          await AsyncStorage.setItem('livenew:plan', JSON.stringify(plan));
+          setCompletedItems(prev => ({ ...prev, [item.index]: true }));
+        }
+      } catch {}
+    }
   };
 
   const handleRecheck = () => {
@@ -128,163 +132,112 @@ export default function TodayScreen({ navigation }) {
     navigation.replace('StressTap');
   };
 
-  const onRefresh = useCallback(async () => {
-    setRefreshing(true);
-    // Reload completion state
-    try {
-      const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-      const raw = await AsyncStorage.getItem('livenew:plan');
-      if (raw) {
-        const plan = JSON.parse(raw);
-        setCompletedSessions(plan.completedSessions || {});
-      }
-    } catch {}
-    setRefreshing(false);
-  }, []);
-
   if (!todayPlan) return null;
 
-  if (sessions.length === 0) {
+  if (interventions.length === 0) {
     return (
       <SafeAreaView style={s.safe} edges={['top']}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
           <Text style={s.greeting}>Something went wrong</Text>
           <Text style={[s.sub, { marginBottom: 24 }]}>Your plan didn't generate properly.</Text>
-          <TouchableOpacity style={s.startBtn} onPress={handleRecheck} activeOpacity={0.8}>
-            <Text style={s.startBtnText}>Try again</Text>
+          <TouchableOpacity style={s.retryBtn} onPress={handleRecheck} activeOpacity={0.8}>
+            <Text style={s.retryBtnText}>Try again</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
   }
 
-  // Calculate total minutes for today
-  const totalMin = sessions.reduce((sum, s) =>
-    sum + (s.phases || []).reduce((ps, p) => ps + (p.minutes || 0), 0), 0
-  );
-
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
       <ScrollView
         contentContainerStyle={s.scroll}
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={colors.gold} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => {}} tintColor={colors.gold} />}
       >
-        {/* Header */}
-        <Text style={s.logo}>LiveNew</Text>
         <Text style={s.greeting}>{getGreeting()}</Text>
         <Text style={s.sub}>
           {allDone
             ? "You've completed everything today."
-            : `${sessions.length} sessions · ${Math.round(totalMin)} min · ${meals.length} meals`
+            : `${interventions.length} interventions for your day`
           }
         </Text>
-        {streak > 1 && (
-          <View style={s.streakRow}>
-            <Text style={s.streakText}>{streak} day streak 🔥</Text>
-          </View>
-        )}
+        {streak > 1 && <Text style={s.streakText}>{streak} day streak 🔥</Text>}
 
-        {/* Completed sessions */}
-        {doneSessions.length > 0 && !allDone && (
-          <View style={s.completedWrap}>
-            {doneSessions.map(ds => (
-              <View key={ds.index} style={s.completedRow}>
-                <Text style={s.completedCheck}>✓</Text>
-                <Text style={s.completedText}>{ds.title}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* All done */}
+        {/* All done celebration */}
         {allDone && (
           <View style={s.celebrateWrap}>
             <Text style={s.celebrateEmoji}>🎉</Text>
             <Text style={s.celebrateTitle}>You did it</Text>
-            <Text style={s.celebrateSub}>Every session complete. Your cortisol is on track tonight.</Text>
+            <Text style={s.celebrateSub}>Your cortisol is on track tonight.</Text>
+          </View>
+        )}
 
-            <View style={s.celebrateCard}>
-              {doneSessions.map((ds, i) => (
-                <View key={ds.index} style={[s.celebrateRow, i < doneSessions.length - 1 && s.celebrateRowBorder]}>
-                  <Text style={s.celebrateCheck}>✓</Text>
-                  <Text style={s.celebrateSessionTitle}>{ds.title}</Text>
-                </View>
-              ))}
+        {/* Next up card */}
+        {!allDone && nextItem && (
+          <TouchableOpacity
+            style={s.nextCard}
+            onPress={() => handleTapIntervention(nextItem)}
+            activeOpacity={0.8}
+          >
+            <View style={s.nowBadge}>
+              <Text style={s.nowText}>
+                {nextItem.type === 'breathe' ? 'BREATHE' : nextItem.type === 'food' ? 'EAT' : 'DO THIS'}
+              </Text>
             </View>
-
-            {streak > 1 && (
-              <View style={s.celebrateStreak}>
-                <Text style={s.celebrateStreakText}>{streak} day streak 🔥</Text>
-              </View>
+            <Text style={s.nextMoment}>{nextItem.moment}</Text>
+            <Text style={s.nextTitle}>{nextItem.title}</Text>
+            <Text style={s.nextDesc}>{nextItem.description}</Text>
+            {nextItem.type === 'breathe' && nextItem.minutes && (
+              <Text style={s.nextMeta}>{nextItem.minutes} min</Text>
             )}
-          </View>
-        )}
-
-        {/* Active session card */}
-        {!allDone && nextSession && (
-          <View style={s.activeCard}>
-            <Text style={s.activeTime}>{nextSession.time || ''}</Text>
-            <Text style={s.activeTitle}>{nextSession.title || ''}</Text>
-            <Text style={s.activeDesc}>{nextSession.description || ''}</Text>
-            <View style={s.activeMeta}>
-              <Text style={s.activeMin}>
-                {(nextSession.phases || []).reduce((sum, p) => sum + (p.minutes || 0), 0)} min
-              </Text>
-              <Text style={s.activeDot}>·</Text>
-              <Text style={s.activePhases}>
-                {(nextSession.phases || []).length} parts
+            <View style={s.nextAction}>
+              <Text style={s.nextActionText}>
+                {nextItem.type === 'breathe' ? 'Start' : nextItem.type === 'food' ? 'Got it' : 'Done'}
               </Text>
             </View>
-            <TouchableOpacity
-              style={s.startBtn}
-              onPress={() => handleStartSession(nextSession)}
-              activeOpacity={0.8}
-            >
-              <Text style={s.startBtnText}>Start</Text>
-            </TouchableOpacity>
-          </View>
+          </TouchableOpacity>
         )}
 
-        {/* Up next */}
-        {!allDone && afterNext && (
-          <Text style={s.upNext}>Up next: {afterNext.title} · {afterNext.time}</Text>
-        )}
-
-        {/* All sessions timeline */}
-        {!allDone && sessionList.length > 1 && (
-          <View style={s.timeline}>
-            <Text style={s.sectionTitle}>Your day</Text>
-            {sessionList.map(ses => (
-              <TouchableOpacity
-                key={ses.index}
-                style={s.timelineRow}
-                onPress={() => !ses.done && handleStartSession(ses)}
-                disabled={ses.done}
-                activeOpacity={0.7}
-              >
-                <View style={[s.timelineDot, ses.done && s.timelineDotDone]} />
-                <View style={s.timelineContent}>
-                  <Text style={[s.timelineTitle, ses.done && s.timelineTitleDone]}>
-                    {ses.title}
-                  </Text>
-                  <Text style={s.timelineTime}>{ses.time}</Text>
-                </View>
-                {ses.done && <Text style={s.timelineCheck}>✓</Text>}
-              </TouchableOpacity>
+        {/* Completed items */}
+        {doneItems.length > 0 && !allDone && (
+          <View style={s.doneSection}>
+            {doneItems.map(item => (
+              <View key={item.index} style={s.doneRow}>
+                <Text style={s.doneCheck}>✓</Text>
+                <Text style={s.doneTitle}>{item.title}</Text>
+              </View>
             ))}
           </View>
         )}
 
-        {/* Meals */}
-        {meals.length > 0 && (
-          <View style={s.mealsWrap}>
-            <Text style={s.sectionTitle}>Meals</Text>
-            {meals.map((m, i) => (
-              <View key={i} style={s.mealCard}>
-                <Text style={s.mealTime}>{m.time}</Text>
-                <MealText recommendation={m.recommendation} isSubscribed={isSubscribed} />
-              </View>
+        {/* Rest of today */}
+        {!allDone && allItems.filter(i => !i.done && i !== nextItem).length > 0 && (
+          <View style={s.laterSection}>
+            <View style={s.sectionHeader}>
+              <View style={s.sectionLine} />
+              <Text style={s.sectionLabel}>Later today</Text>
+              <View style={s.sectionLine} />
+            </View>
+            {allItems.filter(i => !i.done && i !== nextItem).map(item => (
+              <TouchableOpacity
+                key={item.index}
+                style={s.laterCard}
+                onPress={() => handleTapIntervention(item)}
+                activeOpacity={0.7}
+              >
+                <View style={s.laterTop}>
+                  <View style={[s.typeBadge, item.type === 'breathe' && s.typeBreathe, item.type === 'food' && s.typeFood]}>
+                    <Text style={s.typeText}>
+                      {item.type === 'breathe' ? '🫁' : item.type === 'food' ? '🍽' : '⚡'}
+                    </Text>
+                  </View>
+                  <View style={s.laterContent}>
+                    <Text style={s.laterMoment}>{item.moment}</Text>
+                    <Text style={s.laterTitle}>{item.title}</Text>
+                  </View>
+                </View>
+              </TouchableOpacity>
             ))}
           </View>
         )}
@@ -309,317 +262,93 @@ function getGreeting() {
   return 'Good evening';
 }
 
-function MealText({ recommendation, isSubscribed }) {
-  const [isTrial, setIsTrial] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-        const raw = await AsyncStorage.getItem('livenew:plan_count');
-        const count = raw ? parseInt(raw, 10) : 0;
-        setIsTrial(count <= 7);
-      } catch {
-        setIsTrial(true);
-      }
-    })();
-  }, []);
-
-  return (
-    <Text style={s.mealRec}>
-      {(isSubscribed || isTrial) ? recommendation : 'Subscribe to see your meal plan'}
-    </Text>
-  );
-}
-
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 20, paddingBottom: 100 },
 
-  logo: {
-    fontSize: 20,
-    fontWeight: '500',
-    color: colors.text,
-    letterSpacing: 1,
-    marginBottom: 20,
-  },
+  greeting: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 4 },
+  sub: { fontSize: 14, color: colors.muted, marginBottom: 4 },
+  streakText: { fontSize: 14, color: colors.gold, fontWeight: '600', marginBottom: 20 },
 
-  greeting: {
-    fontSize: 26,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 4,
-  },
-
-  sub: {
-    fontSize: 14,
-    color: colors.muted,
-    marginBottom: 24,
-  },
-
-  streakRow: {
-    marginBottom: 16,
-  },
-  streakText: {
-    fontSize: 14,
-    color: colors.gold,
-    fontWeight: '600',
-  },
-
-  // Active card
-  activeCard: {
+  // Next card
+  nextCard: {
     backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
+    borderWidth: 1.5,
+    borderColor: colors.gold,
     borderRadius: 16,
-    padding: 24,
+    padding: 22,
+    marginTop: 16,
     marginBottom: 16,
   },
-
-  activeTime: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: colors.gold,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 10,
-  },
-
-  activeTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 8,
-    lineHeight: 26,
-  },
-
-  activeDesc: {
-    fontSize: 14,
-    color: colors.muted,
-    lineHeight: 20,
+  nowBadge: {
+    backgroundColor: 'rgba(196,168,108,0.15)',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+    alignSelf: 'flex-start',
     marginBottom: 12,
   },
-
-  activeMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-
-  activeMin: { fontSize: 13, color: colors.dim },
-  activeDot: { fontSize: 13, color: colors.dim, marginHorizontal: 6 },
-  activePhases: { fontSize: 13, color: colors.dim },
-
-  startBtn: {
+  nowText: { fontSize: 11, fontWeight: '700', color: colors.gold, letterSpacing: 1.5 },
+  nextMoment: { fontSize: 13, color: colors.gold, fontWeight: '500', marginBottom: 6 },
+  nextTitle: { fontSize: 20, fontWeight: '700', color: colors.text, marginBottom: 8, lineHeight: 26 },
+  nextDesc: { fontSize: 14, color: colors.muted, lineHeight: 20, marginBottom: 12 },
+  nextMeta: { fontSize: 13, color: colors.dim, marginBottom: 14 },
+  nextAction: {
     backgroundColor: colors.gold,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
   },
+  nextActionText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
 
-  startBtnText: {
-    color: colors.bg,
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  // Done items
+  doneSection: { marginBottom: 16 },
+  doneRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
+  doneCheck: { color: colors.gold, fontSize: 14, fontWeight: '600', marginRight: 10 },
+  doneTitle: { color: colors.gold, fontSize: 14 },
 
-  // Up next
-  upNext: {
-    fontSize: 13,
-    color: colors.dim,
-    textAlign: 'center',
-    marginBottom: 24,
-  },
+  // Later section
+  laterSection: { marginBottom: 20 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 12 },
+  sectionLine: { flex: 1, height: 1, backgroundColor: colors.line },
+  sectionLabel: { fontSize: 12, fontWeight: '600', color: colors.dim, textTransform: 'uppercase', letterSpacing: 1 },
 
-  // Completed
-  completedWrap: {
-    marginBottom: 16,
-  },
-
-  completedRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
-  },
-
-  completedCheck: {
-    color: colors.gold,
-    fontSize: 14,
-    fontWeight: '600',
-    marginRight: 8,
-  },
-
-  completedText: {
-    color: colors.gold,
-    fontSize: 14,
-  },
-
-  celebrateWrap: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  celebrateEmoji: {
-    fontSize: 48,
-    marginBottom: 16,
-  },
-  celebrateTitle: {
-    fontSize: 28,
-    fontWeight: '700',
-    color: colors.text,
-    marginBottom: 8,
-  },
-  celebrateSub: {
-    fontSize: 15,
-    color: colors.muted,
-    textAlign: 'center',
-    lineHeight: 22,
-    marginBottom: 24,
-    paddingHorizontal: 20,
-  },
-  celebrateCard: {
+  laterCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 14,
-    width: '100%',
-    overflow: 'hidden',
-    marginBottom: 16,
-  },
-  celebrateRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-    paddingHorizontal: 16,
-  },
-  celebrateRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: colors.line,
-  },
-  celebrateCheck: {
-    color: colors.gold,
-    fontSize: 16,
-    fontWeight: '700',
-    marginRight: 12,
-  },
-  celebrateSessionTitle: {
-    fontSize: 15,
-    color: colors.text,
-    fontWeight: '500',
-    flex: 1,
-  },
-  celebrateStreak: {
-    backgroundColor: 'rgba(196,168,108,0.12)',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-  },
-  celebrateStreakText: {
-    color: colors.gold,
-    fontSize: 15,
-    fontWeight: '600',
-  },
-
-  // Timeline
-  timeline: {
-    marginTop: 8,
-    marginBottom: 24,
-  },
-
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.dim,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 12,
-  },
-
-  timelineRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.goldSoft,
-  },
-
-  timelineDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: colors.dim,
-    marginRight: 14,
-  },
-
-  timelineDotDone: {
-    backgroundColor: colors.gold,
-  },
-
-  timelineContent: {
-    flex: 1,
-  },
-
-  timelineTitle: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: colors.text,
-  },
-
-  timelineTitleDone: {
-    color: colors.muted,
-  },
-
-  timelineTime: {
-    fontSize: 12,
-    color: colors.dim,
-    marginTop: 2,
-  },
-
-  timelineCheck: {
-    color: colors.gold,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-
-  // Meals
-  mealsWrap: {
-    marginBottom: 24,
-  },
-
-  mealCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.goldSoft,
-    borderRadius: 12,
-    padding: 14,
+    padding: 16,
     marginBottom: 8,
   },
-
-  mealTime: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: colors.gold,
-    textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 4,
+  laterTop: { flexDirection: 'row', alignItems: 'center' },
+  typeBadge: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    backgroundColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
-
-  mealRec: {
-    fontSize: 14,
-    color: colors.text,
-    lineHeight: 20,
-  },
+  typeBreathe: { backgroundColor: 'rgba(196,168,108,0.12)' },
+  typeFood: { backgroundColor: 'rgba(122,173,122,0.12)' },
+  typeText: { fontSize: 16 },
+  laterContent: { flex: 1 },
+  laterMoment: { fontSize: 12, color: colors.dim, marginBottom: 2 },
+  laterTitle: { fontSize: 15, fontWeight: '500', color: colors.text },
 
   // Recheck
-  recheckBtn: {
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
+  recheckBtn: { borderWidth: 1, borderColor: colors.line, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  recheckText: { color: colors.muted, fontSize: 14 },
 
-  recheckText: {
-    color: colors.muted,
-    fontSize: 14,
-  },
+  // Retry
+  retryBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center' },
+  retryBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
+
+  // Celebrate
+  celebrateWrap: { alignItems: 'center', paddingVertical: 32 },
+  celebrateEmoji: { fontSize: 48, marginBottom: 16 },
+  celebrateTitle: { fontSize: 28, fontWeight: '700', color: colors.text, marginBottom: 8 },
+  celebrateSub: { fontSize: 15, color: colors.muted, textAlign: 'center' },
 });
