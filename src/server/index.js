@@ -2840,7 +2840,6 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           stress: checkIn.stress,
           routine: checkIn.routine || "",
           goal: checkIn.goal || "",
-          stressHistory: checkIn.stressHistory || [],
         });
       } catch (err) {
         console.error("[DAYPLAN_FAILED]", err?.message);
@@ -2863,10 +2862,11 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
       clearInterval(keepAlive);
       keepAlive = null;
-      body = { userId: auth.userId, ...normalizedToday, ...(dayPlan || {}) };
-      if (res?.livenewRequestId) body.requestId = res.livenewRequestId;
-      attachDbStats(res);
-      res.end(JSON.stringify(body));
+      sendJson(res, 200, {
+        ok: true,
+        dateISO: dateKey,
+        ...(dayPlan || {}),
+      }, auth.userId);
     } catch (checkinErr) {
       if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
       console.error(

@@ -168,19 +168,11 @@ export const useAuthStore = create((set, get) => ({
     const stressMap = { good: 2, okay: 5, stressed: 8, overwhelmed: 10 };
     const stressValue = stressMap[stress] || (typeof stress === 'number' ? stress : 5);
 
-    // Load stress history
-    let stressHistory = [];
-    try {
-      const histRaw = await AsyncStorage.getItem('livenew:stress_history');
-      if (histRaw) stressHistory = JSON.parse(histRaw);
-    } catch {}
-
     const data = await api.checkin({
       dateISO: new Date().toISOString().slice(0, 10),
       stress: stressValue,
       routine: profile.routine || '',
       goal: profile.goal || '',
-      stressHistory: stressHistory.slice(-7),
     });
 
     const today = new Date().toISOString().slice(0, 10);
@@ -207,15 +199,6 @@ export const useAuthStore = create((set, get) => ({
       if (granted && data?.interventions) {
         await scheduleSessionReminders(data.interventions);
       }
-    } catch {}
-
-    // Save to stress history
-    try {
-      stressHistory.push({ date: today, stress: stressValue });
-      // Keep last 14 days
-      if (stressHistory.length > 14) stressHistory = stressHistory.slice(-14);
-      await AsyncStorage.setItem('livenew:stress_history', JSON.stringify(stressHistory));
-      set({ stressHistory });
     } catch {}
 
     get().incrementStreak();

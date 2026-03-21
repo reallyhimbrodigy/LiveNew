@@ -1,12 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, RefreshControl, AppState,
+  View, Text, ScrollView, TouchableOpacity, StyleSheet, AppState,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors } from '../theme';
 import { useAuthStore } from '../store/authStore';
-import { tapLight, tapSelect } from '../haptics';
+import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
 
 export default function TodayScreen({ navigation }) {
@@ -14,38 +15,29 @@ export default function TodayScreen({ navigation }) {
   const todayDate = useAuthStore(s => s.todayDate);
   const isSubscribed = useAuthStore(s => s.isSubscribed);
   const streak = useAuthStore(s => s.streak);
-  const [completedItems, setCompletedItems] = useState({});
-  const [refreshing, setRefreshing] = useState(false);
+  const [completed, setCompleted] = useState({});
+  const [expandedIndex, setExpandedIndex] = useState(null);
 
-  // Redirect to stress tap if no plan for today
   useEffect(() => {
-    const checkPlan = async () => {
+    const check = async () => {
       const today = new Date().toISOString().slice(0, 10);
       if (todayPlan && todayDate === today) return;
-
       try {
-        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
         const raw = await AsyncStorage.getItem('livenew:plan');
         if (raw) {
           const cached = JSON.parse(raw);
           if (cached.date === today && cached.contract) {
-            useAuthStore.setState({
-              todayPlan: cached.contract,
-              todayDate: cached.date,
-              todayStress: cached.stress,
-            });
-            setCompletedItems(cached.completedSessions || {});
+            useAuthStore.setState({ todayPlan: cached.contract, todayDate: cached.date, todayStress: cached.stress });
+            setCompleted(cached.completedSessions || {});
             return;
           }
         }
       } catch {}
-
       navigation.replace('StressTap');
     };
-    checkPlan();
+    check();
   }, []);
 
-  // New day detection
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
@@ -56,21 +48,17 @@ export default function TodayScreen({ navigation }) {
     return () => sub.remove();
   }, [todayDate]);
 
-  // Reload completion state on focus
   useFocusEffect(
     useCallback(() => {
       (async () => {
         try {
-          const AsyncStorage = require('@react-native-async-storage/async-storage').default;
           const raw = await AsyncStorage.getItem('livenew:plan');
           if (raw) {
             const plan = JSON.parse(raw);
-            const completed = plan.completedSessions || {};
-            setCompletedItems(completed);
-
-            const interventions = plan.contract?.interventions || [];
-            const allComplete = interventions.length > 0 && interventions.every((_, i) => completed[i]);
-            if (allComplete) maybePromptReview();
+            const c = plan.completedSessions || {};
+            setCompleted(c);
+            const items = plan.contract?.interventions || [];
+            if (items.length > 0 && items.every((_, i) => c[i])) maybePromptReview();
           }
         } catch {}
       })();
@@ -78,21 +66,29 @@ export default function TodayScreen({ navigation }) {
   );
 
   const interventions = todayPlan?.interventions || [];
-  const breatheItems = interventions.filter(i => i.type === 'breathe');
-  const habitItems = interventions.filter(i => i.type === 'habit');
-  const foodItems = interventions.filter(i => i.type === 'food');
-  const allItems = interventions.map((item, i) => ({ ...item, index: i, done: !!completedItems[i] }));
-  const allDone = allItems.length > 0 && allItems.every(i => i.done);
-  const nextItem = allItems.find(i => !i.done);
-  const doneItems = allItems.filter(i => i.done);
+  const items = interventions.map((item, i) => ({ ...item, index: i, done: !!completed[i] }));
+  const allDone = items.length > 0 && items.every(i => i.done);
+  const doneCount = items.filter(i => i.done).length;
 
-  const handleTapIntervention = async (item) => {
-    tapLight();
+  const markDone = async (index) => {
+    tapSuccess();
+    try {
+      const raw = await AsyncStorage.getItem('livenew:plan');
+      if (raw) {
+        const plan = JSON.parse(raw);
+        if (!plan.completedSessions) plan.completedSessions = {};
+        plan.completedSessions[index] = true;
+        await AsyncStorage.setItem('livenew:plan', JSON.stringify(plan));
+        setCompleted(prev => ({ ...prev, [index]: true }));
+      }
+    } catch {}
+  };
 
-    // Check trial
+  const handleTap = async (item) => {
+    if (item.done) return;
+
     if (!isSubscribed) {
       try {
-        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
         const raw = await AsyncStorage.getItem('livenew:plan_count');
         const count = raw ? parseInt(raw, 10) : 0;
         if (count > 7) {
@@ -102,34 +98,14 @@ export default function TodayScreen({ navigation }) {
       } catch {}
     }
 
-    if (item.type === 'breathe' && item.minutes) {
-      // Navigate to breathing session
-      navigation.navigate('Session', {
-        session: {
-          title: item.title,
-          phases: [{ instruction: item.action, minutes: item.minutes }],
-        },
-        onCompleteKey: item.index,
-      });
-    } else {
-      // Habit or food — mark as done immediately
-      try {
-        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-        const raw = await AsyncStorage.getItem('livenew:plan');
-        if (raw) {
-          const plan = JSON.parse(raw);
-          if (!plan.completedSessions) plan.completedSessions = {};
-          plan.completedSessions[item.index] = true;
-          await AsyncStorage.setItem('livenew:plan', JSON.stringify(plan));
-          setCompletedItems(prev => ({ ...prev, [item.index]: true }));
-        }
-      } catch {}
-    }
-  };
+    tapLight();
 
-  const handleRecheck = () => {
-    tapSelect();
-    navigation.replace('StressTap');
+    if (expandedIndex === item.index) {
+      markDone(item.index);
+      setExpandedIndex(null);
+    } else {
+      setExpandedIndex(item.index);
+    }
   };
 
   if (!todayPlan) return null;
@@ -138,10 +114,10 @@ export default function TodayScreen({ navigation }) {
     return (
       <SafeAreaView style={s.safe} edges={['top']}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
-          <Text style={s.greeting}>Something went wrong</Text>
-          <Text style={[s.sub, { marginBottom: 24 }]}>Your plan didn't generate properly.</Text>
-          <TouchableOpacity style={s.retryBtn} onPress={handleRecheck} activeOpacity={0.8}>
-            <Text style={s.retryBtnText}>Try again</Text>
+          <Text style={s.heading}>Something went wrong</Text>
+          <Text style={{ color: colors.muted, marginBottom: 24 }}>Your plan didn't generate properly.</Text>
+          <TouchableOpacity style={s.goldBtn} onPress={() => navigation.replace('StressTap')} activeOpacity={0.8}>
+            <Text style={s.goldBtnText}>Try again</Text>
           </TouchableOpacity>
         </View>
       </SafeAreaView>
@@ -150,21 +126,19 @@ export default function TodayScreen({ navigation }) {
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
-      <ScrollView
-        contentContainerStyle={s.scroll}
-        showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => {}} tintColor={colors.gold} />}
-      >
-        <Text style={s.greeting}>{getGreeting()}</Text>
-        <Text style={s.sub}>
-          {allDone
-            ? "You've completed everything today."
-            : `${interventions.length} interventions for your day`
-          }
-        </Text>
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+
+        <Text style={s.heading}>{getGreeting()}</Text>
+
+        <View style={s.progressWrap}>
+          <View style={s.progressBg}>
+            <View style={[s.progressFill, { width: items.length > 0 ? `${(doneCount / items.length) * 100}%` : '0%' }]} />
+          </View>
+          <Text style={s.progressText}>{doneCount} of {items.length} done</Text>
+        </View>
+
         {streak > 1 && <Text style={s.streakText}>{streak} day streak 🔥</Text>}
 
-        {/* All done celebration */}
         {allDone && (
           <View style={s.celebrateWrap}>
             <Text style={s.celebrateEmoji}>🎉</Text>
@@ -173,78 +147,58 @@ export default function TodayScreen({ navigation }) {
           </View>
         )}
 
-        {/* Next up card */}
-        {!allDone && nextItem && (
+        {items.map(item => (
           <TouchableOpacity
-            style={s.nextCard}
-            onPress={() => handleTapIntervention(nextItem)}
-            activeOpacity={0.8}
+            key={item.index}
+            style={[
+              s.card,
+              item.done && s.cardDone,
+              expandedIndex === item.index && s.cardExpanded,
+            ]}
+            onPress={() => handleTap(item)}
+            activeOpacity={0.7}
+            disabled={item.done}
           >
-            <View style={s.nowBadge}>
-              <Text style={s.nowText}>
-                {nextItem.type === 'breathe' ? 'BREATHE' : nextItem.type === 'food' ? 'EAT' : 'DO THIS'}
-              </Text>
-            </View>
-            <Text style={s.nextMoment}>{nextItem.moment}</Text>
-            <Text style={s.nextTitle}>{nextItem.title}</Text>
-            <Text style={s.nextDesc}>{nextItem.description}</Text>
-            {nextItem.type === 'breathe' && nextItem.minutes && (
-              <Text style={s.nextMeta}>{nextItem.minutes} min</Text>
-            )}
-            <View style={s.nextAction}>
-              <Text style={s.nextActionText}>
-                {nextItem.type === 'breathe' ? 'Start' : nextItem.type === 'food' ? 'Got it' : 'Done'}
-              </Text>
-            </View>
-          </TouchableOpacity>
-        )}
-
-        {/* Completed items */}
-        {doneItems.length > 0 && !allDone && (
-          <View style={s.doneSection}>
-            {doneItems.map(item => (
-              <View key={item.index} style={s.doneRow}>
-                <Text style={s.doneCheck}>✓</Text>
-                <Text style={s.doneTitle}>{item.title}</Text>
-              </View>
-            ))}
-          </View>
-        )}
-
-        {/* Rest of today */}
-        {!allDone && allItems.filter(i => !i.done && i !== nextItem).length > 0 && (
-          <View style={s.laterSection}>
-            <View style={s.sectionHeader}>
-              <View style={s.sectionLine} />
-              <Text style={s.sectionLabel}>Later today</Text>
-              <View style={s.sectionLine} />
-            </View>
-            {allItems.filter(i => !i.done && i !== nextItem).map(item => (
-              <TouchableOpacity
-                key={item.index}
-                style={s.laterCard}
-                onPress={() => handleTapIntervention(item)}
-                activeOpacity={0.7}
-              >
-                <View style={s.laterTop}>
-                  <View style={[s.typeBadge, item.type === 'breathe' && s.typeBreathe, item.type === 'food' && s.typeFood]}>
-                    <Text style={s.typeText}>
-                      {item.type === 'breathe' ? '🫁' : item.type === 'food' ? '🍽' : '⚡'}
-                    </Text>
+            <View style={s.cardTop}>
+              <View style={s.cardLeft}>
+                {item.done ? (
+                  <View style={s.checkDone}>
+                    <Text style={s.checkMark}>✓</Text>
                   </View>
-                  <View style={s.laterContent}>
-                    <Text style={s.laterMoment}>{item.moment}</Text>
-                    <Text style={s.laterTitle}>{item.title}</Text>
-                  </View>
+                ) : (
+                  <View style={[
+                    s.checkEmpty,
+                    item.type === 'breathe' && { borderColor: colors.gold },
+                    item.type === 'food' && { borderColor: '#7aad7a' },
+                  ]} />
+                )}
+                <View style={s.cardContent}>
+                  <Text style={s.cardMoment}>{item.moment}</Text>
+                  <Text style={[s.cardTitle, item.done && s.cardTitleDone]}>{item.title}</Text>
                 </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
+              </View>
+              <Text style={s.typeIcon}>
+                {item.type === 'breathe' ? '🫁' : item.type === 'food' ? '🍽' : '⚡'}
+              </Text>
+            </View>
 
-        {/* Recheck */}
+            {expandedIndex === item.index && !item.done && (
+              <View style={s.expandedWrap}>
+                <Text style={s.actionText}>{item.action}</Text>
+                <TouchableOpacity
+                  style={s.doneBtn}
+                  onPress={() => { markDone(item.index); setExpandedIndex(null); }}
+                  activeOpacity={0.8}
+                >
+                  <Text style={s.doneBtnText}>Done</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+          </TouchableOpacity>
+        ))}
+
         {!allDone && (
-          <TouchableOpacity style={s.recheckBtn} onPress={handleRecheck} activeOpacity={0.7}>
+          <TouchableOpacity style={s.recheckBtn} onPress={() => { tapSelect(); navigation.replace('StressTap'); }} activeOpacity={0.7}>
             <Text style={s.recheckText}>Feeling different? Re-check</Text>
           </TouchableOpacity>
         )}
@@ -265,90 +219,35 @@ function getGreeting() {
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 20, paddingBottom: 100 },
-
-  greeting: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 4 },
-  sub: { fontSize: 14, color: colors.muted, marginBottom: 4 },
-  streakText: { fontSize: 14, color: colors.gold, fontWeight: '600', marginBottom: 20 },
-
-  // Next card
-  nextCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1.5,
-    borderColor: colors.gold,
-    borderRadius: 16,
-    padding: 22,
-    marginTop: 16,
-    marginBottom: 16,
-  },
-  nowBadge: {
-    backgroundColor: 'rgba(196,168,108,0.15)',
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    alignSelf: 'flex-start',
-    marginBottom: 12,
-  },
-  nowText: { fontSize: 11, fontWeight: '700', color: colors.gold, letterSpacing: 1.5 },
-  nextMoment: { fontSize: 13, color: colors.gold, fontWeight: '500', marginBottom: 6 },
-  nextTitle: { fontSize: 20, fontWeight: '700', color: colors.text, marginBottom: 8, lineHeight: 26 },
-  nextDesc: { fontSize: 14, color: colors.muted, lineHeight: 20, marginBottom: 12 },
-  nextMeta: { fontSize: 13, color: colors.dim, marginBottom: 14 },
-  nextAction: {
-    backgroundColor: colors.gold,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  nextActionText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
-
-  // Done items
-  doneSection: { marginBottom: 16 },
-  doneRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 6 },
-  doneCheck: { color: colors.gold, fontSize: 14, fontWeight: '600', marginRight: 10 },
-  doneTitle: { color: colors.gold, fontSize: 14 },
-
-  // Later section
-  laterSection: { marginBottom: 20 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 12, gap: 12 },
-  sectionLine: { flex: 1, height: 1, backgroundColor: colors.line },
-  sectionLabel: { fontSize: 12, fontWeight: '600', color: colors.dim, textTransform: 'uppercase', letterSpacing: 1 },
-
-  laterCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 8,
-  },
-  laterTop: { flexDirection: 'row', alignItems: 'center' },
-  typeBadge: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  typeBreathe: { backgroundColor: 'rgba(196,168,108,0.12)' },
-  typeFood: { backgroundColor: 'rgba(122,173,122,0.12)' },
-  typeText: { fontSize: 16 },
-  laterContent: { flex: 1 },
-  laterMoment: { fontSize: 12, color: colors.dim, marginBottom: 2 },
-  laterTitle: { fontSize: 15, fontWeight: '500', color: colors.text },
-
-  // Recheck
-  recheckBtn: { borderWidth: 1, borderColor: colors.line, borderRadius: 12, paddingVertical: 12, alignItems: 'center' },
+  heading: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 16 },
+  progressWrap: { marginBottom: 16 },
+  progressBg: { height: 4, backgroundColor: colors.line, borderRadius: 2, overflow: 'hidden', marginBottom: 6 },
+  progressFill: { height: '100%', backgroundColor: colors.gold, borderRadius: 2 },
+  progressText: { fontSize: 13, color: colors.dim },
+  streakText: { fontSize: 14, color: colors.gold, fontWeight: '600', marginBottom: 16 },
+  card: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.line, borderRadius: 14, marginBottom: 8, overflow: 'hidden' },
+  cardDone: { opacity: 0.5 },
+  cardExpanded: { borderColor: colors.gold },
+  cardTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: 16 },
+  cardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  checkEmpty: { width: 22, height: 22, borderRadius: 11, borderWidth: 2, borderColor: colors.dim, marginRight: 14 },
+  checkDone: { width: 22, height: 22, borderRadius: 11, backgroundColor: colors.gold, alignItems: 'center', justifyContent: 'center', marginRight: 14 },
+  checkMark: { color: colors.bg, fontSize: 12, fontWeight: '700' },
+  cardContent: { flex: 1 },
+  cardMoment: { fontSize: 12, color: colors.gold, fontWeight: '500', marginBottom: 2 },
+  cardTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
+  cardTitleDone: { textDecorationLine: 'line-through', color: colors.muted },
+  typeIcon: { fontSize: 16, marginLeft: 8 },
+  expandedWrap: { paddingHorizontal: 16, paddingBottom: 16, paddingTop: 4, borderTopWidth: 1, borderTopColor: colors.line },
+  actionText: { fontSize: 15, color: colors.text, lineHeight: 22, marginBottom: 14 },
+  doneBtn: { backgroundColor: colors.gold, borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
+  doneBtnText: { color: colors.bg, fontSize: 15, fontWeight: '600' },
+  recheckBtn: { borderWidth: 1, borderColor: colors.line, borderRadius: 12, paddingVertical: 12, alignItems: 'center', marginTop: 8 },
   recheckText: { color: colors.muted, fontSize: 14 },
-
-  // Retry
-  retryBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center' },
-  retryBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
-
-  // Celebrate
   celebrateWrap: { alignItems: 'center', paddingVertical: 32 },
   celebrateEmoji: { fontSize: 48, marginBottom: 16 },
   celebrateTitle: { fontSize: 28, fontWeight: '700', color: colors.text, marginBottom: 8 },
   celebrateSub: { fontSize: 15, color: colors.muted, textAlign: 'center' },
+  goldBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center' },
+  goldBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
 });
