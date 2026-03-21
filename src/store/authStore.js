@@ -194,6 +194,13 @@ export const useAuthStore = create((set, get) => ({
     await AsyncStorage.setItem(PLAN_KEY, JSON.stringify(plan));
     set({ todayPlan: data, todayStress: stressValue, todayDate: today });
 
+    // Increment plan count for trial tracking
+    try {
+      const countRaw = await AsyncStorage.getItem('livenew:plan_count');
+      const count = countRaw ? parseInt(countRaw, 10) : 0;
+      await AsyncStorage.setItem('livenew:plan_count', (count + 1).toString());
+    } catch {}
+
     // Schedule notifications for sessions
     try {
       const granted = await requestPermissions();

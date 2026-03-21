@@ -103,26 +103,17 @@ export default function TodayScreen({ navigation }) {
 
   const handleStartSession = async (session) => {
     if (!isSubscribed) {
-      // Check if this is the first day (free trial)
       try {
         const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-        const firstUse = await AsyncStorage.getItem('livenew:first_use');
-        const today = new Date().toISOString().slice(0, 10);
-
-        if (!firstUse) {
-          // First ever use — mark it and allow free access
-          await AsyncStorage.setItem('livenew:first_use', today);
-        } else if (firstUse === today) {
-          // Still the first day — allow free access
-        } else {
-          // Past the first day — show paywall
+        const raw = await AsyncStorage.getItem('livenew:plan_count');
+        const count = raw ? parseInt(raw, 10) : 0;
+        
+        if (count > 7) {
           navigation.navigate('Paywall', { planPreview: todayPlan });
           return;
         }
       } catch {
-        // If we can't check, show paywall to be safe
-        navigation.navigate('Paywall', { planPreview: todayPlan });
-        return;
+        // If we can't check, allow access
       }
     }
 
@@ -292,9 +283,7 @@ export default function TodayScreen({ navigation }) {
             {meals.map((m, i) => (
               <View key={i} style={s.mealCard}>
                 <Text style={s.mealTime}>{m.time}</Text>
-                <Text style={s.mealRec}>
-                  {isSubscribed ? m.recommendation : 'Subscribe to see your meal plan'}
-                </Text>
+                <MealText recommendation={m.recommendation} isSubscribed={isSubscribed} />
               </View>
             ))}
           </View>
@@ -318,6 +307,29 @@ function getGreeting() {
   if (h < 12) return 'Good morning';
   if (h < 17) return 'Good afternoon';
   return 'Good evening';
+}
+
+function MealText({ recommendation, isSubscribed }) {
+  const [isTrial, setIsTrial] = useState(true);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        const raw = await AsyncStorage.getItem('livenew:plan_count');
+        const count = raw ? parseInt(raw, 10) : 0;
+        setIsTrial(count <= 7);
+      } catch {
+        setIsTrial(true);
+      }
+    })();
+  }, []);
+
+  return (
+    <Text style={s.mealRec}>
+      {(isSubscribed || isTrial) ? recommendation : 'Subscribe to see your meal plan'}
+    </Text>
+  );
 }
 
 const s = StyleSheet.create({
