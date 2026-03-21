@@ -24,7 +24,7 @@ Read my routine carefully. See the shape of my day — the transitions, the pres
 
 Use my own routine to anchor every intervention. Reference the specific parts of my day I described to you — my commute, my classes, my gym time, my evening — so I can see exactly when each one fits.
 
-Keep each intervention short. Tell me what to do and what it does. Write like you are texting a friend who trusts you. Plain words. A fifth grader could read every word.
+Keep each intervention short. Tell me what to do. Write like you are texting a friend who trusts you. Plain words. A fifth grader could read every word.
 
 Some interventions are breathing patterns with specific counts. Some are small changes to something I already do — slowing a transition, changing an order, pausing before a habit. Some are about what to eat or drink and when. The format fits the intervention.
 
@@ -45,7 +45,7 @@ Return my plan:
       "moment": "When in my day",
       "title": "What I do",
       "type": "breathe | habit | food",
-      "action": "What to do and what it does"
+      "action": "What to do"
     }
   ]
 }
