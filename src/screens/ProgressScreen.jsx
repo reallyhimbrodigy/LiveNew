@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { api } from '../api';
@@ -8,14 +8,18 @@ import { useAuthStore } from '../store/authStore';
 export default function ProgressScreen() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
   const streak = useAuthStore(s => s.streak);
+  const profile = useAuthStore(s => s.profile);
 
   useEffect(() => {
     (async () => {
       try {
         const res = await api.progress();
         setData(res?.progress || null);
-      } catch {}
+      } catch {
+        setError(true);
+      }
       setLoading(false);
     })();
   }, []);
@@ -31,7 +35,9 @@ export default function ProgressScreen() {
   const trend = data?.stressTrend || [];
   const consistency = data?.consistency || {};
   const stressAvg = data?.stressAvg7;
-  const totalSessions = (consistency.movementCompleted || 0) + (consistency.resetsCompleted || 0);
+  const totalSessions = (consistency.movementCompleted || 0) + (consistency.resetsCompleted || 0) + (consistency.winddownsCompleted || 0);
+  const weeklySummary = data?.weeklySummary || null;
+  const insight = data?.insight || null;
 
   // Calculate insights
   const recentTrend = trend.slice(-7);
@@ -50,6 +56,7 @@ export default function ProgressScreen() {
     : null;
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const daysActive = consistency.checkinDays || 0;
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -57,10 +64,35 @@ export default function ProgressScreen() {
 
         <Text style={s.heading}>Progress</Text>
 
+        {/* Goal reminder */}
+        {profile?.goal && (
+          <View style={s.goalCard}>
+            <Text style={s.goalLabel}>YOUR GOAL</Text>
+            <Text style={s.goalText}>{profile.goal}</Text>
+          </View>
+        )}
+
+        {/* Story card — the main narrative */}
+        {daysActive >= 2 && (
+          <View style={s.storyCard}>
+            <Text style={s.storyText}>
+              {buildStoryText({ daysActive, streak, stressChange, stressAvg, recentAvg, totalSessions, bestDay, dayNames })}
+            </Text>
+          </View>
+        )}
+
+        {/* AI insight */}
+        {insight && (
+          <View style={s.insightCard}>
+            <Text style={s.insightLabel}>THIS WEEK</Text>
+            <Text style={s.insightText}>{insight}</Text>
+          </View>
+        )}
+
         {/* Summary cards row */}
         <View style={s.summaryRow}>
           <View style={s.summaryCard}>
-            <Text style={s.summaryValue}>{consistency.checkinDays || 0}</Text>
+            <Text style={s.summaryValue}>{daysActive}</Text>
             <Text style={s.summaryLabel}>Days</Text>
           </View>
           <View style={s.summaryCard}>
@@ -73,15 +105,15 @@ export default function ProgressScreen() {
           </View>
         </View>
 
-        {/* Insights card */}
-        {(stressChange !== null || bestDay) && (
+        {/* Key insights */}
+        {(stressChange !== null || bestDay || stressAvg != null) && (
           <View style={s.card}>
             <Text style={s.cardTitle}>Insights</Text>
             {stressChange !== null && (
               <View style={s.insightRow}>
-                <View style={[s.insightIcon, { backgroundColor: stressChange > 0 ? 'rgba(122,173,122,0.15)' : 'rgba(201,122,122,0.15)' }]}>
-                  <Text style={{ color: stressChange > 0 ? '#7aad7a' : '#c97a7a', fontSize: 16, fontWeight: '700' }}>
-                    {stressChange > 0 ? '↓' : '↑'}
+                <View style={[s.insightIcon, { backgroundColor: stressChange > 0 ? colors.successBg : colors.errorBg }]}>
+                  <Text style={{ color: stressChange > 0 ? colors.success : colors.error, fontSize: 16, fontWeight: '700' }}>
+                    {stressChange > 0 ? '\u2193' : '\u2191'}
                   </Text>
                 </View>
                 <View style={s.insightContent}>
@@ -99,20 +131,20 @@ export default function ProgressScreen() {
             )}
             {bestDay && (
               <View style={s.insightRow}>
-                <View style={[s.insightIcon, { backgroundColor: 'rgba(196,168,108,0.15)' }]}>
-                  <Text style={{ color: colors.gold, fontSize: 14, fontWeight: '700' }}>★</Text>
+                <View style={[s.insightIcon, { backgroundColor: colors.goldBorder }]}>
+                  <Text style={{ color: colors.gold, fontSize: 14, fontWeight: '700' }}>{'\u2605'}</Text>
                 </View>
                 <View style={s.insightContent}>
                   <Text style={s.insightTitle}>Best day</Text>
                   <Text style={s.insightSub}>
-                    {bestDay.date ? `${dayNames[new Date(bestDay.date + 'T12:00:00').getDay()]} — stress ${bestDay.stress}/10` : `Stress ${bestDay.stress}/10`}
+                    {bestDay.date ? `${dayNames[new Date(bestDay.date + 'T12:00:00').getDay()]} \u2014 stress ${bestDay.stress}/10` : `Stress ${bestDay.stress}/10`}
                   </Text>
                 </View>
               </View>
             )}
             {stressAvg != null && (
-              <View style={s.insightRow}>
-                <View style={[s.insightIcon, { backgroundColor: 'rgba(196,168,108,0.08)' }]}>
+              <View style={[s.insightRow, { borderBottomWidth: 0 }]}>
+                <View style={[s.insightIcon, { backgroundColor: colors.goldSoft }]}>
                   <Text style={{ color: colors.muted, fontSize: 14, fontWeight: '700' }}>~</Text>
                 </View>
                 <View style={s.insightContent}>
@@ -133,7 +165,7 @@ export default function ProgressScreen() {
               {trend.slice(-14).map((t, i) => {
                 const maxHeight = 80;
                 const height = Math.max(6, ((t.stress || 0) / 10) * maxHeight);
-                const barColor = t.stress > 7 ? '#c97a7a' : t.stress > 4 ? colors.gold : '#7aad7a';
+                const barColor = t.stress > 7 ? colors.error : t.stress > 4 ? colors.gold : colors.success;
                 const dayLabel = t.date ? dayNames[new Date(t.date + 'T12:00:00').getDay()]?.[0] : '';
                 return (
                   <View key={i} style={s.chartCol}>
@@ -147,32 +179,34 @@ export default function ProgressScreen() {
           </View>
         )}
 
-        {/* Activity breakdown */}
-        <View style={s.card}>
-          <Text style={s.cardTitle}>Activity</Text>
-          <View style={s.activityRow}>
-            <View style={s.activityItem}>
-              <Text style={s.activityValue}>{consistency.checkinDays || 0}</Text>
-              <Text style={s.activityLabel}>Check-ins</Text>
-            </View>
-            <View style={s.activityDivider} />
-            <View style={s.activityItem}>
-              <Text style={s.activityValue}>{consistency.movementCompleted || 0}</Text>
-              <Text style={s.activityLabel}>Sessions done</Text>
-            </View>
-            <View style={s.activityDivider} />
-            <View style={s.activityItem}>
-              <Text style={s.activityValue}>{consistency.resetsCompleted || 0}</Text>
-              <Text style={s.activityLabel}>Resets done</Text>
-            </View>
-          </View>
-        </View>
-
-        {/* Empty state */}
+        {/* Empty / Error state */}
         {trend.length === 0 && (
           <View style={s.emptyCard}>
-            <Text style={s.emptyTitle}>No data yet</Text>
-            <Text style={s.emptySub}>Check in daily to start seeing your stress trend and insights.</Text>
+            <Text style={s.emptyTitle}>{error ? 'Could not load' : 'No data yet'}</Text>
+            <Text style={s.emptySub}>
+              {error
+                ? 'Check your connection and try again.'
+                : 'Check in daily to start seeing your stress trend and insights.'}
+            </Text>
+            {error && (
+              <TouchableOpacity
+                style={s.retryBtn}
+                onPress={async () => {
+                  setLoading(true);
+                  setError(false);
+                  try {
+                    const res = await api.progress();
+                    setData(res?.progress || null);
+                  } catch {
+                    setError(true);
+                  }
+                  setLoading(false);
+                }}
+                activeOpacity={0.8}
+              >
+                <Text style={s.retryText}>Retry</Text>
+              </TouchableOpacity>
+            )}
           </View>
         )}
 
@@ -182,12 +216,109 @@ export default function ProgressScreen() {
   );
 }
 
+function buildStoryText({ daysActive, streak, stressChange, stressAvg, recentAvg, totalSessions, bestDay, dayNames }) {
+  const parts = [];
+
+  if (daysActive <= 3) {
+    parts.push(`You're ${daysActive} days in. This is where the foundation gets built.`);
+  } else if (daysActive <= 7) {
+    parts.push(`${daysActive} days of showing up. Your body is starting to notice the pattern.`);
+  } else if (daysActive <= 14) {
+    parts.push(`${daysActive} days. Most people quit by now \u2014 you didn't.`);
+  } else if (daysActive <= 30) {
+    parts.push(`${daysActive} days of cortisol regulation. This is becoming part of who you are.`);
+  } else {
+    parts.push(`${daysActive} days. You've built a real practice.`);
+  }
+
+  if (stressChange !== null) {
+    if (stressChange > 1) {
+      parts.push(`Your stress has dropped ${stressChange.toFixed(1)} points this week. That's not luck \u2014 that's the compound effect of what you've been doing.`);
+    } else if (stressChange > 0) {
+      parts.push(`Stress is trending down slightly. Small shifts add up.`);
+    } else if (stressChange < -1) {
+      parts.push(`Stress went up this week. That's okay \u2014 tomorrow's plan will adapt.`);
+    }
+  } else if (recentAvg !== null) {
+    if (recentAvg <= 4) {
+      parts.push(`Your recent stress levels are looking solid. Keep doing what's working.`);
+    } else if (recentAvg >= 7) {
+      parts.push(`It's been a tough stretch. The plan is adjusting to meet you where you are.`);
+    }
+  }
+
+  if (totalSessions > 0 && daysActive > 3) {
+    parts.push(`You've completed ${totalSessions} sessions total.`);
+  }
+
+  return parts.join(' ');
+}
+
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },
   scroll: { padding: 20, paddingBottom: 100 },
 
-  heading: { fontSize: 28, fontWeight: '700', color: colors.text, marginBottom: 24 },
+  heading: { fontSize: 28, fontWeight: '700', color: colors.text, marginBottom: 20 },
+
+  // Goal
+  goalCard: {
+    backgroundColor: colors.goldSoft,
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 16,
+  },
+  goalLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.gold,
+    letterSpacing: 1.5,
+    marginBottom: 6,
+  },
+  goalText: {
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 22,
+  },
+
+  // Story
+  storyCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    padding: 18,
+    marginBottom: 16,
+  },
+  storyText: {
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 23,
+  },
+
+  // AI Insight
+  insightCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    padding: 18,
+    marginBottom: 16,
+  },
+  insightLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.dim,
+    letterSpacing: 1.5,
+    marginBottom: 8,
+  },
+  insightText: {
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 23,
+  },
 
   // Summary row
   summaryRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
@@ -215,7 +346,7 @@ const s = StyleSheet.create({
   cardTitle: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 4 },
   cardSub: { fontSize: 12, color: colors.dim, marginBottom: 16 },
 
-  // Insights
+  // Insights rows
   insightRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -242,13 +373,6 @@ const s = StyleSheet.create({
   chartNum: { fontSize: 9, color: colors.dim, marginTop: 4 },
   chartDay: { fontSize: 9, color: colors.dim, marginTop: 1 },
 
-  // Activity
-  activityRow: { flexDirection: 'row', alignItems: 'center', paddingTop: 8 },
-  activityItem: { flex: 1, alignItems: 'center' },
-  activityValue: { fontSize: 20, fontWeight: '700', color: colors.text, marginBottom: 2 },
-  activityLabel: { fontSize: 11, color: colors.dim },
-  activityDivider: { width: 1, height: 30, backgroundColor: colors.line },
-
   // Empty
   emptyCard: {
     backgroundColor: colors.surface,
@@ -260,4 +384,12 @@ const s = StyleSheet.create({
   },
   emptyTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: 8 },
   emptySub: { fontSize: 14, color: colors.muted, textAlign: 'center', lineHeight: 20 },
+  retryBtn: {
+    marginTop: 16,
+    backgroundColor: colors.gold,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+  },
+  retryText: { color: colors.bg, fontSize: 14, fontWeight: '600' },
 });

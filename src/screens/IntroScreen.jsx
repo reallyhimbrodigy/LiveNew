@@ -13,12 +13,12 @@ export default function IntroScreen({ navigation }) {
         </View>
 
         <View style={s.center}>
-          <Text style={s.title}>Your daily cortisol{'\n'}regulation plan</Text>
+          <Text style={s.title}>Lower your cortisol{'\n'}by tonight</Text>
           <Text style={s.body}>
-            LiveNew reads your stress level and builds a personalized plan — sessions and meals — that regulate your cortisol from morning to night.
+            Tell us how you're feeling. We'll build a plan that fits your day — small changes backed by real science that add up by bedtime.
           </Text>
           <Text style={s.body}>
-            By tonight, you should feel a real shift.
+            No sessions. No timers. Just what to do and why it works.
           </Text>
         </View>
 
@@ -26,7 +26,7 @@ export default function IntroScreen({ navigation }) {
           <TouchableOpacity style={s.btn} onPress={() => navigation.replace('OnboardingFlow')} activeOpacity={0.8}>
             <Text style={s.btnText}>Get started</Text>
           </TouchableOpacity>
-          <Text style={s.note}>Takes about 2 minutes to set up</Text>
+          <Text style={s.note}>4 quick taps to your first plan</Text>
         </View>
       </View>
     </SafeAreaView>

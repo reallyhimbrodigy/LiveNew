@@ -28,13 +28,13 @@ export async function scheduleSessionReminders(interventions) {
   await Notifications.cancelAllScheduledNotificationsAsync();
   if (!interventions || interventions.length === 0) return;
   const now = new Date();
-  const today = now.toISOString().slice(0, 10);
 
   for (const item of interventions) {
     const hour = parseTimeToHour(item.moment || item.time || '');
     if (hour === null) continue;
 
-    const triggerDate = new Date(`${today}T${String(hour).padStart(2, '0')}:00:00`);
+    // Use local time components to construct trigger date (not UTC)
+    const triggerDate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), hour, 0, 0);
 
     if (triggerDate > now) {
       try {

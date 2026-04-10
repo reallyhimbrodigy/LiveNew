@@ -326,7 +326,7 @@ const s = StyleSheet.create({
     padding: 12,
     marginBottom: 16,
   },
-  errorText: { color: '#c97a7a', fontSize: 14 },
+  errorText: { color: colors.error, fontSize: 14 },
 
   successBox: {
     backgroundColor: 'rgba(196,168,108,0.1)',

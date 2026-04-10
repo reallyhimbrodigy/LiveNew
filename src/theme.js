@@ -5,16 +5,22 @@ export const colors = {
   gold: '#c4a86c',
   goldDim: 'rgba(196,168,108,0.12)',
   goldSoft: 'rgba(196,168,108,0.06)',
+  goldBorder: 'rgba(196,168,108,0.2)',
   text: '#e8e0d4',
   muted: '#8a8070',
   dim: '#5a5248',
   line: 'rgba(196,168,108,0.1)',
   error: '#c97a7a',
   errorBg: 'rgba(200,80,80,0.1)',
+  errorBorder: 'rgba(201,122,122,0.3)',
+  success: '#7aad7a',
+  successBg: 'rgba(122,173,122,0.15)',
+  accent: '#8a8acd',
+  tabBar: '#111110',
 };
 
 export const fonts = {
-  display: 'System', // We'll use system font for now — can swap to custom later
+  display: 'System',
   body: 'System',
 };
 

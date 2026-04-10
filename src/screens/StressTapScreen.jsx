@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
+  View, Text, TouchableOpacity, StyleSheet, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme';
@@ -8,20 +8,31 @@ import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
 
 const STRESS_OPTIONS = [
-  { label: 'Good', value: 'good', emoji: '😌' },
-  { label: 'Okay', value: 'okay', emoji: '😐' },
-  { label: 'Stressed', value: 'stressed', emoji: '😰' },
-  { label: 'Overwhelmed', value: 'overwhelmed', emoji: '🤯' },
+  { label: 'Good', value: 'good', emoji: '\u{1F60C}' },
+  { label: 'Okay', value: 'okay', emoji: '\u{1F610}' },
+  { label: 'Stressed', value: 'stressed', emoji: '\u{1F630}' },
+  { label: 'Overwhelmed', value: 'overwhelmed', emoji: '\u{1F92F}' },
+];
+
+const SLEEP_OPTIONS = [
+  { label: 'Great', value: 'great', emoji: '\u{1F31F}' },
+  { label: 'OK', value: 'okay', emoji: '\u{1F634}' },
+  { label: 'Rough', value: 'rough', emoji: '\u{1F62B}' },
+];
+
+const ENERGY_OPTIONS = [
+  { label: 'High', value: 'high', emoji: '\u26A1' },
+  { label: 'Medium', value: 'medium', emoji: '\u{1F44C}' },
+  { label: 'Low', value: 'low', emoji: '\u{1F50B}' },
 ];
 
 function LoadingAnimation() {
   const [messageIndex, setMessageIndex] = useState(0);
   const messages = [
-    'Reading your stress level...',
-    'Analyzing your routine...',
-    'Building your sessions...',
-    'Selecting your meals...',
-    'Finalizing your plan...',
+    'Reading your signals...',
+    'Mapping your day...',
+    'Finding what matters...',
+    'Building your plan...',
   ];
 
   useEffect(() => {
@@ -30,7 +41,7 @@ function LoadingAnimation() {
         if (prev < messages.length - 1) return prev + 1;
         return prev;
       });
-    }, 2500);
+    }, 3000);
     return () => clearInterval(interval);
   }, []);
 
@@ -50,50 +61,91 @@ function LoadingAnimation() {
 }
 
 export default function StressTapScreen({ navigation }) {
+  const [step, setStep] = useState(1);   // 1=stress, 2=sleep, 3=energy
+  const [stress, setStress] = useState(null);
+  const [sleep, setSleep] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [selected, setSelected] = useState(null);
   const [error, setError] = useState('');
+  const fadeAnim = useState(new Animated.Value(1))[0];
 
   const generatePlan = useAuthStore(s => s.generatePlan);
 
-  const handleTap = async (option) => {
+  const animateTransition = (callback) => {
+    Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
+      callback();
+      Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+    });
+  };
+
+  const handleStress = (option) => {
     tapMedium();
-    setSelected(option.value);
+    setStress(option.value);
+    animateTransition(() => setStep(2));
+  };
+
+  const handleSleep = (option) => {
+    tapMedium();
+    setSleep(option.value);
+    animateTransition(() => setStep(3));
+  };
+
+  const handleEnergy = async (option) => {
+    tapMedium();
     setError('');
     setLoading(true);
 
-    // Timeout after 45 seconds
-    const timeout = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('TIMEOUT')), 45000)
-    );
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('TIMEOUT')), 50000);
+    });
 
     try {
-      const result = await Promise.race([
-        generatePlan(option.value),
+      await Promise.race([
+        generatePlan({ stress, sleepQuality: sleep, energy: option.value }),
         timeout,
       ]);
+      clearTimeout(timeoutId);
       navigation.replace('TodayMain');
     } catch (err) {
+      clearTimeout(timeoutId);
       if (err.message === 'TIMEOUT') {
         setError('Taking longer than usual. Tap to try again.');
       } else if (err.message === 'AUTH_EXPIRED') {
-        // Token expired — will be caught by auth store
         setError('Session expired. Please log in again.');
+      } else if (err.code === 'NETWORK_ERROR') {
+        setError('Check your internet connection.');
       } else {
         setError('Something went wrong. Tap to try again.');
       }
-      setSelected(null);
+      // Keep selections — user can retry from energy step without re-answering
+      setStep(3);
       setLoading(false);
     }
   };
 
+  const handleBack = () => {
+    tapMedium();
+    animateTransition(() => {
+      if (step === 3) { setStep(2); }
+      else if (step === 2) { setStep(1); setStress(null); }
+    });
+  };
+
+  const stepLabels = { 1: 'How are you feeling?', 2: 'How did you sleep?', 3: 'Energy right now?' };
+  const options = step === 1 ? STRESS_OPTIONS : step === 2 ? SLEEP_OPTIONS : ENERGY_OPTIONS;
+  const handler = step === 1 ? handleStress : step === 2 ? handleSleep : handleEnergy;
+
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.container}>
-
         <Text style={s.logo}>LiveNew</Text>
 
-        <Text style={s.heading}>How are you feeling?</Text>
+        {/* Step indicator */}
+        <View style={s.stepRow}>
+          {[1, 2, 3].map(i => (
+            <View key={i} style={[s.stepDot, i <= step && s.stepDotActive]} />
+          ))}
+        </View>
 
         {error ? (
           <Text style={s.error}>{error}</Text>
@@ -102,27 +154,32 @@ export default function StressTapScreen({ navigation }) {
         {loading ? (
           <LoadingAnimation />
         ) : (
-          <View style={s.grid}>
-            {STRESS_OPTIONS.map(option => (
-              <TouchableOpacity
-                key={option.value}
-                style={[
-                  s.option,
-                  selected === option.value && s.optionSelected,
-                ]}
-                onPress={() => handleTap(option)}
-                activeOpacity={0.7}
-              >
-                <Text style={s.emoji}>{option.emoji}</Text>
-                <Text style={[
-                  s.optionLabel,
-                  selected === option.value && s.optionLabelSelected,
-                ]}>{option.label}</Text>
+          <Animated.View style={{ opacity: fadeAnim }}>
+            {step > 1 && (
+              <TouchableOpacity style={s.backBtn} onPress={handleBack} activeOpacity={0.7}>
+                <Text style={s.backText}>{'\u2190'} Back</Text>
               </TouchableOpacity>
-            ))}
-          </View>
-        )}
+            )}
 
+            <Text style={s.heading}>{stepLabels[step]}</Text>
+
+            <View style={step === 1 ? s.grid : s.row}>
+              {options.map(option => (
+                <TouchableOpacity
+                  key={option.value}
+                  style={[
+                    step === 1 ? s.option : s.optionSmall,
+                  ]}
+                  onPress={() => handler(option)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={s.emoji}>{option.emoji}</Text>
+                  <Text style={s.optionLabel}>{option.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </Animated.View>
+        )}
       </View>
     </SafeAreaView>
   );
@@ -137,8 +194,24 @@ const s = StyleSheet.create({
     fontWeight: '500',
     color: colors.text,
     textAlign: 'center',
-    marginBottom: 48,
+    marginBottom: 32,
     letterSpacing: 1,
+  },
+
+  stepRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 32,
+  },
+  stepDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.line,
+  },
+  stepDotActive: {
+    backgroundColor: colors.gold,
   },
 
   heading: {
@@ -156,6 +229,12 @@ const s = StyleSheet.create({
     gap: 12,
   },
 
+  row: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 12,
+  },
+
   option: {
     width: '46%',
     backgroundColor: colors.surface,
@@ -167,23 +246,25 @@ const s = StyleSheet.create({
     gap: 8,
   },
 
-  optionSelected: {
-    borderColor: colors.gold,
-    backgroundColor: colors.goldDim,
+  optionSmall: {
+    flex: 1,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 16,
+    paddingVertical: 20,
+    alignItems: 'center',
+    gap: 6,
   },
 
   emoji: {
-    fontSize: 32,
+    fontSize: 28,
   },
 
   optionLabel: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '500',
     color: colors.text,
-  },
-
-  optionLabelSelected: {
-    color: colors.gold,
   },
 
   error: {
@@ -191,6 +272,17 @@ const s = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
     marginBottom: 16,
+  },
+
+  backBtn: {
+    alignSelf: 'flex-start',
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    marginBottom: 8,
+  },
+  backText: {
+    color: colors.muted,
+    fontSize: 15,
   },
 });
 

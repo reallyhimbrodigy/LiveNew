@@ -76,35 +76,20 @@ export default function PaywallScreen({ navigation, route }) {
 
         <View style={s.content}>
           <Text style={s.logo}>LiveNew</Text>
-          <Text style={s.title}>Your plan is ready</Text>
-
-          {/* Plan preview */}
-          {planPreview && planPreview.interventions && (
-            <View style={s.previewWrap}>
-              {planPreview.interventions.map((item, i) => (
-                <View key={i} style={s.previewRow}>
-                  <View style={s.previewDot} />
-                  <View style={s.previewContent}>
-                    <Text style={s.previewTitle}>{item.title}</Text>
-                    <Text style={s.previewTime}>{item.moment}</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
+          <Text style={s.title}>Keep going</Text>
 
           <Text style={s.sub}>
-            Subscribe to unlock your full personalized plan — guided sessions, timed meals, progress tracking, and plans that get smarter every day.
+            You've been using LiveNew for a week. People who stick with it past this point report feeling measurably calmer within 2 weeks.
           </Text>
 
           {/* Features */}
           <View style={s.features}>
             {[
-              'Full guided sessions with timers',
-              'Personalized meals timed to your day',
-              'Progress tracking and stress insights',
-              'Plans that evolve with your history',
-              'Session reminders at the right time',
+              'Unlimited daily plans that learn from your patterns',
+              'Plans that reference your actual routine',
+              'Evening reflections that shape tomorrow',
+              'Stress tracking that tells a story, not just numbers',
+              'A plan that gets better the longer you use it',
             ].map((f, i) => (
               <View key={i} style={s.featureRow}>
                 <Text style={s.featureCheck}>✓</Text>

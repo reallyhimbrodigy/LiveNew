@@ -8,7 +8,7 @@ import { colors } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect } from '../haptics';
 
-export default function AccountScreen() {
+export default function AccountScreen({ navigation }) {
   const profile = useAuthStore(s => s.profile);
   const isSubscribed = useAuthStore(s => s.isSubscribed);
   const logout = useAuthStore(s => s.logout);
@@ -33,11 +33,20 @@ export default function AccountScreen() {
     try {
       const updated = { ...profile, [editing]: editValue.trim() };
       await saveProfile(updated);
+      setSaving(false);
+      setEditing(null);
+      // Plan was cleared — send user to re-check-in with updated profile
+      try {
+        const parent = navigation.getParent();
+        if (parent) {
+          parent.navigate('Today', { screen: 'StressTap' });
+        }
+      } catch {}
+      Alert.alert('Updated', 'Your plan will refresh with your new profile on the next check-in.');
     } catch {
       Alert.alert('Error', 'Could not save. Try again.');
+      setSaving(false);
     }
-    setSaving(false);
-    setEditing(null);
   };
 
   const handleLogout = () => {
@@ -261,7 +270,7 @@ export default function AccountScreen() {
               <Text style={s.settingEmoji}>🗑️</Text>
             </View>
             <View style={s.settingContent}>
-              <Text style={[s.settingTitle, { color: '#c97a7a' }]}>
+              <Text style={[s.settingTitle, { color: colors.error }]}>
                 {deleting ? 'Deleting...' : 'Delete my account'}
               </Text>
               <Text style={s.settingValue}>Permanently delete all data</Text>

@@ -2323,6 +2323,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/progress",
     "/v1/stats",
     "/v1/feedback",
+    "/v1/reflect",
     "/v1/subscription/status",
     "/v1/profile/update",
     "/v1/account/delete",
@@ -2755,6 +2756,64 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     return true;
   }
 
+  // --- AI History Builder ---
+  async function buildAIHistory(userSupabase, userId, todayDateKey) {
+    const history = {};
+    try {
+      // Yesterday's date
+      const todayMs = new Date(todayDateKey + "T12:00:00Z").getTime();
+      const yesterdayKey = new Date(todayMs - 86400000).toISOString().slice(0, 10);
+
+      // Get yesterday's stored plan from derived_state
+      const { data: derivedRow } = await userSupabase
+        .from("derived_state")
+        .select("today_contract")
+        .eq("user_id", userId)
+        .maybeSingle();
+      const contract = derivedRow?.today_contract;
+      if (contract && (contract.dateKey === yesterdayKey || contract.dateISO === yesterdayKey)) {
+        history.yesterdayPlan = contract.plan || [];
+        history.yesterdayCompleted = contract.completed || {};
+      }
+
+      // Get yesterday's events for completions and reflections
+      const { data: yesterdayEvents } = await userSupabase
+        .from("event")
+        .select("type, payload")
+        .eq("user_id", userId)
+        .eq("date_key", yesterdayKey);
+      if (Array.isArray(yesterdayEvents)) {
+        const reflection = yesterdayEvents.find(e => e.type === "reflection_submitted");
+        if (reflection?.payload?.feeling) {
+          history.yesterdayReflection = reflection.payload.feeling;
+        }
+      }
+
+      // Recent checkins for stress trend (last 7)
+      const { data: recentCheckins } = await userSupabase
+        .from("checkin")
+        .select("date_key, stress")
+        .eq("user_id", userId)
+        .order("date_key", { ascending: false })
+        .limit(7);
+      if (Array.isArray(recentCheckins) && recentCheckins.length > 0) {
+        history.stressTrend = recentCheckins
+          .reverse()
+          .map(c => ({ date: c.date_key, stress: c.stress }));
+      }
+
+      // Count total checkin days for day number
+      const { count } = await userSupabase
+        .from("checkin")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId);
+      history.dayNumber = (count || 0) + 1;
+    } catch (err) {
+      console.error("[BUILD_AI_HISTORY_ERROR]", err?.message);
+    }
+    return history;
+  }
+
   if (pathname === "/v1/checkin" && req.method === "POST") {
     let keepAlive = null;
     try {
@@ -2776,11 +2835,21 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       }
       dateKey = dateValidation.value;
       const checkInRawSource = body?.checkIn && typeof body.checkIn === "object" ? body.checkIn : body;
+      // Map string labels to numeric values for storage (new 3-step check-in sends labels)
+      const sleepLabelToNum = { great: 8, okay: 5, rough: 2 };
+      const energyLabelToNum = { high: 8, medium: 5, low: 2 };
+      const rawSleep = checkInRawSource?.sleepQuality;
+      const rawEnergy = checkInRawSource?.energy;
+      const sleepNumeric = typeof rawSleep === "string" && sleepLabelToNum[rawSleep] != null
+        ? sleepLabelToNum[rawSleep]
+        : Number.isFinite(Number(rawSleep)) ? Number(rawSleep) : 5;
+      const energyNumeric = typeof rawEnergy === "string" && energyLabelToNum[rawEnergy] != null
+        ? energyLabelToNum[rawEnergy]
+        : Number.isFinite(Number(rawEnergy)) ? Number(rawEnergy) : 5;
       const checkInRaw = {
         ...(checkInRawSource && typeof checkInRawSource === "object" ? checkInRawSource : {}),
-        sleepQuality: Number.isFinite(Number(checkInRawSource?.sleepQuality))
-          ? Number(checkInRawSource.sleepQuality)
-          : 5,
+        sleepQuality: sleepNumeric,
+        energy: energyNumeric,
         timeAvailableMin: Number.isFinite(Number(checkInRawSource?.timeAvailableMin))
           ? Number(checkInRawSource.timeAvailableMin)
           : 10,
@@ -2810,21 +2879,11 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       if (checkinInserted?.inserted) {
         invalidateOutcomesCache(auth.userId, dateKey);
       }
-      const context = await loadSupabaseDayContext(persist, auth.userId, dateKey);
-      const today = buildToday({
-        userId: auth.userId,
-        dateKey,
-        timezone: baselineResolved.timezone,
-        dayBoundaryHour: baselineResolved.dayBoundaryHour,
-        baseline: baselineResolved,
-        latestCheckin: context.checkIn,
-        dayState: context.dayState,
-        weekSeed: {},
-        eventsToday: context.events,
-        panicMode: context.checkIn?.safety?.panic === true,
-        libVersion: LIB_VERSION,
-        priorProfile: context.priorProfile,
-      });
+      // Map sleep/energy labels to the AI format
+      const sleepLabelMap = { great: "great", okay: "okay", rough: "rough" };
+      const energyLabelMap = { high: "high", medium: "medium", low: "low" };
+      const sleepLabel = sleepLabelMap[checkInRawSource?.sleepQuality] || "okay";
+      const energyLabel = energyLabelMap[checkInRawSource?.energy] || "medium";
 
       // Keep-alive: write a space every 10s so Render's 30s proxy timeout doesn't kill the connection
       res.setHeader('Content-Type', 'application/json');
@@ -2833,13 +2892,19 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         if (!res.writableEnded) res.write(' ');
       }, 10000);
 
+      // Build AI history context from yesterday + recent days
+      const aiHistory = await buildAIHistory(supabaseForUser(auth.jwt), auth.userId, dateKey);
+
       // AI-powered personalized plan
       let dayPlan = null;
       try {
         dayPlan = await generateDayPlan({
           stress: checkIn.stress,
+          sleepQuality: sleepLabel,
+          energy: energyLabel,
           routine: checkIn.routine || "",
           goal: checkIn.goal || "",
+          history: aiHistory,
         });
       } catch (err) {
         console.error("[DAYPLAN_FAILED]", err?.message);
@@ -2849,17 +2914,19 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         console.error("[DAYPLAN_NULL] AI returned no plan");
       }
 
-      today.interventions = dayPlan?.interventions || [];
-
-      // Legacy contract validation no longer applies to unified day-plan responses.
-      // const normalizedToday = ensureTodayContract(today, res);
-      // if (!normalizedToday) {
-      //   clearInterval(keepAlive);
-      //   keepAlive = null;
-      //   return true;
-      // }
-      const normalizedToday = today;
-      await persist.upsertDerivedState(auth.userId, dateKey, normalizedToday.meta?.inputHash || null, normalizedToday);
+      // Store the AI plan in derived_state for tomorrow's history context
+      const derivedContract = {
+        dateISO: dateKey,
+        dateKey: dateKey,
+        plan: dayPlan?.plan || [],
+        rightNow: dayPlan?.rightNow || {},
+        goalThread: dayPlan?.goalThread || {},
+        stressRelief: dayPlan?.stressRelief || "",
+        eveningPrompt: dayPlan?.eveningPrompt || "",
+        completed: {},
+        reflection: null,
+      };
+      await persist.upsertDerivedState(auth.userId, dateKey, null, derivedContract);
       clearInterval(keepAlive);
       keepAlive = null;
       sendJson(res, 200, {
@@ -3099,6 +3166,17 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         .eq("user_id", auth.userId)
         .eq("type", "winddown_completed");
       if (!winddownError && Array.isArray(winddownRows)) winddownEvents = winddownRows;
+
+      // Count intervention completions from the new feedback-based flow
+      const { data: feedbackRows, error: feedbackError } = await userSupabase
+        .from("event")
+        .select("date_key")
+        .eq("user_id", auth.userId)
+        .eq("type", "session_feedback");
+      if (!feedbackError && Array.isArray(feedbackRows)) {
+        // Add feedback completions to the total count
+        resetEvents = resetEvents.concat(feedbackRows);
+      }
     } catch (err) {
       console.error("[PROGRESS_QUERY_ERROR]", err?.message);
     }
@@ -3199,9 +3277,56 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           user_id: auth.userId,
           date_key: body?.dateISO || new Date().toISOString().slice(0, 10),
           type: "session_feedback",
-          payload: { sessionType: body?.type, feeling: body?.feeling },
+          payload: {
+            sessionType: body?.type,
+            feeling: body?.feeling,
+            sessionIndex: body?.sessionIndex ?? null,
+            interventionType: body?.interventionType ?? null,
+          },
         });
     } catch {}
+    sendJson(res, 200, { ok: true }, auth.userId);
+    return true;
+  }
+
+  if (pathname === "/v1/reflect" && req.method === "POST") {
+    const body = await parseJson(req);
+    const feeling = body?.feeling;
+    const allowed = ["better", "same", "harder"];
+    if (!feeling || !allowed.includes(feeling)) {
+      sendErrorCodeOnly(res, 400, "INVALID_REFLECTION");
+      return true;
+    }
+    const dateKey = body?.dateISO || new Date().toISOString().slice(0, 10);
+    try {
+      await supabaseForUser(auth.jwt)
+        .from("event")
+        .insert({
+          user_id: auth.userId,
+          date_key: dateKey,
+          type: "reflection_submitted",
+          payload: { feeling },
+          created_at: new Date().toISOString(),
+        });
+    } catch (err) {
+      // Ignore duplicate — reflection already recorded for today
+      if (err?.code !== "23505") {
+        console.error("[REFLECT_ERROR]", err?.message);
+      }
+    }
+
+    // Also update the derived_state with the reflection and completed items
+    try {
+      const derived = await persist.getDerivedState(auth.userId);
+      if (derived?.todayContract) {
+        derived.todayContract.reflection = feeling;
+        if (body?.completed) {
+          derived.todayContract.completed = body.completed;
+        }
+        await persist.upsertDerivedState(auth.userId, dateKey, derived.inputHash, derived.todayContract);
+      }
+    } catch {}
+
     sendJson(res, 200, { ok: true }, auth.userId);
     return true;
   }

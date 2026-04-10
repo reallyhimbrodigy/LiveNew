@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, setTokens, clearTokens } from '../api';
 import { requestPermissions, scheduleSessionReminders } from '../notifications';
+import { getLocalDateISO, getYesterdayISO } from '../utils/localDate';
 
 const AUTH_KEY = 'livenew:auth';
 const PROFILE_KEY = 'livenew:profile';
@@ -14,9 +15,13 @@ export const useAuthStore = create((set, get) => ({
   isSubscribed: false,
   hasProfile: false,
   profile: null,
-  todayPlan: null,
+  todayPlan: null,       // { rightNow, plan, goalThread, stressRelief, eveningPrompt }
   todayStress: null,
+  todaySleep: null,
+  todayEnergy: null,
   todayDate: null,
+  completed: {},         // { 0: true, 2: true } — which plan items the user has acknowledged
+  reflection: null,      // "better" | "same" | "harder" | null
   streak: 0,
   stressHistory: [],
 
@@ -49,14 +54,22 @@ export const useAuthStore = create((set, get) => ({
         // Check if we have a valid plan for today
         let todayPlan = null;
         let todayStress = null;
+        let todaySleep = null;
+        let todayEnergy = null;
         let todayDate = null;
+        let completed = {};
+        let reflection = null;
         if (planJson) {
           const plan = JSON.parse(planJson);
-          const today = new Date().toISOString().slice(0, 10);
+          const today = getLocalDateISO();
           if (plan.date === today) {
             todayPlan = plan.contract;
             todayStress = plan.stress;
+            todaySleep = plan.sleepQuality;
+            todayEnergy = plan.energy;
             todayDate = plan.date;
+            completed = plan.completed || {};
+            reflection = plan.reflection || null;
           }
         }
 
@@ -68,7 +81,11 @@ export const useAuthStore = create((set, get) => ({
           profile,
           todayPlan,
           todayStress,
+          todaySleep,
+          todayEnergy,
           todayDate,
+          completed,
+          reflection,
         });
         get().loadStreak();
 
@@ -131,7 +148,6 @@ export const useAuthStore = create((set, get) => ({
         timeMin: p.timeMin || null,
         injuries: p.injuries || [],
       };
-      // Check for new onboarding (routine + goal) OR old onboarding (goal as category)
       const hasProfile = !!(profile.routine && profile.goal) || !!(profile.goal && profile.goal !== 'all');
       await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
       set({ isLoggedIn: true, hasProfile, profile });
@@ -143,7 +159,7 @@ export const useAuthStore = create((set, get) => ({
   // Signup
   signup: async (email, password, name) => {
     const data = await api.signup(email, password, name);
-    return data; // May need email confirmation
+    return data;
   },
 
   setSubscribed: async (value) => {
@@ -153,38 +169,73 @@ export const useAuthStore = create((set, get) => ({
     set({ isSubscribed: value });
   },
 
-  // Save onboarding profile
+  // Save onboarding profile (sets hasProfile, triggers navigation to MainTabs)
   saveProfile: async (profile) => {
     await api.onboardComplete(profile);
     await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
-    // Clear today's plan so next check-in uses updated profile
     await AsyncStorage.removeItem(PLAN_KEY);
-    set({ hasProfile: true, profile, todayPlan: null, todayDate: null });
+    set({ hasProfile: true, profile, todayPlan: null, todayDate: null, completed: {}, reflection: null });
   },
 
-  // Generate day plan
-  generatePlan: async (stress) => {
+  // Save profile WITHOUT triggering navigation — used during onboarding
+  // so we can save profile + generate plan before flipping to MainTabs
+  saveProfileWithoutNav: async (profile) => {
+    await api.onboardComplete(profile);
+    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    await AsyncStorage.removeItem(PLAN_KEY);
+    set({ profile, todayPlan: null, todayDate: null, completed: {}, reflection: null });
+  },
+
+  // Flip hasProfile to trigger navigation to MainTabs
+  activateProfile: () => {
+    set({ hasProfile: true });
+  },
+
+  // Save routine upgrade (after user has seen their first plan and wants personalization)
+  saveRoutine: async (routine) => {
+    const profile = { ...get().profile, routine };
+    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    set({ profile });
+    // Fire and forget to server
+    try { api.onboardComplete(profile); } catch {}
+  },
+
+  // Generate day plan — called after the 3-step check-in
+  generatePlan: async ({ stress, sleepQuality, energy }) => {
     const profile = get().profile || {};
     const stressMap = { good: 2, okay: 5, stressed: 8, overwhelmed: 10 };
     const stressValue = stressMap[stress] || (typeof stress === 'number' ? stress : 5);
 
     const data = await api.checkin({
-      dateISO: new Date().toISOString().slice(0, 10),
+      dateISO: getLocalDateISO(),
       stress: stressValue,
+      sleepQuality,   // "great" | "okay" | "rough"
+      energy,         // "high" | "medium" | "low"
       routine: profile.routine || '',
       goal: profile.goal || '',
     });
 
-    const today = new Date().toISOString().slice(0, 10);
+    const today = getLocalDateISO();
     const plan = {
       date: today,
-      contract: data,
+      contract: data,     // { rightNow, plan, goalThread, stressRelief, eveningPrompt }
       stress: stressValue,
-      completedSessions: {},
+      sleepQuality,
+      energy,
+      completed: {},
+      reflection: null,
     };
 
     await AsyncStorage.setItem(PLAN_KEY, JSON.stringify(plan));
-    set({ todayPlan: data, todayStress: stressValue, todayDate: today });
+    set({
+      todayPlan: data,
+      todayStress: stressValue,
+      todaySleep: sleepQuality,
+      todayEnergy: energy,
+      todayDate: today,
+      completed: {},
+      reflection: null,
+    });
 
     // Increment plan count for trial tracking
     try {
@@ -193,11 +244,11 @@ export const useAuthStore = create((set, get) => ({
       await AsyncStorage.setItem('livenew:plan_count', (count + 1).toString());
     } catch {}
 
-    // Schedule notifications for interventions
+    // Schedule notifications for plan items
     try {
       const granted = await requestPermissions();
-      if (granted && data?.interventions) {
-        await scheduleSessionReminders(data.interventions);
+      if (granted && data?.plan) {
+        await scheduleSessionReminders(data.plan);
       }
     } catch {}
 
@@ -205,21 +256,65 @@ export const useAuthStore = create((set, get) => ({
     return data;
   },
 
+  // Mark a plan item as acknowledged ("Got it")
+  markDone: async (index) => {
+    const newCompleted = { ...get().completed, [index]: true };
+    set({ completed: newCompleted });
+    try {
+      const raw = await AsyncStorage.getItem(PLAN_KEY);
+      if (raw) {
+        const plan = JSON.parse(raw);
+        plan.completed = newCompleted;
+        await AsyncStorage.setItem(PLAN_KEY, JSON.stringify(plan));
+      }
+    } catch {}
+    // Report completion to server so progress tracking works
+    try {
+      const planItems = get().todayPlan?.plan || [];
+      const item = planItems[index];
+      api.feedback({
+        type: 'item_completed',
+        dateISO: getLocalDateISO(),
+        sessionIndex: index,
+        interventionType: item?.type || 'unknown',
+      }).catch(() => {});
+    } catch {}
+  },
+
+  // Submit evening reflection
+  submitReflection: async (feeling) => {
+    set({ reflection: feeling });
+    try {
+      const raw = await AsyncStorage.getItem(PLAN_KEY);
+      if (raw) {
+        const plan = JSON.parse(raw);
+        plan.reflection = feeling;
+        await AsyncStorage.setItem(PLAN_KEY, JSON.stringify(plan));
+      }
+    } catch {}
+    // Send to server (fire and forget)
+    try {
+      api.reflect({
+        feeling,
+        dateISO: getLocalDateISO(),
+        completed: get().completed,
+      }).catch(() => {});
+    } catch {}
+  },
+
   loadStreak: async () => {
     try {
       const raw = await AsyncStorage.getItem('livenew:streak');
       if (raw) {
         const data = JSON.parse(raw);
-        const today = new Date().toISOString().slice(0, 10);
-        const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
-        
+        const today = getLocalDateISO();
+        const yesterday = getYesterdayISO();
+
         if (data.lastDate === today) {
           set({ streak: data.count });
         } else if (data.lastDate === yesterday) {
-          // Streak continues but not incremented yet today
           set({ streak: data.count });
         } else {
-          // Streak broken
           set({ streak: 0 });
           await AsyncStorage.setItem('livenew:streak', JSON.stringify({ count: 0, lastDate: null }));
         }
@@ -231,60 +326,39 @@ export const useAuthStore = create((set, get) => ({
     try {
       const raw = await AsyncStorage.getItem('livenew:streak');
       const data = raw ? JSON.parse(raw) : { count: 0, lastDate: null };
-      const today = new Date().toISOString().slice(0, 10);
-      
-      if (data.lastDate === today) return; // Already counted today
-      
-      const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const today = getLocalDateISO();
+
+      if (data.lastDate === today) return;
+
+      const yesterday = getYesterdayISO();
       const newCount = data.lastDate === yesterday ? data.count + 1 : 1;
-      
+
       await AsyncStorage.setItem('livenew:streak', JSON.stringify({ count: newCount, lastDate: today }));
       set({ streak: newCount });
     } catch {}
-  },
-
-  // Mark session complete
-  completeSession: async (type) => {
-    const today = new Date().toISOString().slice(0, 10);
-    try {
-      if (type === 'move') await api.completeMove(today);
-      else if (type === 'reset') await api.completeReset(today);
-      else if (type === 'winddown') await api.completeWinddown(today);
-    } catch {}
-
-    // Update local plan
-    const planJson = await AsyncStorage.getItem(PLAN_KEY);
-    if (planJson) {
-      const plan = JSON.parse(planJson);
-      if (type === 'move') plan.moveCompleted = true;
-      else if (type === 'reset') plan.resetCompleted = true;
-      else if (type === 'winddown') plan.winddownCompleted = true;
-      await AsyncStorage.setItem(PLAN_KEY, JSON.stringify(plan));
-
-      set((prev) => ({
-        todayPlan: {
-          ...prev.todayPlan,
-          [`${type}Completed`]: true,
-        },
-      }));
-    }
   },
 
   // Logout
   logout: async () => {
     try { await api.logout(); } catch {}
     clearTokens();
-    await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, PLAN_KEY]);
-    await AsyncStorage.removeItem('livenew:subscribed');
-    set({ isLoggedIn: false, hasProfile: false, profile: null, todayPlan: null, isSubscribed: false });
+    await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, PLAN_KEY, 'livenew:subscribed', 'livenew:streak', 'livenew:plan_count']);
+    set({
+      isLoggedIn: false, hasProfile: false, profile: null,
+      todayPlan: null, todayDate: null, isSubscribed: false,
+      completed: {}, reflection: null, streak: 0,
+    });
   },
 
   // Delete account
   deleteAccount: async () => {
     await api.deleteAccount();
     clearTokens();
-    await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, PLAN_KEY]);
-    await AsyncStorage.removeItem('livenew:subscribed');
-    set({ isLoggedIn: false, hasProfile: false, profile: null, todayPlan: null, isSubscribed: false });
+    await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, PLAN_KEY, 'livenew:subscribed', 'livenew:streak', 'livenew:plan_count']);
+    set({
+      isLoggedIn: false, hasProfile: false, profile: null,
+      todayPlan: null, todayDate: null, isSubscribed: false,
+      completed: {}, reflection: null, streak: 0,
+    });
   },
 }));
