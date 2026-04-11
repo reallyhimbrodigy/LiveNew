@@ -127,6 +127,11 @@ export const api = {
   // Progress
   progress: () => request('GET', '/v1/progress'),
 
+  // Consent
+  acceptConsent: () => request('POST', '/v1/consents/accept', {
+    consent: { terms: true, privacy: true, alpha_processing: true },
+  }),
+
   // Profile
   onboardComplete: (profile) => request('POST', '/v1/onboard/complete', { profile }),
 

@@ -180,6 +180,8 @@ export const useAuthStore = create((set, get) => ({
   // Save profile WITHOUT triggering navigation — used during onboarding
   // so we can save profile + generate plan before flipping to MainTabs
   saveProfileWithoutNav: async (profile) => {
+    // Accept consent first (required before any other server calls work)
+    await api.acceptConsent();
     await api.onboardComplete(profile);
     await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
     await AsyncStorage.removeItem(PLAN_KEY);
