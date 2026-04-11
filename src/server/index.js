@@ -2929,11 +2929,18 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       await persist.upsertDerivedState(auth.userId, dateKey, null, derivedContract);
       clearInterval(keepAlive);
       keepAlive = null;
-      sendJson(res, 200, {
+      const responseBody = JSON.stringify({
         ok: true,
         dateISO: dateKey,
         ...(dayPlan || {}),
-      }, auth.userId);
+      });
+      if (res.headersSent) {
+        // Headers were already flushed by keep-alive res.write() — just end with the body
+        res.end(responseBody);
+      } else {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(responseBody);
+      }
     } catch (checkinErr) {
       if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
       console.error(

@@ -217,6 +217,11 @@ export const useAuthStore = create((set, get) => ({
       goal: profile.goal || '',
     });
 
+    // Validate the response actually contains a plan
+    if (!data || data.ok === false || !data.plan || !Array.isArray(data.plan) || data.plan.length === 0) {
+      throw new Error('Plan generation failed. Please try again.');
+    }
+
     const today = getLocalDateISO();
     const plan = {
       date: today,
