@@ -204,7 +204,7 @@ export default function TodayScreen({ navigation }) {
           <View style={s.goalCard}>
             <View style={s.goalHeader}>
               <Text style={s.goalIcon}>{'\u{1F3AF}'}</Text>
-              <Text style={s.goalLabel}>{profile?.goal || 'Your goal'}</Text>
+              <Text style={s.goalLabel} numberOfLines={2}>{profile?.goal || 'Your goal'}</Text>
             </View>
             <Text style={s.goalFocus}>{goalThread.weeklyFocus}</Text>
             <Text style={s.goalConnection}>{goalThread.todayConnection}</Text>

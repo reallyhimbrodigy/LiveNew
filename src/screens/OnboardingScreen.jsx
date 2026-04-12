@@ -151,12 +151,14 @@ export default function OnboardingScreen() {
 
         <Text style={s.logo}>LiveNew</Text>
 
-        {/* Step indicator */}
-        <View style={s.stepRow}>
-          {Array.from({ length: totalSteps }, (_, i) => (
-            <View key={i} style={[s.stepDot, i < step && s.stepDotActive]} />
-          ))}
-        </View>
+        {/* Step indicator — hidden during loading */}
+        {!loading && (
+          <View style={s.stepRow}>
+            {Array.from({ length: totalSteps }, (_, i) => (
+              <View key={i} style={[s.stepDot, i < step && s.stepDotActive]} />
+            ))}
+          </View>
+        )}
 
         {loading ? (
           <LoadingAnimation />

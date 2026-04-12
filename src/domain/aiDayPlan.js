@@ -45,9 +45,10 @@ RULES:
 5. Never repeat yesterday's plan. Different moments, different advice, different angle.
 6. When stress is high: the first intervention is something they do RIGHT NOW. Physical, immediate, no setup.
 7. When stress is low: don't waste a good day on basics. Go deeper — optimize sleep, build a new habit, address something they've been avoiding.
-8. Mix the types. Don't give 3 breathing exercises.
+8. VARY THE TYPES across all 5 items. You must use at least 3 different types from: breathe, habit, food, mindset. Never give 3+ items of the same type. A good mix: 1 breathe, 1 food, 1 mindset, 2 habit — or similar.
 9. No timers. No durations. No "for 5 minutes."
 10. Generate exactly 5 plan items.
+11. Titles must be immediately clear when read alone — someone should understand what to do from just the title. Good: "Cold shower finish", "Eat before your energy dips". Bad: "Sit before you eat", "Look at something far away" — these are confusing without context.
 
 RIGHT NOW ZONE:
 One or two sentences for each time of day. A quick insight tied to this moment and this user's state. Like glancing at a smart watch — you read it in 3 seconds and it shifts how you think about the next hour.

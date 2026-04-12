@@ -138,14 +138,14 @@ export default function StressTapScreen({ navigation }) {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.container}>
-        <Text style={s.logo}>LiveNew</Text>
-
-        {/* Step indicator */}
-        <View style={s.stepRow}>
-          {[1, 2, 3].map(i => (
-            <View key={i} style={[s.stepDot, i <= step && s.stepDotActive]} />
-          ))}
-        </View>
+        {/* Step indicator — hidden during loading */}
+        {!loading && (
+          <View style={s.stepRow}>
+            {[1, 2, 3].map(i => (
+              <View key={i} style={[s.stepDot, i <= step && s.stepDotActive]} />
+            ))}
+          </View>
+        )}
 
         {error ? (
           <Text style={s.error}>{error}</Text>
