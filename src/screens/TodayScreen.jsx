@@ -202,10 +202,7 @@ export default function TodayScreen({ navigation }) {
         {/* Goal Thread */}
         {goalThread && (
           <View style={s.goalCard}>
-            <View style={s.goalHeader}>
-              <Text style={s.goalIcon}>{'\u{1F3AF}'}</Text>
-              <Text style={s.goalLabel} numberOfLines={2}>{profile?.goal || 'Your goal'}</Text>
-            </View>
+            <Text style={s.goalCardLabel}>THIS WEEK</Text>
             <Text style={s.goalFocus}>{goalThread.weeklyFocus}</Text>
             <Text style={s.goalConnection}>{goalThread.todayConnection}</Text>
           </View>
@@ -429,8 +426,8 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 20, paddingBottom: 100 },
 
-  greeting: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 4 },
-  streakText: { fontSize: 14, color: colors.gold, fontWeight: '600', marginBottom: 16 },
+  greeting: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 2 },
+  streakText: { fontSize: 14, color: colors.gold, fontWeight: '600', marginBottom: 4 },
 
   // Right Now zone
   rightNowCard: {
@@ -466,13 +463,13 @@ const s = StyleSheet.create({
     padding: 16,
     marginBottom: 20,
   },
-  goalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  goalCardLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.dim,
+    letterSpacing: 1.5,
     marginBottom: 8,
   },
-  goalIcon: { fontSize: 14, marginRight: 8 },
-  goalLabel: { fontSize: 13, color: colors.muted, fontWeight: '500', flex: 1 },
   goalFocus: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 4 },
   goalConnection: { fontSize: 13, color: colors.muted, lineHeight: 19 },
 
@@ -513,7 +510,7 @@ const s = StyleSheet.create({
   },
   checkMark: { color: colors.bg, fontSize: 12, fontWeight: '700' },
   cardContent: { flex: 1 },
-  cardMoment: { fontSize: 12, color: colors.gold, fontWeight: '500', marginBottom: 2 },
+  cardMoment: { fontSize: 13, color: colors.gold, fontWeight: '500', marginBottom: 2 },
   cardTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
   cardTitleDone: { textDecorationLine: 'line-through', color: colors.muted },
   typeIcon: { fontSize: 16, marginLeft: 8 },
@@ -626,13 +623,13 @@ const s = StyleSheet.create({
   bottomActions: { marginTop: 20, gap: 8 },
   stressBtn: {
     borderWidth: 1,
-    borderColor: colors.errorBorder,
-    backgroundColor: colors.errorBg,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
     borderRadius: 12,
     paddingVertical: 14,
     alignItems: 'center',
   },
-  stressBtnText: { color: colors.error, fontSize: 14, fontWeight: '500' },
+  stressBtnText: { color: colors.text, fontSize: 14, fontWeight: '500' },
   stressNotedText: { color: colors.muted, fontSize: 13, textAlign: 'center', fontStyle: 'italic', marginBottom: 8 },
   recheckBtn: {
     borderWidth: 1,
