@@ -277,7 +277,7 @@ export default function TodayScreen({ navigation }) {
         })}
 
         {/* Routine upgrade prompt — shown after first plan if no routine yet */}
-        {!hasRoutine && !showRoutinePrompt && doneCount >= 1 && (
+        {!hasRoutine && !showRoutinePrompt && (streak >= 2 || doneCount >= 1) && (
           <TouchableOpacity
             style={s.routinePromptCard}
             onPress={() => { tapLight(); setShowRoutinePrompt(true); }}

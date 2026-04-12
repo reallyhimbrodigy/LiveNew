@@ -6,7 +6,16 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 import { useAuthStore } from '../store/authStore';
-import { tapLight, tapSelect } from '../haptics';
+import { tapLight, tapSelect, tapMedium } from '../haptics';
+
+const GOAL_OPTIONS = [
+  { label: 'Sleep better', value: 'I want to sleep through the night and wake up rested', emoji: '\u{1F319}' },
+  { label: 'Less anxiety', value: 'I want to stop feeling anxious and overwhelmed all day', emoji: '\u{1F32C}\uFE0F' },
+  { label: 'More energy', value: 'I want consistent energy throughout the day without crashing', emoji: '\u26A1' },
+  { label: 'Lose weight', value: 'I want to lose weight and stop stress eating', emoji: '\u{1F331}' },
+  { label: 'Be calmer', value: 'I want to feel calm and in control of my stress', emoji: '\u{1F9D8}' },
+  { label: 'Feel better', value: 'I just want to feel better overall', emoji: '\u2728' },
+];
 
 export default function AccountScreen({ navigation }) {
   const profile = useAuthStore(s => s.profile);
@@ -79,21 +88,68 @@ export default function AccountScreen({ navigation }) {
     );
   };
 
+  const handleGoalSelect = async (goalValue) => {
+    tapMedium();
+    setSaving(true);
+    try {
+      const updated = { ...profile, goal: goalValue };
+      await saveProfile(updated);
+      setSaving(false);
+      setEditing(null);
+      try {
+        const parent = navigation.getParent();
+        if (parent) parent.navigate('Today', { screen: 'StressTap' });
+      } catch {}
+      Alert.alert('Updated', 'Your plan will refresh with your new goal on the next check-in.');
+    } catch {
+      Alert.alert('Error', 'Could not save. Try again.');
+      setSaving(false);
+    }
+  };
+
   // Edit screen
   if (editing) {
+    // Goal editing uses preset options (same as onboarding)
+    if (editing === 'goal') {
+      return (
+        <SafeAreaView style={s.safe}>
+          <View style={s.editWrap}>
+            <Text style={s.editTitle}>What's your goal?</Text>
+            <Text style={s.editSub}>Pick the one that matters most right now</Text>
+            {saving ? (
+              <View style={{ alignItems: 'center', paddingTop: 32 }}>
+                <Text style={{ color: colors.muted, fontSize: 16 }}>Saving...</Text>
+              </View>
+            ) : (
+              <View style={s.goalGrid}>
+                {GOAL_OPTIONS.map(option => (
+                  <TouchableOpacity
+                    key={option.value}
+                    style={s.goalOption}
+                    onPress={() => handleGoalSelect(option.value)}
+                    activeOpacity={0.7}
+                  >
+                    <Text style={s.goalEmoji}>{option.emoji}</Text>
+                    <Text style={s.goalLabel}>{option.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+            <TouchableOpacity style={s.cancelBtn} onPress={() => setEditing(null)} activeOpacity={0.7}>
+              <Text style={s.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </SafeAreaView>
+      );
+    }
+
+    // Routine editing uses text input
     return (
       <SafeAreaView style={s.safe}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={s.editWrap}>
-            <Text style={s.editTitle}>
-              {editing === 'routine' ? 'Update your routine' : 'Update your goal'}
-            </Text>
-            <Text style={s.editSub}>
-              {editing === 'routine'
-                ? 'This shapes when and how LiveNew builds your sessions.'
-                : 'This shapes what LiveNew focuses on in your daily plan.'
-              }
-            </Text>
+            <Text style={s.editTitle}>Update your routine</Text>
+            <Text style={s.editSub}>This shapes when and how LiveNew builds your plan.</Text>
             <TextInput
               style={s.editInput}
               value={editValue}
@@ -102,7 +158,7 @@ export default function AccountScreen({ navigation }) {
               textAlignVertical="top"
               autoFocus
               placeholderTextColor={colors.dim}
-              placeholder={editing === 'routine' ? 'Describe your daily routine...' : 'What is your goal...'}
+              placeholder="Describe your daily routine..."
             />
             <TouchableOpacity
               style={[s.saveBtn, (!editValue.trim() || saving) && { opacity: 0.4 }]}
@@ -138,7 +194,7 @@ export default function AccountScreen({ navigation }) {
             <View style={s.statusContent}>
               <Text style={s.statusTitle}>{isSubscribed ? 'LiveNew Pro' : 'Free plan'}</Text>
               <Text style={s.statusSub}>
-                {isSubscribed ? 'Full access to all features' : 'Upgrade to unlock guided sessions'}
+                {isSubscribed ? 'Full access to all features' : 'Upgrade for unlimited plans'}
               </Text>
             </View>
           </View>
@@ -408,4 +464,20 @@ const s = StyleSheet.create({
   saveBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
   cancelBtn: { alignItems: 'center', marginTop: 12, padding: 8 },
   cancelText: { color: colors.muted, fontSize: 14 },
+
+  // Goal preset grid
+  goalGrid: { gap: 10 },
+  goalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    gap: 14,
+  },
+  goalEmoji: { fontSize: 22 },
+  goalLabel: { fontSize: 16, fontWeight: '500', color: colors.text },
 });

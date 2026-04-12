@@ -68,7 +68,7 @@ export default function ProgressScreen() {
         {profile?.goal && (
           <View style={s.goalCard}>
             <Text style={s.goalLabel}>YOUR GOAL</Text>
-            <Text style={s.goalText}>{profile.goal}</Text>
+            <Text style={s.goalText} numberOfLines={2}>{profile.goal}</Text>
           </View>
         )}
 
@@ -97,7 +97,7 @@ export default function ProgressScreen() {
           </View>
           <View style={s.summaryCard}>
             <Text style={s.summaryValue}>{totalSessions}</Text>
-            <Text style={s.summaryLabel}>Sessions</Text>
+            <Text style={s.summaryLabel}>Done</Text>
           </View>
           <View style={s.summaryCard}>
             <Text style={s.summaryValue}>{streak || 0}</Text>
