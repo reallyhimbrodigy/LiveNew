@@ -189,7 +189,7 @@ export default function TodayScreen({ navigation }) {
 
         {/* Header */}
         <Text style={s.greeting}>{getGreeting()}</Text>
-        {streak > 1 && <Text style={s.streakText}>Day {streak}</Text>}
+        {streak >= 1 && <Text style={s.streakText}>Day {streak}</Text>}
 
         {/* Right Now Zone */}
         {rightNowText && (
@@ -246,9 +246,11 @@ export default function TodayScreen({ navigation }) {
                     <Text style={[s.cardTitle, isDone && s.cardTitleDone]}>{item.title}</Text>
                   </View>
                 </View>
-                <Text style={s.typeIcon}>
-                  {item.type === 'breathe' ? '\u{1FAC1}' : item.type === 'food' ? '\u{1F37D}' : item.type === 'mindset' ? '\u{1F9E0}' : '\u26A1'}
-                </Text>
+                <View style={s.typeBadge}>
+                  <Text style={s.typeBadgeText}>
+                    {item.type === 'breathe' ? 'BREATHE' : item.type === 'food' ? 'FOOD' : item.type === 'mindset' ? 'MINDSET' : 'HABIT'}
+                  </Text>
+                </View>
               </View>
 
               {isExpanded && (
@@ -256,7 +258,6 @@ export default function TodayScreen({ navigation }) {
                   <Text style={s.insightText}>{item.insight}</Text>
                   {item.goalConnection && (
                     <View style={s.goalTag}>
-                      <Text style={s.goalTagIcon}>{'\u{1F3AF}'}</Text>
                       <Text style={s.goalTagText}>{item.goalConnection}</Text>
                     </View>
                   )}
@@ -513,7 +514,19 @@ const s = StyleSheet.create({
   cardMoment: { fontSize: 13, color: colors.gold, fontWeight: '500', marginBottom: 2 },
   cardTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
   cardTitleDone: { textDecorationLine: 'line-through', color: colors.muted },
-  typeIcon: { fontSize: 16, marginLeft: 8 },
+  typeBadge: {
+    backgroundColor: colors.goldSoft,
+    borderRadius: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginLeft: 8,
+  },
+  typeBadgeText: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: colors.gold,
+    letterSpacing: 0.8,
+  },
 
   // Expanded
   expandedWrap: {
@@ -534,15 +547,15 @@ const s = StyleSheet.create({
     padding: 10,
     marginBottom: 14,
   },
-  goalTagIcon: { fontSize: 12, marginRight: 8, marginTop: 1 },
-  goalTagText: { fontSize: 13, color: colors.gold, lineHeight: 18, flex: 1 },
+  goalTagText: { fontSize: 13, color: colors.gold, lineHeight: 18 },
   gotItBtn: {
-    backgroundColor: colors.gold,
+    borderWidth: 1,
+    borderColor: colors.gold,
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
   },
-  gotItText: { color: colors.bg, fontSize: 15, fontWeight: '600' },
+  gotItText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
 
   // Routine prompt
   routinePromptCard: {
@@ -633,12 +646,12 @@ const s = StyleSheet.create({
   stressNotedText: { color: colors.muted, fontSize: 13, textAlign: 'center', fontStyle: 'italic', marginBottom: 8 },
   recheckBtn: {
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.dim,
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
   },
-  recheckText: { color: colors.muted, fontSize: 14 },
+  recheckText: { color: colors.text, fontSize: 14 },
 
   // Stress relief modal
   modalOverlay: {

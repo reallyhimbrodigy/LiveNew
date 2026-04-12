@@ -138,6 +138,8 @@ export default function StressTapScreen({ navigation }) {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.container}>
+        <Text style={s.topLabel}>Daily check-in</Text>
+
         {/* Step indicator — hidden during loading */}
         {!loading && (
           <View style={s.stepRow}>
@@ -187,15 +189,16 @@ export default function StressTapScreen({ navigation }) {
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  container: { flex: 1, justifyContent: 'center', padding: 24 },
+  container: { flex: 1, justifyContent: 'flex-start', padding: 24, paddingTop: 60 },
 
-  logo: {
-    fontSize: 28,
-    fontWeight: '500',
-    color: colors.text,
+  topLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.dim,
     textAlign: 'center',
-    marginBottom: 32,
+    textTransform: 'uppercase',
     letterSpacing: 1,
+    marginBottom: 24,
   },
 
   stepRow: {
