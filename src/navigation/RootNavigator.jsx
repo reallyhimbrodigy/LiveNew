@@ -83,6 +83,8 @@ function MainTabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        lazy: false,
+        freezeOnBlur: false,
         tabBarStyle: {
           backgroundColor: colors.tabBar,
           borderTopColor: colors.line,
