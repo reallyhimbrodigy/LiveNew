@@ -232,10 +232,15 @@ export const useAuthStore = create((set, get) => ({
     const profile = get().profile || {};
     const stressMap = { good: 2, okay: 5, stressed: 8, overwhelmed: 10 };
     const stressValue = stressMap[stress] || (typeof stress === 'number' ? stress : 5);
+    // Send the user's chosen LABEL ("good"/"okay"/"stressed"/"overwhelmed")
+    // so the server can pass it verbatim to the AI prompt. The numeric value
+    // is also sent so the server can store it for stress-trend purposes.
+    const stressLabel = typeof stress === 'string' ? stress : null;
 
     const data = await api.checkin({
       dateISO: getLocalDateISO(),
       stress: stressValue,
+      stressLabel,
       sleepQuality,   // "great" | "okay" | "rough"
       energy,         // "high" | "medium" | "low"
       routine: profile.routine || '',

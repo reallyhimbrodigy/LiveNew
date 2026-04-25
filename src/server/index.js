@@ -2782,11 +2782,17 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
   async function buildAIHistory(userSupabase, userId, todayDateKey) {
     const history = {};
     try {
-      // Yesterday's date
       const todayMs = new Date(todayDateKey + "T12:00:00Z").getTime();
       const yesterdayKey = new Date(todayMs - 86400000).toISOString().slice(0, 10);
 
-      // Get yesterday's stored plan from derived_state
+      // ISO week start (Monday) for "days active this week"
+      const todayDate = new Date(todayDateKey + "T12:00:00Z");
+      const dayOfWeek = todayDate.getUTCDay(); // 0=Sun..6=Sat
+      const daysSinceMonday = (dayOfWeek + 6) % 7;
+      const mondayMs = todayMs - daysSinceMonday * 86400000;
+      const weekStartKey = new Date(mondayMs).toISOString().slice(0, 10);
+
+      // Yesterday's stored plan from derived_state — also source of last weeklyFocus + stressRelief
       const { data: derivedRow } = await userSupabase
         .from("derived_state")
         .select("today_contract")
@@ -2796,9 +2802,15 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       if (contract && (contract.dateKey === yesterdayKey || contract.dateISO === yesterdayKey)) {
         history.yesterdayPlan = contract.plan || [];
         history.yesterdayCompleted = contract.completed || {};
+        if (contract.goalThread?.weeklyFocus) {
+          history.lastWeeklyFocus = contract.goalThread.weeklyFocus;
+        }
+        if (typeof contract.stressRelief === "string" && contract.stressRelief.trim()) {
+          history.lastStressRelief = contract.stressRelief.trim();
+        }
       }
 
-      // Get yesterday's events for completions and reflections
+      // Yesterday's reflection
       const { data: yesterdayEvents } = await userSupabase
         .from("event")
         .select("type, payload")
@@ -2811,7 +2823,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         }
       }
 
-      // Recent checkins for stress trend (last 7)
+      // Recent stress trend (last 7 numeric values, oldest first)
       const { data: recentCheckins } = await userSupabase
         .from("checkin")
         .select("date_key, stress")
@@ -2819,17 +2831,25 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         .order("date_key", { ascending: false })
         .limit(7);
       if (Array.isArray(recentCheckins) && recentCheckins.length > 0) {
-        history.stressTrend = recentCheckins
-          .reverse()
-          .map(c => ({ date: c.date_key, stress: c.stress }));
+        history.stressTrend = recentCheckins.reverse().map(c => ({ date: c.date_key, stress: c.stress }));
       }
 
-      // Count total checkin days for day number
-      const { count } = await userSupabase
+      // Day number (overall)
+      const { count: totalCount } = await userSupabase
         .from("checkin")
         .select("*", { count: "exact", head: true })
         .eq("user_id", userId);
-      history.dayNumber = (count || 0) + 1;
+      history.dayNumber = (totalCount || 0) + 1;
+      history.isFirstDay = history.dayNumber === 1;
+
+      // Days active this ISO week — drives "advance the weekly focus" logic
+      const { count: weekCount } = await userSupabase
+        .from("checkin")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .gte("date_key", weekStartKey)
+        .lt("date_key", todayDateKey);
+      history.daysActiveThisWeek = weekCount || 0;
     } catch (err) {
       console.error("[BUILD_AI_HISTORY_ERROR]", err?.message);
     }
@@ -2904,8 +2924,16 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       // Map sleep/energy labels to the AI format
       const sleepLabelMap = { great: "great", okay: "okay", rough: "rough" };
       const energyLabelMap = { high: "high", medium: "medium", low: "low" };
+      const stressLabelMap = { good: "good", okay: "okay", stressed: "stressed", overwhelmed: "overwhelmed" };
       const sleepLabel = sleepLabelMap[checkInRawSource?.sleepQuality] || "okay";
       const energyLabel = energyLabelMap[checkInRawSource?.energy] || "medium";
+      // Prefer the explicit label client now sends; fall back to deriving from numeric.
+      const rawStressLabel = checkInRawSource?.stressLabel;
+      const stressLabel = stressLabelMap[rawStressLabel]
+        || (checkIn.stress >= 9 ? "overwhelmed"
+          : checkIn.stress >= 7 ? "stressed"
+          : checkIn.stress >= 4 ? "okay"
+          : "good");
 
       // Keep-alive: write a space every 10s so Render's 30s proxy timeout doesn't kill the connection
       res.setHeader('Content-Type', 'application/json');
@@ -2921,7 +2949,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       let dayPlan = null;
       try {
         dayPlan = await generateDayPlan({
-          stress: checkIn.stress,
+          stressLabel,
           sleepQuality: sleepLabel,
           energy: energyLabel,
           routine: checkIn.routine || "",
