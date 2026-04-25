@@ -43,6 +43,32 @@ function isEvening() {
   return new Date().getHours() >= 19;
 }
 
+// Wind-down phase begins when:
+// - the time of the user's LAST plan item has passed, OR
+// - it's 21:00 or later, OR
+// - all plan items have been marked done.
+// During wind-down we soften the UI, foreground the reflection prompt,
+// and stop scheduling new notifications.
+function isWindDown(planItems, completed) {
+  const now = new Date();
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const nowMinutes = hour * 60 + minute;
+
+  if (hour >= 21) return true;
+  if (planItems.length > 0) {
+    const lastTime = planItems
+      .map(i => {
+        const m = (i.time || '').match(/^(\d{1,2}):(\d{2})$/);
+        return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
+      })
+      .reduce((max, t) => Math.max(max, t), 0);
+    if (lastTime > 0 && nowMinutes >= lastTime) return true;
+    if (planItems.every((_, i) => completed[i])) return true;
+  }
+  return false;
+}
+
 function timeToMinutes(t) {
   if (typeof t !== 'string') return 24 * 60;
   const m = t.match(/^(\d{1,2}):(\d{2})$/);
@@ -139,37 +165,30 @@ export default function TodayScreen({ navigation }) {
           }
         }
       } catch {}
-      // If user explicitly skipped today, don't force them into the check-in.
-      if (skippedDate === today) return;
-      navigation.replace('StressTap');
+      // No plan for today. Don't force the user into the check-in flow.
+      // Clear any stale plan from the previous day, then fall through to the
+      // empty-state render below (which has a gentle "ready when you are" CTA).
+      if (todayPlan && todayDate !== today) {
+        useAuthStore.setState({
+          todayPlan: null,
+          todayDate: null,
+          completed: {},
+          reflection: null,
+        });
+      }
     };
     check();
   }, []);
 
+  // Detect day rollover on app focus, but DON'T auto-redirect to the check-in.
+  // The empty-state below will gently surface the new-day CTA when the user
+  // is ready. Forcing them straight into a 3-step flow at midnight (or whenever
+  // they next open the app) is too abrupt.
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        const today = getLocalDateISO();
-        if (todayDate !== today) navigation.replace('StressTap');
-        setTimeOfDay(getTimeOfDay());
-      }
+      if (state === 'active') setTimeOfDay(getTimeOfDay());
     });
     return () => sub.remove();
-  }, [todayDate]);
-
-  // Auto-reset at midnight even if the app stays foregrounded.
-  // Schedules a single timeout for the next 00:00 local; reschedules itself.
-  useEffect(() => {
-    const now = new Date();
-    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 5);
-    const ms = Math.max(1000, nextMidnight.getTime() - now.getTime());
-    const t = setTimeout(() => {
-      const today = getLocalDateISO();
-      if (todayDate !== today) {
-        navigation.replace('StressTap');
-      }
-    }, ms);
-    return () => clearTimeout(t);
   }, [todayDate]);
 
   useEffect(() => {
@@ -202,6 +221,8 @@ export default function TodayScreen({ navigation }) {
   const showStressBtn = !!stressRelief && doneCount < planItems.length;
 
   const { dayOfWeek, partOfDay } = getGreetingParts();
+  const inWindDown = todayPlan && isWindDown(planItems, completed);
+  const winddownPartOfDay = inWindDown ? 'winding down' : partOfDay;
 
   const handleTap = async (item) => {
     const idx = item._idx;
@@ -246,12 +267,20 @@ export default function TodayScreen({ navigation }) {
     setSavingRoutine(false);
   };
 
-  // Empty state: user skipped today's check-in (or no plan exists yet for today).
-  // Polished "ready when you are" rather than a spinner or broken-looking screen.
+  // Empty state: no plan for today yet. Could be because:
+  //   1. User skipped today's check-in
+  //   2. The day rolled over and they haven't checked in yet
+  //   3. First app open and no cached plan
+  // All three get the same calm "ready when you are" view — no forced flow.
   const today = getLocalDateISO();
-  const isSkippedToday = skippedDate === today;
 
-  if (!todayPlan && isSkippedToday) {
+  if (!todayPlan) {
+    const morning = new Date().getHours() < 12;
+    const titleCopy = morning ? 'A new day.' : 'Ready when you are.';
+    const bodyCopy = morning
+      ? 'A 10-second check-in shapes today around how you woke up.'
+      : 'A 10-second check-in shapes today around how you actually feel right now.';
+
     return (
       <SafeAreaView style={s.safe} edges={['top']}>
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
@@ -264,10 +293,8 @@ export default function TodayScreen({ navigation }) {
 
           <View style={s.emptyCard}>
             <Text style={s.emptyLabel}>NO PLAN YET</Text>
-            <Text style={s.emptyTitle}>Ready when you are.</Text>
-            <Text style={s.emptyBody}>
-              A 10-second check-in shapes today's plan around how you actually feel right now.
-            </Text>
+            <Text style={s.emptyTitle}>{titleCopy}</Text>
+            <Text style={s.emptyBody}>{bodyCopy}</Text>
             <Pressable
               style={({ pressed }) => [s.emptyCta, pressed && { opacity: 0.85 }]}
               onPress={async () => {
@@ -281,16 +308,6 @@ export default function TodayScreen({ navigation }) {
             <Text style={s.emptyHint}>Or browse Progress and Account anytime.</Text>
           </View>
         </ScrollView>
-      </SafeAreaView>
-    );
-  }
-
-  if (!todayPlan) {
-    return (
-      <SafeAreaView style={s.safe} edges={['top']}>
-        <View style={s.centered}>
-          <ActivityIndicator size="large" color={colors.gold} />
-        </View>
       </SafeAreaView>
     );
   }
@@ -325,7 +342,7 @@ export default function TodayScreen({ navigation }) {
         <View style={s.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
-            <Text style={s.greetingPart}>{partOfDay}</Text>
+            <Text style={s.greetingPart}>{winddownPartOfDay}</Text>
           </View>
           {streak >= 1 && (
             <View style={s.streakInline}>
@@ -345,8 +362,24 @@ export default function TodayScreen({ navigation }) {
           </Pressable>
         </View>
 
-        {/* Right Now — hero, gradient */}
-        {rightNowText && (
+        {/* Wind-down recap — only in evening, replaces Right Now hero */}
+        {inWindDown ? (
+          <View style={s.windDownCard}>
+            <Text style={s.windDownLabel}>TODAY, BRIEFLY</Text>
+            <Text style={s.windDownTitle}>
+              {doneCount === planItems.length
+                ? 'You did all five.'
+                : doneCount > 0
+                  ? `You internalized ${doneCount} of ${planItems.length}.`
+                  : 'A quiet day.'}
+            </Text>
+            <Text style={s.windDownBody}>
+              {goalThread?.weeklyFocus
+                ? `This week's focus: ${goalThread.weeklyFocus.toLowerCase()}.`
+                : 'Tomorrow comes when you wake up.'}
+            </Text>
+          </View>
+        ) : rightNowText ? (
           <View style={s.rightNowCard}>
             <LinearGradient
               colors={['rgba(196,168,108,0.10)', 'rgba(196,168,108,0.02)']}
@@ -363,10 +396,10 @@ export default function TodayScreen({ navigation }) {
               </Text>
             )}
           </View>
-        )}
+        ) : null}
 
         {/* Plan */}
-        <Text style={s.sectionLabel}>YOUR PLAN</Text>
+        <Text style={s.sectionLabel}>{inWindDown ? "TODAY'S PLAN" : 'YOUR PLAN'}</Text>
 
         {planItems.map((item, listIdx) => {
           const idx = item._idx;
@@ -958,6 +991,38 @@ const s = StyleSheet.create({
   goldBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center' },
   goldBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
   greeting: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 8, fontFamily: fonts.display },
+
+  // Wind-down hero (evening recap, replaces Right Now)
+  windDownCard: {
+    borderRadius: 18,
+    paddingVertical: 24,
+    paddingHorizontal: 24,
+    marginBottom: 28,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+  },
+  windDownLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.dim,
+    letterSpacing: 2,
+    marginBottom: 12,
+  },
+  windDownTitle: {
+    fontFamily: fonts.display,
+    fontSize: 22,
+    color: colors.text,
+    marginBottom: 8,
+    letterSpacing: 0.2,
+    lineHeight: 30,
+  },
+  windDownBody: {
+    fontFamily: fonts.displayItalic,
+    fontSize: 14,
+    color: colors.muted,
+    lineHeight: 22,
+  },
 
   // Empty state (user skipped today)
   emptyCard: {

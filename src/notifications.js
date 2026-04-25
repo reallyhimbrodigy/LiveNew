@@ -20,6 +20,11 @@ export async function requestPermissions() {
 // Cancel + schedule a notification for each plan item at its exact HH:MM time today.
 // Items are expected to have a `time` field in 24-hour HH:MM (set server-side by aiDayPlan).
 // Falls back to natural-language parsing of `moment` if `time` missing (legacy plans).
+//
+// Notification copy strategy: title is the moment (specific, contextual hook),
+// body leads with the insight's first sentence (the WHY) which is more compelling
+// than the title verbatim. The user wants a notification that earns the open,
+// not a chore reminder.
 export async function scheduleSessionReminders(planItems) {
   await Notifications.cancelAllScheduledNotificationsAsync();
   if (!Array.isArray(planItems) || planItems.length === 0) return;
@@ -41,18 +46,46 @@ export async function scheduleSessionReminders(planItems) {
     );
     if (triggerDate <= now) continue;
 
+    const { title, body } = composeNotificationCopy(item);
+
     try {
       await Notifications.scheduleNotificationAsync({
         identifier: `livenew-plan-${i}`,
         content: {
-          title: item.title || 'LiveNew',
-          body: item.moment || '',
+          title,
+          body,
           data: { planIndex: i },
         },
         trigger: { type: 'date', date: triggerDate },
       });
     } catch {}
   }
+}
+
+function composeNotificationCopy(item) {
+  const moment = (item?.moment || '').trim();
+  const title = (item?.title || '').trim();
+  const insight = (item?.insight || '').trim();
+
+  // Pull the first sentence of the insight as the notification body.
+  // This is usually the observation/hook ("Most people crash because..."),
+  // which is far more interesting than just the moment phrase.
+  const firstSentence = insight ? insight.split(/(?<=[.!?])\s+/)[0] : '';
+
+  // Title prefers the moment (the WHEN/WHERE — concrete, contextual);
+  // falls back to title if moment is missing.
+  const notificationTitle = moment || title || 'LiveNew';
+
+  // Body is the action + brief why. If we have an insight, lead with its
+  // first sentence + the title; otherwise just the title.
+  let notificationBody;
+  if (firstSentence && firstSentence.length < 140) {
+    notificationBody = title ? `${title}. ${firstSentence}` : firstSentence;
+  } else {
+    notificationBody = title || '';
+  }
+
+  return { title: notificationTitle, body: notificationBody };
 }
 
 // Cancel a single plan item's notification (e.g., when user taps "Got it").

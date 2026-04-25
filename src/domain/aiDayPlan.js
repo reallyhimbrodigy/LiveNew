@@ -95,6 +95,23 @@ Each item has:
 - type: breathe | habit | food | mindset.
 - goalConnection: one sentence OR null. 2-3 of the 5 items must include a real goalConnection that traces the action to the user's specific goal. The other 2-3 leave it null. Don't force a connection where it isn't natural.
 
+[LOW FRICTION, HIGH PAYOFF — never give the user homework]
+Each item must be doable in 30 seconds while standing or walking, with nothing but their body and what's already in the room. The user opens this once for the day — your job is to shift their state with small physical or attentional actions, not assign tasks.
+
+Forbidden item patterns (these always feel like chores and KILL the open-the-app instinct):
+- "Write down…", "journal about…", "make a list of…"
+- "Reflect on…", "think about…", "spend 5 minutes…"
+- "Plan tomorrow's…", "set an intention for…"
+- Anything requiring a notebook, pen, or app other than this one.
+- Anything that takes more than 60 seconds to complete.
+
+These same goals can be reached with lower friction:
+- Instead of "Write down your top three priorities" → "Say your top priority out loud once."
+- Instead of "Journal about your stress" → "Name the one thing you can't control, then drop it."
+- Instead of "Plan tomorrow's first move" → "Decide tomorrow's first action while you brush your teeth."
+
+If your item title would feel like an obligation in a notification, it's wrong. Rewrite.
+
 Hard "no":
 - No timers. No durations. No "for 5 minutes."
 - No emoji. No exclamation points. No semicolons used to smuggle a second clause.
