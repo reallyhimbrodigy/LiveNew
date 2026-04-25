@@ -20,6 +20,28 @@ import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
 import { generateDayPlan } from "../domain/aiDayPlan.js";
 import { generateInsight } from "../domain/aiInsight.js";
+
+// In-memory insight cache. Key: `${userId}:${dateKey}`. Cleared on server restart.
+// One Anthropic call per user per day instead of one per Progress mount.
+const insightCache = new Map();
+function getLocalDateISOForUser() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+async function getCachedOrGenerateInsight({ userId, dateKey, checkIns, doneCount }) {
+  const key = `${userId}:${dateKey}`;
+  if (insightCache.has(key)) return insightCache.get(key);
+  const insight = await generateInsight({ checkIns, doneCount });
+  if (insight) {
+    insightCache.set(key, insight);
+    // Cap cache size: prune oldest entries beyond 5000.
+    if (insightCache.size > 5000) {
+      const firstKey = insightCache.keys().next().value;
+      insightCache.delete(firstKey);
+    }
+  }
+  return insight;
+}
 import { buildWeekSkeleton } from "../domain/weekPlanner.js";
 import { computeContinuityMeta } from "../domain/continuity.js";
 import { applyQuickSignal } from "../domain/swap.js";
@@ -3235,11 +3257,12 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     if (checkIns.length >= 2) {
       try {
         const last7 = checkIns.slice(-7);
-        insight = await generateInsight({
+        const doneCount = resetEvents.length + moveEvents.length + winddownEvents.length;
+        insight = await getCachedOrGenerateInsight({
+          userId: auth.userId,
+          dateKey: getLocalDateISOForUser(),
           checkIns: last7,
-          resetsCompleted: resetEvents.length,
-          movesCompleted: moveEvents.length,
-          winddownsCompleted: winddownEvents.length,
+          doneCount,
         });
       } catch (err) {
         console.error("[INSIGHT_ERROR]", err?.message);

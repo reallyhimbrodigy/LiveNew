@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { colors, fonts } from '../theme';
 import { api } from '../api';
 import { useAuthStore } from '../store/authStore';
 import { truncateGoal } from '../utils/goalText';
+
+const PROGRESS_CACHE_KEY = 'livenew:progress_cache_v1';
 
 export default function ProgressScreen() {
   const [data, setData] = useState(null);
@@ -13,19 +16,39 @@ export default function ProgressScreen() {
   const streak = useAuthStore(s => s.streak);
   const profile = useAuthStore(s => s.profile);
 
+  // Stale-while-revalidate: render last-cached payload instantly, refresh in background.
+  // Eliminates the multi-second spinner on every Progress tab open.
+  const refresh = async () => {
+    try {
+      const res = await api.progress();
+      const next = res?.progress || null;
+      setData(next);
+      setError(false);
+      if (next) {
+        try { await AsyncStorage.setItem(PROGRESS_CACHE_KEY, JSON.stringify(next)); } catch {}
+      }
+    } catch {
+      setError(true);
+    }
+    setLoading(false);
+  };
+
   useEffect(() => {
+    let mounted = true;
     (async () => {
       try {
-        const res = await api.progress();
-        setData(res?.progress || null);
-      } catch {
-        setError(true);
-      }
-      setLoading(false);
+        const cached = await AsyncStorage.getItem(PROGRESS_CACHE_KEY);
+        if (cached && mounted) {
+          setData(JSON.parse(cached));
+          setLoading(false);
+        }
+      } catch {}
+      if (mounted) refresh();
     })();
+    return () => { mounted = false; };
   }, []);
 
-  if (loading) {
+  if (loading && !data) {
     return (
       <View style={s.loadingWrap}>
         <ActivityIndicator size="large" color={colors.gold} />
@@ -243,17 +266,7 @@ export default function ProgressScreen() {
             {error && (
               <Pressable
                 style={({ pressed }) => [s.retryBtn, pressed && { opacity: 0.85 }]}
-                onPress={async () => {
-                  setLoading(true);
-                  setError(false);
-                  try {
-                    const res = await api.progress();
-                    setData(res?.progress || null);
-                  } catch {
-                    setError(true);
-                  }
-                  setLoading(false);
-                }}
+                onPress={() => { setLoading(true); refresh(); }}
               >
                 <Text style={s.retryText}>Retry</Text>
               </Pressable>
@@ -267,44 +280,25 @@ export default function ProgressScreen() {
   );
 }
 
+// One sentence. Pick the most signal-rich fact about today.
+// AI insight on Progress carries the rest of the narrative.
 function buildStoryText({ daysActive, streak, stressChange, stressAvg, recentAvg, totalSessions, bestDay, dayNames }) {
-  const parts = [];
-
+  if (stressChange !== null && stressChange > 1) {
+    return `Stress dropped ${stressChange.toFixed(1)} points this week.`;
+  }
+  if (stressChange !== null && stressChange < -1) {
+    return `Stress climbed this week. Tomorrow adapts.`;
+  }
   if (daysActive <= 3) {
-    parts.push(`You're ${daysActive} days in. This is where the foundation gets built.`);
-  } else if (daysActive <= 7) {
-    parts.push(`${daysActive} days of showing up. Your body is starting to notice the pattern.`);
-  } else if (daysActive <= 14) {
-    parts.push(`${daysActive} days. Most people quit by now \u2014 you didn't.`);
-  } else if (daysActive <= 30) {
-    parts.push(`${daysActive} days of cortisol regulation. This is becoming part of who you are.`);
-  } else {
-    parts.push(`${daysActive} days. You've built a real practice.`);
+    return `Day ${daysActive}. Foundation phase.`;
   }
-
-  if (stressChange !== null) {
-    if (stressChange > 1) {
-      parts.push(`Your stress has dropped ${stressChange.toFixed(1)} points this week. That's not luck \u2014 that's the compound effect of what you've been doing.`);
-    } else if (stressChange > 0) {
-      parts.push(`Stress is trending down slightly. Small shifts add up.`);
-    } else if (stressChange < -1) {
-      parts.push(`Stress went up this week. That's okay \u2014 tomorrow's plan will adapt.`);
-    }
-  } else if (recentAvg !== null) {
-    if (recentAvg <= 4) {
-      parts.push(`Your recent stress levels are looking solid. Keep doing what's working.`);
-    } else if (recentAvg >= 7) {
-      parts.push(`It's been a tough stretch. The plan is adjusting to meet you where you are.`);
-    }
+  if (recentAvg !== null && recentAvg >= 7) {
+    return `Stress sitting around ${Math.round(recentAvg)}. Tough stretch.`;
   }
-
-  if (totalSessions > 0 && daysActive > 3) {
-    parts.push(totalSessions === 1
-      ? `You've internalized 1 thing so far. One real shift adds up.`
-      : `You've internalized ${totalSessions} things so far. Each one is a small rewire.`);
+  if (recentAvg !== null && recentAvg <= 4) {
+    return `Stress steady around ${Math.round(recentAvg)}. Whatever you're doing, keep going.`;
   }
-
-  return parts.join(' ');
+  return `${daysActive} days in.`;
 }
 
 const s = StyleSheet.create({

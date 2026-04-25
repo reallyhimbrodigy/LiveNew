@@ -153,6 +153,21 @@ export default function TodayScreen({ navigation }) {
     return () => sub.remove();
   }, [todayDate]);
 
+  // Auto-reset at midnight even if the app stays foregrounded.
+  // Schedules a single timeout for the next 00:00 local; reschedules itself.
+  useEffect(() => {
+    const now = new Date();
+    const nextMidnight = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 5);
+    const ms = Math.max(1000, nextMidnight.getTime() - now.getTime());
+    const t = setTimeout(() => {
+      const today = getLocalDateISO();
+      if (todayDate !== today) {
+        navigation.replace('StressTap');
+      }
+    }, ms);
+    return () => clearTimeout(t);
+  }, [todayDate]);
+
   useEffect(() => {
     const interval = setInterval(() => setTimeOfDay(getTimeOfDay()), 60000);
     return () => clearInterval(interval);
@@ -263,18 +278,28 @@ export default function TodayScreen({ navigation }) {
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
       >
 
-        {/* Header — serif greeting + streak chip */}
+        {/* Header — serif greeting + streak + redo */}
         <View style={s.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
             <Text style={s.greetingPart}>{partOfDay}</Text>
           </View>
           {streak >= 1 && (
-            <View style={s.streakChip}>
-              <Text style={s.streakChipNum}>{streak}</Text>
-              <Text style={s.streakChipLabel}>{streak === 1 ? 'day' : 'days'}</Text>
+            <View style={s.streakInline}>
+              <Text style={s.streakInlineNum}>{streak}</Text>
+              <Text style={s.streakInlineLabel}>day{streak === 1 ? '' : 's'}</Text>
             </View>
           )}
+          <Pressable
+            onPress={() => {
+              tapSelect();
+              navigation.replace('StressTap');
+            }}
+            hitSlop={10}
+            style={s.redoBtn}
+          >
+            <Text style={s.redoIcon}>↻</Text>
+          </Pressable>
         </View>
 
         {/* Right Now — hero, gradient */}
@@ -305,13 +330,8 @@ export default function TodayScreen({ navigation }) {
           const isDone = !!completed[idx];
           const isExpanded = expandedIndex === idx && !isDone;
           const isFirst = listIdx === 0;
-          const isLast = listIdx === planItems.length - 1;
-
-          const accentColor =
-            item.type === 'breathe' ? colors.gold :
-            item.type === 'food' ? colors.success :
-            item.type === 'mindset' ? colors.accent :
-            colors.muted;
+          const timeStr = formatTime(item.time);
+          const hasTime = !!timeStr;
 
           return (
             <PressCard
@@ -326,12 +346,11 @@ export default function TodayScreen({ navigation }) {
               ]}
             >
               <View style={s.planTopRow}>
-                <View style={[s.typeDot, { backgroundColor: accentColor }, isDone && { opacity: 0.4 }]} />
-                <View style={s.planTimeWrap}>
-                  <Text style={[s.planTime, isDone && s.planTextDone]}>
-                    {formatTime(item.time)}
-                  </Text>
-                </View>
+                {hasTime ? (
+                  <View style={s.planTimeWrap}>
+                    <Text style={[s.planTime, isDone && s.planTextDone]}>{timeStr}</Text>
+                  </View>
+                ) : null}
                 <View style={s.planContent}>
                   <Text style={[s.planTitle, isDone && s.planTextDone]} numberOfLines={isExpanded ? undefined : 2}>
                     {item.title}
@@ -347,7 +366,7 @@ export default function TodayScreen({ navigation }) {
                     <Text style={s.checkMark}>{'✓'}</Text>
                   </View>
                 ) : (
-                  <View style={[s.checkEmpty, { borderColor: accentColor }]} />
+                  <View style={s.checkEmpty} />
                 )}
               </View>
 
@@ -529,30 +548,37 @@ const s = StyleSheet.create({
     color: colors.muted,
     letterSpacing: 0.2,
   },
-  streakChip: {
-    alignItems: 'center',
-    backgroundColor: colors.goldSoft,
-    borderWidth: 1,
-    borderColor: colors.goldBorder,
-    borderRadius: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    minWidth: 52,
+  streakInline: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
     marginLeft: 12,
+    marginRight: 8,
+    gap: 4,
   },
-  streakChipNum: {
+  streakInlineNum: {
     fontFamily: fonts.displayBold,
-    fontSize: 18,
+    fontSize: 22,
     color: colors.gold,
-    lineHeight: 22,
+    letterSpacing: 0.2,
   },
-  streakChipLabel: {
-    fontSize: 9,
-    color: colors.gold,
-    fontWeight: '600',
-    letterSpacing: 1.2,
-    textTransform: 'uppercase',
-    marginTop: -2,
+  streakInlineLabel: {
+    fontSize: 12,
+    color: colors.muted,
+    letterSpacing: 0.3,
+  },
+  redoBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.line,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  redoIcon: {
+    color: colors.muted,
+    fontSize: 18,
+    lineHeight: 22,
   },
 
   // Right Now hero
@@ -623,15 +649,8 @@ const s = StyleSheet.create({
   planTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    paddingLeft: 14,
-  },
-  typeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginRight: 12,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
   },
   planTimeWrap: {
     width: 62,
@@ -663,6 +682,7 @@ const s = StyleSheet.create({
   checkEmpty: {
     width: 22, height: 22, borderRadius: 11,
     borderWidth: 2,
+    borderColor: colors.dim,
   },
   checkDone: {
     width: 22, height: 22, borderRadius: 11,

@@ -166,7 +166,9 @@ export default function RootNavigator() {
     })();
   }, []);
 
-  if (isLoading || !fontsLoaded) {
+  // Don't gate render on fontsLoaded — system fallback shows for first frame,
+  // Lora swaps in seamlessly when ready. Saves 0.5–2s on cold boot.
+  if (isLoading) {
     return (
       <View style={styles.loading}>
         <ActivityIndicator size="large" color={colors.gold} />
