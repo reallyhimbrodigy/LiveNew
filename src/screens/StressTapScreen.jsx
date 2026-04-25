@@ -84,6 +84,13 @@ export default function StressTapScreen({ navigation }) {
   const fadeAnim = useState(new Animated.Value(1))[0];
 
   const generatePlan = useAuthStore(s => s.generatePlan);
+  const skipToday = useAuthStore(s => s.skipToday);
+
+  const handleSkip = async () => {
+    tapMedium();
+    await skipToday();
+    navigation.replace('TodayMain');
+  };
 
   const animateTransition = (callback) => {
     Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
@@ -187,6 +194,12 @@ export default function StressTapScreen({ navigation }) {
                 </PressTile>
               ))}
             </View>
+
+            {step === 1 && (
+              <Pressable style={s.skipLink} onPress={handleSkip} hitSlop={8}>
+                <Text style={s.skipText}>Just browsing — skip for now</Text>
+              </Pressable>
+            )}
           </Animated.View>
         )}
       </View>
@@ -250,6 +263,9 @@ const s = StyleSheet.create({
 
   backBtn: { alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 4, marginBottom: 8 },
   backText: { color: colors.muted, fontSize: 14 },
+
+  skipLink: { alignSelf: 'center', marginTop: 32, paddingVertical: 8, paddingHorizontal: 12 },
+  skipText: { color: colors.muted, fontSize: 13, letterSpacing: 0.2 },
 });
 
 const loadingStyles = StyleSheet.create({

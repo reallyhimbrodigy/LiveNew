@@ -7,6 +7,7 @@ import { getLocalDateISO, getYesterdayISO } from '../utils/localDate';
 const AUTH_KEY = 'livenew:auth';
 const PROFILE_KEY = 'livenew:profile';
 const PLAN_KEY = 'livenew:plan';
+const SKIPPED_KEY = 'livenew:skipped_date';
 
 export const useAuthStore = create((set, get) => ({
   // State
@@ -24,14 +25,16 @@ export const useAuthStore = create((set, get) => ({
   reflection: null,      // "better" | "same" | "harder" | null
   streak: 0,
   stressHistory: [],
+  skippedDate: null,     // YYYY-MM-DD when user chose "skip" today; cleared on day change
 
   // Hydrate from storage
   hydrate: async () => {
     try {
-      const [authJson, profileJson, planJson] = await Promise.all([
+      const [authJson, profileJson, planJson, skippedJson] = await Promise.all([
         AsyncStorage.getItem(AUTH_KEY),
         AsyncStorage.getItem(PROFILE_KEY),
         AsyncStorage.getItem(PLAN_KEY),
+        AsyncStorage.getItem(SKIPPED_KEY),
       ]);
 
       if (authJson) {
@@ -73,6 +76,14 @@ export const useAuthStore = create((set, get) => ({
           }
         }
 
+        // Skip flag: only honor if it's for today's local date.
+        let skippedDate = null;
+        if (skippedJson) {
+          const today = getLocalDateISO();
+          const stored = JSON.parse(skippedJson);
+          if (stored === today) skippedDate = stored;
+        }
+
         set({
           isLoading: false,
           isLoggedIn: true,
@@ -86,6 +97,7 @@ export const useAuthStore = create((set, get) => ({
           todayDate,
           completed,
           reflection,
+          skippedDate,
         });
         get().loadStreak();
 
@@ -160,6 +172,19 @@ export const useAuthStore = create((set, get) => ({
   signup: async (email, password, name) => {
     const data = await api.signup(email, password, name);
     return data;
+  },
+
+  // User chose to skip today's check-in. Persists for today only; cleared on day change.
+  skipToday: async () => {
+    const today = getLocalDateISO();
+    set({ skippedDate: today });
+    try { await AsyncStorage.setItem(SKIPPED_KEY, JSON.stringify(today)); } catch {}
+  },
+
+  // Clear the skip flag (called when user starts the check-in flow).
+  clearSkip: async () => {
+    set({ skippedDate: null });
+    try { await AsyncStorage.removeItem(SKIPPED_KEY); } catch {}
   },
 
   setSubscribed: async (value) => {

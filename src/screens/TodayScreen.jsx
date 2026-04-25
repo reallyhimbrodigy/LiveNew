@@ -92,9 +92,11 @@ export default function TodayScreen({ navigation }) {
   const completed = useAuthStore(s => s.completed);
   const reflection = useAuthStore(s => s.reflection);
   const profile = useAuthStore(s => s.profile);
+  const skippedDate = useAuthStore(s => s.skippedDate);
   const markDone = useAuthStore(s => s.markDone);
   const submitReflection = useAuthStore(s => s.submitReflection);
   const saveRoutine = useAuthStore(s => s.saveRoutine);
+  const clearSkip = useAuthStore(s => s.clearSkip);
 
   const [expandedIndex, setExpandedIndex] = useState(null);
   const [showStressRelief, setShowStressRelief] = useState(false);
@@ -137,6 +139,8 @@ export default function TodayScreen({ navigation }) {
           }
         }
       } catch {}
+      // If user explicitly skipped today, don't force them into the check-in.
+      if (skippedDate === today) return;
       navigation.replace('StressTap');
     };
     check();
@@ -241,6 +245,45 @@ export default function TodayScreen({ navigation }) {
     } catch {}
     setSavingRoutine(false);
   };
+
+  // Empty state: user skipped today's check-in (or no plan exists yet for today).
+  // Polished "ready when you are" rather than a spinner or broken-looking screen.
+  const today = getLocalDateISO();
+  const isSkippedToday = skippedDate === today;
+
+  if (!todayPlan && isSkippedToday) {
+    return (
+      <SafeAreaView style={s.safe} edges={['top']}>
+        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+          <View style={s.headerRow}>
+            <View style={{ flex: 1 }}>
+              <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
+              <Text style={s.greetingPart}>{partOfDay}</Text>
+            </View>
+          </View>
+
+          <View style={s.emptyCard}>
+            <Text style={s.emptyLabel}>NO PLAN YET</Text>
+            <Text style={s.emptyTitle}>Ready when you are.</Text>
+            <Text style={s.emptyBody}>
+              A 10-second check-in shapes today's plan around how you actually feel right now.
+            </Text>
+            <Pressable
+              style={({ pressed }) => [s.emptyCta, pressed && { opacity: 0.85 }]}
+              onPress={async () => {
+                tapSelect();
+                await clearSkip();
+                navigation.replace('StressTap');
+              }}
+            >
+              <Text style={s.emptyCtaText}>Start today's plan</Text>
+            </Pressable>
+            <Text style={s.emptyHint}>Or browse Progress and Account anytime.</Text>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
 
   if (!todayPlan) {
     return (
@@ -915,4 +958,58 @@ const s = StyleSheet.create({
   goldBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center' },
   goldBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
   greeting: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 8, fontFamily: fonts.display },
+
+  // Empty state (user skipped today)
+  emptyCard: {
+    marginTop: 32,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+    alignItems: 'flex-start',
+  },
+  emptyLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.gold,
+    letterSpacing: 2,
+    marginBottom: 14,
+  },
+  emptyTitle: {
+    fontFamily: fonts.display,
+    fontSize: 26,
+    color: colors.text,
+    marginBottom: 12,
+    letterSpacing: 0.2,
+  },
+  emptyBody: {
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.muted,
+    lineHeight: 24,
+    marginBottom: 22,
+    letterSpacing: 0.1,
+  },
+  emptyCta: {
+    alignSelf: 'stretch',
+    backgroundColor: colors.gold,
+    borderRadius: 12,
+    paddingVertical: 14,
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  emptyCtaText: {
+    color: colors.bg,
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
+  emptyHint: {
+    fontFamily: fonts.displayItalic,
+    fontSize: 13,
+    color: colors.dim,
+    alignSelf: 'center',
+  },
 });
