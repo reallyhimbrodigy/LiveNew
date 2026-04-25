@@ -66,24 +66,39 @@ async function upload(ipaPath) {
   await run("node", ["scripts/asc.mjs", "upload", ipaPath]);
 }
 
-async function pollProcessing() {
-  console.log("\n[4/4] Polling Apple every 30s for processing completion (max 30 min)...\n");
+// Poll Apple for the build that was uploaded AFTER `uploadStartedAt`.
+// Avoids matching pre-existing VALID builds that are not the one we just sent.
+async function pollProcessing(uploadStartedAt) {
+  console.log("\n[4/4] Polling Apple every 30s for the new build to land in TestFlight (max 30 min)...\n");
   const deadline = Date.now() + 30 * 60 * 1000;
-  let lastSeen = null;
+  let lastStatus = null;
   while (Date.now() < deadline) {
     const r = spawnSync("node", ["scripts/asc.mjs", "builds"], { encoding: "utf8" });
-    const top = (r.stdout.split("\n").find((l) => /^\d+\s+1\.0\./.test(l)) || "").trim();
-    if (top !== lastSeen) {
-      console.log(`  ${new Date().toLocaleTimeString()}  ${top}`);
-      lastSeen = top;
+    const lines = r.stdout.split("\n").filter((l) => /^\d+\s+1\.0\./.test(l));
+    // First listed line is most recently uploaded (asc.mjs sorts by -uploadedDate).
+    const top = lines[0] || "";
+    // Parse "uploaded" column: format like "Apr 24, 06:08 PM"
+    const m = top.match(/(\w{3}\s+\d{1,2},\s+\d{1,2}:\d{2}\s+[AP]M)/);
+    let uploadedAt = 0;
+    if (m) {
+      const parsed = new Date(`${m[1]} ${new Date().getFullYear()}`);
+      if (!isNaN(parsed.getTime())) uploadedAt = parsed.getTime();
     }
-    if (top.includes("VALID") && top.includes("READY_FOR_BETA_SUBMISSION")) {
+    const isNewBuild = uploadedAt >= uploadStartedAt - 60 * 1000; // 1 min slack
+    const isValid = top.includes("VALID") && top.includes("READY_FOR_BETA_SUBMISSION");
+
+    const status = isNewBuild ? (isValid ? "READY" : "PROCESSING") : "WAITING";
+    if (status !== lastStatus) {
+      console.log(`  ${new Date().toLocaleTimeString()}  ${status}  ${top.trim()}`);
+      lastStatus = status;
+    }
+    if (isNewBuild && isValid) {
       console.log("\n✅ Build is in TestFlight. Done.");
       return;
     }
     await new Promise((r) => setTimeout(r, 30000));
   }
-  console.log("\n⚠️  Polling timed out at 30 min. Run `node scripts/asc.mjs builds` to check.");
+  console.log("\n⚠️  Polling timed out at 30 min. Run `npm run ship:status` to check.");
 }
 
 (async () => {
@@ -93,8 +108,9 @@ async function pollProcessing() {
     mkdirSync(dir, { recursive: true });
     const ipaPath = path.join(dir, `LiveNew-${Date.now()}.ipa`);
     await download(artifactUrl, ipaPath);
+    const uploadStartedAt = Date.now();
     await upload(ipaPath);
-    await pollProcessing();
+    await pollProcessing(uploadStartedAt);
   } catch (err) {
     console.error("\n❌ Ship failed:", err.message);
     process.exit(1);
