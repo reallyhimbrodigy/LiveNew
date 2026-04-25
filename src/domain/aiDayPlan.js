@@ -1,5 +1,39 @@
 import Anthropic from "@anthropic-ai/sdk";
 
+function timeToMinutes(t) {
+  if (typeof t !== "string") return 24 * 60;
+  const m = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return 24 * 60;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function inferTimeFromMoment(moment) {
+  if (!moment) return null;
+  const lower = moment.toLowerCase();
+  // Try explicit HH:MM or H[am/pm] anchors first
+  const ampm = lower.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/);
+  if (ampm) {
+    let h = Number(ampm[1]);
+    const mm = ampm[2] ? Number(ampm[2]) : 0;
+    if (ampm[3] === "pm" && h !== 12) h += 12;
+    if (ampm[3] === "am" && h === 12) h = 0;
+    return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  }
+  const hhmm = lower.match(/\b(\d{1,2}):(\d{2})\b/);
+  if (hhmm) {
+    let h = Number(hhmm[1]);
+    const mm = Number(hhmm[2]);
+    if (h <= 5) h += 12; // "at 3:30" without am/pm in late-day context = 15:30
+    return `${String(h).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+  }
+  if (/wake|morning/.test(lower)) return "07:00";
+  if (/lunch|noon|midday/.test(lower)) return "12:00";
+  if (/afternoon/.test(lower)) return "15:00";
+  if (/dinner|evening/.test(lower)) return "18:30";
+  if (/wind\s*down|bed|sleep|night/.test(lower)) return "21:30";
+  return null;
+}
+
 async function withRetry(fn, retries = 2) {
   for (let i = 0; i <= retries; i++) {
     try {
@@ -49,9 +83,11 @@ RULES:
 9. No timers. No durations. No "for 5 minutes."
 10. Generate exactly 5 plan items.
 11. Titles must be immediately clear when read alone — someone should understand what to do from just the title. Good: "Cold shower finish", "Eat before your energy dips". Bad: "Sit before you eat", "Look at something far away" — these are confusing without context.
+12. EVERY item MUST have a "time" field in 24-hour HH:MM format. Use the user's routine to pick a concrete time. If a moment is genuinely time-flexible ("when you feel anxious"), pick the time it most likely happens given their day. No nulls, no ranges, no approximate strings.
+13. Items MUST appear in the JSON array in chronological order by time, earliest first. The notifications system depends on this. A 7:00 item before a 21:30 item, never the reverse.
 
 RIGHT NOW ZONE:
-ONE sentence. Maybe two if the second is short. Glanceable. Tied to this moment and this user's state. Read in 3 seconds, shifts how they think about the next hour. Never lecture. Never over-explain. Examples of the right length: "Your cortisol peaked 20 minutes ago — get outside before you check your phone." or "This is the dip. Eat protein before it hits, not after." If you write more than 25 words, you're writing too much.
+EXACTLY ONE sentence. Max 20 words. Glanceable. Tied to this moment and this user's state. Read in 3 seconds, shifts how they think about the next hour. Never lecture, never over-explain, never use a semicolon to smuggle in a second sentence. Right length: "This is the afternoon dip — eat protein before it hits, not after." Wrong length: anything that needs a comma followed by another full clause.
 
 STRESS RELIEF:
 One physical thing they can do in 10 seconds. "Press your palm into your chest. Exhale slow. Three times." That's the whole thing.
@@ -62,13 +98,14 @@ A short reflection question that references something specific from today's plan
 Return ONLY this JSON:
 {
   "rightNow": {
-    "morning": "ONE sentence (max 25 words). Glanceable.",
-    "afternoon": "ONE sentence (max 25 words). Glanceable.",
-    "evening": "ONE sentence (max 25 words). Glanceable.",
-    "night": "ONE sentence (max 25 words). Glanceable."
+    "morning": "ONE sentence, max 20 words.",
+    "afternoon": "ONE sentence, max 20 words.",
+    "evening": "ONE sentence, max 20 words.",
+    "night": "ONE sentence, max 20 words."
   },
   "plan": [
     {
+      "time": "HH:MM (24-hour, concrete time this happens — required)",
       "moment": "Specific moment from their routine",
       "title": "5-8 words",
       "insight": "2-3 sentences. What to do and why it matters.",
@@ -174,6 +211,17 @@ My goal: ${goal || "Feel better and reduce stress."}`;
       console.error("[AI_DAYPLAN_ERROR] Invalid structure:", Object.keys(parsed));
       return null;
     }
+
+    // Backfill missing times from `moment` text, then sort chronologically.
+    // Defense-in-depth: AI is told to emit time + chronological, but we don't trust it blindly.
+    parsed.plan = parsed.plan.map((item) => {
+      let time = typeof item.time === "string" ? item.time.trim() : "";
+      if (!/^\d{1,2}:\d{2}$/.test(time)) {
+        time = inferTimeFromMoment(item.moment || "") || "";
+      }
+      return { ...item, time };
+    });
+    parsed.plan.sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
     return parsed;
   } catch (err) {

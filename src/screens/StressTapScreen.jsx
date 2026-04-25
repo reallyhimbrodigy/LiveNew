@@ -1,11 +1,26 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Animated,
+  View, Text, Pressable, StyleSheet, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import { colors, fonts } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
+
+function PressTile({ onPress, style, children }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  return (
+    <Pressable
+      onPressIn={() => Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, speed: 60, bounciness: 0 }).start()}
+      onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 4 }).start()}
+      onPress={onPress}
+    >
+      <Animated.View style={[style, { transform: [{ scale }] }]}>
+        {children}
+      </Animated.View>
+    </Pressable>
+  );
+}
 
 const STRESS_OPTIONS = [
   { label: 'Good', value: 'good', emoji: '\u{1F60C}' },
@@ -138,14 +153,9 @@ export default function StressTapScreen({ navigation }) {
   return (
     <SafeAreaView style={s.safe}>
       <View style={s.container}>
-        <Text style={s.topLabel}>Daily check-in</Text>
-
-        {/* Step indicator — hidden during loading */}
         {!loading && (
-          <View style={s.stepRow}>
-            {[1, 2, 3].map(i => (
-              <View key={i} style={[s.stepDot, i <= step && s.stepDotActive]} />
-            ))}
+          <View style={s.progressTrack}>
+            <View style={[s.progressFill, { width: `${(step / 3) * 100}%` }]} />
           </View>
         )}
 
@@ -158,26 +168,23 @@ export default function StressTapScreen({ navigation }) {
         ) : (
           <Animated.View style={{ opacity: fadeAnim }}>
             {step > 1 && (
-              <TouchableOpacity style={s.backBtn} onPress={handleBack} activeOpacity={0.7}>
-                <Text style={s.backText}>{'\u2190'} Back</Text>
-              </TouchableOpacity>
+              <Pressable style={s.backBtn} onPress={handleBack}>
+                <Text style={s.backText}>{'\u2190'}  Back</Text>
+              </Pressable>
             )}
 
             <Text style={s.heading}>{stepLabels[step]}</Text>
 
             <View style={step === 1 ? s.grid : s.row}>
               {options.map(option => (
-                <TouchableOpacity
+                <PressTile
                   key={option.value}
-                  style={[
-                    step === 1 ? s.option : s.optionSmall,
-                  ]}
+                  style={step === 1 ? s.option : s.optionSmall}
                   onPress={() => handler(option)}
-                  activeOpacity={0.7}
                 >
                   <Text style={s.emoji}>{option.emoji}</Text>
                   <Text style={s.optionLabel}>{option.label}</Text>
-                </TouchableOpacity>
+                </PressTile>
               ))}
             </View>
           </Animated.View>
@@ -191,102 +198,58 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   container: { flex: 1, justifyContent: 'flex-start', padding: 24, paddingTop: 60 },
 
-  topLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: colors.dim,
-    textAlign: 'center',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-    marginBottom: 24,
-  },
-
-  stepRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 32,
-  },
-  stepDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
+  progressTrack: {
+    height: 2,
     backgroundColor: colors.line,
+    borderRadius: 1,
+    marginBottom: 36,
+    overflow: 'hidden',
   },
-  stepDotActive: {
+  progressFill: {
+    height: 2,
     backgroundColor: colors.gold,
   },
 
   heading: {
-    fontSize: 24,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    fontSize: 28,
     color: colors.text,
     textAlign: 'center',
     marginBottom: 32,
+    letterSpacing: 0.2,
   },
 
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 12,
-  },
-
-  row: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 12,
-  },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 12 },
+  row: { flexDirection: 'row', justifyContent: 'center', gap: 12 },
 
   option: {
     width: '46%',
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
-    borderRadius: 16,
-    paddingVertical: 24,
+    borderRadius: 18,
+    paddingVertical: 26,
     alignItems: 'center',
-    gap: 8,
+    gap: 10,
   },
-
   optionSmall: {
     flex: 1,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
-    borderRadius: 16,
-    paddingVertical: 20,
+    borderRadius: 18,
+    paddingVertical: 22,
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
   },
 
-  emoji: {
-    fontSize: 28,
-  },
+  emoji: { fontSize: 28 },
+  optionLabel: { fontSize: 15, fontWeight: '500', color: colors.text, letterSpacing: 0.2 },
 
-  optionLabel: {
-    fontSize: 15,
-    fontWeight: '500',
-    color: colors.text,
-  },
+  error: { color: colors.error, fontSize: 14, textAlign: 'center', marginBottom: 16 },
 
-  error: {
-    color: colors.error,
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-
-  backBtn: {
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    marginBottom: 8,
-  },
-  backText: {
-    color: colors.muted,
-    fontSize: 15,
-  },
+  backBtn: { alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 4, marginBottom: 8 },
+  backText: { color: colors.muted, fontSize: 14 },
 });
 
 const loadingStyles = StyleSheet.create({

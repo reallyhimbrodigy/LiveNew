@@ -3,7 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import { colors, fonts } from '../theme';
 import { getOfferings, purchasePackage, restorePurchases } from '../purchases';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSuccess } from '../haptics';
@@ -157,18 +157,19 @@ const s = StyleSheet.create({
   },
 
   logo: {
+    fontFamily: fonts.display,
     fontSize: 18,
-    fontWeight: '500',
     color: colors.gold,
-    letterSpacing: 1,
-    marginBottom: 12,
+    letterSpacing: 1.2,
+    marginBottom: 14,
   },
 
   title: {
-    fontSize: 28,
-    fontWeight: '700',
+    fontFamily: fonts.display,
+    fontSize: 32,
     color: colors.text,
     marginBottom: 20,
+    letterSpacing: 0.2,
   },
 
   previewWrap: {
@@ -208,10 +209,12 @@ const s = StyleSheet.create({
   },
 
   sub: {
-    fontSize: 14,
+    fontFamily: fonts.display,
+    fontSize: 16,
     color: colors.muted,
-    lineHeight: 21,
-    marginBottom: 20,
+    lineHeight: 25,
+    marginBottom: 24,
+    letterSpacing: 0.1,
   },
 
   features: {

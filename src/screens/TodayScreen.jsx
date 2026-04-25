@@ -1,17 +1,25 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, StyleSheet, AppState,
+  View, Text, ScrollView, Pressable, StyleSheet, AppState,
   Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform,
+  Animated, LayoutAnimation, UIManager,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors } from '../theme';
+import { colors, fonts } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
 import { getLocalDateISO } from '../utils/localDate';
+import { truncateGoal } from '../utils/goalText';
+import { cancelPlanItemNotification } from '../notifications';
 import { api } from '../api';
+
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
 
 function getTimeOfDay() {
   const h = new Date().getHours();
@@ -21,18 +29,62 @@ function getTimeOfDay() {
   return 'night';
 }
 
-function getGreeting() {
-  const h = new Date().getHours();
-  if (h < 12) return 'Good morning';
-  if (h < 17) return 'Good afternoon';
-  return 'Good evening';
+function getGreetingParts() {
+  const now = new Date();
+  const h = now.getHours();
+  const dayOfWeek = now.toLocaleDateString('en-US', { weekday: 'long' });
+  let part = 'evening';
+  if (h < 12) part = 'morning';
+  else if (h < 17) part = 'afternoon';
+  return { dayOfWeek, partOfDay: part };
 }
 
 function isEvening() {
   return new Date().getHours() >= 19;
 }
 
+function timeToMinutes(t) {
+  if (typeof t !== 'string') return 24 * 60;
+  const m = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return 24 * 60;
+  return Number(m[1]) * 60 + Number(m[2]);
+}
+
+function formatTime(t) {
+  if (typeof t !== 'string') return '';
+  const m = t.match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return '';
+  let h = Number(m[1]);
+  const mm = m[2];
+  const period = h >= 12 ? 'PM' : 'AM';
+  if (h === 0) h = 12;
+  else if (h > 12) h -= 12;
+  return `${h}:${mm} ${period}`;
+}
+
+function PressCard({ onPress, style, children, disabled }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  return (
+    <Pressable
+      onPressIn={() => {
+        if (disabled) return;
+        Animated.spring(scale, { toValue: 0.98, useNativeDriver: true, speed: 60, bounciness: 0 }).start();
+      }}
+      onPressOut={() => {
+        Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 4 }).start();
+      }}
+      onPress={onPress}
+      disabled={disabled}
+    >
+      <Animated.View style={[style, { transform: [{ scale }] }]}>
+        {children}
+      </Animated.View>
+    </Pressable>
+  );
+}
+
 export default function TodayScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const todayPlan = useAuthStore(s => s.todayPlan);
   const todayDate = useAuthStore(s => s.todayDate);
   const isSubscribed = useAuthStore(s => s.isSubscribed);
@@ -49,14 +101,20 @@ export default function TodayScreen({ navigation }) {
   const [stressNoted, setStressNoted] = useState(false);
   const [timeOfDay, setTimeOfDay] = useState(getTimeOfDay());
 
-  // Routine upgrade prompt
   const [showRoutinePrompt, setShowRoutinePrompt] = useState(false);
   const [routineText, setRoutineText] = useState('');
   const [savingRoutine, setSavingRoutine] = useState(false);
 
+  // Sticky stress button fade on scroll
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const stressBtnOpacity = scrollY.interpolate({
+    inputRange: [0, 80, 200],
+    outputRange: [1, 0.6, 0.95],
+    extrapolate: 'clamp',
+  });
+
   const hasRoutine = !!(profile?.routine && profile.routine.length > 5);
 
-  // Check if we need to redirect to check-in
   useEffect(() => {
     const check = async () => {
       const today = getLocalDateISO();
@@ -84,7 +142,6 @@ export default function TodayScreen({ navigation }) {
     check();
   }, []);
 
-  // Day change detection
   useEffect(() => {
     const sub = AppState.addEventListener('change', (state) => {
       if (state === 'active') {
@@ -96,13 +153,11 @@ export default function TodayScreen({ navigation }) {
     return () => sub.remove();
   }, [todayDate]);
 
-  // Update time of day periodically
   useEffect(() => {
     const interval = setInterval(() => setTimeOfDay(getTimeOfDay()), 60000);
     return () => clearInterval(interval);
   }, []);
 
-  // Update time of day and check review on tab focus
   useFocusEffect(
     useCallback(() => {
       setTimeOfDay(getTimeOfDay());
@@ -113,16 +168,25 @@ export default function TodayScreen({ navigation }) {
     }, [completed, todayPlan])
   );
 
-  const planItems = todayPlan?.plan || [];
-  const doneCount = planItems.filter((_, i) => completed[i]).length;
+  // Sort plan items chronologically by time. Defense-in-depth — server already sorts.
+  const rawItems = todayPlan?.plan || [];
+  const planItems = [...rawItems]
+    .map((item, originalIndex) => ({ ...item, _idx: originalIndex }))
+    .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
+
+  const doneCount = planItems.filter(i => completed[i._idx]).length;
   const rightNowText = todayPlan?.rightNow?.[timeOfDay] || null;
   const goalThread = todayPlan?.goalThread || null;
   const stressRelief = todayPlan?.stressRelief || null;
   const eveningPrompt = todayPlan?.eveningPrompt || null;
   const showEveningReflection = isEvening() && !reflection && planItems.length > 0;
+  const showStressBtn = !!stressRelief && doneCount < planItems.length;
 
-  const handleTap = async (index) => {
-    if (completed[index]) return;
+  const { dayOfWeek, partOfDay } = getGreetingParts();
+
+  const handleTap = async (item) => {
+    const idx = item._idx;
+    if (completed[idx]) return;
 
     if (!isSubscribed) {
       try {
@@ -136,12 +200,16 @@ export default function TodayScreen({ navigation }) {
     }
 
     tapLight();
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    setExpandedIndex(expandedIndex === idx ? null : idx);
+  };
 
-    if (expandedIndex === index) {
-      setExpandedIndex(null);
-    } else {
-      setExpandedIndex(index);
-    }
+  const handleGotIt = (idx) => {
+    tapSuccess();
+    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+    cancelPlanItemNotification(idx);
+    markDone(idx);
+    setExpandedIndex(null);
   };
 
   const handleReflection = (feeling) => {
@@ -162,7 +230,7 @@ export default function TodayScreen({ navigation }) {
   if (!todayPlan) {
     return (
       <SafeAreaView style={s.safe} edges={['top']}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center' }}>
+        <View style={s.centered}>
           <ActivityIndicator size="large" color={colors.gold} />
         </View>
       </SafeAreaView>
@@ -172,12 +240,15 @@ export default function TodayScreen({ navigation }) {
   if (planItems.length === 0) {
     return (
       <SafeAreaView style={s.safe} edges={['top']}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 }}>
+        <View style={[s.centered, { padding: 24 }]}>
           <Text style={s.greeting}>Something went wrong</Text>
-          <Text style={{ color: colors.muted, marginBottom: 24 }}>Your plan didn't generate properly.</Text>
-          <TouchableOpacity style={s.goldBtn} onPress={() => navigation.replace('StressTap')} activeOpacity={0.8}>
+          <Text style={s.errorBody}>Your plan didn't generate properly.</Text>
+          <Pressable
+            style={({ pressed }) => [s.goldBtn, pressed && { opacity: 0.85 }]}
+            onPress={() => navigation.replace('StressTap')}
+          >
             <Text style={s.goldBtnText}>Try again</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
       </SafeAreaView>
     );
@@ -185,72 +256,99 @@ export default function TodayScreen({ navigation }) {
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
-      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+      <Animated.ScrollView
+        contentContainerStyle={[s.scroll, { paddingBottom: showStressBtn ? 140 : 80 }]}
+        showsVerticalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
+      >
 
-        {/* Header */}
-        <Text style={s.greeting}>{getGreeting()}</Text>
-        {streak >= 1 && <Text style={s.streakText}>Day {streak}</Text>}
+        {/* Header — serif greeting + streak chip */}
+        <View style={s.headerRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
+            <Text style={s.greetingPart}>{partOfDay}</Text>
+          </View>
+          {streak >= 1 && (
+            <View style={s.streakChip}>
+              <Text style={s.streakChipNum}>{streak}</Text>
+              <Text style={s.streakChipLabel}>{streak === 1 ? 'day' : 'days'}</Text>
+            </View>
+          )}
+        </View>
 
-        {/* Right Now Zone */}
+        {/* Right Now — hero, gradient */}
         {rightNowText && (
           <View style={s.rightNowCard}>
+            <LinearGradient
+              colors={['rgba(196,168,108,0.10)', 'rgba(196,168,108,0.02)']}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 0, y: 1 }}
+              style={StyleSheet.absoluteFill}
+            />
+            <View style={s.rightNowAccent} />
             <Text style={s.rightNowLabel}>RIGHT NOW</Text>
             <Text style={s.rightNowText}>{rightNowText}</Text>
+            {goalThread?.weeklyFocus && (
+              <Text style={s.goalThreadLine}>
+                {goalThread.weeklyFocus}
+              </Text>
+            )}
           </View>
         )}
 
-        {/* Goal Thread */}
-        {goalThread && (
-          <View style={s.goalCard}>
-            <Text style={s.goalCardLabel}>THIS WEEK</Text>
-            <Text style={s.goalFocus}>{goalThread.weeklyFocus}</Text>
-            <Text style={s.goalConnection}>{goalThread.todayConnection}</Text>
-          </View>
-        )}
-
-        {/* Plan Items */}
+        {/* Plan */}
         <Text style={s.sectionLabel}>YOUR PLAN</Text>
 
-        {planItems.map((item, index) => {
-          const isDone = !!completed[index];
-          const isExpanded = expandedIndex === index && !isDone;
+        {planItems.map((item, listIdx) => {
+          const idx = item._idx;
+          const isDone = !!completed[idx];
+          const isExpanded = expandedIndex === idx && !isDone;
+          const isFirst = listIdx === 0;
+          const isLast = listIdx === planItems.length - 1;
+
+          const accentColor =
+            item.type === 'breathe' ? colors.gold :
+            item.type === 'food' ? colors.success :
+            item.type === 'mindset' ? colors.accent :
+            colors.muted;
 
           return (
-            <TouchableOpacity
-              key={index}
-              style={[
-                s.card,
-                isDone && s.cardDone,
-                isExpanded && s.cardExpanded,
-              ]}
-              onPress={() => handleTap(index)}
-              activeOpacity={0.7}
+            <PressCard
+              key={idx}
+              onPress={() => handleTap(item)}
               disabled={isDone}
+              style={[
+                s.planCard,
+                !isFirst && { marginTop: 8 },
+                isExpanded && s.planCardExpanded,
+                isDone && s.planCardDone,
+              ]}
             >
-              <View style={s.cardTop}>
-                <View style={s.cardLeft}>
-                  {isDone ? (
-                    <View style={s.checkDone}>
-                      <Text style={s.checkMark}>{'\u2713'}</Text>
-                    </View>
-                  ) : (
-                    <View style={[
-                      s.checkEmpty,
-                      item.type === 'breathe' && { borderColor: colors.gold },
-                      item.type === 'food' && { borderColor: colors.success },
-                      item.type === 'mindset' && { borderColor: colors.accent },
-                    ]} />
-                  )}
-                  <View style={s.cardContent}>
-                    <Text style={s.cardMoment}>{item.moment}</Text>
-                    <Text style={[s.cardTitle, isDone && s.cardTitleDone]}>{item.title}</Text>
-                  </View>
-                </View>
-                <View style={s.typeBadge}>
-                  <Text style={s.typeBadgeText}>
-                    {item.type === 'breathe' ? 'BREATHE' : item.type === 'food' ? 'FOOD' : item.type === 'mindset' ? 'MINDSET' : 'HABIT'}
+              <View style={s.planTopRow}>
+                <View style={[s.typeDot, { backgroundColor: accentColor }, isDone && { opacity: 0.4 }]} />
+                <View style={s.planTimeWrap}>
+                  <Text style={[s.planTime, isDone && s.planTextDone]}>
+                    {formatTime(item.time)}
                   </Text>
                 </View>
+                <View style={s.planContent}>
+                  <Text style={[s.planTitle, isDone && s.planTextDone]} numberOfLines={isExpanded ? undefined : 2}>
+                    {item.title}
+                  </Text>
+                  {item.moment && (
+                    <Text style={s.planMoment} numberOfLines={1}>
+                      {item.moment}
+                    </Text>
+                  )}
+                </View>
+                {isDone ? (
+                  <View style={s.checkDone}>
+                    <Text style={s.checkMark}>{'✓'}</Text>
+                  </View>
+                ) : (
+                  <View style={[s.checkEmpty, { borderColor: accentColor }]} />
+                )}
               </View>
 
               {isExpanded && (
@@ -261,57 +359,52 @@ export default function TodayScreen({ navigation }) {
                       <Text style={s.goalTagText}>{item.goalConnection}</Text>
                     </View>
                   )}
-                  <TouchableOpacity
-                    style={s.gotItBtn}
-                    onPress={() => { tapSuccess(); markDone(index); setExpandedIndex(null); }}
-                    activeOpacity={0.8}
+                  <Pressable
+                    style={({ pressed }) => [s.gotItBtn, pressed && { opacity: 0.85 }]}
+                    onPress={() => handleGotIt(idx)}
                   >
                     <Text style={s.gotItText}>Got it</Text>
-                  </TouchableOpacity>
+                  </Pressable>
                 </View>
               )}
-            </TouchableOpacity>
+            </PressCard>
           );
         })}
 
-        {/* Routine upgrade prompt — shown after first plan if no routine yet */}
+        {/* Routine upgrade prompt */}
         {!hasRoutine && !showRoutinePrompt && (streak >= 2 || doneCount >= 1) && (
-          <TouchableOpacity
-            style={s.routinePromptCard}
+          <PressCard
             onPress={() => { tapLight(); setShowRoutinePrompt(true); }}
-            activeOpacity={0.7}
+            style={s.routinePromptCard}
           >
-            <Text style={s.routinePromptTitle}>Want your plan to match your actual day?</Text>
-            <Text style={s.routinePromptSub}>Tell me your routine and tomorrow's plan will be specific to your schedule.</Text>
-          </TouchableOpacity>
+            <Text style={s.routinePromptTitle}>Want plans tuned to your real day?</Text>
+            <Text style={s.routinePromptSub}>Tell me your routine and tomorrow's plan will reference your actual schedule.</Text>
+          </PressCard>
         )}
 
-        {/* Evening Reflection */}
+        {/* Evening reflection */}
         {showEveningReflection && (
           <View style={s.reflectionCard}>
             <Text style={s.reflectionLabel}>EVENING CHECK-IN</Text>
             <Text style={s.reflectionPrompt}>{eveningPrompt || 'How was today?'}</Text>
             <View style={s.reflectionOptions}>
               {[
-                { label: 'Better', value: 'better', emoji: '\u2B06\uFE0F' },
-                { label: 'Same', value: 'same', emoji: '\u27A1\uFE0F' },
-                { label: 'Harder', value: 'harder', emoji: '\u2B07\uFE0F' },
+                { label: 'Better', value: 'better' },
+                { label: 'Same', value: 'same' },
+                { label: 'Harder', value: 'harder' },
               ].map(opt => (
-                <TouchableOpacity
+                <Pressable
                   key={opt.value}
-                  style={s.reflectionBtn}
+                  style={({ pressed }) => [s.reflectionBtn, pressed && { opacity: 0.85 }]}
                   onPress={() => handleReflection(opt.value)}
-                  activeOpacity={0.7}
                 >
-                  <Text style={s.reflectionEmoji}>{opt.emoji}</Text>
                   <Text style={s.reflectionBtnText}>{opt.label}</Text>
-                </TouchableOpacity>
+                </Pressable>
               ))}
             </View>
           </View>
         )}
 
-        {/* Reflection submitted */}
         {reflection && (
           <View style={s.reflectionDoneCard}>
             <Text style={s.reflectionDoneText}>
@@ -320,37 +413,30 @@ export default function TodayScreen({ navigation }) {
           </View>
         )}
 
-        {/* Bottom actions */}
-        <View style={s.bottomActions}>
-          {stressNoted && (
+        {stressNoted && (
+          <View style={s.stressNotedCard}>
             <Text style={s.stressNotedText}>Noted. Tomorrow's plan will account for today.</Text>
-          )}
+          </View>
+        )}
 
-          {stressRelief && (
-            <TouchableOpacity
-              style={s.stressBtn}
-              onPress={() => {
-                tapSelect();
-                setShowStressRelief(true);
-                api.feedback({ type: 'stress_spike', dateISO: getLocalDateISO() }).catch(() => {});
-              }}
-              activeOpacity={0.7}
-            >
-              <Text style={s.stressBtnText}>I'm stressed right now</Text>
-            </TouchableOpacity>
-          )}
+      </Animated.ScrollView>
 
-          <TouchableOpacity
-            style={s.recheckBtn}
-            onPress={() => { tapSelect(); navigation.replace('StressTap'); }}
-            activeOpacity={0.7}
+      {/* Sticky stress button — fades subtly on scroll */}
+      {showStressBtn && (
+        <Animated.View style={[s.stressBtnSticky, { bottom: insets.bottom + 12, opacity: stressBtnOpacity }]} pointerEvents="box-none">
+          <Pressable
+            onPress={() => {
+              tapSelect();
+              setShowStressRelief(true);
+              api.feedback({ type: 'stress_spike', dateISO: getLocalDateISO() }).catch(() => {});
+            }}
+            style={({ pressed }) => [s.stressBtnInner, pressed && { transform: [{ scale: 0.98 }] }]}
           >
-            <Text style={s.recheckText}>Feeling different? Re-check</Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={{ height: 40 }} />
-      </ScrollView>
+            <View style={s.stressBtnDot} />
+            <Text style={s.stressBtnText}>I'm stressed right now</Text>
+          </Pressable>
+        </Animated.View>
+      )}
 
       {/* Stress Relief Modal */}
       <Modal
@@ -359,28 +445,23 @@ export default function TodayScreen({ navigation }) {
         animationType="fade"
         onRequestClose={() => setShowStressRelief(false)}
       >
-        <TouchableOpacity
-          style={s.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowStressRelief(false)}
-        >
-          <View style={s.modalContent}>
-            <Text style={s.modalTitle}>Right now, do this:</Text>
+        <Pressable style={s.modalOverlay} onPress={() => setShowStressRelief(false)}>
+          <Pressable style={s.modalContent} onPress={() => {}}>
+            <Text style={s.modalLabel}>RIGHT NOW, DO THIS</Text>
             <Text style={s.modalBody}>{stressRelief}</Text>
-            <TouchableOpacity
-              style={s.modalBtn}
+            <Pressable
+              style={({ pressed }) => [s.modalBtn, pressed && { opacity: 0.85 }]}
               onPress={() => {
                 tapLight();
                 setShowStressRelief(false);
                 setStressNoted(true);
                 setTimeout(() => setStressNoted(false), 4000);
               }}
-              activeOpacity={0.8}
             >
               <Text style={s.modalBtnText}>OK</Text>
-            </TouchableOpacity>
-          </View>
-        </TouchableOpacity>
+            </Pressable>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* Routine Input Modal */}
@@ -393,7 +474,7 @@ export default function TodayScreen({ navigation }) {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.routineModalWrap}>
           <View style={s.routineModalContent}>
             <Text style={s.routineModalTitle}>Describe your daily routine</Text>
-            <Text style={s.routineModalSub}>When do you wake up, work, eat, and wind down? The more detail, the more personalized your plan.</Text>
+            <Text style={s.routineModalSub}>Wake, work, eat, wind down. The more detail, the more your plan reflects your actual day.</Text>
             <TextInput
               style={s.routineInput}
               placeholder="I wake up at 7, work from 9-5, eat lunch at noon, gym after work, bed by 11..."
@@ -405,17 +486,16 @@ export default function TodayScreen({ navigation }) {
               maxLength={1000}
               autoFocus
             />
-            <TouchableOpacity
-              style={[s.routineSaveBtn, routineText.trim().length < 10 && { opacity: 0.4 }]}
+            <Pressable
+              style={({ pressed }) => [s.routineSaveBtn, (routineText.trim().length < 10 || savingRoutine) && { opacity: 0.4 }, pressed && { opacity: 0.85 }]}
               onPress={handleSaveRoutine}
               disabled={routineText.trim().length < 10 || savingRoutine}
-              activeOpacity={0.8}
             >
-              <Text style={s.routineSaveBtnText}>{savingRoutine ? 'Saving...' : 'Save'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.routineSkipBtn} onPress={() => setShowRoutinePrompt(false)} activeOpacity={0.7}>
+              <Text style={s.routineSaveBtnText}>{savingRoutine ? 'Saving…' : 'Save'}</Text>
+            </Pressable>
+            <Pressable style={s.routineSkipBtn} onPress={() => setShowRoutinePrompt(false)}>
               <Text style={s.routineSkipText}>Maybe later</Text>
-            </TouchableOpacity>
+            </Pressable>
           </View>
         </KeyboardAvoidingView>
       </Modal>
@@ -425,258 +505,342 @@ export default function TodayScreen({ navigation }) {
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: 20, paddingBottom: 100 },
+  scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 80 },
+  centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  errorBody: { color: colors.muted, marginBottom: 24, textAlign: 'center' },
 
-  greeting: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 2 },
-  streakText: { fontSize: 14, color: colors.gold, fontWeight: '600', marginBottom: 4 },
-
-  // Right Now zone
-  rightNowCard: {
+  // Header
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    paddingTop: 4,
+    paddingBottom: 18,
+  },
+  greetingDay: {
+    fontFamily: fonts.display,
+    fontSize: 30,
+    color: colors.text,
+    letterSpacing: 0.2,
+    marginBottom: -2,
+  },
+  greetingPart: {
+    fontFamily: fonts.displayItalic,
+    fontSize: 22,
+    color: colors.muted,
+    letterSpacing: 0.2,
+  },
+  streakChip: {
+    alignItems: 'center',
     backgroundColor: colors.goldSoft,
     borderWidth: 1,
     borderColor: colors.goldBorder,
-    borderLeftWidth: 3,
-    borderLeftColor: colors.gold,
-    borderRadius: 14,
-    padding: 18,
-    marginTop: 16,
-    marginBottom: 16,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    minWidth: 52,
+    marginLeft: 12,
   },
-  rightNowLabel: {
-    fontSize: 11,
-    fontWeight: '700',
+  streakChipNum: {
+    fontFamily: fonts.displayBold,
+    fontSize: 18,
     color: colors.gold,
-    letterSpacing: 1.5,
-    marginBottom: 8,
+    lineHeight: 22,
   },
-  rightNowText: {
-    fontSize: 15,
-    color: colors.text,
-    lineHeight: 23,
+  streakChipLabel: {
+    fontSize: 9,
+    color: colors.gold,
+    fontWeight: '600',
+    letterSpacing: 1.2,
+    textTransform: 'uppercase',
+    marginTop: -2,
   },
 
-  // Goal thread
-  goalCard: {
-    backgroundColor: colors.surface,
+  // Right Now hero
+  rightNowCard: {
+    borderRadius: 18,
+    paddingVertical: 22,
+    paddingHorizontal: 22,
+    paddingLeft: 26,
+    marginBottom: 28,
+    overflow: 'hidden',
     borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 20,
+    borderColor: colors.goldBorder,
   },
-  goalCardLabel: {
-    fontSize: 11,
+  rightNowAccent: {
+    position: 'absolute',
+    left: 0, top: 0, bottom: 0,
+    width: 3,
+    backgroundColor: colors.gold,
+  },
+  rightNowLabel: {
+    fontSize: 10,
     fontWeight: '700',
-    color: colors.dim,
-    letterSpacing: 1.5,
-    marginBottom: 8,
+    color: colors.gold,
+    letterSpacing: 2,
+    marginBottom: 10,
   },
-  goalFocus: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 4 },
-  goalConnection: { fontSize: 13, color: colors.muted, lineHeight: 19 },
+  rightNowText: {
+    fontFamily: fonts.display,
+    fontSize: 18,
+    color: colors.text,
+    lineHeight: 27,
+    letterSpacing: 0.1,
+  },
+  goalThreadLine: {
+    marginTop: 16,
+    paddingTop: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    fontSize: 12,
+    color: colors.muted,
+    letterSpacing: 0.5,
+    fontStyle: 'italic',
+  },
 
   // Section label
   sectionLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: colors.dim,
-    letterSpacing: 1.5,
-    marginBottom: 12,
+    letterSpacing: 2,
+    marginBottom: 14,
+    marginLeft: 2,
   },
 
-  // Plan cards
-  card: {
+  // Plan card
+  planCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 14,
-    marginBottom: 8,
     overflow: 'hidden',
   },
-  cardDone: { opacity: 0.45 },
-  cardExpanded: { borderColor: colors.gold },
-  cardTop: {
+  planCardExpanded: {
+    borderColor: colors.goldBorder,
+    backgroundColor: colors.goldSoft,
+  },
+  planCardDone: { opacity: 0.5 },
+  planTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingLeft: 14,
   },
-  cardLeft: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  typeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginRight: 12,
+  },
+  planTimeWrap: {
+    width: 62,
+    marginRight: 14,
+  },
+  planTime: {
+    fontFamily: fonts.displayBold,
+    fontSize: 15,
+    color: colors.gold,
+    letterSpacing: 0.2,
+  },
+  planContent: { flex: 1, marginRight: 8 },
+  planTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: colors.text,
+    lineHeight: 20,
+    marginBottom: 2,
+  },
+  planMoment: {
+    fontSize: 12,
+    color: colors.muted,
+    lineHeight: 16,
+  },
+  planTextDone: {
+    color: colors.muted,
+    textDecorationLine: 'line-through',
+  },
   checkEmpty: {
     width: 22, height: 22, borderRadius: 11,
-    borderWidth: 2, borderColor: colors.dim, marginRight: 14,
+    borderWidth: 2,
   },
   checkDone: {
     width: 22, height: 22, borderRadius: 11,
-    backgroundColor: colors.gold, alignItems: 'center', justifyContent: 'center', marginRight: 14,
+    backgroundColor: colors.gold,
+    alignItems: 'center', justifyContent: 'center',
   },
   checkMark: { color: colors.bg, fontSize: 12, fontWeight: '700' },
-  cardContent: { flex: 1 },
-  cardMoment: { fontSize: 13, color: colors.gold, fontWeight: '500', marginBottom: 2 },
-  cardTitle: { fontSize: 15, fontWeight: '600', color: colors.text },
-  cardTitleDone: { textDecorationLine: 'line-through', color: colors.muted },
-  typeBadge: {
-    backgroundColor: colors.goldSoft,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    marginLeft: 8,
-  },
-  typeBadgeText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: colors.gold,
-    letterSpacing: 0.8,
-  },
 
   // Expanded
   expandedWrap: {
-    paddingHorizontal: 16, paddingBottom: 16, paddingTop: 4,
-    borderTopWidth: 1, borderTopColor: colors.line,
+    paddingHorizontal: 22,
+    paddingBottom: 18,
+    paddingTop: 4,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
   },
   insightText: {
+    fontFamily: fonts.display,
     fontSize: 15,
     color: colors.text,
-    lineHeight: 23,
-    marginBottom: 12,
+    lineHeight: 24,
+    marginBottom: 14,
+    letterSpacing: 0.1,
   },
   goalTag: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.goldSoft,
+    backgroundColor: 'rgba(196,168,108,0.06)',
     borderRadius: 8,
-    padding: 10,
+    padding: 12,
     marginBottom: 14,
   },
-  goalTagText: { fontSize: 13, color: colors.gold, lineHeight: 18 },
+  goalTagText: { fontSize: 13, color: colors.gold, lineHeight: 18, fontStyle: 'italic' },
   gotItBtn: {
     borderWidth: 1,
     borderColor: colors.gold,
+    backgroundColor: 'transparent',
     borderRadius: 10,
     paddingVertical: 12,
     alignItems: 'center',
   },
-  gotItText: { color: colors.gold, fontSize: 15, fontWeight: '600' },
+  gotItText: { color: colors.gold, fontSize: 15, fontWeight: '600', letterSpacing: 0.2 },
 
   // Routine prompt
   routinePromptCard: {
-    backgroundColor: colors.goldSoft,
-    borderWidth: 1,
-    borderColor: colors.goldBorder,
-    borderRadius: 14,
-    padding: 18,
-    marginTop: 12,
-  },
-  routinePromptTitle: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: colors.gold,
-    marginBottom: 4,
-  },
-  routinePromptSub: {
-    fontSize: 13,
-    color: colors.muted,
-    lineHeight: 19,
-  },
-
-  // Evening reflection
-  reflectionCard: {
-    backgroundColor: colors.goldSoft,
-    borderWidth: 1,
-    borderColor: colors.goldBorder,
-    borderRadius: 14,
-    padding: 18,
-    marginTop: 16,
-  },
-  reflectionLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.gold,
-    letterSpacing: 1.5,
-    marginBottom: 8,
-  },
-  reflectionPrompt: {
-    fontSize: 16,
-    fontWeight: '500',
-    color: colors.text,
-    marginBottom: 16,
-    lineHeight: 23,
-  },
-  reflectionOptions: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  reflectionBtn: {
-    flex: 1,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
-    borderRadius: 12,
+    borderRadius: 14,
+    padding: 18,
+    marginTop: 20,
+  },
+  routinePromptTitle: {
+    fontFamily: fonts.display,
+    fontSize: 16,
+    color: colors.text,
+    marginBottom: 4,
+  },
+  routinePromptSub: { fontSize: 13, color: colors.muted, lineHeight: 19 },
+
+  // Evening reflection
+  reflectionCard: {
+    borderRadius: 14,
+    padding: 18,
+    marginTop: 20,
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+  },
+  reflectionLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.gold,
+    letterSpacing: 2,
+    marginBottom: 8,
+  },
+  reflectionPrompt: {
+    fontFamily: fonts.display,
+    fontSize: 17,
+    color: colors.text,
+    lineHeight: 25,
+    marginBottom: 16,
+  },
+  reflectionOptions: { flexDirection: 'row', gap: 8 },
+  reflectionBtn: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 10,
     paddingVertical: 14,
     alignItems: 'center',
-    gap: 4,
   },
-  reflectionEmoji: { fontSize: 18 },
-  reflectionBtnText: { fontSize: 13, fontWeight: '500', color: colors.text },
+  reflectionBtnText: { fontSize: 14, fontWeight: '500', color: colors.text },
 
-  // Reflection done
   reflectionDoneCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 14,
-    padding: 16,
+    backgroundColor: 'transparent',
+    paddingVertical: 16,
     marginTop: 16,
     alignItems: 'center',
   },
   reflectionDoneText: {
+    fontFamily: fonts.displayItalic,
     fontSize: 14,
     color: colors.muted,
-    fontStyle: 'italic',
   },
 
-  // Bottom actions
-  bottomActions: { marginTop: 20, gap: 4 },
-  stressBtn: {
+  stressNotedCard: {
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginTop: 12,
+  },
+  stressNotedText: { color: colors.muted, fontSize: 13, fontStyle: 'italic' },
+
+  // Sticky stress button
+  stressBtnSticky: {
+    position: 'absolute',
+    left: 22,
+    right: 22,
+    alignItems: 'stretch',
+  },
+  stressBtnInner: {
+    backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.goldBorder,
-    backgroundColor: colors.goldSoft,
-    borderRadius: 12,
+    borderRadius: 14,
     paddingVertical: 16,
+    paddingHorizontal: 18,
+    flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.45,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 6,
   },
-  stressBtnText: { color: colors.gold, fontSize: 15, fontWeight: '600', letterSpacing: 0.2 },
-  stressNotedText: { color: colors.muted, fontSize: 13, textAlign: 'center', fontStyle: 'italic', marginBottom: 8 },
-  recheckBtn: {
-    paddingVertical: 14,
-    alignItems: 'center',
+  stressBtnDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.gold,
   },
-  recheckText: { color: colors.muted, fontSize: 13 },
+  stressBtnText: {
+    color: colors.gold,
+    fontSize: 15,
+    fontWeight: '600',
+    letterSpacing: 0.2,
+  },
 
-  // Stress relief modal
+  // Modal
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: 'rgba(0,0,0,0.72)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 32,
+    padding: 28,
   },
   modalContent: {
     backgroundColor: colors.surface,
-    borderRadius: 20,
-    padding: 28,
+    borderRadius: 18,
+    padding: 26,
     width: '100%',
     borderWidth: 1,
-    borderColor: colors.line,
+    borderColor: colors.goldBorder,
   },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: colors.text,
-    marginBottom: 16,
+  modalLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.gold,
+    letterSpacing: 2,
+    marginBottom: 12,
   },
   modalBody: {
-    fontSize: 16,
+    fontFamily: fonts.display,
+    fontSize: 18,
     color: colors.text,
-    lineHeight: 24,
-    marginBottom: 24,
+    lineHeight: 27,
+    marginBottom: 22,
   },
   modalBtn: {
     backgroundColor: colors.gold,
@@ -684,28 +848,24 @@ const s = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
   },
-  modalBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
+  modalBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600', letterSpacing: 0.2 },
 
   // Routine modal
-  routineModalWrap: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
+  routineModalWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },
   routineModalContent: {
     backgroundColor: colors.bg,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
     padding: 24,
     paddingBottom: 40,
     borderTopWidth: 1,
     borderTopColor: colors.line,
   },
   routineModalTitle: {
-    fontSize: 20,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    fontSize: 22,
     color: colors.text,
-    marginBottom: 8,
+    marginBottom: 6,
   },
   routineModalSub: {
     fontSize: 14,
@@ -718,29 +878,21 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     fontSize: 16,
     color: colors.text,
     minHeight: 120,
     lineHeight: 22,
     marginBottom: 16,
   },
-  routineSaveBtn: {
-    backgroundColor: colors.gold,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
+  routineSaveBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
   routineSaveBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
-  routineSkipBtn: {
-    alignItems: 'center',
-    marginTop: 12,
-    padding: 8,
-  },
+  routineSkipBtn: { alignItems: 'center', marginTop: 12, padding: 8 },
   routineSkipText: { color: colors.muted, fontSize: 14 },
 
   // Shared
   goldBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center' },
   goldBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
+  greeting: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 8, fontFamily: fonts.display },
 });

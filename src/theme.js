@@ -19,8 +19,12 @@ export const colors = {
   tabBar: '#111110',
 };
 
+// Display font (Lora) is loaded via expo-font in RootNavigator.
+// Falls back to system serif if not yet loaded — never blocks render.
 export const fonts = {
-  display: 'System',
+  display: 'Lora_500Medium',
+  displayItalic: 'Lora_400Regular_Italic',
+  displayBold: 'Lora_700Bold',
   body: 'System',
 };
 

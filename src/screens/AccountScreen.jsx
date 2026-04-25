@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
 import {
-  View, Text, ScrollView, TouchableOpacity, TextInput,
+  View, Text, ScrollView, Pressable, TextInput,
   StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import { colors, fonts } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapMedium } from '../haptics';
+import { truncateGoal } from '../utils/goalText';
 
 const GOAL_OPTIONS = [
   { label: 'Sleep better', value: 'I want to sleep through the night and wake up rested', emoji: '\u{1F319}' },
@@ -123,21 +124,21 @@ export default function AccountScreen({ navigation }) {
             ) : (
               <View style={s.goalGrid}>
                 {GOAL_OPTIONS.map(option => (
-                  <TouchableOpacity
+                  <Pressable
                     key={option.value}
                     style={s.goalOption}
                     onPress={() => handleGoalSelect(option.value)}
-                    activeOpacity={0.7}
+                   
                   >
                     <Text style={s.goalEmoji}>{option.emoji}</Text>
                     <Text style={s.goalLabel}>{option.label}</Text>
-                  </TouchableOpacity>
+                  </Pressable>
                 ))}
               </View>
             )}
-            <TouchableOpacity style={s.cancelBtn} onPress={() => setEditing(null)} activeOpacity={0.7}>
+            <Pressable style={s.cancelBtn} onPress={() => setEditing(null)}>
               <Text style={s.cancelText}>Cancel</Text>
-            </TouchableOpacity>
+            </Pressable>
           </View>
         </SafeAreaView>
       );
@@ -160,17 +161,17 @@ export default function AccountScreen({ navigation }) {
               placeholderTextColor={colors.dim}
               placeholder="Describe your daily routine..."
             />
-            <TouchableOpacity
+            <Pressable
               style={[s.saveBtn, (!editValue.trim() || saving) && { opacity: 0.4 }]}
               onPress={handleSave}
               disabled={!editValue.trim() || saving}
-              activeOpacity={0.8}
+             
             >
               <Text style={s.saveBtnText}>{saving ? 'Saving...' : 'Save'}</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.cancelBtn} onPress={() => setEditing(null)} activeOpacity={0.7}>
+            </Pressable>
+            <Pressable style={s.cancelBtn} onPress={() => setEditing(null)}>
               <Text style={s.cancelText}>Cancel</Text>
-            </TouchableOpacity>
+            </Pressable>
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
@@ -206,20 +207,16 @@ export default function AccountScreen({ navigation }) {
           {isSubscribed && (
             <>
               <View style={s.settingDivider} />
-              <TouchableOpacity
+              <Pressable
                 style={s.settingRow}
                 onPress={() => Linking.openURL('https://apps.apple.com/account/subscriptions')}
-                activeOpacity={0.7}
               >
-                <View style={s.settingIcon}>
-                  <Text style={s.settingEmoji}>⚙️</Text>
-                </View>
                 <View style={s.settingContent}>
                   <Text style={s.settingTitle}>Manage subscription</Text>
                   <Text style={s.settingValue}>Change or cancel in App Store</Text>
                 </View>
                 <Text style={s.settingArrow}>›</Text>
-              </TouchableOpacity>
+              </Pressable>
             </>
           )}
         </View>
@@ -228,103 +225,79 @@ export default function AccountScreen({ navigation }) {
         <Text style={s.sectionTitle}>Your profile</Text>
 
         <View style={s.card}>
-          <TouchableOpacity style={s.settingRow} onPress={() => handleEdit('routine')} activeOpacity={0.7}>
-            <View style={s.settingIcon}>
-              <Text style={s.settingEmoji}>📋</Text>
-            </View>
+          <Pressable style={s.settingRow} onPress={() => handleEdit('routine')}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>My routine</Text>
               <Text style={s.settingValue} numberOfLines={2}>{profile?.routine || 'Not set'}</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
-          </TouchableOpacity>
+          </Pressable>
 
           <View style={s.settingDivider} />
 
-          <TouchableOpacity style={s.settingRow} onPress={() => handleEdit('goal')} activeOpacity={0.7}>
-            <View style={s.settingIcon}>
-              <Text style={s.settingEmoji}>🎯</Text>
-            </View>
+          <Pressable style={s.settingRow} onPress={() => handleEdit('goal')}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>My goal</Text>
-              <Text style={s.settingValue} numberOfLines={2}>{profile?.goal || 'Not set'}</Text>
+              <Text style={s.settingValue} numberOfLines={2}>{profile?.goal ? truncateGoal(profile.goal) : 'Not set'}</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         {/* Support section */}
         <Text style={s.sectionTitle}>Support</Text>
 
         <View style={s.card}>
-          <TouchableOpacity style={s.settingRow} onPress={() => Linking.openURL('https://livenew.app/help')} activeOpacity={0.7}>
-            <View style={s.settingIcon}>
-              <Text style={s.settingEmoji}>❓</Text>
-            </View>
+          <Pressable style={s.settingRow} onPress={() => Linking.openURL('https://livenew.app/help')}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Help center</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
-          </TouchableOpacity>
+          </Pressable>
 
           <View style={s.settingDivider} />
 
-          <TouchableOpacity style={s.settingRow} onPress={() => Linking.openURL('mailto:support@livenew.app')} activeOpacity={0.7}>
-            <View style={s.settingIcon}>
-              <Text style={s.settingEmoji}>✉️</Text>
-            </View>
+          <Pressable style={s.settingRow} onPress={() => Linking.openURL('mailto:support@livenew.app')}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Contact us</Text>
               <Text style={s.settingValue}>support@livenew.app</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
-          </TouchableOpacity>
+          </Pressable>
 
           <View style={s.settingDivider} />
 
-          <TouchableOpacity style={s.settingRow} onPress={() => Linking.openURL('https://livenew.app/terms')} activeOpacity={0.7}>
-            <View style={s.settingIcon}>
-              <Text style={s.settingEmoji}>📄</Text>
-            </View>
+          <Pressable style={s.settingRow} onPress={() => Linking.openURL('https://livenew.app/terms')}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Terms of service</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
-          </TouchableOpacity>
+          </Pressable>
 
           <View style={s.settingDivider} />
 
-          <TouchableOpacity style={s.settingRow} onPress={() => Linking.openURL('https://livenew.app/privacy')} activeOpacity={0.7}>
-            <View style={s.settingIcon}>
-              <Text style={s.settingEmoji}>🔒</Text>
-            </View>
+          <Pressable style={s.settingRow} onPress={() => Linking.openURL('https://livenew.app/privacy')}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Privacy policy</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         {/* Account actions */}
         <Text style={s.sectionTitle}>Account</Text>
 
         <View style={s.card}>
-          <TouchableOpacity style={s.settingRow} onPress={handleLogout} activeOpacity={0.7}>
-            <View style={s.settingIcon}>
-              <Text style={s.settingEmoji}>👋</Text>
-            </View>
+          <Pressable style={s.settingRow} onPress={handleLogout}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Log out</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
-          </TouchableOpacity>
+          </Pressable>
 
           <View style={s.settingDivider} />
 
-          <TouchableOpacity style={s.settingRow} onPress={handleDelete} disabled={deleting} activeOpacity={0.7}>
-            <View style={s.settingIcon}>
-              <Text style={s.settingEmoji}>🗑️</Text>
-            </View>
+          <Pressable style={s.settingRow} onPress={handleDelete} disabled={deleting}>
             <View style={s.settingContent}>
               <Text style={[s.settingTitle, { color: colors.error }]}>
                 {deleting ? 'Deleting...' : 'Delete my account'}
@@ -332,7 +305,7 @@ export default function AccountScreen({ navigation }) {
               <Text style={s.settingValue}>Permanently delete all data</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
-          </TouchableOpacity>
+          </Pressable>
         </View>
 
         <Text style={s.version}>LiveNew v1.0.0</Text>
@@ -347,16 +320,22 @@ const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 20, paddingBottom: 100 },
 
-  heading: { fontSize: 28, fontWeight: '700', color: colors.text, marginBottom: 24 },
+  heading: {
+    fontFamily: fonts.display,
+    fontSize: 32,
+    color: colors.text,
+    marginBottom: 24,
+    letterSpacing: 0.2,
+  },
 
   // Section titles
   sectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 10,
+    fontWeight: '700',
     color: colors.dim,
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 8,
+    letterSpacing: 2,
+    marginBottom: 10,
     marginTop: 8,
     marginLeft: 4,
   },
@@ -375,29 +354,32 @@ const s = StyleSheet.create({
   statusRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 18,
   },
   statusBadge: {
-    backgroundColor: colors.line,
-    borderRadius: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    marginRight: 12,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    marginRight: 14,
   },
   statusBadgeActive: {
-    backgroundColor: 'rgba(196,168,108,0.2)',
+    borderColor: colors.goldBorder,
+    backgroundColor: 'rgba(196,168,108,0.08)',
   },
   statusBadgeText: {
-    fontSize: 11,
+    fontSize: 9,
     fontWeight: '700',
     color: colors.dim,
-    letterSpacing: 1,
+    letterSpacing: 1.6,
   },
   statusBadgeTextActive: {
     color: colors.gold,
   },
   statusContent: { flex: 1 },
-  statusTitle: { fontSize: 16, fontWeight: '600', color: colors.text },
+  statusTitle: { fontSize: 16, fontWeight: '600', color: colors.text, letterSpacing: 0.1 },
   statusSub: { fontSize: 13, color: colors.muted, marginTop: 2 },
 
   streakRow: {
@@ -416,24 +398,14 @@ const s = StyleSheet.create({
   settingRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
-    paddingHorizontal: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
   },
-  settingIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  settingEmoji: { fontSize: 16 },
   settingContent: { flex: 1 },
-  settingTitle: { fontSize: 15, fontWeight: '500', color: colors.text },
-  settingValue: { fontSize: 13, color: colors.muted, marginTop: 2 },
-  settingArrow: { fontSize: 20, color: colors.dim, fontWeight: '300', marginLeft: 8 },
-  settingDivider: { height: 1, backgroundColor: colors.line, marginLeft: 64 },
+  settingTitle: { fontSize: 15, fontWeight: '500', color: colors.text, letterSpacing: 0.1 },
+  settingValue: { fontSize: 13, color: colors.muted, marginTop: 3, lineHeight: 18 },
+  settingArrow: { fontSize: 20, color: colors.dim, fontWeight: '300', marginLeft: 12 },
+  settingDivider: { height: 1, backgroundColor: colors.line, marginLeft: 18 },
 
   // Version
   version: {
@@ -445,8 +417,8 @@ const s = StyleSheet.create({
 
   // Edit screen
   editWrap: { flex: 1, padding: 24, justifyContent: 'center' },
-  editTitle: { fontSize: 24, fontWeight: '600', color: colors.text, marginBottom: 8, textAlign: 'center' },
-  editSub: { fontSize: 14, color: colors.muted, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
+  editTitle: { fontFamily: fonts.display, fontSize: 26, color: colors.text, marginBottom: 8, textAlign: 'center', letterSpacing: 0.2 },
+  editSub: { fontFamily: fonts.displayItalic, fontSize: 14, color: colors.muted, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
   editInput: {
     backgroundColor: colors.surface,
     borderWidth: 1,

@@ -1,11 +1,26 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, Animated,
+  View, Text, Pressable, StyleSheet, Animated,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import { colors, fonts } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
+
+function PressTile({ onPress, style, children }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  return (
+    <Pressable
+      onPressIn={() => Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, speed: 60, bounciness: 0 }).start()}
+      onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 4 }).start()}
+      onPress={onPress}
+    >
+      <Animated.View style={[style, { transform: [{ scale }] }]}>
+        {children}
+      </Animated.View>
+    </Pressable>
+  );
+}
 
 const GOAL_OPTIONS = [
   { label: 'Sleep better', value: 'I want to sleep through the night and wake up rested', emoji: '\u{1F319}' },
@@ -151,12 +166,9 @@ export default function OnboardingScreen() {
 
         <Text style={s.logo}>LiveNew</Text>
 
-        {/* Step indicator — hidden during loading */}
         {!loading && (
-          <View style={s.stepRow}>
-            {Array.from({ length: totalSteps }, (_, i) => (
-              <View key={i} style={[s.stepDot, i < step && s.stepDotActive]} />
-            ))}
+          <View style={s.progressTrack}>
+            <View style={[s.progressFill, { width: `${(step / totalSteps) * 100}%` }]} />
           </View>
         )}
 
@@ -172,15 +184,10 @@ export default function OnboardingScreen() {
                 <Text style={s.sub}>Pick the one that matters most right now</Text>
                 <View style={s.goalGrid}>
                   {GOAL_OPTIONS.map(option => (
-                    <TouchableOpacity
-                      key={option.value}
-                      style={s.goalOption}
-                      onPress={() => handleGoal(option)}
-                      activeOpacity={0.7}
-                    >
+                    <PressTile key={option.value} style={s.goalOption} onPress={() => handleGoal(option)}>
                       <Text style={s.goalEmoji}>{option.emoji}</Text>
                       <Text style={s.goalLabel}>{option.label}</Text>
-                    </TouchableOpacity>
+                    </PressTile>
                   ))}
                 </View>
               </View>
@@ -189,16 +196,16 @@ export default function OnboardingScreen() {
             {/* Step 2: Stress */}
             {step === 2 && (
               <View>
-                <TouchableOpacity style={s.backBtn} onPress={handleBack} activeOpacity={0.7}>
-                  <Text style={s.backText}>{'\u2190'} Back</Text>
-                </TouchableOpacity>
+                <Pressable style={s.backBtn} onPress={handleBack}>
+                  <Text style={s.backText}>{'\u2190'}  Back</Text>
+                </Pressable>
                 <Text style={s.heading}>How are you feeling?</Text>
                 <View style={s.optionGrid}>
                   {STRESS_OPTIONS.map(option => (
-                    <TouchableOpacity key={option.value} style={s.optionLarge} onPress={() => handleStress(option)} activeOpacity={0.7}>
+                    <PressTile key={option.value} style={s.optionLarge} onPress={() => handleStress(option)}>
                       <Text style={s.optionEmoji}>{option.emoji}</Text>
                       <Text style={s.optionLabel}>{option.label}</Text>
-                    </TouchableOpacity>
+                    </PressTile>
                   ))}
                 </View>
               </View>
@@ -207,16 +214,16 @@ export default function OnboardingScreen() {
             {/* Step 3: Sleep */}
             {step === 3 && (
               <View>
-                <TouchableOpacity style={s.backBtn} onPress={handleBack} activeOpacity={0.7}>
-                  <Text style={s.backText}>{'\u2190'} Back</Text>
-                </TouchableOpacity>
+                <Pressable style={s.backBtn} onPress={handleBack}>
+                  <Text style={s.backText}>{'\u2190'}  Back</Text>
+                </Pressable>
                 <Text style={s.heading}>How did you sleep?</Text>
                 <View style={s.optionRow}>
                   {SLEEP_OPTIONS.map(option => (
-                    <TouchableOpacity key={option.value} style={s.optionSmall} onPress={() => handleSleep(option)} activeOpacity={0.7}>
+                    <PressTile key={option.value} style={s.optionSmall} onPress={() => handleSleep(option)}>
                       <Text style={s.optionEmoji}>{option.emoji}</Text>
                       <Text style={s.optionLabel}>{option.label}</Text>
-                    </TouchableOpacity>
+                    </PressTile>
                   ))}
                 </View>
               </View>
@@ -225,17 +232,17 @@ export default function OnboardingScreen() {
             {/* Step 4: Energy */}
             {step === 4 && (
               <View>
-                <TouchableOpacity style={s.backBtn} onPress={handleBack} activeOpacity={0.7}>
-                  <Text style={s.backText}>{'\u2190'} Back</Text>
-                </TouchableOpacity>
+                <Pressable style={s.backBtn} onPress={handleBack}>
+                  <Text style={s.backText}>{'\u2190'}  Back</Text>
+                </Pressable>
                 <Text style={s.heading}>Energy right now?</Text>
                 {error ? <Text style={s.error}>{error}</Text> : null}
                 <View style={s.optionRow}>
                   {ENERGY_OPTIONS.map(option => (
-                    <TouchableOpacity key={option.value} style={s.optionSmall} onPress={() => handleEnergy(option)} activeOpacity={0.7}>
+                    <PressTile key={option.value} style={s.optionSmall} onPress={() => handleEnergy(option)}>
                       <Text style={s.optionEmoji}>{option.emoji}</Text>
                       <Text style={s.optionLabel}>{option.label}</Text>
-                    </TouchableOpacity>
+                    </PressTile>
                   ))}
                 </View>
               </View>
@@ -253,36 +260,41 @@ const s = StyleSheet.create({
   container: { flex: 1, justifyContent: 'center', padding: 24 },
 
   logo: {
-    fontSize: 28,
-    fontWeight: '500',
+    fontFamily: fonts.display,
+    fontSize: 26,
     color: colors.text,
     textAlign: 'center',
-    marginBottom: 24,
-    letterSpacing: 1,
+    marginBottom: 28,
+    letterSpacing: 0.6,
   },
 
-  stepRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 32,
+  progressTrack: {
+    height: 2,
+    backgroundColor: colors.line,
+    borderRadius: 1,
+    marginBottom: 36,
+    overflow: 'hidden',
   },
-  stepDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.line },
-  stepDotActive: { backgroundColor: colors.gold },
+  progressFill: {
+    height: 2,
+    backgroundColor: colors.gold,
+  },
 
   heading: {
-    fontSize: 24,
-    fontWeight: '600',
+    fontFamily: fonts.display,
+    fontSize: 28,
     color: colors.text,
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
+    letterSpacing: 0.2,
   },
   sub: {
-    fontSize: 14,
+    fontFamily: fonts.displayItalic,
+    fontSize: 15,
     color: colors.muted,
     textAlign: 'center',
-    marginBottom: 24,
-    lineHeight: 20,
+    marginBottom: 26,
+    lineHeight: 22,
   },
 
   // Goal selection

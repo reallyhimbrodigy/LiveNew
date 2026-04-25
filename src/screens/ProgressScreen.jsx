@@ -1,9 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import { colors, fonts } from '../theme';
 import { api } from '../api';
 import { useAuthStore } from '../store/authStore';
+import { truncateGoal } from '../utils/goalText';
 
 export default function ProgressScreen() {
   const [data, setData] = useState(null);
@@ -84,7 +85,7 @@ export default function ProgressScreen() {
         {profile?.goal && (
           <View style={s.goalCard}>
             <Text style={s.goalLabel}>YOUR GOAL</Text>
-            <Text style={s.goalText} numberOfLines={2}>{profile.goal}</Text>
+            <Text style={s.goalText}>{truncateGoal(profile.goal)}</Text>
           </View>
         )}
 
@@ -179,18 +180,27 @@ export default function ProgressScreen() {
             <Text style={s.cardSub}>Last {recentReflections.length} reflections</Text>
             <View style={s.reflectionRow}>
               <View style={s.reflectionStat}>
-                <Text style={[s.reflectionValue, { color: colors.success }]}>{reflectionCounts.better}</Text>
+                <Text style={s.reflectionValue}>{reflectionCounts.better}</Text>
                 <Text style={s.reflectionLabel}>Better</Text>
               </View>
               <View style={s.reflectionStat}>
-                <Text style={[s.reflectionValue, { color: colors.muted }]}>{reflectionCounts.same}</Text>
+                <Text style={s.reflectionValue}>{reflectionCounts.same}</Text>
                 <Text style={s.reflectionLabel}>Same</Text>
               </View>
               <View style={s.reflectionStat}>
-                <Text style={[s.reflectionValue, { color: colors.error }]}>{reflectionCounts.harder}</Text>
+                <Text style={s.reflectionValue}>{reflectionCounts.harder}</Text>
                 <Text style={s.reflectionLabel}>Harder</Text>
               </View>
             </View>
+            {recentReflections.length >= 3 && (
+              <Text style={s.reflectionInsight}>
+                {reflectionCounts.better > reflectionCounts.harder
+                  ? 'More “better” days than “harder” this week. The pattern is starting to land.'
+                  : reflectionCounts.harder > reflectionCounts.better
+                    ? 'A heavier week. Tomorrow’s plan will keep things gentler.'
+                    : 'Even split. Pay attention to what shifted on the better days.'}
+              </Text>
+            )}
           </View>
         )}
 
@@ -231,8 +241,8 @@ export default function ProgressScreen() {
                 : 'Check in daily to start seeing your stress trend and insights.'}
             </Text>
             {error && (
-              <TouchableOpacity
-                style={s.retryBtn}
+              <Pressable
+                style={({ pressed }) => [s.retryBtn, pressed && { opacity: 0.85 }]}
                 onPress={async () => {
                   setLoading(true);
                   setError(false);
@@ -244,10 +254,9 @@ export default function ProgressScreen() {
                   }
                   setLoading(false);
                 }}
-                activeOpacity={0.8}
               >
                 <Text style={s.retryText}>Retry</Text>
-              </TouchableOpacity>
+              </Pressable>
             )}
           </View>
         )}
@@ -303,7 +312,13 @@ const s = StyleSheet.create({
   loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },
   scroll: { padding: 20, paddingBottom: 100 },
 
-  heading: { fontSize: 28, fontWeight: '700', color: colors.text, marginBottom: 20 },
+  heading: {
+    fontFamily: fonts.display,
+    fontSize: 32,
+    color: colors.text,
+    marginBottom: 22,
+    letterSpacing: 0.2,
+  },
 
   // Goal
   goalCard: {
@@ -315,16 +330,18 @@ const s = StyleSheet.create({
     marginBottom: 16,
   },
   goalLabel: {
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
     color: colors.gold,
-    letterSpacing: 1.5,
-    marginBottom: 6,
+    letterSpacing: 2,
+    marginBottom: 8,
   },
   goalText: {
-    fontSize: 15,
+    fontFamily: fonts.display,
+    fontSize: 16,
     color: colors.text,
-    lineHeight: 22,
+    lineHeight: 24,
+    letterSpacing: 0.1,
   },
 
   // Story
@@ -333,13 +350,15 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 14,
-    padding: 18,
+    padding: 20,
     marginBottom: 16,
   },
   storyText: {
-    fontSize: 15,
+    fontFamily: fonts.display,
+    fontSize: 16,
     color: colors.text,
-    lineHeight: 23,
+    lineHeight: 26,
+    letterSpacing: 0.1,
   },
 
   // AI Insight
@@ -359,9 +378,11 @@ const s = StyleSheet.create({
     marginBottom: 8,
   },
   insightText: {
+    fontFamily: fonts.display,
     fontSize: 15,
     color: colors.text,
-    lineHeight: 23,
+    lineHeight: 24,
+    letterSpacing: 0.1,
   },
 
   // Summary row
@@ -372,11 +393,17 @@ const s = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 14,
-    padding: 18,
+    paddingVertical: 22,
     alignItems: 'center',
   },
-  summaryValue: { fontSize: 26, fontWeight: '700', color: colors.text, marginBottom: 2 },
-  summaryLabel: { fontSize: 11, color: colors.dim, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  summaryValue: {
+    fontFamily: fonts.displayBold,
+    fontSize: 32,
+    color: colors.text,
+    marginBottom: 4,
+    letterSpacing: 0.2,
+  },
+  summaryLabel: { fontSize: 10, color: colors.dim, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1.2 },
 
   // Cards
   card: {
@@ -411,7 +438,7 @@ const s = StyleSheet.create({
   insightSub: { fontSize: 12, color: colors.muted, marginTop: 1 },
 
   // Reflections
-  reflectionRow: { flexDirection: 'row', gap: 12, marginTop: 4 },
+  reflectionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
   reflectionStat: {
     flex: 1,
     backgroundColor: colors.bg,
@@ -419,8 +446,20 @@ const s = StyleSheet.create({
     paddingVertical: 14,
     alignItems: 'center',
   },
-  reflectionValue: { fontSize: 22, fontWeight: '700', marginBottom: 2 },
-  reflectionLabel: { fontSize: 11, color: colors.dim, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  reflectionValue: {
+    fontFamily: fonts.displayBold,
+    fontSize: 24,
+    color: colors.text,
+    marginBottom: 2,
+  },
+  reflectionLabel: { fontSize: 10, color: colors.dim, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1.2 },
+  reflectionInsight: {
+    fontFamily: fonts.displayItalic,
+    fontSize: 13,
+    color: colors.muted,
+    marginTop: 14,
+    lineHeight: 19,
+  },
 
   // Chart
   chartWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 110, paddingTop: 8 },
