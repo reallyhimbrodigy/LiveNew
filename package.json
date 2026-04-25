@@ -14,6 +14,8 @@
     "build:ios": "eas build --platform ios --profile production",
     "build:preview": "eas build --platform ios --profile preview",
     "submit:ios": "eas submit --platform ios --profile production",
+    "ship": "node scripts/ship.mjs",
+    "ship:status": "node scripts/asc.mjs builds",
     "push": "git add -A && git commit -m 'Update' && git push origin main",
     "deploy": "npm run push",
     "test:integration": "node scripts/integration.test.js",

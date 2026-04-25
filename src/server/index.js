@@ -5482,7 +5482,7 @@ const server = http.createServer(async (req, res) => {
   const authRedirectRoutes = new Set(['/login', '/login.html', '/signup', '/signup.html']);
 
   if (req.method === "GET" && appRedirectRoutes.has(pathname)) {
-    res.writeHead(302, { Location: 'https://apps.apple.com/app/id6744594498' });
+    res.writeHead(302, { Location: 'https://apps.apple.com/app/id6760437838' });
     res.end();
     return;
   }
