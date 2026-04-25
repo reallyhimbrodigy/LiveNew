@@ -7,61 +7,62 @@ import { colors, fonts } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
 
-function PressTile({ onPress, style, children }) {
-  const scale = useRef(new Animated.Value(1)).current;
-  return (
-    <Pressable
-      onPressIn={() => Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, speed: 60, bounciness: 0 }).start()}
-      onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 4 }).start()}
-      onPress={onPress}
-    >
-      <Animated.View style={[style, { transform: [{ scale }] }]}>
-        {children}
-      </Animated.View>
-    </Pressable>
-  );
-}
-
 const GOAL_OPTIONS = [
-  { label: 'Sleep better', value: 'I want to sleep through the night and wake up rested', emoji: '\u{1F319}' },
-  { label: 'Less anxiety', value: 'I want to stop feeling anxious and overwhelmed all day', emoji: '\u{1F32C}\uFE0F' },
-  { label: 'More energy', value: 'I want consistent energy throughout the day without crashing', emoji: '\u26A1' },
-  { label: 'Lose weight', value: 'I want to lose weight and stop stress eating', emoji: '\u{1F331}' },
-  { label: 'Be calmer', value: 'I want to feel calm and in control of my stress', emoji: '\u{1F9D8}' },
-  { label: 'Feel better', value: 'I just want to feel better overall', emoji: '\u2728' },
+  { label: 'Sleep better', value: 'I want to sleep through the night and wake up rested', sub: 'Through the night, wake rested.' },
+  { label: 'Less anxiety', value: 'I want to stop feeling anxious and overwhelmed all day', sub: 'Quiet the constant edge.' },
+  { label: 'More energy', value: 'I want consistent energy throughout the day without crashing', sub: 'Steady all day, no crashes.' },
+  { label: 'Lose weight', value: 'I want to lose weight and stop stress eating', sub: 'Stop the stress-eating cycle.' },
+  { label: 'Be calmer', value: 'I want to feel calm and in control of my stress', sub: 'In control, not reactive.' },
+  { label: 'Feel better', value: 'I just want to feel better overall', sub: 'Just better, generally.' },
 ];
 
 const STRESS_OPTIONS = [
-  { label: 'Good', value: 'good', emoji: '\u{1F60C}' },
-  { label: 'Okay', value: 'okay', emoji: '\u{1F610}' },
-  { label: 'Stressed', value: 'stressed', emoji: '\u{1F630}' },
-  { label: 'Overwhelmed', value: 'overwhelmed', emoji: '\u{1F635}‍\u{1F4AB}' },
+  { label: 'Good', value: 'good', sub: 'calm, steady' },
+  { label: 'Okay', value: 'okay', sub: 'a little tense' },
+  { label: 'Stressed', value: 'stressed', sub: 'on edge' },
+  { label: 'Overwhelmed', value: 'overwhelmed', sub: 'too much at once' },
 ];
 
 const SLEEP_OPTIONS = [
-  { label: 'Great', value: 'great', emoji: '\u{1F31F}' },
-  { label: 'OK', value: 'okay', emoji: '\u{1F610}' },
-  { label: 'Rough', value: 'rough', emoji: '\u{1F62B}' },
+  { label: 'Great', value: 'great', sub: 'rested' },
+  { label: 'OK', value: 'okay', sub: 'enough to function' },
+  { label: 'Rough', value: 'rough', sub: 'tired before today started' },
 ];
 
 const ENERGY_OPTIONS = [
-  { label: 'High', value: 'high', emoji: '\u26A1' },
-  { label: 'Medium', value: 'medium', emoji: '\u{1F642}' },
-  { label: 'Low', value: 'low', emoji: '\u{1FAAB}' },
+  { label: 'High', value: 'high', sub: 'sharp and ready' },
+  { label: 'Medium', value: 'medium', sub: 'steady' },
+  { label: 'Low', value: 'low', sub: 'dragging' },
 ];
+
+function PressRow({ onPress, children }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable
+        onPressIn={() => Animated.spring(scale, { toValue: 0.98, useNativeDriver: true, speed: 60, bounciness: 0 }).start()}
+        onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 4 }).start()}
+        onPress={onPress}
+        style={s.optionRow}
+      >
+        {children}
+      </Pressable>
+    </Animated.View>
+  );
+}
 
 function LoadingAnimation() {
   const [messageIndex, setMessageIndex] = useState(0);
   const messages = [
-    'Reading your signals...',
-    'Mapping your day...',
-    'Finding what matters...',
-    'Building your plan...',
+    'Reading your signals…',
+    'Mapping your day…',
+    'Finding what matters…',
+    'Building your plan…',
   ];
 
   React.useEffect(() => {
     const interval = setInterval(() => {
-      setMessageIndex(prev => prev < messages.length - 1 ? prev + 1 : prev);
+      setMessageIndex(prev => (prev < messages.length - 1 ? prev + 1 : prev));
     }, 3000);
     return () => clearInterval(interval);
   }, []);
@@ -70,10 +71,7 @@ function LoadingAnimation() {
     <View style={loadingStyles.wrap}>
       <View style={loadingStyles.dotsRow}>
         {[0, 1, 2].map(i => (
-          <View key={i} style={[
-            loadingStyles.dot,
-            { opacity: (messageIndex % 3 === i) ? 1 : 0.2 },
-          ]} />
+          <View key={i} style={[loadingStyles.dot, { opacity: messageIndex % 3 === i ? 1 : 0.2 }]} />
         ))}
       </View>
       <Text style={loadingStyles.message}>{messages[messageIndex]}</Text>
@@ -88,7 +86,7 @@ export default function OnboardingScreen() {
   const [sleep, setSleep] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [fadeAnim] = useState(new Animated.Value(1));
+  const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const saveProfileWithoutNav = useAuthStore(s => s.saveProfileWithoutNav);
   const generatePlan = useAuthStore(s => s.generatePlan);
@@ -139,13 +137,9 @@ export default function OnboardingScreen() {
       activateProfile();
     } catch (err) {
       clearTimeout(timeoutId);
-      if (err.message === 'TIMEOUT') {
-        setError('Taking longer than usual. Tap to try again.');
-      } else if (err?.code === 'NETWORK_ERROR') {
-        setError('Check your internet connection.');
-      } else {
-        setError('Something went wrong. Tap to try again.');
-      }
+      if (err.message === 'TIMEOUT') setError('Taking longer than usual. Tap to try again.');
+      else if (err?.code === 'NETWORK_ERROR') setError('Check your internet connection.');
+      else setError('Something went wrong. Tap to try again.');
       setStep(4);
       setLoading(false);
     }
@@ -160,8 +154,29 @@ export default function OnboardingScreen() {
 
   const totalSteps = 4;
 
+  const stepHeading = {
+    1: 'What brings you here?',
+    2: 'How are you feeling?',
+    3: 'How did you sleep?',
+    4: 'Energy right now?',
+  };
+  const stepSub = {
+    1: 'Pick the one that matters most right now.',
+    2: null,
+    3: null,
+    4: null,
+  };
+  const stepOptions = step === 1 ? GOAL_OPTIONS
+    : step === 2 ? STRESS_OPTIONS
+    : step === 3 ? SLEEP_OPTIONS
+    : ENERGY_OPTIONS;
+  const stepHandler = step === 1 ? handleGoal
+    : step === 2 ? handleStress
+    : step === 3 ? handleSleep
+    : handleEnergy;
+
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       <View style={s.container}>
 
         <Text style={s.logo}>LiveNew</Text>
@@ -175,79 +190,29 @@ export default function OnboardingScreen() {
         {loading ? (
           <LoadingAnimation />
         ) : (
-          <Animated.View style={{ opacity: fadeAnim }}>
-
-            {/* Step 1: Goal */}
-            {step === 1 && (
-              <View>
-                <Text style={s.heading}>What brings you here?</Text>
-                <Text style={s.sub}>Pick the one that matters most right now</Text>
-                <View style={s.goalGrid}>
-                  {GOAL_OPTIONS.map(option => (
-                    <PressTile key={option.value} style={s.goalOption} onPress={() => handleGoal(option)}>
-                      <Text style={s.goalEmoji}>{option.emoji}</Text>
-                      <Text style={s.goalLabel}>{option.label}</Text>
-                    </PressTile>
-                  ))}
-                </View>
-              </View>
+          <Animated.View style={[s.body, { opacity: fadeAnim }]}>
+            {step > 1 && (
+              <Pressable style={s.backBtn} onPress={handleBack} hitSlop={8}>
+                <Text style={s.backText}>{'←'}  Back</Text>
+              </Pressable>
             )}
 
-            {/* Step 2: Stress */}
-            {step === 2 && (
-              <View>
-                <Pressable style={s.backBtn} onPress={handleBack}>
-                  <Text style={s.backText}>{'\u2190'}  Back</Text>
-                </Pressable>
-                <Text style={s.heading}>How are you feeling?</Text>
-                <View style={s.optionGrid}>
-                  {STRESS_OPTIONS.map(option => (
-                    <PressTile key={option.value} style={s.optionLarge} onPress={() => handleStress(option)}>
-                      <Text style={s.optionEmoji}>{option.emoji}</Text>
-                      <Text style={s.optionLabel}>{option.label}</Text>
-                    </PressTile>
-                  ))}
-                </View>
-              </View>
-            )}
+            <Text style={s.heading}>{stepHeading[step]}</Text>
+            {stepSub[step] && <Text style={s.sub}>{stepSub[step]}</Text>}
 
-            {/* Step 3: Sleep */}
-            {step === 3 && (
-              <View>
-                <Pressable style={s.backBtn} onPress={handleBack}>
-                  <Text style={s.backText}>{'\u2190'}  Back</Text>
-                </Pressable>
-                <Text style={s.heading}>How did you sleep?</Text>
-                <View style={s.optionRow}>
-                  {SLEEP_OPTIONS.map(option => (
-                    <PressTile key={option.value} style={s.optionSmall} onPress={() => handleSleep(option)}>
-                      <Text style={s.optionEmoji}>{option.emoji}</Text>
-                      <Text style={s.optionLabel}>{option.label}</Text>
-                    </PressTile>
-                  ))}
-                </View>
-              </View>
-            )}
+            {error ? <Text style={s.error}>{error}</Text> : null}
 
-            {/* Step 4: Energy */}
-            {step === 4 && (
-              <View>
-                <Pressable style={s.backBtn} onPress={handleBack}>
-                  <Text style={s.backText}>{'\u2190'}  Back</Text>
-                </Pressable>
-                <Text style={s.heading}>Energy right now?</Text>
-                {error ? <Text style={s.error}>{error}</Text> : null}
-                <View style={s.optionRow}>
-                  {ENERGY_OPTIONS.map(option => (
-                    <PressTile key={option.value} style={s.optionSmall} onPress={() => handleEnergy(option)}>
-                      <Text style={s.optionEmoji}>{option.emoji}</Text>
-                      <Text style={s.optionLabel}>{option.label}</Text>
-                    </PressTile>
-                  ))}
-                </View>
-              </View>
-            )}
-
+            <View style={s.list}>
+              {stepOptions.map(option => (
+                <PressRow key={option.value} onPress={() => stepHandler(option)}>
+                  <View style={s.optionContent}>
+                    <Text style={s.optionLabel}>{option.label}</Text>
+                    {option.sub && <Text style={s.optionSub}>{option.sub}</Text>}
+                  </View>
+                  <Text style={s.optionChevron}>{'›'}</Text>
+                </PressRow>
+              ))}
+            </View>
           </Animated.View>
         )}
       </View>
@@ -257,14 +222,14 @@ export default function OnboardingScreen() {
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  container: { flex: 1, justifyContent: 'center', padding: 24 },
+  container: { flex: 1, paddingHorizontal: 24, paddingTop: 28 },
 
   logo: {
     fontFamily: fonts.display,
-    fontSize: 26,
-    color: colors.text,
+    fontSize: 22,
+    color: colors.gold,
     textAlign: 'center',
-    marginBottom: 28,
+    marginBottom: 22,
     letterSpacing: 0.6,
   },
 
@@ -272,101 +237,81 @@ const s = StyleSheet.create({
     height: 2,
     backgroundColor: colors.line,
     borderRadius: 1,
-    marginBottom: 36,
+    marginBottom: 32,
     overflow: 'hidden',
   },
-  progressFill: {
-    height: 2,
-    backgroundColor: colors.gold,
-  },
+  progressFill: { height: 2, backgroundColor: colors.gold },
+
+  body: { flex: 1 },
+
+  backBtn: { alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 4, marginBottom: 12 },
+  backText: { color: colors.muted, fontSize: 14, letterSpacing: 0.2 },
 
   heading: {
     fontFamily: fonts.display,
-    fontSize: 28,
+    fontSize: 30,
     color: colors.text,
-    textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
     letterSpacing: 0.2,
+    lineHeight: 36,
   },
   sub: {
     fontFamily: fonts.displayItalic,
     fontSize: 15,
     color: colors.muted,
-    textAlign: 'center',
-    marginBottom: 26,
+    marginBottom: 24,
     lineHeight: 22,
   },
 
-  // Goal selection
-  goalGrid: { gap: 10 },
-  goalOption: {
+  error: {
+    color: colors.error,
+    fontSize: 14,
+    marginBottom: 16,
+    fontStyle: 'italic',
+  },
+
+  list: { gap: 10, marginTop: 12 },
+
+  optionRow: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-    gap: 14,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
   },
-  goalEmoji: { fontSize: 22 },
-  goalLabel: { fontSize: 16, fontWeight: '500', color: colors.text },
-
-  // Check-in options
-  optionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'center',
-    gap: 12,
+  optionContent: { flex: 1, marginRight: 8 },
+  optionLabel: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text,
+    letterSpacing: 0.1,
   },
-  optionRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    gap: 12,
+  optionSub: {
+    fontFamily: fonts.displayItalic,
+    fontSize: 13,
+    color: colors.muted,
+    marginTop: 3,
+    letterSpacing: 0.1,
   },
-  optionLarge: {
-    width: '46%',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 16,
-    paddingVertical: 24,
-    alignItems: 'center',
-    gap: 8,
-  },
-  optionSmall: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 16,
-    paddingVertical: 20,
-    alignItems: 'center',
-    gap: 6,
-  },
-  optionEmoji: { fontSize: 28 },
-  optionLabel: { fontSize: 15, fontWeight: '500', color: colors.text },
-
-  backBtn: {
-    alignSelf: 'flex-start',
-    paddingVertical: 8,
-    paddingHorizontal: 4,
-    marginBottom: 8,
-  },
-  backText: { color: colors.muted, fontSize: 15 },
-
-  error: {
-    color: colors.error,
-    fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 16,
+  optionChevron: {
+    fontSize: 22,
+    color: colors.gold,
+    fontWeight: '300',
+    marginLeft: 8,
+    lineHeight: 22,
   },
 });
 
 const loadingStyles = StyleSheet.create({
-  wrap: { alignItems: 'center', gap: 20, paddingTop: 20 },
+  wrap: { alignItems: 'center', justifyContent: 'center', flex: 1, gap: 24, paddingBottom: 80 },
   dotsRow: { flexDirection: 'row', gap: 8 },
   dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.gold },
-  message: { color: colors.muted, fontSize: 16 },
+  message: {
+    fontFamily: fonts.displayItalic,
+    color: colors.muted,
+    fontSize: 16,
+  },
 });

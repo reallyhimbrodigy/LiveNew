@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View, Text, Pressable, StyleSheet, Animated,
 } from 'react-native';
@@ -7,55 +7,53 @@ import { colors, fonts } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
 
-function PressTile({ onPress, style, children }) {
-  const scale = useRef(new Animated.Value(1)).current;
-  return (
-    <Pressable
-      onPressIn={() => Animated.spring(scale, { toValue: 0.97, useNativeDriver: true, speed: 60, bounciness: 0 }).start()}
-      onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 4 }).start()}
-      onPress={onPress}
-    >
-      <Animated.View style={[style, { transform: [{ scale }] }]}>
-        {children}
-      </Animated.View>
-    </Pressable>
-  );
-}
-
 const STRESS_OPTIONS = [
-  { label: 'Good', value: 'good', emoji: '\u{1F60C}' },
-  { label: 'Okay', value: 'okay', emoji: '\u{1F610}' },
-  { label: 'Stressed', value: 'stressed', emoji: '\u{1F630}' },
-  { label: 'Overwhelmed', value: 'overwhelmed', emoji: '\u{1F635}‍\u{1F4AB}' },
+  { label: 'Good', value: 'good', sub: 'calm, steady' },
+  { label: 'Okay', value: 'okay', sub: 'a little tense' },
+  { label: 'Stressed', value: 'stressed', sub: 'on edge' },
+  { label: 'Overwhelmed', value: 'overwhelmed', sub: 'too much at once' },
 ];
 
 const SLEEP_OPTIONS = [
-  { label: 'Great', value: 'great', emoji: '\u{1F31F}' },
-  { label: 'OK', value: 'okay', emoji: '\u{1F610}' },
-  { label: 'Rough', value: 'rough', emoji: '\u{1F62B}' },
+  { label: 'Great', value: 'great', sub: 'rested' },
+  { label: 'OK', value: 'okay', sub: 'enough to function' },
+  { label: 'Rough', value: 'rough', sub: 'tired before today started' },
 ];
 
 const ENERGY_OPTIONS = [
-  { label: 'High', value: 'high', emoji: '\u26A1' },
-  { label: 'Medium', value: 'medium', emoji: '\u{1F642}' },
-  { label: 'Low', value: 'low', emoji: '\u{1FAAB}' },
+  { label: 'High', value: 'high', sub: 'sharp and ready' },
+  { label: 'Medium', value: 'medium', sub: 'steady' },
+  { label: 'Low', value: 'low', sub: 'dragging' },
 ];
+
+function PressRow({ onPress, children }) {
+  const scale = useRef(new Animated.Value(1)).current;
+  return (
+    <Animated.View style={{ transform: [{ scale }] }}>
+      <Pressable
+        onPressIn={() => Animated.spring(scale, { toValue: 0.98, useNativeDriver: true, speed: 60, bounciness: 0 }).start()}
+        onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 4 }).start()}
+        onPress={onPress}
+        style={s.optionRow}
+      >
+        {children}
+      </Pressable>
+    </Animated.View>
+  );
+}
 
 function LoadingAnimation() {
   const [messageIndex, setMessageIndex] = useState(0);
   const messages = [
-    'Reading your signals...',
-    'Mapping your day...',
-    'Finding what matters...',
-    'Building your plan...',
+    'Reading your signals…',
+    'Mapping your day…',
+    'Finding what matters…',
+    'Building your plan…',
   ];
 
-  useEffect(() => {
+  React.useEffect(() => {
     const interval = setInterval(() => {
-      setMessageIndex(prev => {
-        if (prev < messages.length - 1) return prev + 1;
-        return prev;
-      });
+      setMessageIndex(prev => (prev < messages.length - 1 ? prev + 1 : prev));
     }, 3000);
     return () => clearInterval(interval);
   }, []);
@@ -64,10 +62,7 @@ function LoadingAnimation() {
     <View style={loadingStyles.wrap}>
       <View style={loadingStyles.dotsRow}>
         {[0, 1, 2].map(i => (
-          <View key={i} style={[
-            loadingStyles.dot,
-            { opacity: (messageIndex % 3 === i) ? 1 : 0.2 },
-          ]} />
+          <View key={i} style={[loadingStyles.dot, { opacity: messageIndex % 3 === i ? 1 : 0.2 }]} />
         ))}
       </View>
       <Text style={loadingStyles.message}>{messages[messageIndex]}</Text>
@@ -76,21 +71,15 @@ function LoadingAnimation() {
 }
 
 export default function StressTapScreen({ navigation }) {
-  const [step, setStep] = useState(1);   // 1=stress, 2=sleep, 3=energy
+  const [step, setStep] = useState(1);
   const [stress, setStress] = useState(null);
   const [sleep, setSleep] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const fadeAnim = useState(new Animated.Value(1))[0];
+  const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const generatePlan = useAuthStore(s => s.generatePlan);
   const skipToday = useAuthStore(s => s.skipToday);
-
-  const handleSkip = async () => {
-    tapMedium();
-    await skipToday();
-    navigation.replace('TodayMain');
-  };
 
   const animateTransition = (callback) => {
     Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
@@ -130,16 +119,10 @@ export default function StressTapScreen({ navigation }) {
       navigation.replace('TodayMain');
     } catch (err) {
       clearTimeout(timeoutId);
-      if (err.message === 'TIMEOUT') {
-        setError('Taking longer than usual. Tap to try again.');
-      } else if (err.message === 'AUTH_EXPIRED') {
-        setError('Session expired. Please log in again.');
-      } else if (err.code === 'NETWORK_ERROR') {
-        setError('Check your internet connection.');
-      } else {
-        setError('Something went wrong. Tap to try again.');
-      }
-      // Keep selections — user can retry from energy step without re-answering
+      if (err.message === 'TIMEOUT') setError('Taking longer than usual. Tap to try again.');
+      else if (err.message === 'AUTH_EXPIRED') setError('Session expired. Please log in again.');
+      else if (err.code === 'NETWORK_ERROR') setError('Check your internet connection.');
+      else setError('Something went wrong. Tap to try again.');
       setStep(3);
       setLoading(false);
     }
@@ -148,50 +131,54 @@ export default function StressTapScreen({ navigation }) {
   const handleBack = () => {
     tapMedium();
     animateTransition(() => {
-      if (step === 3) { setStep(2); }
+      if (step === 3) setStep(2);
       else if (step === 2) { setStep(1); setStress(null); }
     });
   };
 
-  const stepLabels = { 1: 'How are you feeling?', 2: 'How did you sleep?', 3: 'Energy right now?' };
+  const handleSkip = async () => {
+    tapMedium();
+    await skipToday();
+    navigation.replace('TodayMain');
+  };
+
+  const stepHeading = { 1: 'How are you feeling?', 2: 'How did you sleep?', 3: 'Energy right now?' };
   const options = step === 1 ? STRESS_OPTIONS : step === 2 ? SLEEP_OPTIONS : ENERGY_OPTIONS;
   const handler = step === 1 ? handleStress : step === 2 ? handleSleep : handleEnergy;
 
   return (
-    <SafeAreaView style={s.safe}>
+    <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       <View style={s.container}>
+
         {!loading && (
           <View style={s.progressTrack}>
             <View style={[s.progressFill, { width: `${(step / 3) * 100}%` }]} />
           </View>
         )}
 
-        {error ? (
-          <Text style={s.error}>{error}</Text>
-        ) : null}
-
         {loading ? (
           <LoadingAnimation />
         ) : (
-          <Animated.View style={{ opacity: fadeAnim }}>
+          <Animated.View style={[s.body, { opacity: fadeAnim }]}>
             {step > 1 && (
-              <Pressable style={s.backBtn} onPress={handleBack}>
-                <Text style={s.backText}>{'\u2190'}  Back</Text>
+              <Pressable style={s.backBtn} onPress={handleBack} hitSlop={8}>
+                <Text style={s.backText}>{'←'}  Back</Text>
               </Pressable>
             )}
 
-            <Text style={s.heading}>{stepLabels[step]}</Text>
+            <Text style={s.heading}>{stepHeading[step]}</Text>
 
-            <View style={step === 1 ? s.grid : s.row}>
+            {error ? <Text style={s.error}>{error}</Text> : null}
+
+            <View style={s.list}>
               {options.map(option => (
-                <PressTile
-                  key={option.value}
-                  style={step === 1 ? s.option : s.optionSmall}
-                  onPress={() => handler(option)}
-                >
-                  <Text style={s.emoji}>{option.emoji}</Text>
-                  <Text style={s.optionLabel}>{option.label}</Text>
-                </PressTile>
+                <PressRow key={option.value} onPress={() => handler(option)}>
+                  <View style={s.optionContent}>
+                    <Text style={s.optionLabel}>{option.label}</Text>
+                    {option.sub && <Text style={s.optionSub}>{option.sub}</Text>}
+                  </View>
+                  <Text style={s.optionChevron}>{'›'}</Text>
+                </PressRow>
               ))}
             </View>
 
@@ -209,82 +196,88 @@ export default function StressTapScreen({ navigation }) {
 
 const s = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
-  container: { flex: 1, justifyContent: 'flex-start', padding: 24, paddingTop: 60 },
+  container: { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
 
   progressTrack: {
     height: 2,
     backgroundColor: colors.line,
     borderRadius: 1,
-    marginBottom: 36,
+    marginBottom: 48,
     overflow: 'hidden',
   },
-  progressFill: {
-    height: 2,
-    backgroundColor: colors.gold,
-  },
+  progressFill: { height: 2, backgroundColor: colors.gold },
+
+  body: { flex: 1 },
+
+  backBtn: { alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 4, marginBottom: 12 },
+  backText: { color: colors.muted, fontSize: 14, letterSpacing: 0.2 },
 
   heading: {
     fontFamily: fonts.display,
-    fontSize: 28,
+    fontSize: 30,
     color: colors.text,
-    textAlign: 'center',
-    marginBottom: 32,
+    textAlign: 'left',
+    marginBottom: 28,
     letterSpacing: 0.2,
+    lineHeight: 36,
   },
 
-  grid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', gap: 12 },
-  row: { flexDirection: 'row', justifyContent: 'center', gap: 12 },
+  error: {
+    color: colors.error,
+    fontSize: 14,
+    marginBottom: 16,
+    fontStyle: 'italic',
+  },
 
-  option: {
-    width: '46%',
+  list: { gap: 10 },
+
+  optionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
-    borderRadius: 18,
-    paddingVertical: 26,
-    alignItems: 'center',
-    gap: 10,
+    borderRadius: 14,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
   },
-  optionSmall: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 18,
-    paddingVertical: 22,
-    alignItems: 'center',
-    gap: 8,
+  optionContent: { flex: 1, marginRight: 8 },
+  optionLabel: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: colors.text,
+    letterSpacing: 0.1,
+  },
+  optionSub: {
+    fontFamily: fonts.displayItalic,
+    fontSize: 13,
+    color: colors.muted,
+    marginTop: 3,
+    letterSpacing: 0.1,
+  },
+  optionChevron: {
+    fontSize: 22,
+    color: colors.gold,
+    fontWeight: '300',
+    marginLeft: 8,
+    lineHeight: 22,
   },
 
-  emoji: { fontSize: 28 },
-  optionLabel: { fontSize: 15, fontWeight: '500', color: colors.text, letterSpacing: 0.2 },
-
-  error: { color: colors.error, fontSize: 14, textAlign: 'center', marginBottom: 16 },
-
-  backBtn: { alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 4, marginBottom: 8 },
-  backText: { color: colors.muted, fontSize: 14 },
-
-  skipLink: { alignSelf: 'center', marginTop: 32, paddingVertical: 8, paddingHorizontal: 12 },
+  skipLink: {
+    alignSelf: 'center',
+    marginTop: 32,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+  },
   skipText: { color: colors.muted, fontSize: 13, letterSpacing: 0.2 },
 });
 
 const loadingStyles = StyleSheet.create({
-  wrap: {
-    alignItems: 'center',
-    gap: 20,
-    paddingTop: 20,
-  },
-  dotsRow: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  dot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: colors.gold,
-  },
+  wrap: { alignItems: 'center', justifyContent: 'center', flex: 1, gap: 24, paddingBottom: 80 },
+  dotsRow: { flexDirection: 'row', gap: 8 },
+  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.gold },
   message: {
+    fontFamily: fonts.displayItalic,
     color: colors.muted,
     fontSize: 16,
   },
