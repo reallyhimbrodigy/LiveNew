@@ -633,25 +633,22 @@ const s = StyleSheet.create({
   },
 
   // Bottom actions
-  bottomActions: { marginTop: 20, gap: 8 },
+  bottomActions: { marginTop: 20, gap: 4 },
   stressBtn: {
     borderWidth: 1,
-    borderColor: colors.line,
-    backgroundColor: colors.surface,
+    borderColor: colors.goldBorder,
+    backgroundColor: colors.goldSoft,
     borderRadius: 12,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  stressBtnText: { color: colors.gold, fontSize: 15, fontWeight: '600', letterSpacing: 0.2 },
+  stressNotedText: { color: colors.muted, fontSize: 13, textAlign: 'center', fontStyle: 'italic', marginBottom: 8 },
+  recheckBtn: {
     paddingVertical: 14,
     alignItems: 'center',
   },
-  stressBtnText: { color: colors.text, fontSize: 14, fontWeight: '500' },
-  stressNotedText: { color: colors.muted, fontSize: 13, textAlign: 'center', fontStyle: 'italic', marginBottom: 8 },
-  recheckBtn: {
-    borderWidth: 1,
-    borderColor: colors.dim,
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  recheckText: { color: colors.text, fontSize: 14 },
+  recheckText: { color: colors.muted, fontSize: 13 },
 
   // Stress relief modal
   modalOverlay: {

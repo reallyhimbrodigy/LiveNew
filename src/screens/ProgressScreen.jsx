@@ -32,14 +32,23 @@ export default function ProgressScreen() {
     );
   }
 
-  const trend = data?.stressTrend || [];
+  const rawTrend = data?.stressTrend || [];
+  const trend = [...rawTrend].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const consistency = data?.consistency || {};
   const stressAvg = data?.stressAvg7;
   const totalSessions = (consistency.movementCompleted || 0) + (consistency.resetsCompleted || 0) + (consistency.winddownsCompleted || 0);
   const weeklySummary = data?.weeklySummary || null;
   const insight = data?.insight || null;
+  const reflections = Array.isArray(data?.reflections) ? data.reflections : [];
 
-  // Calculate insights
+  // Reflection breakdown for last 7 days
+  const recentReflections = reflections.slice(-7);
+  const reflectionCounts = recentReflections.reduce((acc, r) => {
+    acc[r.feeling] = (acc[r.feeling] || 0) + 1;
+    return acc;
+  }, { better: 0, same: 0, harder: 0 });
+
+  // Calculate insights (trend is now sorted chronologically asc)
   const recentTrend = trend.slice(-7);
   const olderTrend = trend.slice(-14, -7);
   const recentAvg = recentTrend.length > 0
@@ -56,7 +65,14 @@ export default function ProgressScreen() {
     : null;
 
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+  const dayInitials = ['Su', 'M', 'Tu', 'W', 'Th', 'F', 'Sa'];
   const daysActive = consistency.checkinDays || 0;
+
+  // Chart slice (trend is already sorted chronologically asc)
+  const chartTrend = trend.slice(-14);
+  const minStress = chartTrend.length > 0
+    ? Math.min(...chartTrend.map(t => t.stress ?? 999))
+    : null;
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -156,21 +172,47 @@ export default function ProgressScreen() {
           </View>
         )}
 
+        {/* Evening reflections — show how the loop is closing */}
+        {recentReflections.length > 0 && (
+          <View style={s.card}>
+            <Text style={s.cardTitle}>Evenings</Text>
+            <Text style={s.cardSub}>Last {recentReflections.length} reflections</Text>
+            <View style={s.reflectionRow}>
+              <View style={s.reflectionStat}>
+                <Text style={[s.reflectionValue, { color: colors.success }]}>{reflectionCounts.better}</Text>
+                <Text style={s.reflectionLabel}>Better</Text>
+              </View>
+              <View style={s.reflectionStat}>
+                <Text style={[s.reflectionValue, { color: colors.muted }]}>{reflectionCounts.same}</Text>
+                <Text style={s.reflectionLabel}>Same</Text>
+              </View>
+              <View style={s.reflectionStat}>
+                <Text style={[s.reflectionValue, { color: colors.error }]}>{reflectionCounts.harder}</Text>
+                <Text style={s.reflectionLabel}>Harder</Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         {/* Stress trend chart */}
-        {trend.length > 0 && (
+        {chartTrend.length > 0 && (
           <View style={s.card}>
             <Text style={s.cardTitle}>Stress trend</Text>
-            <Text style={s.cardSub}>Last {Math.min(trend.length, 14)} days</Text>
+            <Text style={s.cardSub}>Last {chartTrend.length} days</Text>
             <View style={s.chartWrap}>
-              {trend.slice(-14).map((t, i) => {
+              {chartTrend.map((t, i) => {
                 const maxHeight = 80;
-                const height = Math.max(6, ((t.stress || 0) / 10) * maxHeight);
-                const barColor = t.stress > 7 ? colors.error : t.stress > 4 ? colors.gold : colors.success;
-                const dayLabel = t.date ? dayNames[new Date(t.date + 'T12:00:00').getDay()]?.[0] : '';
+                const stress = t.stress ?? 0;
+                const height = Math.max(6, (stress / 10) * maxHeight);
+                const isBest = minStress != null && stress === minStress;
+                // Single cohesive palette: muted gold scaled by stress, bright gold for best day
+                const opacity = 0.35 + Math.min(1, stress / 10) * 0.55;
+                const barColor = isBest ? colors.gold : `rgba(196,168,108,${opacity.toFixed(2)})`;
+                const dayLabel = t.date ? dayInitials[new Date(t.date + 'T12:00:00').getDay()] : '';
                 return (
                   <View key={i} style={s.chartCol}>
                     <View style={[s.chartBar, { height, backgroundColor: barColor }]} />
-                    <Text style={s.chartNum}>{t.stress}</Text>
+                    <Text style={[s.chartNum, isBest && { color: colors.gold, fontWeight: '700' }]}>{stress}</Text>
                     <Text style={s.chartDay}>{dayLabel}</Text>
                   </View>
                 );
@@ -248,7 +290,9 @@ function buildStoryText({ daysActive, streak, stressChange, stressAvg, recentAvg
   }
 
   if (totalSessions > 0 && daysActive > 3) {
-    parts.push(`You've completed ${totalSessions} sessions total.`);
+    parts.push(totalSessions === 1
+      ? `You've internalized 1 thing so far. One real shift adds up.`
+      : `You've internalized ${totalSessions} things so far. Each one is a small rewire.`);
   }
 
   return parts.join(' ');
@@ -365,6 +409,18 @@ const s = StyleSheet.create({
   insightContent: { flex: 1 },
   insightTitle: { fontSize: 14, fontWeight: '600', color: colors.text },
   insightSub: { fontSize: 12, color: colors.muted, marginTop: 1 },
+
+  // Reflections
+  reflectionRow: { flexDirection: 'row', gap: 12, marginTop: 4 },
+  reflectionStat: {
+    flex: 1,
+    backgroundColor: colors.bg,
+    borderRadius: 10,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  reflectionValue: { fontSize: 22, fontWeight: '700', marginBottom: 2 },
+  reflectionLabel: { fontSize: 11, color: colors.dim, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
 
   // Chart
   chartWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 110, paddingTop: 8 },

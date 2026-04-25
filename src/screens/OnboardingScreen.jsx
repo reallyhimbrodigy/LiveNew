@@ -20,19 +20,19 @@ const STRESS_OPTIONS = [
   { label: 'Good', value: 'good', emoji: '\u{1F60C}' },
   { label: 'Okay', value: 'okay', emoji: '\u{1F610}' },
   { label: 'Stressed', value: 'stressed', emoji: '\u{1F630}' },
-  { label: 'Overwhelmed', value: 'overwhelmed', emoji: '\u{1F92F}' },
+  { label: 'Overwhelmed', value: 'overwhelmed', emoji: '\u{1F635}‍\u{1F4AB}' },
 ];
 
 const SLEEP_OPTIONS = [
   { label: 'Great', value: 'great', emoji: '\u{1F31F}' },
-  { label: 'OK', value: 'okay', emoji: '\u{1F634}' },
+  { label: 'OK', value: 'okay', emoji: '\u{1F610}' },
   { label: 'Rough', value: 'rough', emoji: '\u{1F62B}' },
 ];
 
 const ENERGY_OPTIONS = [
   { label: 'High', value: 'high', emoji: '\u26A1' },
-  { label: 'Medium', value: 'medium', emoji: '\u{1F44C}' },
-  { label: 'Low', value: 'low', emoji: '\u{1F50B}' },
+  { label: 'Medium', value: 'medium', emoji: '\u{1F642}' },
+  { label: 'Low', value: 'low', emoji: '\u{1FAAB}' },
 ];
 
 function LoadingAnimation() {

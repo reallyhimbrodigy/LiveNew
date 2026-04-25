@@ -57,7 +57,11 @@ export function logError(entry) {
   }
 }
 
+const DEBUG_ENABLED =
+  process.env.LIVENEW_LOG_DEBUG === "1" || process.env.NODE_ENV !== "production";
+
 export function logDebug(entry) {
+  if (!DEBUG_ENABLED) return;
   const formatted = formatEntry(entry);
   if (typeof formatted === "string") {
     console.debug(formatted);

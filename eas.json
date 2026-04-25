@@ -25,5 +25,13 @@
         "autoIncrement": true
       }
     }
+  },
+  "submit": {
+    "production": {
+      "ios": {
+        "appleId": "zaclibman@gmail.com",
+        "ascAppId": "6744594498"
+      }
+    }
   }
 }

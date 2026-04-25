@@ -51,7 +51,7 @@ RULES:
 11. Titles must be immediately clear when read alone — someone should understand what to do from just the title. Good: "Cold shower finish", "Eat before your energy dips". Bad: "Sit before you eat", "Look at something far away" — these are confusing without context.
 
 RIGHT NOW ZONE:
-One or two sentences for each time of day. A quick insight tied to this moment and this user's state. Like glancing at a smart watch — you read it in 3 seconds and it shifts how you think about the next hour.
+ONE sentence. Maybe two if the second is short. Glanceable. Tied to this moment and this user's state. Read in 3 seconds, shifts how they think about the next hour. Never lecture. Never over-explain. Examples of the right length: "Your cortisol peaked 20 minutes ago — get outside before you check your phone." or "This is the dip. Eat protein before it hits, not after." If you write more than 25 words, you're writing too much.
 
 STRESS RELIEF:
 One physical thing they can do in 10 seconds. "Press your palm into your chest. Exhale slow. Three times." That's the whole thing.
@@ -62,10 +62,10 @@ A short reflection question that references something specific from today's plan
 Return ONLY this JSON:
 {
   "rightNow": {
-    "morning": "1-2 sentences",
-    "afternoon": "1-2 sentences",
-    "evening": "1-2 sentences",
-    "night": "1-2 sentences"
+    "morning": "ONE sentence (max 25 words). Glanceable.",
+    "afternoon": "ONE sentence (max 25 words). Glanceable.",
+    "evening": "ONE sentence (max 25 words). Glanceable.",
+    "night": "ONE sentence (max 25 words). Glanceable."
   },
   "plan": [
     {

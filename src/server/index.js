@@ -2328,7 +2328,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/profile/update",
     "/v1/account/delete",
   ]);
-  console.log("[SUPABASE_ROUTE_CHECK]", pathname, supabaseRoutes.has(pathname));
+  logDebug({ tag: "SUPABASE_ROUTE_CHECK", pathname, hit: supabaseRoutes.has(pathname) });
   if (!supabaseRoutes.has(pathname)) return false;
 
   const flags = await getFeatureFlags();
@@ -2350,7 +2350,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         res.livenewUserId = auth.userId;
       }
       const payload = await buildSupabaseBootstrapPayload({ userId: auth.userId, userProfile: profile, flags });
-      console.log("[BOOTSTRAP_RESPONSE]", JSON.stringify({ userId: auth.userId, uiState: payload?.uiState, consent: payload?.consent, profile: payload?.profile }));
+      logDebug({ tag: "BOOTSTRAP_RESPONSE", userId: auth.userId, uiState: payload?.uiState, consent: payload?.consent, profile: payload?.profile });
       assertBootstrapContract(payload);
       sendJson(res, 200, payload, auth.userId || null);
     } catch (bootstrapErr) {
@@ -2478,7 +2478,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     if (!requireCsrf(req, res)) return true;
 
     const userId = auth.userId;
-    console.log("[ACCOUNT_DELETE] starting", { userId });
+    logDebug({ tag: "ACCOUNT_DELETE", phase: "starting", userId });
 
     try {
       const tables = ["checkin", "event", "user_profile", "subscription"];
@@ -2508,7 +2508,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         `ln_refresh=; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=0`,
       ]);
 
-      console.log("[ACCOUNT_DELETE] complete", { userId });
+      logDebug({ tag: "ACCOUNT_DELETE", phase: "complete", userId });
       sendJson(res, 200, { ok: true }, userId);
       return true;
     } catch (err) {
@@ -3136,6 +3136,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     let moveEvents = [];
     let resetEvents = [];
     let winddownEvents = [];
+    let reflectionEvents = [];
     try {
       const userSupabase = supabaseForUser(auth.jwt);
       const { data: checkInRows, error: checkInError } = await userSupabase
@@ -3184,12 +3185,27 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         // Add feedback completions to the total count
         resetEvents = resetEvents.concat(feedbackRows);
       }
+
+      // Pull last 14 evening reflections so we can show the loop closing
+      const { data: reflectionRows, error: reflectionError } = await userSupabase
+        .from("event")
+        .select("date_key, payload")
+        .eq("user_id", auth.userId)
+        .eq("type", "reflection_submitted")
+        .order("date_key", { ascending: true });
+      if (!reflectionError && Array.isArray(reflectionRows)) {
+        reflectionEvents = reflectionRows
+          .map((r) => ({ date: r.date_key, feeling: r?.payload?.feeling }))
+          .filter((r) => r.feeling)
+          .slice(-14);
+      }
     } catch (err) {
       console.error("[PROGRESS_QUERY_ERROR]", err?.message);
     }
 
-    console.log("[PROGRESS_CHECKINS]", JSON.stringify(checkIns?.slice(0, 3)));
-    console.log("[PROGRESS_DEBUG]", {
+    logDebug({ tag: "PROGRESS_CHECKINS", sample: checkIns?.slice(0, 3) });
+    logDebug({
+      tag: "PROGRESS_DEBUG",
       checkInCount: checkIns.length,
       resetEvents: resetEvents.length,
       moveEvents: moveEvents.length,
@@ -3212,6 +3228,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         movementCompleted: moveEvents.length,
         winddownsCompleted: winddownEvents.length,
       },
+      reflections: reflectionEvents,
     };
 
     let insight = null;
@@ -5465,9 +5482,7 @@ const server = http.createServer(async (req, res) => {
   const authRedirectRoutes = new Set(['/login', '/login.html', '/signup', '/signup.html']);
 
   if (req.method === "GET" && appRedirectRoutes.has(pathname)) {
-    // Once you have an App Store URL, replace this with:
-    // res.writeHead(302, { Location: 'https://apps.apple.com/app/livenew/idXXXXXXXXXX' });
-    res.writeHead(302, { Location: '/' });
+    res.writeHead(302, { Location: 'https://apps.apple.com/app/id6744594498' });
     res.end();
     return;
   }
@@ -5492,7 +5507,7 @@ const server = http.createServer(async (req, res) => {
       if (!token) {
         decision = "no_token";
         res.writeHead(302, { Location: "/login.html", "X-LN-AUTH": "redirect:no_token" });
-        console.log("[gate]", { path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
+        logDebug({ tag: "gate", path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
         res.end();
         return;
       }
@@ -5520,12 +5535,12 @@ const server = http.createServer(async (req, res) => {
           "X-LN-AUTH": "redirect:token_invalid",
           "Set-Cookie": "ln_token=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
         });
-        console.log("[gate]", { path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
+        logDebug({ tag: "gate", path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
         res.end();
         return;
       }
       res.setHeader("X-LN-AUTH", "ok");
-      console.log("[gate]", { path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
+      logDebug({ tag: "gate", path: pathname, hasCookie: Boolean(cookieTok), hasBearer: Boolean(bearer), decision });
       res.livenewUserId = user.id || null;
     }
     issueCsrfToken(res);
@@ -5927,7 +5942,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 500, { ok: false, code: "ACCOUNT_CHECK_FAILED" });
         return;
       }
-      console.log("[auth][signup] email=%s exists=%s", emailLower, exists);
+      logDebug({ tag: "auth.signup", email: emailLower, exists });
       res.setHeader("X-LN-SIGNUP-PATH", exists ? "exists" : "new");
       if (exists) {
         sendJson(res, 409, { ok: false, code: "ACCOUNT_EXISTS" });
@@ -5981,11 +5996,7 @@ const server = http.createServer(async (req, res) => {
             // Don't fail signup if consent save fails — they can accept later
           }
         }
-        console.log("[auth][signup] ok", {
-          email,
-          redirectTo,
-          userId: newUserId,
-        });
+        logDebug({ tag: "auth.signup", phase: "ok", email, redirectTo, userId: newUserId });
         sendJson(res, 200, {
           ok: true,
           needsEmailConfirm: !data?.session,
@@ -6067,7 +6078,7 @@ const server = http.createServer(async (req, res) => {
           `ln_refresh=${encodeURIComponent(refreshToken)}; Path=/; HttpOnly; SameSite=Lax${secure}; Max-Age=${maxAge * 24}`,
         ]);
 
-        console.log("[auth][login] ok", { email: emailLower, userId: user?.id });
+        logDebug({ tag: "auth.login", phase: "ok", email: emailLower, userId: user?.id });
 
         sendJson(res, 200, {
           ok: true,
@@ -6115,7 +6126,7 @@ const server = http.createServer(async (req, res) => {
           });
           return;
         }
-        console.log("[auth][resend] ok", { email, redirectTo, data: Boolean(data) });
+        logDebug({ tag: "auth.resend", phase: "ok", email, redirectTo, data: Boolean(data) });
         sendJson(res, 200, { ok: true });
         return;
       } catch (err) {
@@ -10996,7 +11007,7 @@ server.listen(PORT, () => {
   logInfo(`LiveNew server listening on http://localhost:${PORT}`);
   const publicOriginClean = PUBLIC_ORIGIN;
   const callbackUrl = CALLBACK_URL;
-  console.log("[auth] PUBLIC_ORIGIN=%s CALLBACK_URL=%s", publicOriginClean, callbackUrl);
+  logDebug({ tag: "auth.config", PUBLIC_ORIGIN: publicOriginClean, CALLBACK_URL: callbackUrl });
   if (PUBLIC_ORIGIN) {
     logInfo({
       event: "auth_callback_url",
