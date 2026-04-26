@@ -26,7 +26,21 @@ const ENERGY_OPTIONS = [
   { label: 'Low', value: 'low', sub: 'dragging' },
 ];
 
-function PressRow({ onPress, children }) {
+// Day-type tells the AI what shape today actually has, regardless of the user's
+// stored typical routine. Smart-defaulted by day-of-week, override in one tap.
+const DAY_TYPE_OPTIONS = [
+  { label: 'Same as usual', value: 'usual', sub: 'follow my regular routine' },
+  { label: 'Free day', value: 'free', sub: 'no work, no school, no obligations' },
+  { label: 'Traveling', value: 'travel', sub: 'on the move, away from home' },
+  { label: 'Sick or off', value: 'off', sub: 'pulling back, gentler today' },
+];
+
+function defaultDayType() {
+  const dow = new Date().getDay(); // 0=Sun, 6=Sat
+  return dow === 0 || dow === 6 ? 'free' : 'usual';
+}
+
+function PressRow({ onPress, children, selected }) {
   const scale = useRef(new Animated.Value(1)).current;
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
@@ -34,7 +48,7 @@ function PressRow({ onPress, children }) {
         onPressIn={() => Animated.spring(scale, { toValue: 0.98, useNativeDriver: true, speed: 60, bounciness: 0 }).start()}
         onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 4 }).start()}
         onPress={onPress}
-        style={s.optionRow}
+        style={[s.optionRow, selected && s.optionRowSelected]}
       >
         {children}
       </Pressable>
@@ -74,12 +88,15 @@ export default function StressTapScreen({ navigation }) {
   const [step, setStep] = useState(1);
   const [stress, setStress] = useState(null);
   const [sleep, setSleep] = useState(null);
+  const [energy, setEnergy] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const generatePlan = useAuthStore(s => s.generatePlan);
   const skipToday = useAuthStore(s => s.skipToday);
+
+  const totalSteps = 4;
 
   const animateTransition = (callback) => {
     Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
@@ -100,7 +117,13 @@ export default function StressTapScreen({ navigation }) {
     animateTransition(() => setStep(3));
   };
 
-  const handleEnergy = async (option) => {
+  const handleEnergy = (option) => {
+    tapMedium();
+    setEnergy(option.value);
+    animateTransition(() => setStep(4));
+  };
+
+  const handleDayType = async (option) => {
     tapMedium();
     setError('');
     setLoading(true);
@@ -112,7 +135,7 @@ export default function StressTapScreen({ navigation }) {
 
     try {
       await Promise.race([
-        generatePlan({ stress, sleepQuality: sleep, energy: option.value }),
+        generatePlan({ stress, sleepQuality: sleep, energy, dayContext: option.value }),
         timeout,
       ]);
       clearTimeout(timeoutId);
@@ -123,7 +146,7 @@ export default function StressTapScreen({ navigation }) {
       else if (err.message === 'AUTH_EXPIRED') setError('Session expired. Please log in again.');
       else if (err.code === 'NETWORK_ERROR') setError('Check your internet connection.');
       else setError('Something went wrong. Tap to try again.');
-      setStep(3);
+      setStep(4);
       setLoading(false);
     }
   };
@@ -131,7 +154,8 @@ export default function StressTapScreen({ navigation }) {
   const handleBack = () => {
     tapMedium();
     animateTransition(() => {
-      if (step === 3) setStep(2);
+      if (step === 4) setStep(3);
+      else if (step === 3) setStep(2);
       else if (step === 2) { setStep(1); setStress(null); }
     });
   };
@@ -142,9 +166,24 @@ export default function StressTapScreen({ navigation }) {
     navigation.replace('TodayMain');
   };
 
-  const stepHeading = { 1: 'How are you feeling?', 2: 'How did you sleep?', 3: 'Energy right now?' };
-  const options = step === 1 ? STRESS_OPTIONS : step === 2 ? SLEEP_OPTIONS : ENERGY_OPTIONS;
-  const handler = step === 1 ? handleStress : step === 2 ? handleSleep : handleEnergy;
+  const stepHeading = {
+    1: 'How are you feeling?',
+    2: 'How did you sleep?',
+    3: 'Energy right now?',
+    4: 'Anything different about today?',
+  };
+  const stepSub = {
+    4: 'Two seconds — so today\'s plan fits the day you\'re actually having.',
+  };
+  const options = step === 1 ? STRESS_OPTIONS
+    : step === 2 ? SLEEP_OPTIONS
+    : step === 3 ? ENERGY_OPTIONS
+    : DAY_TYPE_OPTIONS;
+  const handler = step === 1 ? handleStress
+    : step === 2 ? handleSleep
+    : step === 3 ? handleEnergy
+    : handleDayType;
+  const defaultSelected = step === 4 ? defaultDayType() : null;
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
@@ -152,7 +191,7 @@ export default function StressTapScreen({ navigation }) {
 
         {!loading && (
           <View style={s.progressTrack}>
-            <View style={[s.progressFill, { width: `${(step / 3) * 100}%` }]} />
+            <View style={[s.progressFill, { width: `${(step / totalSteps) * 100}%` }]} />
           </View>
         )}
 
@@ -167,12 +206,17 @@ export default function StressTapScreen({ navigation }) {
             )}
 
             <Text style={s.heading}>{stepHeading[step]}</Text>
+            {stepSub[step] && <Text style={s.subheading}>{stepSub[step]}</Text>}
 
             {error ? <Text style={s.error}>{error}</Text> : null}
 
             <View style={s.list}>
               {options.map(option => (
-                <PressRow key={option.value} onPress={() => handler(option)}>
+                <PressRow
+                  key={option.value}
+                  onPress={() => handler(option)}
+                  selected={defaultSelected === option.value}
+                >
                   <View style={s.optionContent}>
                     <Text style={s.optionLabel}>{option.label}</Text>
                     {option.sub && <Text style={s.optionSub}>{option.sub}</Text>}
@@ -217,9 +261,16 @@ const s = StyleSheet.create({
     fontSize: 30,
     color: colors.text,
     textAlign: 'left',
-    marginBottom: 28,
+    marginBottom: 8,
     letterSpacing: 0.2,
     lineHeight: 36,
+  },
+  subheading: {
+    fontFamily: fonts.displayItalic,
+    fontSize: 14,
+    color: colors.muted,
+    marginBottom: 24,
+    lineHeight: 20,
   },
 
   error: {
@@ -229,7 +280,7 @@ const s = StyleSheet.create({
     fontStyle: 'italic',
   },
 
-  list: { gap: 10 },
+  list: { gap: 10, marginTop: 8 },
 
   optionRow: {
     flexDirection: 'row',
@@ -240,6 +291,10 @@ const s = StyleSheet.create({
     borderRadius: 14,
     paddingVertical: 18,
     paddingHorizontal: 20,
+  },
+  optionRowSelected: {
+    borderColor: colors.goldBorder,
+    backgroundColor: colors.goldSoft,
   },
   optionContent: { flex: 1, marginRight: 8 },
   optionLabel: {

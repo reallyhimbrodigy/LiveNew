@@ -173,6 +173,16 @@ Bad shape: "Did you do X?", "Was Y helpful?", "Have you tried Z?"
 [FIRST DAY HANDLING]
 If this is the user's first day (no plan history): keep the plan gentle. Foundational items only — light in morning, water on waking, phone out of bedroom, eat protein before noon, no screens for 60 minutes before bed. Don't ask for big shifts. The first day teaches the user what LiveNew does; it doesn't try to fix everything.
 
+[TODAY'S SHAPE — the user told you what kind of day this is]
+At check-in the user picked one of these for today, and you'll see it as "Today's shape: <value>" in the user message. Treat this as the AUTHORITATIVE signal for what today looks like, overriding the stored routine when they conflict.
+
+- "usual" → follow the user's stored typical routine. Anchor plan items to it.
+- "free" → the user has no work, no school, no fixed obligations today. The stored routine doesn't apply. Use weekend-shape rhythms: later wake, longer breakfast, no commute, no business hours, social or recreational anchors. Wind-down still matters.
+- "travel" → the user is on the move. They don't have their normal kitchen, gym, or quiet space. Plan around portability — actions doable in a car, in transit, in a hotel room. Anchors: airport, terminal, hotel check-in, dinner out.
+- "off" → sick or pulling back. Make today gentler than usual. Shorter list of asks. No anything-strenuous. Anchors: bed, couch, kitchen, short walk if possible.
+
+When dayContext is anything other than "usual", DO NOT reference work hours, school hours, commute, or any business-day moment from the stored routine. Build today around the actual shape the user just told you they're having.
+
 [OUTPUT — JSON ONLY, NOTHING ELSE]
 {
   "rightNow": {
@@ -199,7 +209,7 @@ If this is the user's first day (no plan history): keep the plan gentle. Foundat
   "eveningPrompt": "Short open-ended reflection question."
 }`;
 
-export async function generateDayPlan({ stressLabel, sleepQuality, energy, routine, goal, history }) {
+export async function generateDayPlan({ stressLabel, sleepQuality, energy, dayContext, routine, goal, history }) {
   const stressPhrase = stressLabel === "overwhelmed" ? "overwhelmed"
     : stressLabel === "stressed" ? "stressed"
     : stressLabel === "good" ? "calm"
@@ -217,6 +227,8 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
     : hour < 12 ? "late morning"
     : hour < 17 ? "afternoon"
     : "evening";
+
+  const dayContextValue = dayContext || "usual";
 
   const isFirstDay = !!history?.isFirstDay;
   const hasRoutine = routine && routine.length > 5;
@@ -243,8 +255,12 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
   lines.push(`Today: I'm feeling ${stressPhrase}. ${sleepPhrase}. My ${energyPhrase}.`);
   lines.push("");
 
-  // 3. Routine.
-  lines.push(`My routine: ${routineText}`);
+  // 3. Today's shape — authoritative signal from check-in.
+  lines.push(`Today's shape: ${dayContextValue}.`);
+  lines.push("");
+
+  // 4. Routine — typical baseline. Subordinate to today's shape when they conflict.
+  lines.push(`My typical routine: ${routineText}`);
   lines.push("");
 
   // 4. Weekly focus continuity.

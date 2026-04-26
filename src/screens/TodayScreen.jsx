@@ -212,6 +212,23 @@ export default function TodayScreen({ navigation }) {
     .map((item, originalIndex) => ({ ...item, _idx: originalIndex }))
     .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
+  // Split into upcoming + past so the screen leads with what's actually next.
+  // An item is "past" if its time has elapsed AND it isn't currently expanded
+  // (don't yank an item out of view while the user is reading it).
+  const nowMinutes = (() => {
+    const n = new Date();
+    return n.getHours() * 60 + n.getMinutes();
+  })();
+  const upcomingItems = planItems.filter(i =>
+    expandedIndex === i._idx || timeToMinutes(i.time) >= nowMinutes
+  );
+  const pastItems = planItems.filter(i =>
+    expandedIndex !== i._idx && timeToMinutes(i.time) < nowMinutes
+  );
+  const nextUpIdx = upcomingItems.find(i => !completed[i._idx])?._idx;
+
+  const [pastExpanded, setPastExpanded] = useState(false);
+
   const doneCount = planItems.filter(i => completed[i._idx]).length;
   const rightNowText = todayPlan?.rightNow?.[timeOfDay] || null;
   const goalThread = todayPlan?.goalThread || null;
@@ -398,14 +415,17 @@ export default function TodayScreen({ navigation }) {
           </View>
         ) : null}
 
-        {/* Plan */}
-        <Text style={s.sectionLabel}>{inWindDown ? "TODAY'S PLAN" : 'YOUR PLAN'}</Text>
+        {/* Plan — upcoming first, past collapsed at the bottom */}
+        {upcomingItems.length > 0 && (
+          <Text style={s.sectionLabel}>{inWindDown ? "TODAY'S PLAN" : 'WHAT\'S NEXT'}</Text>
+        )}
 
-        {planItems.map((item, listIdx) => {
+        {upcomingItems.map((item, listIdx) => {
           const idx = item._idx;
           const isDone = !!completed[idx];
           const isExpanded = expandedIndex === idx && !isDone;
           const isFirst = listIdx === 0;
+          const isNext = idx === nextUpIdx && !inWindDown;
           const timeStr = formatTime(item.time);
           const hasTime = !!timeStr;
 
@@ -417,6 +437,7 @@ export default function TodayScreen({ navigation }) {
               style={[
                 s.planCard,
                 !isFirst && { marginTop: 8 },
+                isNext && s.planCardNext,
                 isExpanded && s.planCardExpanded,
                 isDone && s.planCardDone,
               ]}
@@ -465,6 +486,58 @@ export default function TodayScreen({ navigation }) {
             </PressCard>
           );
         })}
+
+        {/* Earlier today — collapsible, shows past items so they're still accessible */}
+        {pastItems.length > 0 && (
+          <View style={s.pastSection}>
+            <Pressable
+              style={s.pastHeader}
+              onPress={() => {
+                tapLight();
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setPastExpanded(p => !p);
+              }}
+            >
+              <Text style={s.pastHeaderText}>
+                Earlier today ({pastItems.filter(i => completed[i._idx]).length} of {pastItems.length} done)
+              </Text>
+              <Text style={s.pastChevron}>{pastExpanded ? '▾' : '▸'}</Text>
+            </Pressable>
+            {pastExpanded && pastItems.map((item, listIdx) => {
+              const idx = item._idx;
+              const isDone = !!completed[idx];
+              const timeStr = formatTime(item.time);
+              const hasTime = !!timeStr;
+              return (
+                <PressCard
+                  key={idx}
+                  onPress={() => handleTap(item)}
+                  disabled={isDone}
+                  style={[s.planCard, s.planCardPast, listIdx > 0 && { marginTop: 8 }, isDone && s.planCardDone]}
+                >
+                  <View style={s.planTopRow}>
+                    {hasTime ? (
+                      <View style={s.planTimeWrap}>
+                        <Text style={[s.planTime, s.planTimePast, isDone && s.planTextDone]}>{timeStr}</Text>
+                      </View>
+                    ) : null}
+                    <View style={s.planContent}>
+                      <Text style={[s.planTitle, isDone && s.planTextDone]} numberOfLines={2}>
+                        {item.title}
+                      </Text>
+                      {item.moment && <Text style={s.planMoment} numberOfLines={1}>{item.moment}</Text>}
+                    </View>
+                    {isDone ? (
+                      <View style={s.checkDone}><Text style={s.checkMark}>{'✓'}</Text></View>
+                    ) : (
+                      <View style={s.checkEmpty} />
+                    )}
+                  </View>
+                </PressCard>
+              );
+            })}
+          </View>
+        )}
 
         {/* Routine upgrade prompt */}
         {!hasRoutine && !showRoutinePrompt && (streak >= 2 || doneCount >= 1) && (
@@ -721,7 +794,41 @@ const s = StyleSheet.create({
     borderColor: colors.goldBorder,
     backgroundColor: colors.goldSoft,
   },
+  planCardNext: {
+    borderLeftWidth: 3,
+    borderLeftColor: colors.gold,
+  },
+  planCardPast: {
+    backgroundColor: colors.bg,
+    borderColor: colors.line,
+    opacity: 0.7,
+  },
+  planTimePast: { color: colors.muted },
   planCardDone: { opacity: 0.5 },
+
+  // Earlier-today collapsed section
+  pastSection: {
+    marginTop: 28,
+  },
+  pastHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    marginBottom: 8,
+  },
+  pastHeaderText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.dim,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+  },
+  pastChevron: {
+    color: colors.dim,
+    fontSize: 12,
+  },
   planTopRow: {
     flexDirection: 'row',
     alignItems: 'center',
