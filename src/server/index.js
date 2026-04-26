@@ -2945,13 +2945,6 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       // Build AI history context from yesterday + recent days
       const aiHistory = await buildAIHistory(supabaseForUser(auth.jwt), auth.userId, dateKey);
 
-      // Day-type chosen at check-in. Authoritative signal for what shape
-      // today actually has, regardless of stored routine.
-      const validDayContexts = new Set(["usual", "free", "travel", "off"]);
-      const dayContext = validDayContexts.has(checkInRawSource?.dayContext)
-        ? checkInRawSource.dayContext
-        : "usual";
-
       // AI-powered personalized plan
       let dayPlan = null;
       try {
@@ -2959,7 +2952,6 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           stressLabel,
           sleepQuality: sleepLabel,
           energy: energyLabel,
-          dayContext,
           routine: checkIn.routine || "",
           goal: checkIn.goal || "",
           history: aiHistory,

@@ -76,18 +76,6 @@ function timeToMinutes(t) {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
-function formatTime(t) {
-  if (typeof t !== 'string') return '';
-  const m = t.match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return '';
-  let h = Number(m[1]);
-  const mm = m[2];
-  const period = h >= 12 ? 'PM' : 'AM';
-  if (h === 0) h = 12;
-  else if (h > 12) h -= 12;
-  return `${h}:${mm} ${period}`;
-}
-
 function PressCard({ onPress, style, children, disabled }) {
   const scale = useRef(new Animated.Value(1)).current;
   return (
@@ -206,28 +194,16 @@ export default function TodayScreen({ navigation }) {
     }, [completed, todayPlan])
   );
 
-  // Sort plan items chronologically by time. Defense-in-depth — server already sorts.
+  // Sort plan items in arc order (chronological by hidden time field).
+  // Time isn't displayed — items are MOMENT-anchored. The arc gives them
+  // a natural sequence: morning → midday → afternoon → evening → wind-down.
   const rawItems = todayPlan?.plan || [];
   const planItems = [...rawItems]
     .map((item, originalIndex) => ({ ...item, _idx: originalIndex }))
     .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
-  // Split into upcoming + past so the screen leads with what's actually next.
-  // An item is "past" if its time has elapsed AND it isn't currently expanded
-  // (don't yank an item out of view while the user is reading it).
-  const nowMinutes = (() => {
-    const n = new Date();
-    return n.getHours() * 60 + n.getMinutes();
-  })();
-  const upcomingItems = planItems.filter(i =>
-    expandedIndex === i._idx || timeToMinutes(i.time) >= nowMinutes
-  );
-  const pastItems = planItems.filter(i =>
-    expandedIndex !== i._idx && timeToMinutes(i.time) < nowMinutes
-  );
-  const nextUpIdx = upcomingItems.find(i => !completed[i._idx])?._idx;
-
-  const [pastExpanded, setPastExpanded] = useState(false);
+  // Emphasize the first un-done item as "next up" — wherever the user is in their day.
+  const nextUpIdx = planItems.find(i => !completed[i._idx])?._idx;
 
   const doneCount = planItems.filter(i => completed[i._idx]).length;
   const rightNowText = todayPlan?.rightNow?.[timeOfDay] || null;
@@ -379,7 +355,7 @@ export default function TodayScreen({ navigation }) {
           </Pressable>
         </View>
 
-        {/* Wind-down recap — only in evening, replaces Right Now hero */}
+        {/* Wind-down recap — replaces Right Now in the evening */}
         {inWindDown ? (
           <View style={s.windDownCard}>
             <Text style={s.windDownLabel}>TODAY, BRIEFLY</Text>
@@ -407,27 +383,40 @@ export default function TodayScreen({ navigation }) {
             <View style={s.rightNowAccent} />
             <Text style={s.rightNowLabel}>RIGHT NOW</Text>
             <Text style={s.rightNowText}>{rightNowText}</Text>
-            {goalThread?.weeklyFocus && (
-              <Text style={s.goalThreadLine}>
-                {goalThread.weeklyFocus}
-              </Text>
-            )}
           </View>
         ) : null}
 
-        {/* Plan — upcoming first, past collapsed at the bottom */}
-        {upcomingItems.length > 0 && (
-          <Text style={s.sectionLabel}>{inWindDown ? "TODAY'S PLAN" : 'WHAT\'S NEXT'}</Text>
+        {/* Goal thread — your goal, this week's focus, today's thread */}
+        {(() => {
+          if (inWindDown) return null;
+          const lines = [];
+          if (profile?.goal) lines.push({ label: 'Your goal', value: truncateGoal(profile.goal) });
+          if (goalThread?.weeklyFocus) lines.push({ label: 'This week\'s focus', value: goalThread.weeklyFocus });
+          if (goalThread?.todayConnection) lines.push({ label: 'Today\'s thread', value: goalThread.todayConnection });
+          if (lines.length === 0) return null;
+          return (
+            <View style={s.goalCard}>
+              {lines.map((line, i) => (
+                <View key={line.label} style={[s.goalLine, i === 0 && { borderTopWidth: 0, paddingTop: 14 }]}>
+                  <Text style={s.goalLineLabel}>{line.label}</Text>
+                  <Text style={s.goalLineValue}>{line.value}</Text>
+                </View>
+              ))}
+            </View>
+          );
+        })()}
+
+        {/* Plan — moment-anchored knowledge cards in arc order */}
+        {planItems.length > 0 && (
+          <Text style={s.sectionLabel}>{inWindDown ? "TODAY'S PLAN" : 'YOUR PLAN'}</Text>
         )}
 
-        {upcomingItems.map((item, listIdx) => {
+        {planItems.map((item, listIdx) => {
           const idx = item._idx;
           const isDone = !!completed[idx];
           const isExpanded = expandedIndex === idx && !isDone;
           const isFirst = listIdx === 0;
           const isNext = idx === nextUpIdx && !inWindDown;
-          const timeStr = formatTime(item.time);
-          const hasTime = !!timeStr;
 
           return (
             <PressCard
@@ -443,20 +432,15 @@ export default function TodayScreen({ navigation }) {
               ]}
             >
               <View style={s.planTopRow}>
-                {hasTime ? (
-                  <View style={s.planTimeWrap}>
-                    <Text style={[s.planTime, isDone && s.planTextDone]}>{timeStr}</Text>
-                  </View>
-                ) : null}
                 <View style={s.planContent}>
-                  <Text style={[s.planTitle, isDone && s.planTextDone]} numberOfLines={isExpanded ? undefined : 2}>
-                    {item.title}
-                  </Text>
                   {item.moment && (
-                    <Text style={s.planMoment} numberOfLines={1}>
+                    <Text style={s.planMomentLabel} numberOfLines={1}>
                       {item.moment}
                     </Text>
                   )}
+                  <Text style={[s.planTitle, isDone && s.planTextDone]} numberOfLines={isExpanded ? undefined : 2}>
+                    {item.title}
+                  </Text>
                 </View>
                 {isDone ? (
                   <View style={s.checkDone}>
@@ -486,58 +470,6 @@ export default function TodayScreen({ navigation }) {
             </PressCard>
           );
         })}
-
-        {/* Earlier today — collapsible, shows past items so they're still accessible */}
-        {pastItems.length > 0 && (
-          <View style={s.pastSection}>
-            <Pressable
-              style={s.pastHeader}
-              onPress={() => {
-                tapLight();
-                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                setPastExpanded(p => !p);
-              }}
-            >
-              <Text style={s.pastHeaderText}>
-                Earlier today ({pastItems.filter(i => completed[i._idx]).length} of {pastItems.length} done)
-              </Text>
-              <Text style={s.pastChevron}>{pastExpanded ? '▾' : '▸'}</Text>
-            </Pressable>
-            {pastExpanded && pastItems.map((item, listIdx) => {
-              const idx = item._idx;
-              const isDone = !!completed[idx];
-              const timeStr = formatTime(item.time);
-              const hasTime = !!timeStr;
-              return (
-                <PressCard
-                  key={idx}
-                  onPress={() => handleTap(item)}
-                  disabled={isDone}
-                  style={[s.planCard, s.planCardPast, listIdx > 0 && { marginTop: 8 }, isDone && s.planCardDone]}
-                >
-                  <View style={s.planTopRow}>
-                    {hasTime ? (
-                      <View style={s.planTimeWrap}>
-                        <Text style={[s.planTime, s.planTimePast, isDone && s.planTextDone]}>{timeStr}</Text>
-                      </View>
-                    ) : null}
-                    <View style={s.planContent}>
-                      <Text style={[s.planTitle, isDone && s.planTextDone]} numberOfLines={2}>
-                        {item.title}
-                      </Text>
-                      {item.moment && <Text style={s.planMoment} numberOfLines={1}>{item.moment}</Text>}
-                    </View>
-                    {isDone ? (
-                      <View style={s.checkDone}><Text style={s.checkMark}>{'✓'}</Text></View>
-                    ) : (
-                      <View style={s.checkEmpty} />
-                    )}
-                  </View>
-                </PressCard>
-              );
-            })}
-          </View>
-        )}
 
         {/* Routine upgrade prompt */}
         {!hasRoutine && !showRoutinePrompt && (streak >= 2 || doneCount >= 1) && (
@@ -761,15 +693,34 @@ const s = StyleSheet.create({
     lineHeight: 27,
     letterSpacing: 0.1,
   },
-  goalThreadLine: {
-    marginTop: 16,
-    paddingTop: 14,
+  // Goal thread card — your goal / weekly focus / today's thread
+  goalCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    marginBottom: 28,
+  },
+  goalLine: {
+    paddingVertical: 12,
     borderTopWidth: 1,
     borderTopColor: colors.line,
-    fontSize: 12,
-    color: colors.muted,
-    letterSpacing: 0.5,
-    fontStyle: 'italic',
+  },
+  goalLineLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.gold,
+    letterSpacing: 1.5,
+    marginBottom: 4,
+  },
+  goalLineValue: {
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 22,
+    letterSpacing: 0.1,
   },
 
   // Section label
@@ -798,65 +749,28 @@ const s = StyleSheet.create({
     borderLeftWidth: 3,
     borderLeftColor: colors.gold,
   },
-  planCardPast: {
-    backgroundColor: colors.bg,
-    borderColor: colors.line,
-    opacity: 0.7,
-  },
-  planTimePast: { color: colors.muted },
   planCardDone: { opacity: 0.5 },
-
-  // Earlier-today collapsed section
-  pastSection: {
-    marginTop: 28,
-  },
-  pastHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 4,
-    marginBottom: 8,
-  },
-  pastHeaderText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.dim,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-  },
-  pastChevron: {
-    color: colors.dim,
-    fontSize: 12,
-  },
   planTopRow: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     paddingVertical: 18,
     paddingHorizontal: 18,
   },
-  planTimeWrap: {
-    width: 62,
-    marginRight: 14,
-  },
-  planTime: {
-    fontFamily: fonts.displayBold,
-    fontSize: 15,
+  planContent: { flex: 1, marginRight: 12 },
+  planMomentLabel: {
+    fontSize: 11,
+    fontWeight: '700',
     color: colors.gold,
-    letterSpacing: 0.2,
+    letterSpacing: 1.4,
+    marginBottom: 6,
+    textTransform: 'uppercase',
   },
-  planContent: { flex: 1, marginRight: 8 },
   planTitle: {
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
     color: colors.text,
-    lineHeight: 20,
-    marginBottom: 2,
-  },
-  planMoment: {
-    fontSize: 12,
-    color: colors.muted,
-    lineHeight: 16,
+    lineHeight: 22,
+    letterSpacing: 0.1,
   },
   planTextDone: {
     color: colors.muted,

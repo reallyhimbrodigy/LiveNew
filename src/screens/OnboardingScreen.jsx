@@ -35,19 +35,7 @@ const ENERGY_OPTIONS = [
   { label: 'Low', value: 'low', sub: 'dragging' },
 ];
 
-const DAY_TYPE_OPTIONS = [
-  { label: 'Same as usual', value: 'usual', sub: 'follow my regular routine' },
-  { label: 'Free day', value: 'free', sub: 'no work, no school, no obligations' },
-  { label: 'Traveling', value: 'travel', sub: 'on the move, away from home' },
-  { label: 'Sick or off', value: 'off', sub: 'pulling back, gentler today' },
-];
-
-function defaultDayType() {
-  const dow = new Date().getDay();
-  return dow === 0 || dow === 6 ? 'free' : 'usual';
-}
-
-function PressRow({ onPress, children, selected }) {
+function PressRow({ onPress, children }) {
   const scale = useRef(new Animated.Value(1)).current;
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
@@ -55,7 +43,7 @@ function PressRow({ onPress, children, selected }) {
         onPressIn={() => Animated.spring(scale, { toValue: 0.98, useNativeDriver: true, speed: 60, bounciness: 0 }).start()}
         onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 4 }).start()}
         onPress={onPress}
-        style={[s.optionRow, selected && s.optionRowSelected]}
+        style={s.optionRow}
       >
         {children}
       </Pressable>
@@ -111,8 +99,6 @@ export default function OnboardingScreen() {
     });
   };
 
-  const [energy, setEnergy] = useState(null);
-
   const handleGoal = (option) => {
     tapMedium();
     setGoal(option.value);
@@ -131,13 +117,7 @@ export default function OnboardingScreen() {
     animateTransition(() => setStep(4));
   };
 
-  const handleEnergy = (option) => {
-    tapMedium();
-    setEnergy(option.value);
-    animateTransition(() => setStep(5));
-  };
-
-  const handleDayType = async (option) => {
+  const handleEnergy = async (option) => {
     tapMedium();
     setError('');
     setLoading(true);
@@ -150,7 +130,7 @@ export default function OnboardingScreen() {
     try {
       await saveProfileWithoutNav({ goal });
       await Promise.race([
-        generatePlan({ stress, sleepQuality: sleep, energy, dayContext: option.value }),
+        generatePlan({ stress, sleepQuality: sleep, energy: option.value }),
         timeout,
       ]);
       clearTimeout(timeoutId);
@@ -160,7 +140,7 @@ export default function OnboardingScreen() {
       if (err.message === 'TIMEOUT') setError('Taking longer than usual. Tap to try again.');
       else if (err?.code === 'NETWORK_ERROR') setError('Check your internet connection.');
       else setError('Something went wrong. Tap to try again.');
-      setStep(5);
+      setStep(4);
       setLoading(false);
     }
   };
@@ -170,36 +150,30 @@ export default function OnboardingScreen() {
     if (step === 2) { setGoal(null); animateTransition(() => setStep(1)); }
     else if (step === 3) { setStress(null); animateTransition(() => setStep(2)); }
     else if (step === 4) { setSleep(null); animateTransition(() => setStep(3)); }
-    else if (step === 5) { setEnergy(null); animateTransition(() => setStep(4)); }
   };
 
-  const totalSteps = 5;
+  const totalSteps = 4;
 
   const stepHeading = {
     1: 'What brings you here?',
     2: 'How are you feeling?',
     3: 'How did you sleep?',
     4: 'Energy right now?',
-    5: 'Anything different about today?',
   };
   const stepSub = {
     1: 'Pick the one that matters most right now.',
     2: null,
     3: null,
     4: null,
-    5: 'Two seconds — so today\'s plan fits the day you\'re actually having.',
   };
   const stepOptions = step === 1 ? GOAL_OPTIONS
     : step === 2 ? STRESS_OPTIONS
     : step === 3 ? SLEEP_OPTIONS
-    : step === 4 ? ENERGY_OPTIONS
-    : DAY_TYPE_OPTIONS;
+    : ENERGY_OPTIONS;
   const stepHandler = step === 1 ? handleGoal
     : step === 2 ? handleStress
     : step === 3 ? handleSleep
-    : step === 4 ? handleEnergy
-    : handleDayType;
-  const defaultSelected = step === 5 ? defaultDayType() : null;
+    : handleEnergy;
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
@@ -233,7 +207,6 @@ export default function OnboardingScreen() {
                 <PressRow
                   key={option.value}
                   onPress={() => stepHandler(option)}
-                  selected={defaultSelected === option.value}
                 >
                   <View style={s.optionContent}>
                     <Text style={s.optionLabel}>{option.label}</Text>

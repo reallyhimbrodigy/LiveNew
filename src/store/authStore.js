@@ -227,8 +227,8 @@ export const useAuthStore = create((set, get) => ({
     try { api.onboardComplete(profile); } catch {}
   },
 
-  // Generate day plan — called after the 4-step check-in (stress + sleep + energy + day-type)
-  generatePlan: async ({ stress, sleepQuality, energy, dayContext }) => {
+  // Generate day plan — called after the 3-step check-in (stress + sleep + energy)
+  generatePlan: async ({ stress, sleepQuality, energy }) => {
     const profile = get().profile || {};
     const stressMap = { good: 2, okay: 5, stressed: 8, overwhelmed: 10 };
     const stressValue = stressMap[stress] || (typeof stress === 'number' ? stress : 5);
@@ -243,7 +243,6 @@ export const useAuthStore = create((set, get) => ({
       stressLabel,
       sleepQuality,   // "great" | "okay" | "rough"
       energy,         // "high" | "medium" | "low"
-      dayContext,     // "usual" | "free" | "travel" | "off"
       routine: profile.routine || '',
       goal: profile.goal || '',
     });

@@ -86,14 +86,14 @@ You translate this knowledge into specific actions tied to the user's actual day
 Generate exactly 5 plan items.
 
 Each item has:
-- time: HH:MM in 24-hour format. A concrete time pulled from the user's actual day. No nulls, no ranges.
-- moment: the specific anchor in their day ("Right after you close your laptop", "Walking to your car after lunch").
+- moment: the PRIMARY anchor — a specific moment in the user's day, expressed in human language, never a clock time. The user finds this moment in whatever shape their day happens to take. Good: "Right when you wake up", "Before your first coffee", "Before lunch", "When you sit down to start work", "After your last work thing", "Before you brush your teeth at night". Bad: "At 3:30 PM", "At noon", "Around 7am" — clocks lock the item to one shape of day; moments work in any shape.
 - title: 5-8 words, MUST make sense alone. Read just the title — does the user know what to do? If not, rewrite.
-  Good titles: "Cold water on your wrists", "Eat protein before the 3pm dip", "Phone in another room at dinner", "Stand for 60 seconds after lunch", "Two minutes of sun before email"
+  Good titles: "Cold water on your wrists", "Eat protein before the dip", "Phone in another room at dinner", "Stand for 60 seconds after lunch", "Two minutes of sun before email"
   Bad titles: "Sit before you eat", "Look at something far", "Do the thing", "Take a moment", "Notice your breath"
 - insight: 2-3 sentences. Pattern: what is, what to do, optionally why it matters in their life.
 - type: breathe | habit | food | mindset.
 - goalConnection: one sentence OR null. 2-3 of the 5 items must include a real goalConnection that traces the action to the user's specific goal. The other 2-3 leave it null. Don't force a connection where it isn't natural.
+- time: HH:MM in 24-hour format — INTERNAL ONLY. Used for notification scheduling (best-effort). Pick the most likely clock time this moment lands at for this user. The user never sees this — they only see the moment phrase. If the user's schedule shifts, the notification time is approximate; the moment still lands correctly because it's tied to their actual life event, not a clock.
 
 [LOW FRICTION, HIGH PAYOFF — never give the user homework]
 Each item must be doable in 30 seconds while standing or walking, with nothing but their body and what's already in the room. The user opens this once for the day — your job is to shift their state with small physical or attentional actions, not assign tasks.
@@ -173,15 +173,12 @@ Bad shape: "Did you do X?", "Was Y helpful?", "Have you tried Z?"
 [FIRST DAY HANDLING]
 If this is the user's first day (no plan history): keep the plan gentle. Foundational items only — light in morning, water on waking, phone out of bedroom, eat protein before noon, no screens for 60 minutes before bed. Don't ask for big shifts. The first day teaches the user what LiveNew does; it doesn't try to fix everything.
 
-[TODAY'S SHAPE — the user told you what kind of day this is]
-At check-in the user picked one of these for today, and you'll see it as "Today's shape: <value>" in the user message. Treat this as the AUTHORITATIVE signal for what today looks like, overriding the stored routine when they conflict.
+[ANY SHAPE OF DAY — moments are universal, clocks are not]
+The user's stored routine is one possible shape of one possible day. It does not constrain you. If today is the weekend, a holiday, a sick day, a travel day — the moments still exist. People still wake up. Still eat at some point. Still wind down. Still go to bed. The CLOCK times shift; the MOMENTS don't.
 
-- "usual" → follow the user's stored typical routine. Anchor plan items to it.
-- "free" → the user has no work, no school, no fixed obligations today. The stored routine doesn't apply. Use weekend-shape rhythms: later wake, longer breakfast, no commute, no business hours, social or recreational anchors. Wind-down still matters.
-- "travel" → the user is on the move. They don't have their normal kitchen, gym, or quiet space. Plan around portability — actions doable in a car, in transit, in a hotel room. Anchors: airport, terminal, hotel check-in, dinner out.
-- "off" → sick or pulling back. Make today gentler than usual. Shorter list of asks. No anything-strenuous. Anchors: bed, couch, kitchen, short walk if possible.
+So anchor every plan item to a moment, never to a clock. "Before your first coffee" works whether the user wakes at 6 or 11. "When you sit down to start your main thing" works whether their main thing is a job, a class, a workout, or a creative project. "Before bed" works whether they sleep at 9 or 1.
 
-When dayContext is anything other than "usual", DO NOT reference work hours, school hours, commute, or any business-day moment from the stored routine. Build today around the actual shape the user just told you they're having.
+Use day-of-week + history to subtly shift tone, not to lock items to weekday clocks. On a Sunday, "Before your first coffee" might happen at 11am — that's fine. The user finds the moment in their own day.
 
 [OUTPUT — JSON ONLY, NOTHING ELSE]
 {
@@ -209,7 +206,7 @@ When dayContext is anything other than "usual", DO NOT reference work hours, sch
   "eveningPrompt": "Short open-ended reflection question."
 }`;
 
-export async function generateDayPlan({ stressLabel, sleepQuality, energy, dayContext, routine, goal, history }) {
+export async function generateDayPlan({ stressLabel, sleepQuality, energy, routine, goal, history }) {
   const stressPhrase = stressLabel === "overwhelmed" ? "overwhelmed"
     : stressLabel === "stressed" ? "stressed"
     : stressLabel === "good" ? "calm"
@@ -228,13 +225,11 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, dayCo
     : hour < 17 ? "afternoon"
     : "evening";
 
-  const dayContextValue = dayContext || "usual";
-
   const isFirstDay = !!history?.isFirstDay;
   const hasRoutine = routine && routine.length > 5;
   const routineText = hasRoutine
     ? routine
-    : "I haven't shared my routine yet. Use a typical day as a placeholder — wake around 7, work 9 to 5, lunch around noon, home by 6, wind down by 10. Anchor every plan item to a concrete time even though the routine is generic.";
+    : "I haven't shared my routine — pick moment-anchors that work in any shape of day.";
 
   // Build user message in priority order — most predictive context first.
   const lines = [];
@@ -255,12 +250,9 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, dayCo
   lines.push(`Today: I'm feeling ${stressPhrase}. ${sleepPhrase}. My ${energyPhrase}.`);
   lines.push("");
 
-  // 3. Today's shape — authoritative signal from check-in.
-  lines.push(`Today's shape: ${dayContextValue}.`);
-  lines.push("");
-
-  // 4. Routine — typical baseline. Subordinate to today's shape when they conflict.
-  lines.push(`My typical routine: ${routineText}`);
+  // 3. Routine — a typical reference shape. Items must use moment anchors that
+  //    work regardless of whether today follows this shape or differs.
+  lines.push(`My typical routine (reference only — items use moments, not clocks): ${routineText}`);
   lines.push("");
 
   // 4. Weekly focus continuity.
