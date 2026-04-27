@@ -202,7 +202,31 @@ export default function TodayScreen({ navigation }) {
     .map((item, originalIndex) => ({ ...item, _idx: originalIndex }))
     .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
 
-  // Emphasize the first un-done item as "next up" — wherever the user is in their day.
+  // "Active now" = the un-done item whose internal time is closest to current
+  // time, within a ±90 min window. This is the card the user should be doing
+  // RIGHT NOW. Gets the gold treatment.
+  const activeIdx = (() => {
+    if (planItems.length === 0) return null;
+    const now = new Date();
+    const nowMin = now.getHours() * 60 + now.getMinutes();
+    let best = null;
+    let bestDiff = Infinity;
+    for (const item of planItems) {
+      if (completed[item._idx]) continue;
+      const m = (item.time || '').match(/^(\d{1,2}):(\d{2})$/);
+      if (!m) continue;
+      const itemMin = Number(m[1]) * 60 + Number(m[2]);
+      const diff = Math.abs(nowMin - itemMin);
+      if (diff < bestDiff) {
+        bestDiff = diff;
+        best = item._idx;
+      }
+    }
+    return bestDiff <= 90 ? best : null;
+  })();
+
+  // Soft "next up" emphasis on the first un-done item — only used when there
+  // isn't an active-now card to spotlight instead.
   const nextUpIdx = planItems.find(i => !completed[i._idx])?._idx;
 
   const doneCount = planItems.filter(i => completed[i._idx]).length;
@@ -416,7 +440,9 @@ export default function TodayScreen({ navigation }) {
           const isDone = !!completed[idx];
           const isExpanded = expandedIndex === idx && !isDone;
           const isFirst = listIdx === 0;
-          const isNext = idx === nextUpIdx && !inWindDown;
+          const isActive = idx === activeIdx && !inWindDown;
+          // Soft next-up only when there isn't an active card stealing the spotlight.
+          const isNext = !isActive && idx === nextUpIdx && !activeIdx && !inWindDown;
 
           return (
             <PressCard
@@ -427,18 +453,27 @@ export default function TodayScreen({ navigation }) {
                 s.planCard,
                 !isFirst && { marginTop: 8 },
                 isNext && s.planCardNext,
+                isActive && s.planCardActive,
                 isExpanded && s.planCardExpanded,
                 isDone && s.planCardDone,
               ]}
             >
               <View style={s.planTopRow}>
                 <View style={s.planContent}>
-                  {item.moment && (
-                    <Text style={s.planMomentLabel} numberOfLines={1}>
-                      {item.moment}
-                    </Text>
-                  )}
-                  <Text style={[s.planTitle, isDone && s.planTextDone]} numberOfLines={isExpanded ? undefined : 2}>
+                  <View style={s.momentRow}>
+                    {item.moment && (
+                      <Text style={[s.planMomentLabel, isActive && s.planMomentLabelActive]} numberOfLines={1}>
+                        {item.moment}
+                      </Text>
+                    )}
+                    {isActive && (
+                      <View style={s.nowBadge}>
+                        <View style={s.nowDot} />
+                        <Text style={s.nowText}>NOW</Text>
+                      </View>
+                    )}
+                  </View>
+                  <Text style={[s.planTitle, isActive && s.planTitleActive, isDone && s.planTextDone]} numberOfLines={isExpanded ? undefined : 2}>
                     {item.title}
                   </Text>
                 </View>
@@ -447,7 +482,7 @@ export default function TodayScreen({ navigation }) {
                     <Text style={s.checkMark}>{'✓'}</Text>
                   </View>
                 ) : (
-                  <View style={s.checkEmpty} />
+                  <View style={[s.checkEmpty, isActive && s.checkEmptyActive]} />
                 )}
               </View>
 
@@ -749,6 +784,59 @@ const s = StyleSheet.create({
     borderLeftWidth: 3,
     borderLeftColor: colors.gold,
   },
+  // ACTIVE NOW — gold-fill treatment. The card the user should be doing right now.
+  planCardActive: {
+    backgroundColor: 'rgba(196,168,108,0.10)',
+    borderColor: colors.goldBorder,
+    borderWidth: 1.5,
+    borderLeftWidth: 4,
+    borderLeftColor: colors.gold,
+    shadowColor: colors.gold,
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  planMomentLabelActive: {
+    color: colors.gold,
+  },
+  planTitleActive: {
+    color: colors.text,
+    fontWeight: '700',
+  },
+  checkEmptyActive: {
+    borderColor: colors.gold,
+    borderWidth: 2,
+  },
+
+  // NOW badge — inline with the moment label, on active cards only
+  momentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 6,
+    gap: 8,
+  },
+  nowBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.gold,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    gap: 5,
+  },
+  nowDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: colors.bg,
+  },
+  nowText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.bg,
+    letterSpacing: 1.4,
+  },
   planCardDone: { opacity: 0.5 },
   planTopRow: {
     flexDirection: 'row',
@@ -762,8 +850,8 @@ const s = StyleSheet.create({
     fontWeight: '700',
     color: colors.gold,
     letterSpacing: 1.4,
-    marginBottom: 6,
     textTransform: 'uppercase',
+    flexShrink: 1,
   },
   planTitle: {
     fontSize: 16,
