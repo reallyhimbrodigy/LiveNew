@@ -2779,6 +2779,97 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
   }
 
   // --- AI History Builder ---
+  // Computes a "behavior profile" — what kinds of items this user actually
+  // does vs skips, days active, streak, last reflection. Used by both the AI
+  // prompt (to adapt plan generation) and the /v1/progress endpoint (to
+  // surface pattern callouts on the Progress screen).
+  async function computeBehaviorProfile(userSupabase, userId, todayDateKey) {
+    const profile = {
+      daysActive: 0,
+      streak: 0,
+      checkInsLast14: 0,
+      totalItemsDoneLast14: 0,
+      completionsByType: { breathe: 0, food: 0, mindset: 0, habit: 0 },
+      lastReflection: null,
+    };
+    try {
+      const todayMs = new Date(todayDateKey + "T12:00:00Z").getTime();
+      const startKey14 = new Date(todayMs - 14 * 86400000).toISOString().slice(0, 10);
+
+      // Per-type completions in last 14 days
+      const { data: feedbackRows } = await userSupabase
+        .from("event")
+        .select("payload, date_key")
+        .eq("user_id", userId)
+        .eq("type", "session_feedback")
+        .gte("date_key", startKey14);
+      if (Array.isArray(feedbackRows)) {
+        profile.totalItemsDoneLast14 = feedbackRows.length;
+        for (const row of feedbackRows) {
+          const t = row?.payload?.interventionType;
+          if (t && profile.completionsByType[t] !== undefined) {
+            profile.completionsByType[t]++;
+          }
+        }
+      }
+
+      // Days active in last 14 days (unique check-in days)
+      const { data: recentCheckinRows } = await userSupabase
+        .from("checkin")
+        .select("date_key")
+        .eq("user_id", userId)
+        .gte("date_key", startKey14);
+      if (Array.isArray(recentCheckinRows)) {
+        profile.checkInsLast14 = new Set(recentCheckinRows.map((c) => c.date_key)).size;
+      }
+
+      // Total all-time days active
+      const { count: totalCount } = await userSupabase
+        .from("checkin")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", userId);
+      profile.daysActive = totalCount || 0;
+
+      // Streak — consecutive check-in days ending today or yesterday
+      const { data: allCheckinRows } = await userSupabase
+        .from("checkin")
+        .select("date_key")
+        .eq("user_id", userId)
+        .order("date_key", { ascending: false })
+        .limit(60);
+      if (Array.isArray(allCheckinRows)) {
+        const dates = new Set(allCheckinRows.map((r) => r.date_key));
+        const stepBack = (key) => {
+          const ms = new Date(key + "T12:00:00Z").getTime() - 86400000;
+          return new Date(ms).toISOString().slice(0, 10);
+        };
+        let cursor = todayDateKey;
+        let streak = 0;
+        if (!dates.has(cursor)) cursor = stepBack(cursor);
+        while (dates.has(cursor)) {
+          streak++;
+          cursor = stepBack(cursor);
+        }
+        profile.streak = streak;
+      }
+
+      // Most recent reflection
+      const { data: reflectionRows } = await userSupabase
+        .from("event")
+        .select("payload, date_key")
+        .eq("user_id", userId)
+        .eq("type", "reflection_submitted")
+        .order("date_key", { ascending: false })
+        .limit(1);
+      if (Array.isArray(reflectionRows) && reflectionRows[0]?.payload?.feeling) {
+        profile.lastReflection = reflectionRows[0].payload.feeling;
+      }
+    } catch (err) {
+      console.error("[BEHAVIOR_PROFILE_ERROR]", err?.message);
+    }
+    return profile;
+  }
+
   async function buildAIHistory(userSupabase, userId, todayDateKey) {
     const history = {};
     try {
@@ -2943,7 +3034,10 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       }, 10000);
 
       // Build AI history context from yesterday + recent days
-      const aiHistory = await buildAIHistory(supabaseForUser(auth.jwt), auth.userId, dateKey);
+      const userSupabaseForCheckin = supabaseForUser(auth.jwt);
+      const aiHistory = await buildAIHistory(userSupabaseForCheckin, auth.userId, dateKey);
+      // Behavior profile shapes the plan around what THIS user actually does.
+      aiHistory.behaviorProfile = await computeBehaviorProfile(userSupabaseForCheckin, auth.userId, dateKey);
 
       // AI-powered personalized plan
       let dayPlan = null;
@@ -3269,6 +3363,10 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         ? stressValues.slice(-7).reduce((a, b) => a + b, 0) / Math.min(stressValues.length, 7)
         : null;
 
+    // Behavior profile drives the "What we've noticed" callouts on Progress
+    // and the day-N milestone cards on Today.
+    const behaviorProfile = await computeBehaviorProfile(userSupabase, auth.userId, getLocalDateISOForUser());
+
     const progress = {
       stressTrend: checkIns.map((c) => ({ date: c.dateKey, stress: c.stress })),
       stressAvg7,
@@ -3279,6 +3377,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         winddownsCompleted: winddownEvents.length,
       },
       reflections: reflectionEvents,
+      behaviorProfile,
     };
 
     let insight = null;

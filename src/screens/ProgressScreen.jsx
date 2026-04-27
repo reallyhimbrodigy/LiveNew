@@ -64,6 +64,7 @@ export default function ProgressScreen() {
   const weeklySummary = data?.weeklySummary || null;
   const insight = data?.insight || null;
   const reflections = Array.isArray(data?.reflections) ? data.reflections : [];
+  const behaviorProfile = data?.behaviorProfile || null;
 
   // Reflection breakdown for last 7 days
   const recentReflections = reflections.slice(-7);
@@ -71,6 +72,33 @@ export default function ProgressScreen() {
     acc[r.feeling] = (acc[r.feeling] || 0) + 1;
     return acc;
   }, { better: 0, same: 0, harder: 0 });
+
+  // Pattern callouts — "what we've noticed" lines derived from the behavior
+  // profile. Only show meaningful ones, and only when there's enough data.
+  const patternCallouts = (() => {
+    if (!behaviorProfile) return [];
+    const out = [];
+    const { completionsByType = {}, totalItemsDoneLast14 = 0, daysActive = 0, checkInsLast14 = 0 } = behaviorProfile;
+    const TYPE_LABEL = { breathe: 'Breath work', food: 'Food items', mindset: 'Mindset shifts', habit: 'Habit nudges' };
+    if (daysActive < 3) return out;
+    if (totalItemsDoneLast14 >= 4) {
+      const sorted = Object.entries(completionsByType).sort((a, b) => b[1] - a[1]);
+      const top = sorted[0];
+      const bottom = sorted[sorted.length - 1];
+      if (top && top[1] >= 3) {
+        out.push(`${TYPE_LABEL[top[0]]} stick — you've internalized ${top[1]} of them.`);
+      }
+      if (bottom && bottom[1] === 0 && totalItemsDoneLast14 >= 6) {
+        out.push(`${TYPE_LABEL[bottom[0]]} aren't landing. We're easing off them.`);
+      }
+    }
+    if (checkInsLast14 >= 5) {
+      out.push(`Showing up ${checkInsLast14} of the last 14 days. The plan is shaping around you.`);
+    } else if (checkInsLast14 >= 3 && daysActive >= 3) {
+      out.push(`${daysActive} days in. Patterns will sharpen as you keep checking in.`);
+    }
+    return out.slice(0, 3);
+  })();
 
   // Calculate insights (trend is now sorted chronologically asc)
   const recentTrend = trend.slice(-7);
@@ -109,6 +137,19 @@ export default function ProgressScreen() {
           <View style={s.goalCard}>
             <Text style={s.goalLabel}>YOUR GOAL</Text>
             <Text style={s.goalText}>{truncateGoal(profile.goal)}</Text>
+          </View>
+        )}
+
+        {/* What we've noticed — pattern callouts derived from behavior profile */}
+        {patternCallouts.length > 0 && (
+          <View style={s.noticedCard}>
+            <Text style={s.noticedLabel}>WHAT WE'VE NOTICED</Text>
+            {patternCallouts.map((line, i) => (
+              <View key={i} style={[s.noticedRow, i > 0 && { borderTopWidth: 1, borderTopColor: colors.line, marginTop: 10, paddingTop: 10 }]}>
+                <View style={s.noticedDot} />
+                <Text style={s.noticedText}>{line}</Text>
+              </View>
+            ))}
           </View>
         )}
 
@@ -336,6 +377,43 @@ const s = StyleSheet.create({
     color: colors.text,
     lineHeight: 24,
     letterSpacing: 0.1,
+  },
+
+  // What we've noticed — pattern callouts
+  noticedCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    borderRadius: 14,
+    padding: 18,
+    marginBottom: 16,
+  },
+  noticedLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.gold,
+    letterSpacing: 1.6,
+    marginBottom: 12,
+  },
+  noticedRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  noticedDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 2.5,
+    backgroundColor: colors.gold,
+    marginTop: 9,
+  },
+  noticedText: {
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 22,
+    letterSpacing: 0.1,
+    flex: 1,
   },
 
   // Story

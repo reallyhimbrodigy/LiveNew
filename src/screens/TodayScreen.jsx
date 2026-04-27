@@ -76,6 +76,42 @@ function timeToMinutes(t) {
   return Number(m[1]) * 60 + Number(m[2]);
 }
 
+// Day-N milestones — hero cards that appear on specific streak days to
+// give the user a "the app is paying attention" moment. Returns null on
+// non-milestone streaks. Content is templated, with future iterations
+// adding AI-generated personal observations.
+function getMilestone(streak) {
+  if (streak === 3) {
+    return {
+      label: 'DAY 3',
+      title: 'The plan is starting to learn you.',
+      body: 'Three days of signal is enough for patterns to start emerging. Tomorrow\'s plan will lean toward what\'s landed.',
+    };
+  }
+  if (streak === 7) {
+    return {
+      label: 'ONE WEEK',
+      title: 'Most people quit by now. You didn\'t.',
+      body: 'A week is the threshold where the plan stops feeling like advice and starts feeling like a fit. The rest is compound.',
+    };
+  }
+  if (streak === 14) {
+    return {
+      label: 'TWO WEEKS',
+      title: 'This is becoming part of your day.',
+      body: 'Two weeks in, the things that have stuck are stuck. We\'ve quietly stopped suggesting what doesn\'t fit you.',
+    };
+  }
+  if (streak === 30) {
+    return {
+      label: 'THIRTY DAYS',
+      title: 'You\'ve built a real practice.',
+      body: 'A month of small shifts compounds into something real. The plan now knows your shape — and shapes itself around it.',
+    };
+  }
+  return null;
+}
+
 function PressCard({ onPress, style, children, disabled }) {
   const scale = useRef(new Animated.Value(1)).current;
   return (
@@ -378,6 +414,20 @@ export default function TodayScreen({ navigation }) {
             <Text style={s.redoIcon}>↻</Text>
           </Pressable>
         </View>
+
+        {/* Day-N milestone — hero card on top of (or replacing) Right Now
+            on streak 3, 7, 14, 30. Shows once per milestone day. */}
+        {(() => {
+          const milestone = getMilestone(streak);
+          if (!milestone || inWindDown) return null;
+          return (
+            <View style={s.milestoneCard}>
+              <Text style={s.milestoneLabel}>{milestone.label}</Text>
+              <Text style={s.milestoneTitle}>{milestone.title}</Text>
+              <Text style={s.milestoneBody}>{milestone.body}</Text>
+            </View>
+          );
+        })()}
 
         {/* Wind-down recap — replaces Right Now in the evening */}
         {inWindDown ? (
@@ -1100,6 +1150,45 @@ const s = StyleSheet.create({
   goldBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center' },
   goldBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
   greeting: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 8, fontFamily: fonts.display },
+
+  // Milestone hero (Day 3 / 7 / 14 / 30) — distinctive gold treatment that
+  // says "the app noticed something about you this is special"
+  milestoneCard: {
+    backgroundColor: 'rgba(196,168,108,0.10)',
+    borderWidth: 1.5,
+    borderColor: colors.goldBorder,
+    borderRadius: 18,
+    paddingVertical: 24,
+    paddingHorizontal: 24,
+    marginBottom: 28,
+    shadowColor: colors.gold,
+    shadowOpacity: 0.18,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 4,
+  },
+  milestoneLabel: {
+    fontSize: 11,
+    fontWeight: '800',
+    color: colors.gold,
+    letterSpacing: 2,
+    marginBottom: 14,
+  },
+  milestoneTitle: {
+    fontFamily: fonts.display,
+    fontSize: 24,
+    color: colors.text,
+    marginBottom: 12,
+    letterSpacing: 0.2,
+    lineHeight: 32,
+  },
+  milestoneBody: {
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.muted,
+    lineHeight: 23,
+    letterSpacing: 0.1,
+  },
 
   // Wind-down hero (evening recap, replaces Right Now)
   windDownCard: {

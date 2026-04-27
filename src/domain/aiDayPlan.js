@@ -113,6 +113,19 @@ At least 3 of the 5 items must include a phrase pulled directly from the user's 
 
 If the user has shared NO specifics (first day, no routine), say so internally: this is a foundational day. Use universal moments. But don't fake specificity — generic moments dressed up as personal ("your commute") read as fake worse than honest universals ("before bed").
 
+[BEHAVIOR-AWARE — adapt to what they actually do]
+The user message will include a behavior profile if data exists. It looks like:
+"Behavior so far: 8 days active, streak 5. Last 14 days: 23 items internalized. By type: food 12, mindset 7, habit 4, breathe 0. Last reflection: better."
+
+Read it. Adapt the plan accordingly. Specifically:
+- If a type has 0 completions across many days, the user is telling you that kind of intervention doesn't fit. STOP suggesting it. Drop that type entirely from today's plan.
+- If a type is dominant (60%+ of completions), they like it. Keep using it but go DEEPER — more nuanced versions of the same type, not the same surface-level item again.
+- If overall completions are low (<10 in 14 days), the plan is probably too much. Make today gentler. Lighter actions. Lower stakes.
+- If overall completions are high (>20 in 14 days), the user is engaged. You can ask for harder things. More committed actions.
+- If lastReflection is "harder", today should be calmer. If "better", you can push.
+
+The behavior profile is your single most useful signal for personalizing this user's plan. Use it. Don't ignore it.
+
 [LOW FRICTION, HIGH PAYOFF — never give the user homework]
 Each item must be doable in 30 seconds while standing or walking, with nothing but their body and what's already in the room. The user opens this once for the day — your job is to shift their state with small physical or attentional actions, not assign tasks.
 
@@ -341,6 +354,21 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
   // 6. Last stress-relief — for variety rotation.
   if (history?.lastStressRelief) {
     lines.push(`Yesterday's stress relief was: "${history.lastStressRelief}". Use a DIFFERENT category today.`);
+    lines.push("");
+  }
+
+  // 6.5. Behavior profile — what this user actually does vs skips.
+  // Single most predictive signal for personalizing today's plan.
+  if (history?.behaviorProfile) {
+    const bp = history.behaviorProfile;
+    const counts = bp.completionsByType || {};
+    const typeLine = Object.keys(counts)
+      .map((t) => `${t} ${counts[t] || 0}`)
+      .join(", ");
+    const reflLine = bp.lastReflection ? ` Last reflection: ${bp.lastReflection}.` : "";
+    lines.push(
+      `Behavior so far: ${bp.daysActive} days active, streak ${bp.streak}. Last 14 days: ${bp.totalItemsDoneLast14} items internalized. By type: ${typeLine}.${reflLine}`,
+    );
     lines.push("");
   }
 
