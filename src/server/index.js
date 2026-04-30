@@ -2891,7 +2891,12 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         .maybeSingle();
       const contract = derivedRow?.today_contract;
       if (contract && (contract.dateKey === yesterdayKey || contract.dateISO === yesterdayKey)) {
-        history.yesterdayPlan = contract.plan || [];
+        // New schema (zones) preferred; fall back to old plan[] for legacy records.
+        if (Array.isArray(contract.zones) && contract.zones.length > 0) {
+          history.yesterdayPlan = contract.zones;
+        } else {
+          history.yesterdayPlan = contract.plan || [];
+        }
         history.yesterdayCompleted = contract.completed || {};
         if (contract.goalThread?.weeklyFocus) {
           history.lastWeeklyFocus = contract.goalThread.weeklyFocus;
@@ -3058,12 +3063,12 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         console.error("[DAYPLAN_NULL] AI returned no plan");
       }
 
-      // Store the AI plan in derived_state for tomorrow's history context
+      // Store the AI plan in derived_state for tomorrow's history context.
+      // New schema: zones[] replaces the old plan[] / rightNow{} structure.
       const derivedContract = {
         dateISO: dateKey,
         dateKey: dateKey,
-        plan: dayPlan?.plan || [],
-        rightNow: dayPlan?.rightNow || {},
+        zones: dayPlan?.zones || [],
         goalThread: dayPlan?.goalThread || {},
         stressRelief: dayPlan?.stressRelief || "",
         eveningPrompt: dayPlan?.eveningPrompt || "",

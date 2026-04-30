@@ -17,44 +17,57 @@ export async function requestPermissions() {
   return status === 'granted';
 }
 
-// Cancel + schedule a notification for each plan item at its exact HH:MM time today.
-// Items are expected to have a `time` field in 24-hour HH:MM (set server-side by aiDayPlan).
-// Falls back to natural-language parsing of `moment` if `time` missing (legacy plans).
-//
-// Notification copy strategy: title is the moment (specific, contextual hook),
-// body leads with the insight's first sentence (the WHY) which is more compelling
-// than the title verbatim. The user wants a notification that earns the open,
-// not a chore reminder.
-export async function scheduleSessionReminders(planItems) {
+// Default notification times per zone — the inflection points where the user
+// most benefits from a contextual nudge. These are floor times; the AI's
+// content for that zone is what gets shown.
+const ZONE_TIMES = {
+  morning:    { hour: 7,  minute: 0 },
+  peak:       { hour: 9,  minute: 0 },
+  midmorning: { hour: 11, minute: 0 },
+  lunch:      { hour: 12, minute: 30 },
+  afternoon:  { hour: 15, minute: 0 },
+  transition: { hour: 17, minute: 0 },
+  winddown:   { hour: 19, minute: 0 },
+  sleep:      { hour: 21, minute: 30 },
+};
+
+// Which zones get notifications by default. Other zones are still in the app
+// (the user finds them when they open) but don't ping. This keeps daily push
+// volume reasonable (~3/day) and focused on the moments where intervention
+// timing actually matters.
+const DEFAULT_NOTIFY_ZONES = new Set(['midmorning', 'afternoon', 'winddown']);
+
+export async function scheduleSessionReminders(zones) {
   await Notifications.cancelAllScheduledNotificationsAsync();
-  if (!Array.isArray(planItems) || planItems.length === 0) return;
+  if (!Array.isArray(zones) || zones.length === 0) return;
 
   const now = new Date();
-  for (let i = 0; i < planItems.length; i++) {
-    const item = planItems[i];
-    const { hour, minute } = parsePlanTime(item) || {};
-    if (hour == null) continue;
+  for (const zone of zones) {
+    if (!zone || typeof zone !== 'object') continue;
+    if (!DEFAULT_NOTIFY_ZONES.has(zone.id)) continue;
+    const t = ZONE_TIMES[zone.id];
+    if (!t) continue;
 
     const triggerDate = new Date(
       now.getFullYear(),
       now.getMonth(),
       now.getDate(),
-      hour,
-      minute,
+      t.hour,
+      t.minute,
       0,
       0,
     );
     if (triggerDate <= now) continue;
 
-    const { title, body } = composeNotificationCopy(item);
+    const { title, body } = composeNotificationCopy(zone);
 
     try {
       await Notifications.scheduleNotificationAsync({
-        identifier: `livenew-plan-${i}`,
+        identifier: `livenew-zone-${zone.id}`,
         content: {
           title,
           body,
-          data: { planIndex: i },
+          data: { zoneId: zone.id },
         },
         trigger: { type: 'date', date: triggerDate },
       });
@@ -62,77 +75,24 @@ export async function scheduleSessionReminders(planItems) {
   }
 }
 
-function composeNotificationCopy(item) {
-  const moment = (item?.moment || '').trim();
-  const title = (item?.title || '').trim();
-  const insight = (item?.insight || '').trim();
-
-  // Pull the first sentence of the insight as the notification body.
-  // This is usually the observation/hook ("Most people crash because..."),
-  // which is far more interesting than just the moment phrase.
-  const firstSentence = insight ? insight.split(/(?<=[.!?])\s+/)[0] : '';
-
-  // Title prefers the moment (the WHEN/WHERE — concrete, contextual);
-  // falls back to title if moment is missing.
-  const notificationTitle = moment || title || 'LiveNew';
-
-  // Body is the action + brief why. If we have an insight, lead with its
-  // first sentence + the title; otherwise just the title.
-  let notificationBody;
-  if (firstSentence && firstSentence.length < 140) {
-    notificationBody = title ? `${title}. ${firstSentence}` : firstSentence;
-  } else {
-    notificationBody = title || '';
-  }
-
-  return { title: notificationTitle, body: notificationBody };
-}
-
-// Cancel a single plan item's notification (e.g., when user taps "Got it").
-export async function cancelPlanItemNotification(index) {
+export async function cancelPlanItemNotification(zoneId) {
   try {
-    await Notifications.cancelScheduledNotificationAsync(`livenew-plan-${index}`);
+    await Notifications.cancelScheduledNotificationAsync(`livenew-zone-${zoneId}`);
   } catch {}
 }
 
-function parsePlanTime(item) {
-  // Preferred: explicit time field set by AI ("HH:MM")
-  if (typeof item?.time === 'string') {
-    const m = item.time.match(/^(\d{1,2}):(\d{2})$/);
-    if (m) {
-      const hour = Number(m[1]);
-      const minute = Number(m[2]);
-      if (hour >= 0 && hour <= 23 && minute >= 0 && minute <= 59) {
-        return { hour, minute };
-      }
-    }
-  }
+function composeNotificationCopy(zone) {
+  const headline = (zone?.headline || '').trim();
+  const body = (zone?.body || '').trim();
+  const firstSentence = body ? body.split(/(?<=[.!?])\s+/)[0] : '';
 
-  // Legacy fallback: parse natural-language moment text
-  const text = (item?.moment || '').toLowerCase();
-  if (!text) return null;
+  const notificationTitle = headline || 'LiveNew';
+  // Body of the notification = first sentence of the zone (the hook). The full
+  // 50-100 word zone content is read inside the app — the notification just
+  // earns the open.
+  const notificationBody = firstSentence && firstSentence.length < 180
+    ? firstSentence
+    : (body.length < 180 ? body : '');
 
-  const ampm = text.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)/);
-  if (ampm) {
-    let hour = Number(ampm[1]);
-    const minute = ampm[2] ? Number(ampm[2]) : 0;
-    if (ampm[3] === 'pm' && hour !== 12) hour += 12;
-    if (ampm[3] === 'am' && hour === 12) hour = 0;
-    return { hour, minute };
-  }
-
-  const hhmm = text.match(/\b(\d{1,2}):(\d{2})\b/);
-  if (hhmm) {
-    let hour = Number(hhmm[1]);
-    const minute = Number(hhmm[2]);
-    if (hour <= 5) hour += 12;
-    return { hour, minute };
-  }
-
-  if (/wake|morning/.test(text)) return { hour: 7, minute: 0 };
-  if (/lunch|noon|midday/.test(text)) return { hour: 12, minute: 0 };
-  if (/afternoon/.test(text)) return { hour: 15, minute: 0 };
-  if (/dinner|evening/.test(text)) return { hour: 18, minute: 30 };
-  if (/wind\s*down|bed|sleep|night/.test(text)) return { hour: 21, minute: 30 };
-  return null;
+  return { title: notificationTitle, body: notificationBody };
 }

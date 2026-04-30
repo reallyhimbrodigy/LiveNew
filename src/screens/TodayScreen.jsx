@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   View, Text, ScrollView, Pressable, StyleSheet, AppState,
-  Modal, ActivityIndicator, TextInput, KeyboardAvoidingView, Platform,
-  Animated, LayoutAnimation, UIManager,
+  Modal, ActivityIndicator,
+  Animated, LayoutAnimation, UIManager, Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
@@ -14,19 +14,11 @@ import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
 import { getLocalDateISO } from '../utils/localDate';
 import { truncateGoal } from '../utils/goalText';
-import { cancelPlanItemNotification } from '../notifications';
+import { computeScore, scoreBand, getCurrentZoneId, ZONE_ORDER, ZONE_LABELS } from '../utils/score';
 import { api } from '../api';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
   UIManager.setLayoutAnimationEnabledExperimental(true);
-}
-
-function getTimeOfDay() {
-  const h = new Date().getHours();
-  if (h < 12) return 'morning';
-  if (h < 17) return 'afternoon';
-  if (h < 21) return 'evening';
-  return 'night';
 }
 
 function getGreetingParts() {
@@ -43,82 +35,13 @@ function isEvening() {
   return new Date().getHours() >= 19;
 }
 
-// Wind-down phase begins when:
-// - the time of the user's LAST plan item has passed, OR
-// - it's 21:00 or later, OR
-// - all plan items have been marked done.
-// During wind-down we soften the UI, foreground the reflection prompt,
-// and stop scheduling new notifications.
-function isWindDown(planItems, completed) {
-  const now = new Date();
-  const hour = now.getHours();
-  const minute = now.getMinutes();
-  const nowMinutes = hour * 60 + minute;
-
-  if (hour >= 21) return true;
-  if (planItems.length > 0) {
-    const lastTime = planItems
-      .map(i => {
-        const m = (i.time || '').match(/^(\d{1,2}):(\d{2})$/);
-        return m ? Number(m[1]) * 60 + Number(m[2]) : 0;
-      })
-      .reduce((max, t) => Math.max(max, t), 0);
-    if (lastTime > 0 && nowMinutes >= lastTime) return true;
-    if (planItems.every((_, i) => completed[i])) return true;
-  }
-  return false;
-}
-
-function timeToMinutes(t) {
-  if (typeof t !== 'string') return 24 * 60;
-  const m = t.match(/^(\d{1,2}):(\d{2})$/);
-  if (!m) return 24 * 60;
-  return Number(m[1]) * 60 + Number(m[2]);
-}
-
-// Day-N milestones — hero cards that appear on specific streak days to
-// give the user a "the app is paying attention" moment. Returns null on
-// non-milestone streaks. Content is templated, with future iterations
-// adding AI-generated personal observations.
-function getMilestone(streak) {
-  if (streak === 3) {
-    return {
-      label: 'DAY 3',
-      title: 'The plan is starting to learn you.',
-      body: 'Three days of signal is enough for patterns to start emerging. Tomorrow\'s plan will lean toward what\'s landed.',
-    };
-  }
-  if (streak === 7) {
-    return {
-      label: 'ONE WEEK',
-      title: 'Most people quit by now. You didn\'t.',
-      body: 'A week is the threshold where the plan stops feeling like advice and starts feeling like a fit. The rest is compound.',
-    };
-  }
-  if (streak === 14) {
-    return {
-      label: 'TWO WEEKS',
-      title: 'This is becoming part of your day.',
-      body: 'Two weeks in, the things that have stuck are stuck. We\'ve quietly stopped suggesting what doesn\'t fit you.',
-    };
-  }
-  if (streak === 30) {
-    return {
-      label: 'THIRTY DAYS',
-      title: 'You\'ve built a real practice.',
-      body: 'A month of small shifts compounds into something real. The plan now knows your shape — and shapes itself around it.',
-    };
-  }
-  return null;
-}
-
 function PressCard({ onPress, style, children, disabled }) {
   const scale = useRef(new Animated.Value(1)).current;
   return (
     <Pressable
       onPressIn={() => {
         if (disabled) return;
-        Animated.spring(scale, { toValue: 0.98, useNativeDriver: true, speed: 60, bounciness: 0 }).start();
+        Animated.spring(scale, { toValue: 0.985, useNativeDriver: true, speed: 60, bounciness: 0 }).start();
       }}
       onPressOut={() => {
         Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 4 }).start();
@@ -137,36 +60,36 @@ export default function TodayScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const todayPlan = useAuthStore(s => s.todayPlan);
   const todayDate = useAuthStore(s => s.todayDate);
-  const isSubscribed = useAuthStore(s => s.isSubscribed);
+  const todayStress = useAuthStore(s => s.todayStress);
+  const todaySleep = useAuthStore(s => s.todaySleep);
+  const todayEnergy = useAuthStore(s => s.todayEnergy);
   const streak = useAuthStore(s => s.streak);
   const completed = useAuthStore(s => s.completed);
   const reflection = useAuthStore(s => s.reflection);
   const profile = useAuthStore(s => s.profile);
   const skippedDate = useAuthStore(s => s.skippedDate);
-  const markDone = useAuthStore(s => s.markDone);
   const submitReflection = useAuthStore(s => s.submitReflection);
-  const saveRoutine = useAuthStore(s => s.saveRoutine);
   const clearSkip = useAuthStore(s => s.clearSkip);
+  const stressHistory = useAuthStore(s => s.stressHistory);
 
-  const [expandedIndex, setExpandedIndex] = useState(null);
+  const [currentZoneId, setCurrentZoneId] = useState(getCurrentZoneId());
   const [showStressRelief, setShowStressRelief] = useState(false);
   const [stressNoted, setStressNoted] = useState(false);
-  const [timeOfDay, setTimeOfDay] = useState(getTimeOfDay());
+  const [showAllZones, setShowAllZones] = useState(false);
 
-  const [showRoutinePrompt, setShowRoutinePrompt] = useState(false);
-  const [routineText, setRoutineText] = useState('');
-  const [savingRoutine, setSavingRoutine] = useState(false);
+  // Refresh "current" zone when app focuses or every minute
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') setCurrentZoneId(getCurrentZoneId());
+    });
+    return () => sub.remove();
+  }, []);
+  useEffect(() => {
+    const interval = setInterval(() => setCurrentZoneId(getCurrentZoneId()), 60000);
+    return () => clearInterval(interval);
+  }, []);
 
-  // Sticky stress button fade on scroll
-  const scrollY = useRef(new Animated.Value(0)).current;
-  const stressBtnOpacity = scrollY.interpolate({
-    inputRange: [0, 80, 200],
-    outputRange: [1, 0.6, 0.95],
-    extrapolate: 'clamp',
-  });
-
-  const hasRoutine = !!(profile?.routine && profile.routine.length > 5);
-
+  // Hydrate plan on mount if needed (or land in empty state)
   useEffect(() => {
     const check = async () => {
       const today = getLocalDateISO();
@@ -189,188 +112,98 @@ export default function TodayScreen({ navigation }) {
           }
         }
       } catch {}
-      // No plan for today. Don't force the user into the check-in flow.
-      // Clear any stale plan from the previous day, then fall through to the
-      // empty-state render below (which has a gentle "ready when you are" CTA).
       if (todayPlan && todayDate !== today) {
         useAuthStore.setState({
-          todayPlan: null,
-          todayDate: null,
-          completed: {},
-          reflection: null,
+          todayPlan: null, todayDate: null, completed: {}, reflection: null,
         });
       }
     };
     check();
   }, []);
 
-  // Detect day rollover on app focus, but DON'T auto-redirect to the check-in.
-  // The empty-state below will gently surface the new-day CTA when the user
-  // is ready. Forcing them straight into a 3-step flow at midnight (or whenever
-  // they next open the app) is too abrupt.
-  useEffect(() => {
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') setTimeOfDay(getTimeOfDay());
-    });
-    return () => sub.remove();
-  }, [todayDate]);
+  useFocusEffect(useCallback(() => {
+    setCurrentZoneId(getCurrentZoneId());
+  }, []));
 
-  useEffect(() => {
-    const interval = setInterval(() => setTimeOfDay(getTimeOfDay()), 60000);
-    return () => clearInterval(interval);
-  }, []);
+  // Build zone lookup
+  const zones = Array.isArray(todayPlan?.zones) ? todayPlan.zones : [];
+  const zoneById = zones.reduce((acc, z) => { acc[z.id] = z; return acc; }, {});
+  const currentZone = zoneById[currentZoneId] || zones[0] || null;
 
-  useFocusEffect(
-    useCallback(() => {
-      setTimeOfDay(getTimeOfDay());
-      const items = todayPlan?.plan || [];
-      if (items.length > 0 && items.every((_, i) => completed[i])) {
-        maybePromptReview();
-      }
-    }, [completed, todayPlan])
-  );
-
-  // Sort plan items in arc order (chronological by hidden time field).
-  // Time isn't displayed — items are MOMENT-anchored. The arc gives them
-  // a natural sequence: morning → midday → afternoon → evening → wind-down.
-  const rawItems = todayPlan?.plan || [];
-  const planItems = [...rawItems]
-    .map((item, originalIndex) => ({ ...item, _idx: originalIndex }))
-    .sort((a, b) => timeToMinutes(a.time) - timeToMinutes(b.time));
-
-  // "Active now" = the un-done item whose internal time is closest to current
-  // time, within a ±90 min window. This is the card the user should be doing
-  // RIGHT NOW. Gets the gold treatment.
-  const activeIdx = (() => {
-    if (planItems.length === 0) return null;
-    const now = new Date();
-    const nowMin = now.getHours() * 60 + now.getMinutes();
-    let best = null;
-    let bestDiff = Infinity;
-    for (const item of planItems) {
-      if (completed[item._idx]) continue;
-      const m = (item.time || '').match(/^(\d{1,2}):(\d{2})$/);
-      if (!m) continue;
-      const itemMin = Number(m[1]) * 60 + Number(m[2]);
-      const diff = Math.abs(nowMin - itemMin);
-      if (diff < bestDiff) {
-        bestDiff = diff;
-        best = item._idx;
-      }
-    }
-    return bestDiff <= 90 ? best : null;
-  })();
-
-  // Soft "next up" emphasis on the first un-done item — only used when there
-  // isn't an active-now card to spotlight instead.
-  const nextUpIdx = planItems.find(i => !completed[i._idx])?._idx;
-
-  const doneCount = planItems.filter(i => completed[i._idx]).length;
-  const rightNowText = todayPlan?.rightNow?.[timeOfDay] || null;
   const goalThread = todayPlan?.goalThread || null;
   const stressRelief = todayPlan?.stressRelief || null;
   const eveningPrompt = todayPlan?.eveningPrompt || null;
-  const showEveningReflection = isEvening() && !reflection && planItems.length > 0;
-  const showStressBtn = !!stressRelief && doneCount < planItems.length;
+  const showEveningReflection = isEvening() && !reflection && zones.length > 0;
+  const showStressBtn = !!stressRelief;
+
+  // Score — derived from check-in + behavior + trend
+  const stressTrend = Array.isArray(stressHistory) ? stressHistory : [];
+  const score = computeScore({
+    stressLabel: typeof todayStress === 'string' ? todayStress : null,
+    sleepQuality: todaySleep,
+    energy: todayEnergy,
+    stressTrend,
+  });
+  const band = scoreBand(score);
 
   const { dayOfWeek, partOfDay } = getGreetingParts();
-  const inWindDown = todayPlan && isWindDown(planItems, completed);
-  const winddownPartOfDay = inWindDown ? 'winding down' : partOfDay;
-
-  const handleTap = async (item) => {
-    const idx = item._idx;
-    if (completed[idx]) return;
-
-    if (!isSubscribed) {
-      try {
-        const raw = await AsyncStorage.getItem('livenew:plan_count');
-        const count = raw ? parseInt(raw, 10) : 0;
-        if (count > 7) {
-          navigation.navigate('Paywall', { planPreview: todayPlan });
-          return;
-        }
-      } catch {}
-    }
-
-    tapLight();
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    setExpandedIndex(expandedIndex === idx ? null : idx);
-  };
-
-  const handleGotIt = (idx) => {
-    tapSuccess();
-    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-    cancelPlanItemNotification(idx);
-    markDone(idx);
-    setExpandedIndex(null);
-  };
 
   const handleReflection = (feeling) => {
     tapSuccess();
     submitReflection(feeling);
   };
 
-  const handleSaveRoutine = async () => {
-    if (routineText.trim().length < 10) return;
-    setSavingRoutine(true);
-    try {
-      await saveRoutine(routineText.trim());
-      setShowRoutinePrompt(false);
-    } catch {}
-    setSavingRoutine(false);
-  };
-
-  // Empty state: no plan for today yet. Could be because:
-  //   1. User skipped today's check-in
-  //   2. The day rolled over and they haven't checked in yet
-  //   3. First app open and no cached plan
-  // All three get the same calm "ready when you are" view — no forced flow.
+  // Empty / loading / skipped states
   const today = getLocalDateISO();
-
   if (!todayPlan) {
-    const morning = new Date().getHours() < 12;
-    const titleCopy = morning ? 'A new day.' : 'Ready when you are.';
-    const bodyCopy = morning
-      ? 'A 10-second check-in shapes today around how you woke up.'
-      : 'A 10-second check-in shapes today around how you actually feel right now.';
+    if (skippedDate === today || true) {
+      // For first-time / skipped / day-roll: show a calm "ready when you are"
+      const morning = new Date().getHours() < 12;
+      return (
+        <SafeAreaView style={s.safe} edges={['top']}>
+          <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+            <View style={s.headerRow}>
+              <View style={{ flex: 1 }}>
+                <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
+                <Text style={s.greetingPart}>{partOfDay}</Text>
+              </View>
+            </View>
 
+            <View style={s.emptyCard}>
+              <Text style={s.emptyLabel}>NO PLAN YET</Text>
+              <Text style={s.emptyTitle}>{morning ? 'A new day.' : 'Ready when you are.'}</Text>
+              <Text style={s.emptyBody}>
+                Three taps. We'll calibrate your day around your sleep, your stress, and your energy.
+              </Text>
+              <Pressable
+                style={({ pressed }) => [s.emptyCta, pressed && { opacity: 0.85 }]}
+                onPress={async () => {
+                  tapSelect();
+                  await clearSkip();
+                  navigation.replace('StressTap');
+                }}
+              >
+                <Text style={s.emptyCtaText}>Start today</Text>
+              </Pressable>
+              <Text style={s.emptyHint}>Or browse Progress and Account anytime.</Text>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      );
+    }
     return (
       <SafeAreaView style={s.safe} edges={['top']}>
-        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-          <View style={s.headerRow}>
-            <View style={{ flex: 1 }}>
-              <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
-              <Text style={s.greetingPart}>{partOfDay}</Text>
-            </View>
-          </View>
-
-          <View style={s.emptyCard}>
-            <Text style={s.emptyLabel}>NO PLAN YET</Text>
-            <Text style={s.emptyTitle}>{titleCopy}</Text>
-            <Text style={s.emptyBody}>{bodyCopy}</Text>
-            <Pressable
-              style={({ pressed }) => [s.emptyCta, pressed && { opacity: 0.85 }]}
-              onPress={async () => {
-                tapSelect();
-                await clearSkip();
-                navigation.replace('StressTap');
-              }}
-            >
-              <Text style={s.emptyCtaText}>Start today's plan</Text>
-            </Pressable>
-            <Text style={s.emptyHint}>Or browse Progress and Account anytime.</Text>
-          </View>
-        </ScrollView>
+        <View style={s.centered}><ActivityIndicator size="large" color={colors.gold} /></View>
       </SafeAreaView>
     );
   }
 
-  if (planItems.length === 0) {
+  if (zones.length === 0) {
     return (
       <SafeAreaView style={s.safe} edges={['top']}>
         <View style={[s.centered, { padding: 24 }]}>
           <Text style={s.greeting}>Something went wrong</Text>
-          <Text style={s.errorBody}>Your plan didn't generate properly.</Text>
+          <Text style={s.errorBody}>Today's zones didn't generate properly.</Text>
           <Pressable
             style={({ pressed }) => [s.goldBtn, pressed && { opacity: 0.85 }]}
             onPress={() => navigation.replace('StressTap')}
@@ -382,32 +215,27 @@ export default function TodayScreen({ navigation }) {
     );
   }
 
+  const currentZoneIndex = ZONE_ORDER.indexOf(currentZoneId);
+
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
-      <Animated.ScrollView
+      <ScrollView
         contentContainerStyle={[s.scroll, { paddingBottom: showStressBtn ? 140 : 80 }]}
         showsVerticalScrollIndicator={false}
-        scrollEventThrottle={16}
-        onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], { useNativeDriver: true })}
       >
 
-        {/* Header — serif greeting + streak + redo */}
+        {/* Header — score + greeting + redo */}
         <View style={s.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
-            <Text style={s.greetingPart}>{winddownPartOfDay}</Text>
+            <Text style={s.greetingPart}>{partOfDay}</Text>
           </View>
-          {streak >= 1 && (
-            <View style={s.streakInline}>
-              <Text style={s.streakInlineNum}>{streak}</Text>
-              <Text style={s.streakInlineLabel}>day{streak === 1 ? '' : 's'}</Text>
-            </View>
-          )}
+          <View style={s.scoreChip}>
+            <Text style={[s.scoreNum, band === 'high' && { color: colors.gold }]}>{score}</Text>
+            <Text style={s.scoreLabel}>score</Text>
+          </View>
           <Pressable
-            onPress={() => {
-              tapSelect();
-              navigation.replace('StressTap');
-            }}
+            onPress={() => { tapSelect(); navigation.replace('StressTap'); }}
             hitSlop={10}
             style={s.redoBtn}
           >
@@ -415,156 +243,98 @@ export default function TodayScreen({ navigation }) {
           </Pressable>
         </View>
 
-        {/* Day-N milestone — hero card on top of (or replacing) Right Now
-            on streak 3, 7, 14, 30. Shows once per milestone day. */}
-        {(() => {
-          const milestone = getMilestone(streak);
-          if (!milestone || inWindDown) return null;
-          return (
-            <View style={s.milestoneCard}>
-              <Text style={s.milestoneLabel}>{milestone.label}</Text>
-              <Text style={s.milestoneTitle}>{milestone.title}</Text>
-              <Text style={s.milestoneBody}>{milestone.body}</Text>
-            </View>
-          );
-        })()}
-
-        {/* Wind-down recap — replaces Right Now in the evening */}
-        {inWindDown ? (
-          <View style={s.windDownCard}>
-            <Text style={s.windDownLabel}>TODAY, BRIEFLY</Text>
-            <Text style={s.windDownTitle}>
-              {doneCount === planItems.length
-                ? 'You did all five.'
-                : doneCount > 0
-                  ? `You internalized ${doneCount} of ${planItems.length}.`
-                  : 'A quiet day.'}
-            </Text>
-            <Text style={s.windDownBody}>
-              {goalThread?.weeklyFocus
-                ? `This week's focus: ${goalThread.weeklyFocus.toLowerCase()}.`
-                : 'Tomorrow comes when you wake up.'}
-            </Text>
-          </View>
-        ) : rightNowText ? (
-          <View style={s.rightNowCard}>
+        {/* Current zone — hero card */}
+        {currentZone && (
+          <View style={s.zoneHero}>
             <LinearGradient
               colors={['rgba(196,168,108,0.10)', 'rgba(196,168,108,0.02)']}
               start={{ x: 0, y: 0 }}
               end={{ x: 0, y: 1 }}
               style={StyleSheet.absoluteFill}
             />
-            <View style={s.rightNowAccent} />
-            <Text style={s.rightNowLabel}>RIGHT NOW</Text>
-            <Text style={s.rightNowText}>{rightNowText}</Text>
-          </View>
-        ) : null}
-
-        {/* Goal thread — your goal, this week's focus, today's thread */}
-        {(() => {
-          if (inWindDown) return null;
-          const lines = [];
-          if (profile?.goal) lines.push({ label: 'Your goal', value: truncateGoal(profile.goal) });
-          if (goalThread?.weeklyFocus) lines.push({ label: 'This week\'s focus', value: goalThread.weeklyFocus });
-          if (goalThread?.todayConnection) lines.push({ label: 'Today\'s thread', value: goalThread.todayConnection });
-          if (lines.length === 0) return null;
-          return (
-            <View style={s.goalCard}>
-              {lines.map((line, i) => (
-                <View key={line.label} style={[s.goalLine, i === 0 && { borderTopWidth: 0, paddingTop: 14 }]}>
-                  <Text style={s.goalLineLabel}>{line.label}</Text>
-                  <Text style={s.goalLineValue}>{line.value}</Text>
-                </View>
-              ))}
+            <View style={s.zoneAccent} />
+            <View style={s.zoneTopRow}>
+              <Text style={s.zoneLabel}>{ZONE_LABELS[currentZoneId] || 'Right now'}</Text>
+              <View style={s.nowPill}><View style={s.nowPillDot} /><Text style={s.nowPillText}>NOW</Text></View>
             </View>
-          );
-        })()}
-
-        {/* Plan — moment-anchored knowledge cards in arc order */}
-        {planItems.length > 0 && (
-          <Text style={s.sectionLabel}>{inWindDown ? "TODAY'S PLAN" : 'YOUR PLAN'}</Text>
+            <Text style={s.zoneHeadline}>{currentZone.headline}</Text>
+            <Text style={s.zoneBody}>{currentZone.body}</Text>
+          </View>
         )}
 
-        {planItems.map((item, listIdx) => {
-          const idx = item._idx;
-          const isDone = !!completed[idx];
-          const isExpanded = expandedIndex === idx && !isDone;
-          const isFirst = listIdx === 0;
-          const isActive = idx === activeIdx && !inWindDown;
-          // Soft next-up only when there isn't an active card stealing the spotlight.
-          const isNext = !isActive && idx === nextUpIdx && !activeIdx && !inWindDown;
-
-          return (
-            <PressCard
-              key={idx}
-              onPress={() => handleTap(item)}
-              disabled={isDone}
-              style={[
-                s.planCard,
-                !isFirst && { marginTop: 8 },
-                isNext && s.planCardNext,
-                isActive && s.planCardActive,
-                isExpanded && s.planCardExpanded,
-                isDone && s.planCardDone,
-              ]}
-            >
-              <View style={s.planTopRow}>
-                <View style={s.planContent}>
-                  <View style={s.momentRow}>
-                    {item.moment && (
-                      <Text style={[s.planMomentLabel, isActive && s.planMomentLabelActive]} numberOfLines={1}>
-                        {item.moment}
-                      </Text>
-                    )}
-                    {isActive && (
-                      <View style={s.nowBadge}>
-                        <View style={s.nowDot} />
-                        <Text style={s.nowText}>NOW</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={[s.planTitle, isActive && s.planTitleActive, isDone && s.planTextDone]} numberOfLines={isExpanded ? undefined : 2}>
-                    {item.title}
-                  </Text>
-                </View>
-                {isDone ? (
-                  <View style={s.checkDone}>
-                    <Text style={s.checkMark}>{'✓'}</Text>
-                  </View>
-                ) : (
-                  <View style={[s.checkEmpty, isActive && s.checkEmptyActive]} />
-                )}
-              </View>
-
-              {isExpanded && (
-                <View style={s.expandedWrap}>
-                  <Text style={s.insightText}>{item.insight}</Text>
-                  {item.goalConnection && (
-                    <View style={s.goalTag}>
-                      <Text style={s.goalTagText}>{item.goalConnection}</Text>
-                    </View>
+        {/* Today's arc — visual position + tap to expand */}
+        <Pressable
+          style={s.arcCard}
+          onPress={() => {
+            tapLight();
+            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+            setShowAllZones(v => !v);
+          }}
+        >
+          <View style={s.arcHeader}>
+            <Text style={s.arcLabel}>TODAY'S ARC</Text>
+            <Text style={s.arcChevron}>{showAllZones ? '▾' : '▸'}</Text>
+          </View>
+          <View style={s.arcRow}>
+            {ZONE_ORDER.map((zid, i) => {
+              const isCurrent = zid === currentZoneId;
+              const isPast = i < currentZoneIndex;
+              return (
+                <View key={zid} style={s.arcSegment}>
+                  <View style={[
+                    s.arcDot,
+                    isPast && s.arcDotPast,
+                    isCurrent && s.arcDotCurrent,
+                  ]} />
+                  {i < ZONE_ORDER.length - 1 && (
+                    <View style={[s.arcLine, isPast && s.arcLinePast]} />
                   )}
-                  <Pressable
-                    style={({ pressed }) => [s.gotItBtn, pressed && { opacity: 0.85 }]}
-                    onPress={() => handleGotIt(idx)}
-                  >
-                    <Text style={s.gotItText}>Got it</Text>
-                  </Pressable>
                 </View>
-              )}
-            </PressCard>
-          );
-        })}
+              );
+            })}
+          </View>
+          <Text style={s.arcCurrent}>{ZONE_LABELS[currentZoneId]}</Text>
+        </Pressable>
 
-        {/* Routine upgrade prompt */}
-        {!hasRoutine && !showRoutinePrompt && (streak >= 2 || doneCount >= 1) && (
-          <PressCard
-            onPress={() => { tapLight(); setShowRoutinePrompt(true); }}
-            style={s.routinePromptCard}
-          >
-            <Text style={s.routinePromptTitle}>Want plans tuned to your real day?</Text>
-            <Text style={s.routinePromptSub}>Tell me your routine and tomorrow's plan will reference your actual schedule.</Text>
-          </PressCard>
+        {showAllZones && (
+          <View style={s.allZones}>
+            {ZONE_ORDER.map((zid) => {
+              const z = zoneById[zid];
+              if (!z) return null;
+              const isCurrent = zid === currentZoneId;
+              return (
+                <View key={zid} style={[s.zoneListItem, isCurrent && s.zoneListItemCurrent]}>
+                  <Text style={s.zoneListLabel}>{ZONE_LABELS[zid]}</Text>
+                  <Text style={s.zoneListHeadline}>{z.headline}</Text>
+                  <Text style={s.zoneListBody}>{z.body}</Text>
+                </View>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Goal thread */}
+        {(profile?.goal || goalThread?.weeklyFocus || goalThread?.todayConnection) && (
+          <View style={s.goalCard}>
+            {profile?.goal && (
+              <View style={s.goalLine}>
+                <Text style={s.goalLineLabel}>Your goal</Text>
+                <Text style={s.goalLineValue}>{truncateGoal(profile.goal)}</Text>
+              </View>
+            )}
+            {goalThread?.weeklyFocus && (
+              <View style={[s.goalLine, profile?.goal && s.goalLineDivider]}>
+                <Text style={s.goalLineLabel}>This week's focus</Text>
+                <Text style={s.goalLineValue}>{goalThread.weeklyFocus}</Text>
+              </View>
+            )}
+            {goalThread?.todayConnection && (
+              <View style={[s.goalLine, (profile?.goal || goalThread?.weeklyFocus) && s.goalLineDivider]}>
+                <Text style={s.goalLineLabel}>Today's thread</Text>
+                <Text style={s.goalLineValue}>{goalThread.todayConnection}</Text>
+              </View>
+            )}
+          </View>
         )}
 
         {/* Evening reflection */}
@@ -589,7 +359,6 @@ export default function TodayScreen({ navigation }) {
             </View>
           </View>
         )}
-
         {reflection && (
           <View style={s.reflectionDoneCard}>
             <Text style={s.reflectionDoneText}>
@@ -597,18 +366,16 @@ export default function TodayScreen({ navigation }) {
             </Text>
           </View>
         )}
-
         {stressNoted && (
           <View style={s.stressNotedCard}>
-            <Text style={s.stressNotedText}>Noted. Tomorrow's plan will account for today.</Text>
+            <Text style={s.stressNotedText}>Noted. Tomorrow's plan accounts for this.</Text>
           </View>
         )}
+      </ScrollView>
 
-      </Animated.ScrollView>
-
-      {/* Sticky stress button — fades subtly on scroll */}
+      {/* Sticky stress button */}
       {showStressBtn && (
-        <Animated.View style={[s.stressBtnSticky, { bottom: insets.bottom + 12, opacity: stressBtnOpacity }]} pointerEvents="box-none">
+        <View style={[s.stressBtnSticky, { bottom: insets.bottom + 12 }]} pointerEvents="box-none">
           <Pressable
             onPress={() => {
               tapSelect();
@@ -620,10 +387,10 @@ export default function TodayScreen({ navigation }) {
             <View style={s.stressBtnDot} />
             <Text style={s.stressBtnText}>I'm stressed right now</Text>
           </Pressable>
-        </Animated.View>
+        </View>
       )}
 
-      {/* Stress Relief Modal */}
+      {/* Stress relief modal */}
       <Modal
         visible={showStressRelief}
         transparent
@@ -648,42 +415,6 @@ export default function TodayScreen({ navigation }) {
           </Pressable>
         </Pressable>
       </Modal>
-
-      {/* Routine Input Modal */}
-      <Modal
-        visible={showRoutinePrompt}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowRoutinePrompt(false)}
-      >
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.routineModalWrap}>
-          <View style={s.routineModalContent}>
-            <Text style={s.routineModalTitle}>Describe your daily routine</Text>
-            <Text style={s.routineModalSub}>Wake, work, eat, wind down. The more detail, the more your plan reflects your actual day.</Text>
-            <TextInput
-              style={s.routineInput}
-              placeholder="I wake up at 7, work from 9-5, eat lunch at noon, gym after work, bed by 11..."
-              placeholderTextColor={colors.dim}
-              value={routineText}
-              onChangeText={setRoutineText}
-              multiline
-              textAlignVertical="top"
-              maxLength={1000}
-              autoFocus
-            />
-            <Pressable
-              style={({ pressed }) => [s.routineSaveBtn, (routineText.trim().length < 10 || savingRoutine) && { opacity: 0.4 }, pressed && { opacity: 0.85 }]}
-              onPress={handleSaveRoutine}
-              disabled={routineText.trim().length < 10 || savingRoutine}
-            >
-              <Text style={s.routineSaveBtnText}>{savingRoutine ? 'Saving…' : 'Save'}</Text>
-            </Pressable>
-            <Pressable style={s.routineSkipBtn} onPress={() => setShowRoutinePrompt(false)}>
-              <Text style={s.routineSkipText}>Maybe later</Text>
-            </Pressable>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
     </SafeAreaView>
   );
 }
@@ -693,6 +424,7 @@ const s = StyleSheet.create({
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 80 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   errorBody: { color: colors.muted, marginBottom: 24, textAlign: 'center' },
+  greeting: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 8, fontFamily: fonts.display },
 
   // Header
   headerRow: {
@@ -714,82 +446,209 @@ const s = StyleSheet.create({
     color: colors.muted,
     letterSpacing: 0.2,
   },
-  streakInline: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    marginLeft: 12,
+  scoreChip: {
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     marginRight: 8,
-    gap: 4,
+    minWidth: 64,
   },
-  streakInlineNum: {
+  scoreNum: {
     fontFamily: fonts.displayBold,
-    fontSize: 22,
-    color: colors.gold,
-    letterSpacing: 0.2,
-  },
-  streakInlineLabel: {
-    fontSize: 12,
-    color: colors.muted,
+    fontSize: 24,
+    color: colors.text,
     letterSpacing: 0.3,
+    lineHeight: 28,
+  },
+  scoreLabel: {
+    fontSize: 9,
+    color: colors.muted,
+    fontWeight: '600',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginTop: -2,
   },
   redoBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: colors.line,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 36, height: 36, borderRadius: 18,
+    borderWidth: 1, borderColor: colors.line,
+    alignItems: 'center', justifyContent: 'center',
   },
-  redoIcon: {
-    color: colors.muted,
-    fontSize: 18,
-    lineHeight: 22,
-  },
+  redoIcon: { color: colors.muted, fontSize: 18, lineHeight: 22 },
 
-  // Right Now hero
-  rightNowCard: {
+  // Zone hero
+  zoneHero: {
     borderRadius: 18,
     paddingVertical: 22,
     paddingHorizontal: 22,
     paddingLeft: 26,
-    marginBottom: 28,
+    marginBottom: 20,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.goldBorder,
   },
-  rightNowAccent: {
+  zoneAccent: {
     position: 'absolute',
     left: 0, top: 0, bottom: 0,
-    width: 3,
+    width: 4,
     backgroundColor: colors.gold,
   },
-  rightNowLabel: {
+  zoneTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  zoneLabel: {
     fontSize: 10,
     fontWeight: '700',
     color: colors.gold,
     letterSpacing: 2,
-    marginBottom: 10,
   },
-  rightNowText: {
+  nowPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.gold,
+    borderRadius: 10,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    gap: 5,
+  },
+  nowPillDot: {
+    width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.bg,
+  },
+  nowPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    color: colors.bg,
+    letterSpacing: 1.4,
+  },
+  zoneHeadline: {
     fontFamily: fonts.display,
-    fontSize: 18,
+    fontSize: 21,
     color: colors.text,
-    lineHeight: 27,
+    letterSpacing: 0.2,
+    lineHeight: 28,
+    marginBottom: 14,
+  },
+  zoneBody: {
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 24,
     letterSpacing: 0.1,
   },
-  // Goal thread card — your goal / weekly focus / today's thread
+
+  // Today's arc
+  arcCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    marginBottom: 16,
+  },
+  arcHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  arcLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.dim,
+    letterSpacing: 1.6,
+  },
+  arcChevron: { color: colors.dim, fontSize: 12 },
+  arcRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  arcSegment: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flex: 1,
+  },
+  arcDot: {
+    width: 8, height: 8, borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: colors.dim,
+  },
+  arcDotPast: {
+    backgroundColor: colors.muted,
+    borderColor: colors.muted,
+  },
+  arcDotCurrent: {
+    width: 14, height: 14, borderRadius: 7,
+    backgroundColor: colors.gold,
+    borderColor: colors.gold,
+  },
+  arcLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.line,
+    marginHorizontal: 2,
+  },
+  arcLinePast: { backgroundColor: colors.muted },
+  arcCurrent: {
+    fontFamily: fonts.displayItalic,
+    fontSize: 13,
+    color: colors.muted,
+  },
+
+  // All zones (expanded)
+  allZones: { gap: 10, marginBottom: 16 },
+  zoneListItem: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 12,
+    padding: 14,
+  },
+  zoneListItemCurrent: {
+    borderColor: colors.goldBorder,
+    backgroundColor: 'rgba(196,168,108,0.06)',
+  },
+  zoneListLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.gold,
+    letterSpacing: 1.4,
+    marginBottom: 6,
+  },
+  zoneListHeadline: {
+    fontFamily: fonts.display,
+    fontSize: 16,
+    color: colors.text,
+    marginBottom: 6,
+    lineHeight: 22,
+  },
+  zoneListBody: {
+    fontFamily: fonts.display,
+    fontSize: 13,
+    color: colors.muted,
+    lineHeight: 20,
+  },
+
+  // Goal thread card
   goalCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.line,
     borderRadius: 14,
-    paddingVertical: 8,
     paddingHorizontal: 18,
-    marginBottom: 28,
+    marginBottom: 16,
   },
   goalLine: {
     paddingVertical: 12,
+  },
+  goalLineDivider: {
     borderTopWidth: 1,
     borderTopColor: colors.line,
   },
@@ -808,234 +667,44 @@ const s = StyleSheet.create({
     letterSpacing: 0.1,
   },
 
-  // Section label
-  sectionLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.dim,
-    letterSpacing: 2,
-    marginBottom: 14,
-    marginLeft: 2,
-  },
-
-  // Plan card
-  planCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    overflow: 'hidden',
-  },
-  planCardExpanded: {
-    borderColor: colors.goldBorder,
-    backgroundColor: colors.goldSoft,
-  },
-  planCardNext: {
-    borderLeftWidth: 3,
-    borderLeftColor: colors.gold,
-  },
-  // ACTIVE NOW — gold-fill treatment. The card the user should be doing right now.
-  planCardActive: {
-    backgroundColor: 'rgba(196,168,108,0.10)',
-    borderColor: colors.goldBorder,
-    borderWidth: 1.5,
-    borderLeftWidth: 4,
-    borderLeftColor: colors.gold,
-    shadowColor: colors.gold,
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  planMomentLabelActive: {
-    color: colors.gold,
-  },
-  planTitleActive: {
-    color: colors.text,
-    fontWeight: '700',
-  },
-  checkEmptyActive: {
-    borderColor: colors.gold,
-    borderWidth: 2,
-  },
-
-  // NOW badge — inline with the moment label, on active cards only
-  momentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 6,
-    gap: 8,
-  },
-  nowBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.gold,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    gap: 5,
-  },
-  nowDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: colors.bg,
-  },
-  nowText: {
-    fontSize: 9,
-    fontWeight: '800',
-    color: colors.bg,
-    letterSpacing: 1.4,
-  },
-  planCardDone: { opacity: 0.5 },
-  planTopRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingVertical: 18,
-    paddingHorizontal: 18,
-  },
-  planContent: { flex: 1, marginRight: 12 },
-  planMomentLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.gold,
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
-    flexShrink: 1,
-  },
-  planTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: colors.text,
-    lineHeight: 22,
-    letterSpacing: 0.1,
-  },
-  planTextDone: {
-    color: colors.muted,
-    textDecorationLine: 'line-through',
-  },
-  checkEmpty: {
-    width: 22, height: 22, borderRadius: 11,
-    borderWidth: 2,
-    borderColor: colors.dim,
-  },
-  checkDone: {
-    width: 22, height: 22, borderRadius: 11,
-    backgroundColor: colors.gold,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  checkMark: { color: colors.bg, fontSize: 12, fontWeight: '700' },
-
-  // Expanded
-  expandedWrap: {
-    paddingHorizontal: 22,
-    paddingBottom: 18,
-    paddingTop: 4,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-  },
-  insightText: {
-    fontFamily: fonts.display,
-    fontSize: 15,
-    color: colors.text,
-    lineHeight: 24,
-    marginBottom: 14,
-    letterSpacing: 0.1,
-  },
-  goalTag: {
-    backgroundColor: 'rgba(196,168,108,0.06)',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 14,
-  },
-  goalTagText: { fontSize: 13, color: colors.gold, lineHeight: 18, fontStyle: 'italic' },
-  gotItBtn: {
-    borderWidth: 1,
-    borderColor: colors.gold,
-    backgroundColor: 'transparent',
-    borderRadius: 10,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  gotItText: { color: colors.gold, fontSize: 15, fontWeight: '600', letterSpacing: 0.2 },
-
-  // Routine prompt
-  routinePromptCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    padding: 18,
-    marginTop: 20,
-  },
-  routinePromptTitle: {
-    fontFamily: fonts.display,
-    fontSize: 16,
-    color: colors.text,
-    marginBottom: 4,
-  },
-  routinePromptSub: { fontSize: 13, color: colors.muted, lineHeight: 19 },
-
   // Evening reflection
   reflectionCard: {
     borderRadius: 14,
     padding: 18,
-    marginTop: 20,
+    marginTop: 8,
     backgroundColor: colors.surface,
     borderWidth: 1,
     borderColor: colors.goldBorder,
   },
   reflectionLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.gold,
-    letterSpacing: 2,
-    marginBottom: 8,
+    fontSize: 10, fontWeight: '700', color: colors.gold,
+    letterSpacing: 2, marginBottom: 8,
   },
   reflectionPrompt: {
     fontFamily: fonts.display,
-    fontSize: 17,
-    color: colors.text,
-    lineHeight: 25,
-    marginBottom: 16,
+    fontSize: 17, color: colors.text, lineHeight: 25, marginBottom: 16,
   },
   reflectionOptions: { flexDirection: 'row', gap: 8 },
   reflectionBtn: {
-    flex: 1,
-    backgroundColor: colors.bg,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
+    flex: 1, backgroundColor: colors.bg,
+    borderWidth: 1, borderColor: colors.line,
+    borderRadius: 10, paddingVertical: 14, alignItems: 'center',
   },
   reflectionBtnText: { fontSize: 14, fontWeight: '500', color: colors.text },
-
   reflectionDoneCard: {
-    backgroundColor: 'transparent',
-    paddingVertical: 16,
-    marginTop: 16,
-    alignItems: 'center',
+    paddingVertical: 16, marginTop: 8, alignItems: 'center',
   },
   reflectionDoneText: {
     fontFamily: fonts.displayItalic,
-    fontSize: 14,
-    color: colors.muted,
+    fontSize: 14, color: colors.muted,
   },
-
-  stressNotedCard: {
-    paddingVertical: 12,
-    alignItems: 'center',
-    marginTop: 12,
-  },
+  stressNotedCard: { paddingVertical: 12, alignItems: 'center', marginTop: 12 },
   stressNotedText: { color: colors.muted, fontSize: 13, fontStyle: 'italic' },
 
   // Sticky stress button
   stressBtnSticky: {
     position: 'absolute',
-    left: 22,
-    right: 22,
-    alignItems: 'stretch',
+    left: 22, right: 22,
   },
   stressBtnInner: {
     backgroundColor: colors.surface,
@@ -1054,175 +723,34 @@ const s = StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
     elevation: 6,
   },
-  stressBtnDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.gold,
-  },
-  stressBtnText: {
-    color: colors.gold,
-    fontSize: 15,
-    fontWeight: '600',
-    letterSpacing: 0.2,
-  },
+  stressBtnDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.gold },
+  stressBtnText: { color: colors.gold, fontSize: 15, fontWeight: '600', letterSpacing: 0.2 },
 
   // Modal
   modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.72)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 28,
+    flex: 1, backgroundColor: 'rgba(0,0,0,0.72)',
+    justifyContent: 'center', alignItems: 'center', padding: 28,
   },
   modalContent: {
     backgroundColor: colors.surface,
-    borderRadius: 18,
-    padding: 26,
-    width: '100%',
-    borderWidth: 1,
-    borderColor: colors.goldBorder,
+    borderRadius: 18, padding: 26, width: '100%',
+    borderWidth: 1, borderColor: colors.goldBorder,
   },
   modalLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.gold,
-    letterSpacing: 2,
-    marginBottom: 12,
+    fontSize: 10, fontWeight: '700', color: colors.gold,
+    letterSpacing: 2, marginBottom: 12,
   },
   modalBody: {
     fontFamily: fonts.display,
-    fontSize: 18,
-    color: colors.text,
-    lineHeight: 27,
-    marginBottom: 22,
+    fontSize: 17, color: colors.text, lineHeight: 26, marginBottom: 22,
   },
   modalBtn: {
     backgroundColor: colors.gold,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
+    borderRadius: 12, paddingVertical: 14, alignItems: 'center',
   },
   modalBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600', letterSpacing: 0.2 },
 
-  // Routine modal
-  routineModalWrap: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },
-  routineModalContent: {
-    backgroundColor: colors.bg,
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    padding: 24,
-    paddingBottom: 40,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-  },
-  routineModalTitle: {
-    fontFamily: fonts.display,
-    fontSize: 22,
-    color: colors.text,
-    marginBottom: 6,
-  },
-  routineModalSub: {
-    fontSize: 14,
-    color: colors.muted,
-    lineHeight: 20,
-    marginBottom: 16,
-  },
-  routineInput: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontSize: 16,
-    color: colors.text,
-    minHeight: 120,
-    lineHeight: 22,
-    marginBottom: 16,
-  },
-  routineSaveBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
-  routineSaveBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
-  routineSkipBtn: { alignItems: 'center', marginTop: 12, padding: 8 },
-  routineSkipText: { color: colors.muted, fontSize: 14 },
-
-  // Shared
-  goldBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center' },
-  goldBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
-  greeting: { fontSize: 26, fontWeight: '600', color: colors.text, marginBottom: 8, fontFamily: fonts.display },
-
-  // Milestone hero (Day 3 / 7 / 14 / 30) — distinctive gold treatment that
-  // says "the app noticed something about you this is special"
-  milestoneCard: {
-    backgroundColor: 'rgba(196,168,108,0.10)',
-    borderWidth: 1.5,
-    borderColor: colors.goldBorder,
-    borderRadius: 18,
-    paddingVertical: 24,
-    paddingHorizontal: 24,
-    marginBottom: 28,
-    shadowColor: colors.gold,
-    shadowOpacity: 0.18,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 4 },
-    elevation: 4,
-  },
-  milestoneLabel: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: colors.gold,
-    letterSpacing: 2,
-    marginBottom: 14,
-  },
-  milestoneTitle: {
-    fontFamily: fonts.display,
-    fontSize: 24,
-    color: colors.text,
-    marginBottom: 12,
-    letterSpacing: 0.2,
-    lineHeight: 32,
-  },
-  milestoneBody: {
-    fontFamily: fonts.display,
-    fontSize: 15,
-    color: colors.muted,
-    lineHeight: 23,
-    letterSpacing: 0.1,
-  },
-
-  // Wind-down hero (evening recap, replaces Right Now)
-  windDownCard: {
-    borderRadius: 18,
-    paddingVertical: 24,
-    paddingHorizontal: 24,
-    marginBottom: 28,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-  },
-  windDownLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.dim,
-    letterSpacing: 2,
-    marginBottom: 12,
-  },
-  windDownTitle: {
-    fontFamily: fonts.display,
-    fontSize: 22,
-    color: colors.text,
-    marginBottom: 8,
-    letterSpacing: 0.2,
-    lineHeight: 30,
-  },
-  windDownBody: {
-    fontFamily: fonts.displayItalic,
-    fontSize: 14,
-    color: colors.muted,
-    lineHeight: 22,
-  },
-
-  // Empty state (user skipped today)
+  // Empty state
   emptyCard: {
     marginTop: 32,
     paddingVertical: 32,
@@ -1234,45 +762,31 @@ const s = StyleSheet.create({
     alignItems: 'flex-start',
   },
   emptyLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.gold,
-    letterSpacing: 2,
-    marginBottom: 14,
+    fontSize: 10, fontWeight: '700', color: colors.gold,
+    letterSpacing: 2, marginBottom: 14,
   },
   emptyTitle: {
     fontFamily: fonts.display,
-    fontSize: 26,
-    color: colors.text,
-    marginBottom: 12,
-    letterSpacing: 0.2,
+    fontSize: 26, color: colors.text, marginBottom: 12, letterSpacing: 0.2,
   },
   emptyBody: {
     fontFamily: fonts.display,
-    fontSize: 15,
-    color: colors.muted,
-    lineHeight: 24,
-    marginBottom: 22,
-    letterSpacing: 0.1,
+    fontSize: 15, color: colors.muted, lineHeight: 24, marginBottom: 22, letterSpacing: 0.1,
   },
   emptyCta: {
     alignSelf: 'stretch',
     backgroundColor: colors.gold,
-    borderRadius: 12,
-    paddingVertical: 14,
-    alignItems: 'center',
-    marginBottom: 12,
+    borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 12,
   },
   emptyCtaText: {
-    color: colors.bg,
-    fontSize: 15,
-    fontWeight: '600',
-    letterSpacing: 0.2,
+    color: colors.bg, fontSize: 15, fontWeight: '600', letterSpacing: 0.2,
   },
   emptyHint: {
     fontFamily: fonts.displayItalic,
-    fontSize: 13,
-    color: colors.dim,
-    alignSelf: 'center',
+    fontSize: 13, color: colors.dim, alignSelf: 'center',
   },
+
+  // Shared
+  goldBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center' },
+  goldBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
 });

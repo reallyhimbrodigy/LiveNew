@@ -247,15 +247,19 @@ export const useAuthStore = create((set, get) => ({
       goal: profile.goal || '',
     });
 
-    // Validate the response actually contains a plan
-    if (!data || data.ok === false || !data.plan || !Array.isArray(data.plan) || data.plan.length === 0) {
+    // New schema: validate zones[]. Backward-compat: still accept old plan[]
+    // for users mid-migration but treat absence of zones as a failure for new
+    // generations.
+    const hasZones = data && Array.isArray(data.zones) && data.zones.length > 0;
+    const hasLegacyPlan = data && Array.isArray(data.plan) && data.plan.length > 0;
+    if (!data || data.ok === false || (!hasZones && !hasLegacyPlan)) {
       throw new Error('Plan generation failed. Please try again.');
     }
 
     const today = getLocalDateISO();
     const plan = {
       date: today,
-      contract: data,     // { rightNow, plan, goalThread, stressRelief, eveningPrompt }
+      contract: data,     // { zones, goalThread, stressRelief, eveningPrompt }
       stress: stressValue,
       sleepQuality,
       energy,
@@ -281,11 +285,12 @@ export const useAuthStore = create((set, get) => ({
       await AsyncStorage.setItem('livenew:plan_count', (count + 1).toString());
     } catch {}
 
-    // Schedule notifications for plan items
+    // Schedule notifications at the inflection-point zones (mid-morning dip,
+    // afternoon dip, wind-down) — not one per item like the old plan format.
     try {
       const granted = await requestPermissions();
-      if (granted && data?.plan) {
-        await scheduleSessionReminders(data.plan);
+      if (granted && hasZones) {
+        await scheduleSessionReminders(data.zones);
       }
     } catch {}
 
