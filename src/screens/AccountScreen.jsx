@@ -25,6 +25,8 @@ export default function AccountScreen({ navigation }) {
   const deleteAccount = useAuthStore(s => s.deleteAccount);
   const saveProfile = useAuthStore(s => s.saveProfile);
   const streak = useAuthStore(s => s.streak);
+  const healthPermission = useAuthStore(s => s.healthPermission);
+  const connectHealth = useAuthStore(s => s.connectHealth);
   const [deleting, setDeleting] = useState(false);
   const [editing, setEditing] = useState(null);
   const [editValue, setEditValue] = useState('');
@@ -241,6 +243,38 @@ export default function AccountScreen({ navigation }) {
               <Text style={s.settingValue} numberOfLines={2}>{profile?.goal ? truncateGoal(profile.goal) : 'Not set'}</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
+          </Pressable>
+        </View>
+
+        {/* Apple Health section */}
+        <Text style={s.sectionTitle}>Apple Health</Text>
+
+        <View style={s.card}>
+          <Pressable
+            style={s.settingRow}
+            onPress={async () => {
+              if (healthPermission === 'granted') {
+                Alert.alert(
+                  'Apple Health',
+                  'You\'re connected. To revoke access, open the Health app → Sharing → Apps → LiveNew.',
+                );
+                return;
+              }
+              tapSelect();
+              await connectHealth();
+            }}
+          >
+            <View style={s.settingContent}>
+              <Text style={s.settingTitle}>
+                {healthPermission === 'granted' ? 'Connected' : 'Connect Apple Health'}
+              </Text>
+              <Text style={s.settingValue}>
+                {healthPermission === 'granted'
+                  ? 'Sleep, resting heart rate, and HRV power your score.'
+                  : 'Reads sleep, RHR, and HRV. The score becomes legitimate.'}
+              </Text>
+            </View>
+            <Text style={s.settingArrow}>{healthPermission === 'granted' ? '✓' : '›'}</Text>
           </Pressable>
         </View>
 

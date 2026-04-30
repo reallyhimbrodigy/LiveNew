@@ -102,12 +102,18 @@ BAD examples:
 - "Magnesium can help with relaxation." (commodity)
 
 TYPE 3 — DATA-CALLOUT
-References the user's actual logged data (stress trend, sleep history, plan compliance, day-of-week pattern, recent reflection). Pattern:
-"[Specific observation from their data]. [Mechanism explanation]. [Specific intervention]. [Predicted outcome they can verify]."
+References the user's actual logged data — self-reported stress trend, sleep history, plan compliance, day-of-week pattern, recent reflection. AND when Apple Health is connected, REAL biometrics: HRV, resting heart rate, sleep duration, steps. Pattern:
+"[Specific observation from their data, ideally biometric]. [Mechanism explanation]. [Specific intervention]. [Predicted outcome they can verify]."
 60–100 words.
 
-GOOD example:
+GOOD example (self-report only):
 "Your stress has been at 7+ for four consecutive days. Cortisol is cumulative — what you're carrying now will last another six hours regardless of what you do today. Don't add. No caffeine after 10am. No high-intensity training. No emotional conversations you can defer. Conserve. Tonight is the reset window: dinner by 6pm, screens off by 8pm, magnesium 200mg before bed. Tomorrow morning's energy is the test. If it's better, the protocol worked. If not, we go deeper."
+
+GOOD example (with HealthKit biometrics — prefer this when available):
+"Your HRV is 38, down 14% from your 30-day baseline. Resting heart rate is 64, four bpm above baseline. That combination — suppressed HRV plus elevated RHR — is sympathetic overload, full stop. Don't start the workout you planned. No caffeine after noon. Tonight is structural: dinner by 6:30, last screen by 9, magnesium glycinate before bed. Tomorrow's HRV reading is the test. Aim for a 5-point bounce. If it doesn't move, we drop the training load further this week."
+
+GOOD example (sleep-specific from HealthKit):
+"You slept 5h 44m last night. Your 7-day average is 6h 32m — already a deficit, last night made it worse. Your prefrontal cortex is operating at roughly 70% today; that 'I'll just power through' instinct is the deficit talking. Don't make non-trivial decisions before noon. No caffeine after 10am or you'll trade tonight's sleep for today's alertness. Eat protein at every meal. Aim for 9pm in bed tonight, not 11. The deficit closes in two nights, not one."
 
 BAD examples:
 - "You've been a bit stressed lately." (vague observation, no mechanism, no protocol)
@@ -172,7 +178,7 @@ BAD: "Did you do the protocol?", "How was today?"
 
 The test for every zone: would a researcher who actually knows this person say this? If no, rewrite. The user is paying for substance — give it to them.`;
 
-export async function generateDayPlan({ stressLabel, sleepQuality, energy, routine, goal, history }) {
+export async function generateDayPlan({ stressLabel, sleepQuality, energy, routine, goal, history, healthSnapshot }) {
   const stressPhrase = stressLabel === "overwhelmed" ? "overwhelmed"
     : stressLabel === "stressed" ? "stressed"
     : stressLabel === "good" ? "calm"
@@ -261,6 +267,41 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
     const trendStr = history.stressTrend.map((d) => `${d.date}: ${d.stress}/10`).join(", ");
     lines.push(`Recent stress: ${trendStr}.`);
     lines.push("");
+  }
+
+  // 8.5 HealthKit snapshot — REAL biometrics. This is the unlock for substantive
+  // data-callout zones. When present, prefer references to these numbers over
+  // self-report (the user typed "rough" but their watch says they slept 6h44m
+  // with 12% deep — use the watch number).
+  if (healthSnapshot) {
+    const h = healthSnapshot;
+    const parts = [];
+    if (h.sleepLastNightMinutes != null) {
+      const hrs = Math.floor(h.sleepLastNightMinutes / 60);
+      const mins = h.sleepLastNightMinutes % 60;
+      parts.push(`Slept ${hrs}h ${mins}m last night`);
+    }
+    if (h.sleepLast7Avg != null) {
+      const hrs = Math.floor(h.sleepLast7Avg / 60);
+      const mins = h.sleepLast7Avg % 60;
+      parts.push(`7-day sleep avg ${hrs}h ${mins}m`);
+    }
+    if (h.hrvLast7Avg != null) {
+      const dlt = h.hrvDeltaPct != null ? ` (${h.hrvDeltaPct >= 0 ? "+" : ""}${h.hrvDeltaPct}% vs baseline)` : "";
+      parts.push(`HRV avg ${h.hrvLast7Avg}${dlt}`);
+    }
+    if (h.rhrLast7Avg != null) {
+      const dlt = h.rhrDelta != null ? ` (${h.rhrDelta >= 0 ? "+" : ""}${h.rhrDelta} bpm vs baseline)` : "";
+      parts.push(`Resting HR ${h.rhrLast7Avg} bpm${dlt}`);
+    }
+    if (h.stepsYesterday != null) {
+      parts.push(`${h.stepsYesterday.toLocaleString()} steps yesterday`);
+    }
+    if (parts.length > 0) {
+      lines.push(`Biometrics from Apple Health: ${parts.join(", ")}.`);
+      lines.push("Use these numbers in at least one data-callout zone today. Reference real data over self-report when they conflict.");
+      lines.push("");
+    }
   }
 
   // 9. Day context.

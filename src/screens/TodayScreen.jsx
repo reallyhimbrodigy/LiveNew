@@ -71,6 +71,12 @@ export default function TodayScreen({ navigation }) {
   const submitReflection = useAuthStore(s => s.submitReflection);
   const clearSkip = useAuthStore(s => s.clearSkip);
   const stressHistory = useAuthStore(s => s.stressHistory);
+  const healthPermission = useAuthStore(s => s.healthPermission);
+  const healthSnapshot = useAuthStore(s => s.healthSnapshot);
+  const connectHealth = useAuthStore(s => s.connectHealth);
+  const refreshHealthSnapshot = useAuthStore(s => s.refreshHealthSnapshot);
+  const [healthBannerHidden, setHealthBannerHidden] = useState(false);
+  const [connectingHealth, setConnectingHealth] = useState(false);
 
   const [currentZoneId, setCurrentZoneId] = useState(getCurrentZoneId());
   const [showStressRelief, setShowStressRelief] = useState(false);
@@ -136,15 +142,39 @@ export default function TodayScreen({ navigation }) {
   const showEveningReflection = isEvening() && !reflection && zones.length > 0;
   const showStressBtn = !!stressRelief;
 
-  // Score — derived from check-in + behavior + trend
+  // Score — derived from check-in + behavior + trend, AND HealthKit when available.
   const stressTrend = Array.isArray(stressHistory) ? stressHistory : [];
   const score = computeScore({
     stressLabel: typeof todayStress === 'string' ? todayStress : null,
     sleepQuality: todaySleep,
     energy: todayEnergy,
     stressTrend,
+    healthSnapshot,
   });
   const band = scoreBand(score);
+
+  // Refresh the HealthKit snapshot whenever Today gains focus so the score
+  // and any health-aware UI stays current. No-op when permission isn't granted.
+  useFocusEffect(useCallback(() => {
+    if (healthPermission === 'granted') {
+      refreshHealthSnapshot().catch(() => {});
+    }
+  }, [healthPermission]));
+
+  const showHealthBanner =
+    healthPermission !== 'granted' &&
+    !healthBannerHidden &&
+    todayPlan &&
+    Array.isArray(todayPlan.zones) &&
+    todayPlan.zones.length > 0;
+
+  const handleConnectHealth = async () => {
+    if (connectingHealth) return;
+    tapSelect();
+    setConnectingHealth(true);
+    try { await connectHealth(); } catch {}
+    setConnectingHealth(false);
+  };
 
   const { dayOfWeek, partOfDay } = getGreetingParts();
 
@@ -242,6 +272,35 @@ export default function TodayScreen({ navigation }) {
             <Text style={s.redoIcon}>↻</Text>
           </Pressable>
         </View>
+
+        {/* Connect Apple Health — soft prompt; the score and content quality
+            both improve dramatically when this is granted. Dismissable. */}
+        {showHealthBanner && (
+          <View style={s.healthBanner}>
+            <Text style={s.healthBannerLabel}>CONNECT APPLE HEALTH</Text>
+            <Text style={s.healthBannerTitle}>Make this real.</Text>
+            <Text style={s.healthBannerBody}>
+              Right now we're calibrating from what you tap. Connect Apple Health and we'll read your actual sleep, resting heart rate, and HRV — the score becomes legitimate, the zones reference your real biometrics.
+            </Text>
+            <View style={s.healthBannerRow}>
+              <Pressable
+                style={({ pressed }) => [s.healthBannerCta, pressed && { opacity: 0.85 }]}
+                onPress={handleConnectHealth}
+                disabled={connectingHealth}
+              >
+                <Text style={s.healthBannerCtaText}>
+                  {connectingHealth ? 'Connecting…' : 'Connect'}
+                </Text>
+              </Pressable>
+              <Pressable
+                style={s.healthBannerSkip}
+                onPress={() => { tapLight(); setHealthBannerHidden(true); }}
+              >
+                <Text style={s.healthBannerSkipText}>Maybe later</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
 
         {/* Current zone — hero card */}
         {currentZone && (
@@ -478,6 +537,64 @@ const s = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
   },
   redoIcon: { color: colors.muted, fontSize: 18, lineHeight: 22 },
+
+  // Connect Apple Health banner
+  healthBanner: {
+    backgroundColor: 'rgba(196,168,108,0.08)',
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    borderRadius: 14,
+    paddingVertical: 18,
+    paddingHorizontal: 18,
+    marginBottom: 16,
+  },
+  healthBannerLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: colors.gold,
+    letterSpacing: 1.6,
+    marginBottom: 8,
+  },
+  healthBannerTitle: {
+    fontFamily: fonts.display,
+    fontSize: 19,
+    color: colors.text,
+    marginBottom: 8,
+    letterSpacing: 0.2,
+  },
+  healthBannerBody: {
+    fontFamily: fonts.display,
+    fontSize: 14,
+    color: colors.muted,
+    lineHeight: 21,
+    marginBottom: 16,
+    letterSpacing: 0.1,
+  },
+  healthBannerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  healthBannerCta: {
+    backgroundColor: colors.gold,
+    borderRadius: 10,
+    paddingVertical: 11,
+    paddingHorizontal: 22,
+  },
+  healthBannerCtaText: {
+    color: colors.bg,
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  healthBannerSkip: {
+    paddingVertical: 11,
+    paddingHorizontal: 8,
+  },
+  healthBannerSkipText: {
+    color: colors.muted,
+    fontSize: 13,
+  },
 
   // Zone hero
   zoneHero: {

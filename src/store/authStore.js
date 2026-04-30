@@ -3,6 +3,13 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, setTokens, clearTokens } from '../api';
 import { requestPermissions, scheduleSessionReminders } from '../notifications';
 import { getLocalDateISO, getYesterdayISO } from '../utils/localDate';
+import {
+  isHealthAvailable,
+  getHealthPermissionStatus,
+  setHealthPermissionStatus,
+  requestHealthPermissions,
+  getHealthSnapshot,
+} from '../healthkit';
 
 const AUTH_KEY = 'livenew:auth';
 const PROFILE_KEY = 'livenew:profile';
@@ -26,6 +33,8 @@ export const useAuthStore = create((set, get) => ({
   streak: 0,
   stressHistory: [],
   skippedDate: null,     // YYYY-MM-DD when user chose "skip" today; cleared on day change
+  healthPermission: 'unknown', // "granted" | "denied" | "unknown"
+  healthSnapshot: null,        // cached HealthKit summary, refreshed on app focus
 
   // Hydrate from storage
   hydrate: async () => {
@@ -84,6 +93,11 @@ export const useAuthStore = create((set, get) => ({
           if (stored === today) skippedDate = stored;
         }
 
+        // HealthKit permission status is persisted; we read it here so the
+        // UI can decide whether to show the "Connect Apple Health" banner.
+        let healthPermission = 'unknown';
+        try { healthPermission = await getHealthPermissionStatus(); } catch {}
+
         set({
           isLoading: false,
           isLoggedIn: true,
@@ -98,8 +112,14 @@ export const useAuthStore = create((set, get) => ({
           completed,
           reflection,
           skippedDate,
+          healthPermission,
         });
         get().loadStreak();
+        // If we already have permission, refresh the health snapshot in the
+        // background so the score and AI prompt have fresh data.
+        if (healthPermission === 'granted') {
+          get().refreshHealthSnapshot().catch(() => {});
+        }
 
         // Refresh profile from server in background
         try {
@@ -187,6 +207,34 @@ export const useAuthStore = create((set, get) => ({
     try { await AsyncStorage.removeItem(SKIPPED_KEY); } catch {}
   },
 
+  // HealthKit — request permissions, refresh snapshot, persist status.
+  connectHealth: async () => {
+    const available = await isHealthAvailable();
+    if (!available) {
+      set({ healthPermission: 'denied' });
+      await setHealthPermissionStatus('denied');
+      return false;
+    }
+    const ok = await requestHealthPermissions();
+    if (!ok) {
+      set({ healthPermission: 'denied' });
+      return false;
+    }
+    const snapshot = await getHealthSnapshot({ maxAgeMinutes: 0 });
+    const status = await getHealthPermissionStatus();
+    set({ healthPermission: status, healthSnapshot: snapshot });
+    return true;
+  },
+
+  // Refresh the cached health snapshot (called on app focus / Today mount).
+  refreshHealthSnapshot: async () => {
+    const status = await getHealthPermissionStatus();
+    if (status !== 'granted') return null;
+    const snapshot = await getHealthSnapshot({ maxAgeMinutes: 30 });
+    if (snapshot) set({ healthSnapshot: snapshot });
+    return snapshot;
+  },
+
   setSubscribed: async (value) => {
     try {
       await AsyncStorage.setItem('livenew:subscribed', JSON.stringify(value));
@@ -237,6 +285,16 @@ export const useAuthStore = create((set, get) => ({
     // is also sent so the server can store it for stress-trend purposes.
     const stressLabel = typeof stress === 'string' ? stress : null;
 
+    // If HealthKit is connected, attach the latest snapshot so the server
+    // can pass it to the AI. Refresh inline (cheap if cached) so we don't
+    // ship stale data.
+    let healthSnapshot = null;
+    if (get().healthPermission === 'granted') {
+      try {
+        healthSnapshot = await getHealthSnapshot({ maxAgeMinutes: 30 });
+      } catch {}
+    }
+
     const data = await api.checkin({
       dateISO: getLocalDateISO(),
       stress: stressValue,
@@ -245,6 +303,7 @@ export const useAuthStore = create((set, get) => ({
       energy,         // "high" | "medium" | "low"
       routine: profile.routine || '',
       goal: profile.goal || '',
+      healthSnapshot, // null if not connected; server handles either way
     });
 
     // New schema: validate zones[]. Backward-compat: still accept old plan[]

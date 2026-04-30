@@ -3044,6 +3044,14 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       // Behavior profile shapes the plan around what THIS user actually does.
       aiHistory.behaviorProfile = await computeBehaviorProfile(userSupabaseForCheckin, auth.userId, dateKey);
 
+      // HealthKit snapshot, if the client has it. Pass it through unchanged
+      // so the AI prompt sees real biometric data.
+      const rawHealth = checkInRawSource?.healthSnapshot;
+      const healthSnapshot =
+        rawHealth && typeof rawHealth === "object" && !Array.isArray(rawHealth)
+          ? rawHealth
+          : null;
+
       // AI-powered personalized plan
       let dayPlan = null;
       try {
@@ -3054,6 +3062,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           routine: checkIn.routine || "",
           goal: checkIn.goal || "",
           history: aiHistory,
+          healthSnapshot,
         });
       } catch (err) {
         console.error("[DAYPLAN_FAILED]", err?.message);

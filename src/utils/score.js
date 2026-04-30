@@ -1,68 +1,120 @@
-// LiveNew score (0–100) — a behavior + state index, not a real cortisol
-// measurement. Honest about that in the UI.
+// LiveNew score (0–100). Behavior + state + biometric index.
 //
-// Components (each contributes to the final score):
-//   - Sleep quality       (0–25)   strongest signal until HealthKit lands
-//   - Stress today        (0–25)   inverted; stressed=0, good=25
-//   - Energy today        (0–15)
-//   - Recent stress trend (0–15)   downtrending stress earns points
-//   - Plan compliance     (0–10)   from behavior profile
-//   - Streak factor       (0–10)   small reward for showing up
+// When HealthKit is connected, real sleep / RHR / HRV dominate the calculation.
+// When it isn't, falls back to self-report.
 //
-// Inputs come from authStore + behaviorProfile (when available).
+// Self-report mode (no HealthKit):
+//   Sleep quality       (0–25)
+//   Stress today        (0–25)
+//   Energy today        (0–15)
+//   Stress trend        (0–15)
+//   Compliance + streak (0–20)
+//
+// HealthKit mode (snapshot present):
+//   Sleep duration (last night vs 7d avg)   (0–22)
+//   Sleep duration baseline                 (0–8)
+//   HRV vs 30d baseline                     (0–22)
+//   RHR vs baseline (inverted)              (0–13)
+//   Stress / energy reported                (0–15)
+//   Compliance + streak                     (0–20)
 
 const STRESS_TO_NUMERIC = { good: 25, okay: 16, stressed: 8, overwhelmed: 0 };
 const SLEEP_TO_NUMERIC = { great: 25, okay: 14, rough: 5 };
 const ENERGY_TO_NUMERIC = { high: 15, medium: 9, low: 4 };
 
-export function computeScore({ stressLabel, sleepQuality, energy, behaviorProfile, stressTrend }) {
+export function computeScore({ stressLabel, sleepQuality, energy, behaviorProfile, stressTrend, healthSnapshot }) {
   let score = 0;
+  const hasHealth = healthSnapshot && (
+    healthSnapshot.sleepLastNightMinutes != null ||
+    healthSnapshot.hrvLast7Avg != null ||
+    healthSnapshot.rhrLast7Avg != null
+  );
 
-  // Today's check-in inputs
-  if (stressLabel && STRESS_TO_NUMERIC[stressLabel] != null) {
-    score += STRESS_TO_NUMERIC[stressLabel];
-  } else {
-    score += 12; // neutral default
-  }
-  if (sleepQuality && SLEEP_TO_NUMERIC[sleepQuality] != null) {
-    score += SLEEP_TO_NUMERIC[sleepQuality];
-  } else {
-    score += 12;
-  }
-  if (energy && ENERGY_TO_NUMERIC[energy] != null) {
-    score += ENERGY_TO_NUMERIC[energy];
-  } else {
-    score += 7;
-  }
+  if (hasHealth) {
+    // Sleep duration last night (target ~7.5h = 450 min)
+    const sleepMin = healthSnapshot.sleepLastNightMinutes;
+    if (sleepMin != null) {
+      // Bell curve around 450 min, max 22 points at 420–480
+      const distance = Math.abs(sleepMin - 450);
+      const sleepPts = Math.max(0, 22 - Math.round(distance / 12));
+      score += Math.min(22, sleepPts);
+    } else {
+      score += sleepQuality && SLEEP_TO_NUMERIC[sleepQuality] != null
+        ? Math.round(SLEEP_TO_NUMERIC[sleepQuality] * 0.88)
+        : 11;
+    }
 
-  // Recent stress trend — improving earns points, worsening loses them
-  if (Array.isArray(stressTrend) && stressTrend.length >= 4) {
-    const recent = stressTrend.slice(-3).map((t) => t.stress ?? 5);
-    const older = stressTrend.slice(-7, -3).map((t) => t.stress ?? 5);
-    if (recent.length > 0 && older.length > 0) {
-      const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
-      const olderAvg = older.reduce((a, b) => a + b, 0) / older.length;
-      const delta = olderAvg - recentAvg; // positive = stress dropping
-      const trendPoints = Math.max(0, Math.min(15, 7 + delta * 3));
-      score += trendPoints;
+    // 7-day sleep average baseline (target same range)
+    const avg7 = healthSnapshot.sleepLast7Avg;
+    if (avg7 != null) {
+      const distance = Math.abs(avg7 - 450);
+      score += Math.max(0, 8 - Math.round(distance / 25));
+    } else {
+      score += 4;
+    }
+
+    // HRV vs baseline — positive delta is health, negative is overload
+    if (healthSnapshot.hrvDeltaPct != null) {
+      // -20% → 0 pts, 0% → 14 pts, +20% → 22 pts
+      const pct = healthSnapshot.hrvDeltaPct;
+      const hrvPts = Math.max(0, Math.min(22, 14 + Math.round(pct * 0.4)));
+      score += hrvPts;
+    } else if (healthSnapshot.hrvLast7Avg != null) {
+      // Without baseline, give middle credit
+      score += 11;
+    } else {
+      score += 8;
+    }
+
+    // RHR vs baseline (inverted — higher = worse)
+    if (healthSnapshot.rhrDelta != null) {
+      const delta = healthSnapshot.rhrDelta;
+      // -3 bpm or lower → 13 pts, 0 → 9, +5 → 4, +10 → 0
+      const rhrPts = Math.max(0, Math.min(13, 9 - delta));
+      score += rhrPts;
+    } else if (healthSnapshot.rhrLast7Avg != null) {
+      score += 7;
+    } else {
+      score += 4;
+    }
+
+    // Reported stress / energy (lighter weight when biometrics dominate)
+    score += stressLabel && STRESS_TO_NUMERIC[stressLabel] != null
+      ? Math.round(STRESS_TO_NUMERIC[stressLabel] * 0.36)
+      : 6;
+    score += energy && ENERGY_TO_NUMERIC[energy] != null
+      ? Math.round(ENERGY_TO_NUMERIC[energy] * 0.4)
+      : 4;
+  } else {
+    // Self-report fallback
+    score += stressLabel && STRESS_TO_NUMERIC[stressLabel] != null ? STRESS_TO_NUMERIC[stressLabel] : 12;
+    score += sleepQuality && SLEEP_TO_NUMERIC[sleepQuality] != null ? SLEEP_TO_NUMERIC[sleepQuality] : 12;
+    score += energy && ENERGY_TO_NUMERIC[energy] != null ? ENERGY_TO_NUMERIC[energy] : 7;
+
+    if (Array.isArray(stressTrend) && stressTrend.length >= 4) {
+      const recent = stressTrend.slice(-3).map((t) => t.stress ?? 5);
+      const older = stressTrend.slice(-7, -3).map((t) => t.stress ?? 5);
+      if (recent.length > 0 && older.length > 0) {
+        const recentAvg = recent.reduce((a, b) => a + b, 0) / recent.length;
+        const olderAvg = older.reduce((a, b) => a + b, 0) / older.length;
+        const delta = olderAvg - recentAvg;
+        const trendPoints = Math.max(0, Math.min(15, 7 + delta * 3));
+        score += trendPoints;
+      } else {
+        score += 7;
+      }
     } else {
       score += 7;
     }
-  } else {
-    score += 7; // neutral when not enough trend data
   }
 
-  // Plan compliance from behavior profile
+  // Compliance + streak (same weight either mode)
   if (behaviorProfile) {
     const total = behaviorProfile.totalItemsDoneLast14 || 0;
-    // 0 = 0 points, 5 = ~3 points, 15 = ~7 points, 25+ = 10 points
-    const compliancePoints = Math.min(10, Math.round(total * 0.4));
-    score += compliancePoints;
-    const streakPoints = Math.min(10, Math.round((behaviorProfile.streak || 0) * 1.5));
-    score += streakPoints;
+    score += Math.min(10, Math.round(total * 0.4));
+    score += Math.min(10, Math.round((behaviorProfile.streak || 0) * 1.5));
   } else {
-    score += 5; // neutral default
-    score += 0;
+    score += 5;
   }
 
   return Math.max(0, Math.min(100, Math.round(score)));
