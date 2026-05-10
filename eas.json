@@ -19,7 +19,8 @@
     },
     "production": {
       "ios": {
-        "autoIncrement": true
+        "autoIncrement": true,
+        "credentialsSource": "remote"
       },
       "android": {
         "autoIncrement": true

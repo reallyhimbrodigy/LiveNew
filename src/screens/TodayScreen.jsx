@@ -82,6 +82,22 @@ export default function TodayScreen({ navigation }) {
   const [showStressRelief, setShowStressRelief] = useState(false);
   const [stressNoted, setStressNoted] = useState(false);
   const [showAllZones, setShowAllZones] = useState(false);
+  // Fresh stress-relief content per tap. NOT cached — every open of the
+  // modal triggers a new AI generation.
+  const [reliefLoading, setReliefLoading] = useState(false);
+  const [reliefText, setReliefText] = useState('');
+  // Subtle breathing animation on the dot inside the stress button.
+  const stressDotOpacity = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(stressDotOpacity, { toValue: 0.35, duration: 1400, useNativeDriver: true }),
+        Animated.timing(stressDotOpacity, { toValue: 1, duration: 1400, useNativeDriver: true }),
+      ])
+    );
+    loop.start();
+    return () => loop.stop();
+  }, []);
 
   // Refresh "current" zone when app focuses or every minute
   useEffect(() => {
@@ -432,24 +448,34 @@ export default function TodayScreen({ navigation }) {
         )}
       </ScrollView>
 
-      {/* Sticky stress button */}
+      {/* Sticky stress button — sleek pill, centered, breathing dot */}
       {showStressBtn && (
-        <View style={[s.stressBtnSticky, { bottom: insets.bottom + 12 }]} pointerEvents="box-none">
+        <View style={[s.stressBtnSticky, { bottom: insets.bottom + 16 }]} pointerEvents="box-none">
           <Pressable
-            onPress={() => {
+            onPress={async () => {
               tapSelect();
               setShowStressRelief(true);
+              setReliefLoading(true);
+              setReliefText('');
               api.feedback({ type: 'stress_spike', dateISO: getLocalDateISO() }).catch(() => {});
+              try {
+                const r = await api.stressRelief();
+                if (r?.text) setReliefText(r.text);
+                else setReliefText(stressRelief || 'Inhale through your nose for 4. Hold 7. Exhale through your mouth for 8. Once is enough.');
+              } catch {
+                setReliefText(stressRelief || 'Inhale through your nose for 4. Hold 7. Exhale through your mouth for 8. Once is enough.');
+              }
+              setReliefLoading(false);
             }}
-            style={({ pressed }) => [s.stressBtnInner, pressed && { transform: [{ scale: 0.98 }] }]}
+            style={({ pressed }) => [s.stressBtnInner, pressed && { transform: [{ scale: 0.97 }] }]}
           >
-            <View style={s.stressBtnDot} />
-            <Text style={s.stressBtnText}>I'm stressed right now</Text>
+            <Animated.View style={[s.stressBtnDot, { opacity: stressDotOpacity }]} />
+            <Text style={s.stressBtnText}>I'm stressed</Text>
           </Pressable>
         </View>
       )}
 
-      {/* Stress relief modal */}
+      {/* Stress relief modal — content fetched fresh per open */}
       <Modal
         visible={showStressRelief}
         transparent
@@ -459,9 +485,17 @@ export default function TodayScreen({ navigation }) {
         <Pressable style={s.modalOverlay} onPress={() => setShowStressRelief(false)}>
           <Pressable style={s.modalContent} onPress={() => {}}>
             <Text style={s.modalLabel}>RIGHT NOW, DO THIS</Text>
-            <Text style={s.modalBody}>{stressRelief}</Text>
+            {reliefLoading ? (
+              <View style={s.modalLoading}>
+                <ActivityIndicator color={colors.gold} size="small" />
+                <Text style={s.modalLoadingText}>Generating something for this moment…</Text>
+              </View>
+            ) : (
+              <Text style={s.modalBody}>{reliefText}</Text>
+            )}
             <Pressable
-              style={({ pressed }) => [s.modalBtn, pressed && { opacity: 0.85 }]}
+              style={({ pressed }) => [s.modalBtn, pressed && { opacity: 0.85 }, reliefLoading && { opacity: 0.5 }]}
+              disabled={reliefLoading}
               onPress={() => {
                 tapLight();
                 setShowStressRelief(false);
@@ -818,30 +852,42 @@ const s = StyleSheet.create({
   stressNotedCard: { paddingVertical: 12, alignItems: 'center', marginTop: 12 },
   stressNotedText: { color: colors.muted, fontSize: 13, fontStyle: 'italic' },
 
-  // Sticky stress button
+  // Sticky stress button — pill-shaped, centered, gold-soft fill, breathing dot
   stressBtnSticky: {
     position: 'absolute',
-    left: 22, right: 22,
+    left: 0,
+    right: 0,
+    alignItems: 'center',
   },
   stressBtnInner: {
-    backgroundColor: colors.surface,
+    backgroundColor: 'rgba(196,168,108,0.13)',
     borderWidth: 1,
-    borderColor: colors.goldBorder,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
+    borderColor: 'rgba(196,168,108,0.42)',
+    borderRadius: 30,
+    paddingVertical: 13,
+    paddingHorizontal: 28,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.45,
+    gap: 12,
+    shadowColor: colors.gold,
+    shadowOpacity: 0.22,
     shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOffset: { width: 0, height: 6 },
     elevation: 6,
   },
-  stressBtnDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.gold },
-  stressBtnText: { color: colors.gold, fontSize: 15, fontWeight: '600', letterSpacing: 0.2 },
+  stressBtnDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 3.5,
+    backgroundColor: colors.gold,
+  },
+  stressBtnText: {
+    color: colors.gold,
+    fontSize: 14,
+    fontWeight: '600',
+    letterSpacing: 0.6,
+  },
 
   // Modal
   modalOverlay: {
@@ -860,6 +906,19 @@ const s = StyleSheet.create({
   modalBody: {
     fontFamily: fonts.display,
     fontSize: 17, color: colors.text, lineHeight: 26, marginBottom: 22,
+  },
+  modalLoading: {
+    paddingVertical: 24,
+    alignItems: 'center',
+    gap: 14,
+    marginBottom: 22,
+  },
+  modalLoadingText: {
+    fontFamily: fonts.displayItalic,
+    fontSize: 13,
+    color: colors.muted,
+    letterSpacing: 0.2,
+    textAlign: 'center',
   },
   modalBtn: {
     backgroundColor: colors.gold,

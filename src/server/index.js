@@ -20,6 +20,7 @@ import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
 import { generateDayPlan } from "../domain/aiDayPlan.js";
 import { generateInsight } from "../domain/aiInsight.js";
+import { generateStressRelief } from "../domain/aiStressRelief.js";
 
 // In-memory insight cache. Key: `${userId}:${dateKey}`. Cleared on server restart.
 // One Anthropic call per user per day instead of one per Progress mount.
@@ -2345,6 +2346,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/progress",
     "/v1/stats",
     "/v1/feedback",
+    "/v1/stress-relief",
     "/v1/reflect",
     "/v1/subscription/status",
     "/v1/profile/update",
@@ -3475,6 +3477,74 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     } catch {}
     sendJson(res, 200, { ok: true }, auth.userId);
     return true;
+  }
+
+  // Generates a fresh AI stress relief on demand. The user wants a new one
+  // every tap — no caching. We pass recent reliefs to the prompt so the AI
+  // doesn't repeat itself across taps in the same day.
+  if (pathname === "/v1/stress-relief" && req.method === "POST") {
+    try {
+      const userSupabase = supabaseForUser(auth.jwt);
+      const todayKey = getLocalDateISOForUser();
+      const sevenDaysAgo = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
+      // Pull last few stress-relief texts so the AI can vary its output.
+      const { data: prior } = await userSupabase
+        .from("event")
+        .select("payload, date_key")
+        .eq("user_id", auth.userId)
+        .eq("type", "stress_relief_served")
+        .gte("date_key", sevenDaysAgo)
+        .order("date_key", { ascending: false })
+        .limit(8);
+      const recentReliefTexts = (prior || [])
+        .map((r) => r?.payload?.text)
+        .filter(Boolean);
+
+      const hour = new Date().getHours();
+      const timeContext = hour < 10 ? "early morning"
+        : hour < 12 ? "late morning"
+        : hour < 14 ? "midday"
+        : hour < 17 ? "afternoon"
+        : hour < 21 ? "evening"
+        : "late night";
+
+      const relief = await generateStressRelief({
+        recentReliefTexts,
+        timeContext,
+      });
+
+      if (!relief || !relief.text) {
+        sendJson(res, 200, {
+          ok: true,
+          text: "Inhale through your nose for 4. Hold 7. Exhale through your mouth for 8. Once is enough.",
+          category: "BREATH",
+          fallback: true,
+        }, auth.userId);
+        return true;
+      }
+
+      // Persist so future taps know what NOT to repeat.
+      try {
+        await userSupabase.from("event").insert({
+          user_id: auth.userId,
+          date_key: todayKey,
+          type: "stress_relief_served",
+          payload: { text: relief.text, category: relief.category },
+        });
+      } catch {}
+
+      sendJson(res, 200, { ok: true, text: relief.text, category: relief.category }, auth.userId);
+      return true;
+    } catch (err) {
+      console.error("[STRESS_RELIEF_ERROR]", err?.message);
+      sendJson(res, 200, {
+        ok: true,
+        text: "Inhale through your nose for 4. Hold 7. Exhale through your mouth for 8. Once is enough.",
+        category: "BREATH",
+        fallback: true,
+      }, auth.userId);
+      return true;
+    }
   }
 
   if (pathname === "/v1/reflect" && req.method === "POST") {

@@ -124,6 +124,9 @@ export const api = {
   // Feedback
   feedback: (data) => request('POST', '/v1/feedback', data),
 
+  // Fresh AI stress relief — generated per-tap, never cached
+  stressRelief: () => request('POST', '/v1/stress-relief', {}),
+
   // Progress
   progress: () => request('GET', '/v1/progress'),
 
