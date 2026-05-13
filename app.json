@@ -26,8 +26,7 @@
       },
       "entitlements": {
         "com.apple.developer.healthkit": true,
-        "com.apple.developer.healthkit.access": [],
-        "com.apple.security.application-groups": ["group.app.livenew.mobile"]
+        "com.apple.developer.healthkit.access": []
       },
       "appleTeamId": "8KT9332327",
       "config": {
@@ -43,7 +42,6 @@
     },
     "plugins": [
       "expo-font",
-      "@bacons/apple-targets",
       [
         "expo-notifications",
         {
