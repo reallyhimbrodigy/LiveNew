@@ -16,13 +16,28 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 const HEALTH_CACHE_KEY = 'livenew:health_snapshot_v1';
 const HEALTH_PERM_KEY = 'livenew:health_permission_status';
 
+// react-native-health exports the class as the module's default (ES) AND
+// as the bare module export (CommonJS). The previous `.default` access was
+// hitting undefined on some build modes — that's why the Connect button
+// silently did nothing in build #35.
 let AppleHealthKit = null;
+let HEALTHKIT_LOAD_ERROR = null;
 if (Platform.OS === 'ios') {
   try {
-    AppleHealthKit = require('react-native-health').default;
-  } catch {
+    const mod = require('react-native-health');
+    AppleHealthKit = mod?.default || mod;
+    if (!AppleHealthKit || !AppleHealthKit.initHealthKit) {
+      HEALTHKIT_LOAD_ERROR = `Module loaded but initHealthKit is missing (keys: ${Object.keys(mod || {}).join(',')})`;
+      AppleHealthKit = null;
+    }
+  } catch (err) {
+    HEALTHKIT_LOAD_ERROR = err?.message || String(err);
     AppleHealthKit = null;
   }
+}
+
+export function getHealthKitLoadError() {
+  return HEALTHKIT_LOAD_ERROR;
 }
 
 const HK_PERMISSIONS = AppleHealthKit
@@ -67,17 +82,25 @@ export async function setHealthPermissionStatus(status) {
   try { await AsyncStorage.setItem(HEALTH_PERM_KEY, status); } catch {}
 }
 
+// Returns { ok: boolean, error: string|null }. ok=true means the native
+// HealthKit auth sheet ran to completion (either grant or deny — iOS doesn't
+// distinguish for read-only access). error is non-null only on hard failures
+// (native module not loaded, framework not available, etc.).
 export async function requestHealthPermissions() {
-  if (!AppleHealthKit || !HK_PERMISSIONS) return false;
+  if (!AppleHealthKit || !HK_PERMISSIONS) {
+    const msg = HEALTHKIT_LOAD_ERROR
+      ? `HealthKit module didn't load: ${HEALTHKIT_LOAD_ERROR}`
+      : 'HealthKit is only available on iOS devices.';
+    return { ok: false, error: msg };
+  }
   return new Promise((resolve) => {
     AppleHealthKit.initHealthKit(HK_PERMISSIONS, async (err) => {
       if (err) {
         await setHealthPermissionStatus('denied');
-        return resolve(false);
+        return resolve({ ok: false, error: String(err?.message || err) });
       }
-      // We can't directly verify each permission was granted (iOS hides this
-      // for read-only access), so we attempt a probe query and treat any
-      // returned data as success.
+      // Probe for actual data to infer whether the user granted anything.
+      // iOS hides per-permission status for read access (privacy by design).
       try {
         const probe = await fetchHealthSnapshot(2);
         const anyData = probe && (
@@ -87,11 +110,10 @@ export async function requestHealthPermissions() {
           probe.stepsYesterday != null
         );
         await setHealthPermissionStatus(anyData ? 'granted' : 'unknown');
-        resolve(true);
       } catch {
         await setHealthPermissionStatus('unknown');
-        resolve(true);
       }
+      resolve({ ok: true, error: null });
     });
   });
 }

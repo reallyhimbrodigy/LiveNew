@@ -73,10 +73,7 @@ export default function TodayScreen({ navigation }) {
   const stressHistory = useAuthStore(s => s.stressHistory);
   const healthPermission = useAuthStore(s => s.healthPermission);
   const healthSnapshot = useAuthStore(s => s.healthSnapshot);
-  const connectHealth = useAuthStore(s => s.connectHealth);
   const refreshHealthSnapshot = useAuthStore(s => s.refreshHealthSnapshot);
-  const [healthBannerHidden, setHealthBannerHidden] = useState(false);
-  const [connectingHealth, setConnectingHealth] = useState(false);
 
   const [currentZoneId, setCurrentZoneId] = useState(getCurrentZoneId());
   const [showStressRelief, setShowStressRelief] = useState(false);
@@ -177,20 +174,6 @@ export default function TodayScreen({ navigation }) {
     }
   }, [healthPermission]));
 
-  const showHealthBanner =
-    healthPermission !== 'granted' &&
-    !healthBannerHidden &&
-    todayPlan &&
-    Array.isArray(todayPlan.zones) &&
-    todayPlan.zones.length > 0;
-
-  const handleConnectHealth = async () => {
-    if (connectingHealth) return;
-    tapSelect();
-    setConnectingHealth(true);
-    try { await connectHealth(); } catch {}
-    setConnectingHealth(false);
-  };
 
   const { dayOfWeek, partOfDay } = getGreetingParts();
 
@@ -288,35 +271,6 @@ export default function TodayScreen({ navigation }) {
             <Text style={s.redoIcon}>↻</Text>
           </Pressable>
         </View>
-
-        {/* Connect Apple Health — soft prompt; the score and content quality
-            both improve dramatically when this is granted. Dismissable. */}
-        {showHealthBanner && (
-          <View style={s.healthBanner}>
-            <Text style={s.healthBannerLabel}>CONNECT APPLE HEALTH</Text>
-            <Text style={s.healthBannerTitle}>Make this real.</Text>
-            <Text style={s.healthBannerBody}>
-              Right now we're calibrating from what you tap. Connect Apple Health and we'll read your actual sleep, resting heart rate, and HRV — the score becomes legitimate, the zones reference your real biometrics.
-            </Text>
-            <View style={s.healthBannerRow}>
-              <Pressable
-                style={({ pressed }) => [s.healthBannerCta, pressed && { opacity: 0.85 }]}
-                onPress={handleConnectHealth}
-                disabled={connectingHealth}
-              >
-                <Text style={s.healthBannerCtaText}>
-                  {connectingHealth ? 'Connecting…' : 'Connect'}
-                </Text>
-              </Pressable>
-              <Pressable
-                style={s.healthBannerSkip}
-                onPress={() => { tapLight(); setHealthBannerHidden(true); }}
-              >
-                <Text style={s.healthBannerSkipText}>Maybe later</Text>
-              </Pressable>
-            </View>
-          </View>
-        )}
 
         {/* Current zone — hero card */}
         {currentZone && (

@@ -208,22 +208,33 @@ export const useAuthStore = create((set, get) => ({
   },
 
   // HealthKit — request permissions, refresh snapshot, persist status.
+  // Returns { ok, error } so the UI can surface failures instead of silently
+  // doing nothing (the bug in build #35).
   connectHealth: async () => {
     const available = await isHealthAvailable();
     if (!available) {
       set({ healthPermission: 'denied' });
       await setHealthPermissionStatus('denied');
-      return false;
+      return { ok: false, error: 'HealthKit not available on this device.' };
     }
-    const ok = await requestHealthPermissions();
-    if (!ok) {
+    const result = await requestHealthPermissions();
+    if (!result.ok) {
       set({ healthPermission: 'denied' });
-      return false;
+      return result;
     }
     const snapshot = await getHealthSnapshot({ maxAgeMinutes: 0 });
-    const status = await getHealthPermissionStatus();
+    // If we got any biometric data back, the user clearly granted something —
+    // mark granted directly so the UI updates immediately.
+    const anyData = snapshot && (
+      snapshot.sleepLast7Avg != null ||
+      snapshot.rhrLast7Avg != null ||
+      snapshot.hrvLast7Avg != null ||
+      snapshot.stepsYesterday != null
+    );
+    const status = anyData ? 'granted' : (await getHealthPermissionStatus());
+    if (anyData) await setHealthPermissionStatus('granted');
     set({ healthPermission: status, healthSnapshot: snapshot });
-    return true;
+    return { ok: true, error: null };
   },
 
   // Refresh the cached health snapshot (called on app focus / Today mount).

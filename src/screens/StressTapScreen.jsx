@@ -1,6 +1,6 @@
 import React, { useState, useRef } from 'react';
 import {
-  View, Text, Pressable, StyleSheet, Animated,
+  View, Text, Pressable, StyleSheet, Animated, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { colors, fonts } from '../theme';
@@ -71,17 +71,26 @@ function LoadingAnimation() {
 }
 
 export default function StressTapScreen({ navigation }) {
-  const [step, setStep] = useState(1);
+  const healthPermission = useAuthStore(s => s.healthPermission);
+  const connectHealth = useAuthStore(s => s.connectHealth);
+  // If the user has never been asked, surface the HealthKit step FIRST,
+  // before any check-in input. Production apps ask for system permissions
+  // before they generate personalized content, not after.
+  const showHealthStep = healthPermission !== 'granted' && healthPermission !== 'denied';
+  const [step, setStep] = useState(showHealthStep ? 0 : 1);
   const [stress, setStress] = useState(null);
   const [sleep, setSleep] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [connectingHealth, setConnectingHealth] = useState(false);
   const [error, setError] = useState('');
   const fadeAnim = useRef(new Animated.Value(1)).current;
 
   const generatePlan = useAuthStore(s => s.generatePlan);
   const skipToday = useAuthStore(s => s.skipToday);
 
-  const totalSteps = 3;
+  // Total steps shown in the progress bar — 3 if no health step needed, 4 otherwise.
+  const totalSteps = showHealthStep ? 4 : 3;
+  const currentStepIndex = showHealthStep ? step + 1 : step;
 
   const animateTransition = (callback) => {
     Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
@@ -135,6 +144,7 @@ export default function StressTapScreen({ navigation }) {
     animateTransition(() => {
       if (step === 3) setStep(2);
       else if (step === 2) { setStep(1); setStress(null); }
+      else if (step === 1 && showHealthStep) setStep(0);
     });
   };
 
@@ -142,6 +152,29 @@ export default function StressTapScreen({ navigation }) {
     tapMedium();
     await skipToday();
     navigation.replace('TodayMain');
+  };
+
+  // Step 0 — Apple Health permission.
+  const handleConnectHealth = async () => {
+    if (connectingHealth) return;
+    tapMedium();
+    setConnectingHealth(true);
+    const result = await connectHealth();
+    setConnectingHealth(false);
+    if (!result.ok && result.error) {
+      Alert.alert('Couldn\'t connect', result.error);
+      return;
+    }
+    // Whether granted or not — proceed to the actual check-in. The screen
+    // won't re-ask within this session.
+    animateTransition(() => setStep(1));
+  };
+  const handleSkipHealth = () => {
+    tapMedium();
+    // Mark denied so we don't re-prompt next check-in. User can connect from Account.
+    useAuthStore.setState({ healthPermission: 'denied' });
+    require('../healthkit').setHealthPermissionStatus('denied').catch(() => {});
+    animateTransition(() => setStep(1));
   };
 
   const stepHeading = {
@@ -162,12 +195,37 @@ export default function StressTapScreen({ navigation }) {
 
         {!loading && (
           <View style={s.progressTrack}>
-            <View style={[s.progressFill, { width: `${(step / totalSteps) * 100}%` }]} />
+            <View style={[s.progressFill, { width: `${(currentStepIndex / totalSteps) * 100}%` }]} />
           </View>
         )}
 
         {loading ? (
           <LoadingAnimation />
+        ) : step === 0 ? (
+          // STEP 0 — Apple Health permission. Pre-plan, system-style.
+          <Animated.View style={[s.body, { opacity: fadeAnim }]}>
+            <Text style={s.heading}>Connect Apple Health</Text>
+            <Text style={s.healthSub}>
+              We read your actual sleep, resting heart rate, and HRV from Apple Health. The plan you get back is calibrated to your real biometrics — not guesses.
+            </Text>
+            <View style={s.healthBullets}>
+              <Text style={s.healthBullet}>•  Real cortisol-aware insights from your data</Text>
+              <Text style={s.healthBullet}>•  Score reflects actual recovery, not a self-rating</Text>
+              <Text style={s.healthBullet}>•  Read-only. Nothing is written back. Nothing leaves your phone.</Text>
+            </View>
+            <Pressable
+              style={({ pressed }) => [s.healthPrimary, pressed && { opacity: 0.9 }, connectingHealth && { opacity: 0.6 }]}
+              onPress={handleConnectHealth}
+              disabled={connectingHealth}
+            >
+              <Text style={s.healthPrimaryText}>
+                {connectingHealth ? 'Connecting…' : 'Connect Apple Health'}
+              </Text>
+            </Pressable>
+            <Pressable style={s.healthSecondary} onPress={handleSkipHealth} disabled={connectingHealth}>
+              <Text style={s.healthSecondaryText}>Not now</Text>
+            </Pressable>
+          </Animated.View>
         ) : (
           <Animated.View style={[s.body, { opacity: fadeAnim }]}>
             {step > 1 && (
@@ -280,6 +338,49 @@ const s = StyleSheet.create({
     paddingHorizontal: 16,
   },
   skipText: { color: colors.muted, fontSize: 13, letterSpacing: 0.2 },
+
+  // Step 0 — Apple Health permission
+  healthSub: {
+    fontFamily: fonts.display,
+    fontSize: 15,
+    color: colors.muted,
+    lineHeight: 23,
+    marginBottom: 24,
+    letterSpacing: 0.1,
+  },
+  healthBullets: {
+    gap: 10,
+    marginBottom: 36,
+  },
+  healthBullet: {
+    fontFamily: fonts.display,
+    fontSize: 14,
+    color: colors.text,
+    lineHeight: 22,
+    letterSpacing: 0.1,
+  },
+  healthPrimary: {
+    backgroundColor: colors.gold,
+    borderRadius: 14,
+    paddingVertical: 16,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  healthPrimaryText: {
+    color: colors.bg,
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  healthSecondary: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  healthSecondaryText: {
+    color: colors.muted,
+    fontSize: 14,
+    letterSpacing: 0.2,
+  },
 });
 
 const loadingStyles = StyleSheet.create({
