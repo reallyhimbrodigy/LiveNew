@@ -1,14 +1,17 @@
 import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, Pressable, StyleSheet, AppState,
-  Modal, ActivityIndicator,
+  Modal, ActivityIndicator, Share,
   Animated, LayoutAnimation, UIManager, Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Speech from 'expo-speech';
+import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
+import ShareCard from '../components/ShareCard';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
@@ -81,6 +84,10 @@ export default function TodayScreen({ navigation }) {
   const [showStressRelief, setShowStressRelief] = useState(false);
   const [stressNoted, setStressNoted] = useState(false);
   const [showAllZones, setShowAllZones] = useState(false);
+  const [zoneExpanded, setZoneExpanded] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [sharingZone, setSharingZone] = useState(null);
+  const shareCardRef = useRef(null);
   // Fresh stress-relief content per tap. NOT cached — every open of the
   // modal triggers a new AI generation.
   const [reliefLoading, setReliefLoading] = useState(false);
@@ -182,6 +189,51 @@ export default function TodayScreen({ navigation }) {
   const handleReflection = (feeling) => {
     tapSuccess();
     submitReflection(feeling);
+  };
+
+  const handleListen = (zone) => {
+    if (!zone) return;
+    if (isSpeaking) {
+      Speech.stop();
+      setIsSpeaking(false);
+      return;
+    }
+    tapLight();
+    setIsSpeaking(true);
+    const text = `${zone.headline}. ${zone.body}`;
+    Speech.speak(text, {
+      language: 'en-US',
+      pitch: 1.0,
+      rate: 0.95,
+      onDone: () => setIsSpeaking(false),
+      onStopped: () => setIsSpeaking(false),
+      onError: () => setIsSpeaking(false),
+    });
+  };
+
+  useEffect(() => () => { Speech.stop(); }, []);
+
+  const handleShare = async (zone) => {
+    if (!zone) return;
+    tapSelect();
+    setSharingZone(zone);
+    // Let the ShareCard render first
+    await new Promise(r => setTimeout(r, 60));
+    try {
+      const uri = await captureRef(shareCardRef, {
+        format: 'png',
+        quality: 1,
+        result: 'tmpfile',
+      });
+      await Share.share({
+        url: uri,
+        message: `${zone.pullQuote || zone.headline} — Iris @ LiveNew`,
+      });
+    } catch (err) {
+      console.warn('[share]', err?.message);
+    } finally {
+      setSharingZone(null);
+    }
   };
 
   // Empty / loading / skipped states
@@ -289,7 +341,39 @@ export default function TodayScreen({ navigation }) {
               <View style={s.nowPill}><View style={s.nowPillDot} /><Text style={s.nowPillText}>NOW</Text></View>
             </View>
             <Text style={s.zoneHeadline}>{currentZone.headline}</Text>
-            <Text style={s.zoneBody}>{currentZone.body}</Text>
+
+            {currentZone.pullQuote ? (
+              <View style={s.pullQuoteWrap}>
+                <Text style={s.pullQuoteMark}>"</Text>
+                <Text style={s.pullQuoteText}>{currentZone.pullQuote}</Text>
+              </View>
+            ) : null}
+
+            {zoneExpanded ? (
+              <Text style={s.zoneBody}>{currentZone.body}</Text>
+            ) : null}
+
+            <View style={s.zoneActions}>
+              <Pressable style={s.zoneAction} onPress={() => handleListen(currentZone)} hitSlop={6}>
+                <Text style={s.zoneActionIcon}>{isSpeaking ? '◼' : '▶'}</Text>
+                <Text style={s.zoneActionText}>{isSpeaking ? 'Stop' : 'Listen'}</Text>
+              </Pressable>
+              <Pressable style={s.zoneAction} onPress={() => handleShare(currentZone)} hitSlop={6}>
+                <Text style={s.zoneActionIcon}>↗</Text>
+                <Text style={s.zoneActionText}>Share</Text>
+              </Pressable>
+              <Pressable
+                style={s.zoneAction}
+                onPress={() => {
+                  tapLight();
+                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                  setZoneExpanded(v => !v);
+                }}
+                hitSlop={6}
+              >
+                <Text style={s.zoneActionText}>{zoneExpanded ? 'Less' : 'Read more'}</Text>
+              </Pressable>
+            </View>
           </View>
         )}
 
@@ -464,6 +548,19 @@ export default function TodayScreen({ navigation }) {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* Hidden share card — positioned off-screen, captured by view-shot when sharing */}
+      {sharingZone ? (
+        <View style={s.shareCardHidden} pointerEvents="none">
+          <ShareCard
+            innerRef={shareCardRef}
+            headline={sharingZone.headline}
+            pullQuote={sharingZone.pullQuote}
+            zoneLabel={ZONE_LABELS[sharingZone.id] || ''}
+            score={score}
+          />
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -635,12 +732,37 @@ function makeStyles(colors, fonts) {
     letterSpacing: 1.4,
   },
   zoneHeadline: {
-    fontFamily: fonts.display,
-    fontSize: 21,
+    fontFamily: fonts.displayBold,
+    fontSize: 24,
     color: colors.text,
-    letterSpacing: 0.2,
-    lineHeight: 28,
-    marginBottom: 14,
+    letterSpacing: -0.2,
+    lineHeight: 31,
+    marginBottom: 16,
+  },
+  pullQuoteWrap: {
+    paddingLeft: 12,
+    paddingRight: 4,
+    paddingVertical: 4,
+    marginBottom: 18,
+    position: 'relative',
+  },
+  pullQuoteMark: {
+    position: 'absolute',
+    left: -6,
+    top: -10,
+    fontFamily: fonts.accentBold,
+    fontSize: 48,
+    color: colors.gold,
+    opacity: 0.5,
+    lineHeight: 48,
+  },
+  pullQuoteText: {
+    fontFamily: fonts.italic,
+    fontSize: 17,
+    color: colors.text,
+    lineHeight: 26,
+    letterSpacing: 0.1,
+    paddingLeft: 22,
   },
   zoneBody: {
     fontFamily: fonts.display,
@@ -648,6 +770,41 @@ function makeStyles(colors, fonts) {
     color: colors.text,
     lineHeight: 24,
     letterSpacing: 0.1,
+    marginBottom: 16,
+  },
+  zoneActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 18,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+    marginTop: 4,
+    paddingVertical: 12,
+  },
+  zoneAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+  },
+  zoneActionIcon: {
+    fontFamily: fonts.displayBold,
+    fontSize: 11,
+    color: colors.gold,
+    letterSpacing: 0.5,
+  },
+  zoneActionText: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 13,
+    color: colors.text,
+    letterSpacing: 0.3,
+  },
+  shareCardHidden: {
+    position: 'absolute',
+    top: -10000,
+    left: 0,
+    opacity: 1,
   },
 
   // Today's arc

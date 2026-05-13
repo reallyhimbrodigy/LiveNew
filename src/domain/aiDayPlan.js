@@ -128,6 +128,7 @@ Generate exactly 8 zones for today. The IDs are fixed: morning, peak, midmorning
 - id (one of the eight above)
 - type ("counter_intuitive" | "protocol" | "data_callout")
 - headline: 5–10 words. Sharp. Stands alone.
+- pullQuote: ONE sentence pulled from the body, 8–14 words. The single most quotable line — what someone would screenshot and post. Must read alone, without setup. Often the most counter-intuitive or specific line in the body. Do NOT invent something new — extract from your body verbatim or near-verbatim.
 - body: 50–100 words. One of the three content types above.
 
 Across the 8 zones:
@@ -168,6 +169,7 @@ BAD: "Did you do the protocol?", "How was today?"
       "id": "morning" | "peak" | "midmorning" | "lunch" | "afternoon" | "transition" | "winddown" | "sleep",
       "type": "counter_intuitive" | "protocol" | "data_callout",
       "headline": "5–10 word sharp headline",
+      "pullQuote": "ONE sentence from the body, 8-14 words, the most screenshot-worthy line",
       "body": "50–100 word substantive paragraph following the type's pattern"
     }
   ],
