@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
+import IrisSignature from '../components/IrisSignature';
 
 // Goal is no longer asked in onboarding. Defaults to "feel better generally"
 // and can be set/changed any time in Account → Your profile → My goal.
@@ -148,7 +149,7 @@ export default function OnboardingScreen() {
   const stepHeading = {
     1: 'How are you feeling?',
     2: 'How did you sleep?',
-    3: 'Energy right now?',
+    3: 'Your energy right now?',
   };
   const stepSub = {
     1: null,
@@ -166,7 +167,10 @@ export default function OnboardingScreen() {
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
       <View style={s.container}>
 
-        <Text style={s.logo}>LiveNew</Text>
+        <View style={s.brandRow}>
+          <Text style={s.logo}>LiveNew</Text>
+          <IrisSignature />
+        </View>
 
         {!loading && (
           <View style={s.progressTrack}>
@@ -216,13 +220,17 @@ function makeStyles(colors, fonts) {
     safe: { flex: 1, backgroundColor: colors.bg },
     container: { flex: 1, paddingHorizontal: 24, paddingTop: 28 },
 
-    logo: {
-      fontFamily: fonts.display,
-      fontSize: 22,
-      color: colors.gold,
-      textAlign: 'center',
+    brandRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
       marginBottom: 22,
-      letterSpacing: 0.6,
+    },
+    logo: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 18,
+      color: colors.gold,
+      letterSpacing: 1.6,
     },
 
     progressTrack: {

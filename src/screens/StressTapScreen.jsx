@@ -6,6 +6,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
+import IrisSignature from '../components/IrisSignature';
 
 const STRESS_OPTIONS = [
   { label: 'Good', value: 'good', sub: 'calm, steady' },
@@ -198,9 +199,14 @@ export default function StressTapScreen({ navigation }) {
       <View style={s.container}>
 
         {!loading && (
-          <View style={s.progressTrack}>
-            <View style={[s.progressFill, { width: `${(currentStepIndex / totalSteps) * 100}%` }]} />
-          </View>
+          <>
+            <View style={s.brandRow}>
+              <IrisSignature />
+            </View>
+            <View style={s.progressTrack}>
+              <View style={[s.progressFill, { width: `${(currentStepIndex / totalSteps) * 100}%` }]} />
+            </View>
+          </>
         )}
 
         {loading ? (
@@ -271,6 +277,11 @@ function makeStyles(colors, fonts) {
     safe: { flex: 1, backgroundColor: colors.bg },
     container: { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
 
+    brandRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 18,
+    },
     progressTrack: {
       height: 2,
       backgroundColor: colors.line,

@@ -3,6 +3,7 @@ import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
+import IrisSignature from '../components/IrisSignature';
 
 export default function IntroScreen({ navigation }) {
   const { colors, fonts } = useTheme();
@@ -15,12 +16,16 @@ export default function IntroScreen({ navigation }) {
         </View>
 
         <View style={s.center}>
-          <Text style={s.title}>Lower your cortisol{'\n'}by tonight</Text>
+          <View style={s.signatureRow}>
+            <Text style={s.signaturePrefix}>Hi, I'm </Text>
+            <IrisSignature size="header" />
+          </View>
+          <Text style={s.title}>I'll tell you{'\n'}what's actually{'\n'}happening.</Text>
           <Text style={s.body}>
-            Tell Iris how you're feeling. She'll build a plan that fits your day — small changes backed by real science that add up by bedtime.
+            Eight moments a day. Each one a read on where your body is and exactly what to do about it.
           </Text>
           <Text style={s.body}>
-            No sessions. No timers. Just what to do and why it works.
+            No timers. No sessions. Substance over fluff.
           </Text>
         </View>
 
@@ -44,12 +49,23 @@ function makeStyles(colors, fonts) {
     logo: { fontFamily: fonts.displaySemibold, fontSize: 20, color: colors.text, letterSpacing: 1 },
 
     center: { paddingHorizontal: 4 },
+    signatureRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      marginBottom: 18,
+    },
+    signaturePrefix: {
+      fontFamily: fonts.body,
+      fontSize: 18,
+      color: colors.muted,
+    },
     title: {
       fontFamily: fonts.displayBold,
-      fontSize: 32,
+      fontSize: 36,
       color: colors.text,
-      lineHeight: 40,
+      lineHeight: 42,
       marginBottom: 20,
+      letterSpacing: -0.4,
     },
     body: {
       fontFamily: fonts.body,

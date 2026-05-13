@@ -8,6 +8,10 @@ const darkColors = {
   card: '#161412',
   surface: '#1c1a17',
   gold: GOLD,
+  // A slightly darker gold used where the brand gold needs more contrast on
+  // light backgrounds. Same hue, deeper saturation — reads as "the brand
+  // color" but passes WCAG AA against cream.
+  goldDeep: GOLD,
   goldDim: 'rgba(196,168,108,0.12)',
   goldSoft: 'rgba(196,168,108,0.06)',
   goldBorder: 'rgba(196,168,108,0.2)',
@@ -22,6 +26,7 @@ const darkColors = {
   successBg: 'rgba(122,173,122,0.15)',
   accent: '#8a8acd',
   tabBar: '#111110',
+  modalOverlay: 'rgba(0,0,0,0.72)',
   scheme: 'dark',
 };
 
@@ -30,9 +35,12 @@ const lightColors = {
   card: '#ffffff',
   surface: '#fefcf7',
   gold: GOLD,
+  // Darker gold for text/accents on cream — passes contrast where the brand
+  // gold alone would wash out (gold #c4a86c on cream = 1.6:1, fails WCAG AA).
+  goldDeep: '#8a6f3a',
   goldDim: 'rgba(196,168,108,0.18)',
   goldSoft: 'rgba(196,168,108,0.08)',
-  goldBorder: 'rgba(196,168,108,0.35)',
+  goldBorder: 'rgba(196,168,108,0.45)',
   text: '#2a2620',
   muted: '#6b6357',
   dim: '#a59f93',
@@ -44,6 +52,7 @@ const lightColors = {
   successBg: 'rgba(74,138,74,0.1)',
   accent: '#5a5aa8',
   tabBar: '#ffffff',
+  modalOverlay: 'rgba(42,38,32,0.45)',
   scheme: 'light',
 };
 

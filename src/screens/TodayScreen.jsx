@@ -8,11 +8,12 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Speech from 'expo-speech';
 import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
 import ShareCard from '../components/ShareCard';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
+import IrisSignature from '../components/IrisSignature';
+import { speakAsIris, stopSpeaking } from '../utils/irisVoice';
 import { writeWidgetPayload } from '../widgetBridge';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapSuccess } from '../haptics';
@@ -38,6 +39,37 @@ function getGreetingParts() {
 
 function isEvening() {
   return new Date().getHours() >= 19;
+}
+
+// Small SVG-free speaker icon drawn with View primitives. A trapezoid body
+// and two sound-wave arcs (approximated with thin bordered circles). Looks
+// clean at the 28x28 size we use for the Listen button.
+function SpeakerGlyph({ color = '#c4a86c', size = 14 }) {
+  const body = {
+    width: size * 0.5,
+    height: size * 0.7,
+    backgroundColor: color,
+    borderTopRightRadius: 2,
+    borderBottomRightRadius: 2,
+  };
+  const wave = {
+    position: 'absolute',
+    right: -4,
+    width: size * 0.45,
+    height: size * 0.45,
+    borderRadius: size * 0.225,
+    borderWidth: 1.6,
+    borderColor: color,
+    borderLeftColor: 'transparent',
+    borderTopColor: 'transparent',
+    borderBottomColor: 'transparent',
+  };
+  return (
+    <View style={{ width: size + 4, height: size + 2, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={body} />
+      <View style={wave} />
+    </View>
+  );
 }
 
 function PressCard({ onPress, style, children, disabled }) {
@@ -90,7 +122,18 @@ export default function TodayScreen({ navigation }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sharing, setSharing] = useState(null); // { type: 'zone'|'streak', payload }
   const [showMilestone, setShowMilestone] = useState(null); // milestone days int
+  const [showGoalNudge, setShowGoalNudge] = useState(false);
+  const [shareVariant, setShareVariant] = useState('dark');
   const shareCardRef = useRef(null);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const v = await AsyncStorage.getItem('livenew:share_card_variant');
+        if (v === 'cream' || v === 'dark') setShareVariant(v);
+      } catch {}
+    })();
+  }, []);
   // Fresh stress-relief content per tap. NOT cached — every open of the
   // modal triggers a new AI generation.
   const [reliefLoading, setReliefLoading] = useState(false);
@@ -189,6 +232,24 @@ export default function TodayScreen({ navigation }) {
 
   const { dayOfWeek, partOfDay } = getGreetingParts();
 
+  // Goal nudge: show when goal is default/missing and user hasn't dismissed
+  // it. Stops appearing after 3 days from dismissal so we don't nag.
+  useEffect(() => {
+    (async () => {
+      const goal = profile?.goal || '';
+      const isDefault = !goal || /just want to feel better/i.test(goal);
+      if (!isDefault) { setShowGoalNudge(false); return; }
+      try {
+        const dismissedAt = await AsyncStorage.getItem('livenew:goal_nudge_dismissed');
+        const ts = dismissedAt ? parseInt(dismissedAt, 10) : 0;
+        const days = (Date.now() - ts) / (1000 * 60 * 60 * 24);
+        setShowGoalNudge(!ts || days > 3);
+      } catch {
+        setShowGoalNudge(true);
+      }
+    })();
+  }, [profile?.goal]);
+
   // Push the current zone payload into the App Group UserDefaults so the iOS
   // home-screen widget can read it. Fires whenever the current zone or score
   // changes — runs only on iOS, silently no-ops elsewhere.
@@ -208,27 +269,24 @@ export default function TodayScreen({ navigation }) {
     submitReflection(feeling);
   };
 
-  const handleListen = (zone) => {
+  const handleListen = async (zone) => {
     if (!zone) return;
     if (isSpeaking) {
-      Speech.stop();
+      stopSpeaking();
       setIsSpeaking(false);
       return;
     }
     tapLight();
     setIsSpeaking(true);
     const text = `${zone.headline}. ${zone.body}`;
-    Speech.speak(text, {
-      language: 'en-US',
-      pitch: 1.0,
-      rate: 0.95,
+    await speakAsIris(text, {
       onDone: () => setIsSpeaking(false),
       onStopped: () => setIsSpeaking(false),
       onError: () => setIsSpeaking(false),
     });
   };
 
-  useEffect(() => () => { Speech.stop(); }, []);
+  useEffect(() => () => { stopSpeaking(); }, []);
 
   const shareAs = async (type, payload, message) => {
     tapSelect();
@@ -288,6 +346,7 @@ export default function TodayScreen({ navigation }) {
           <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
             <View style={s.headerRow}>
               <View style={{ flex: 1 }}>
+                <IrisSignature size="header" style={{ marginBottom: 4 }} />
                 <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
                 <Text style={s.greetingPart}>{partOfDay}</Text>
               </View>
@@ -348,9 +407,10 @@ export default function TodayScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* Header — score + streak + greeting + redo */}
+        {/* Header — Iris signature + greeting + streak/score + redo */}
         <View style={s.headerRow}>
           <View style={{ flex: 1 }}>
+            <IrisSignature size="header" style={{ marginBottom: 4 }} />
             <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
             <Text style={s.greetingPart}>{partOfDay}</Text>
           </View>
@@ -393,6 +453,10 @@ export default function TodayScreen({ navigation }) {
               <View style={s.pullQuoteWrap}>
                 <Text style={s.pullQuoteMark}>"</Text>
                 <Text style={s.pullQuoteText}>{currentZone.pullQuote}</Text>
+                <View style={s.pullQuoteAttribution}>
+                  <Text style={s.pullQuoteDash}>—</Text>
+                  <IrisSignature />
+                </View>
               </View>
             ) : null}
 
@@ -401,25 +465,35 @@ export default function TodayScreen({ navigation }) {
             ) : null}
 
             <View style={s.zoneActions}>
-              <Pressable style={s.zoneAction} onPress={() => handleListen(currentZone)} hitSlop={6}>
-                <Text style={s.zoneActionIcon}>{isSpeaking ? '◼' : '▶'}</Text>
-                <Text style={s.zoneActionText}>{isSpeaking ? 'Stop' : 'Listen'}</Text>
-              </Pressable>
-              <Pressable style={s.zoneAction} onPress={() => handleShare(currentZone)} hitSlop={6}>
-                <Text style={s.zoneActionIcon}>↗</Text>
-                <Text style={s.zoneActionText}>Share</Text>
-              </Pressable>
               <Pressable
-                style={s.zoneAction}
-                onPress={() => {
-                  tapLight();
-                  LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                  setZoneExpanded(v => !v);
-                }}
-                hitSlop={6}
+                onPress={() => handleListen(currentZone)}
+                hitSlop={10}
+                style={[s.listenBtn, isSpeaking && s.listenBtnActive]}
+                accessibilityLabel={isSpeaking ? 'Stop Iris' : 'Hear from Iris'}
               >
-                <Text style={s.zoneActionText}>{zoneExpanded ? 'Less' : 'Read more'}</Text>
+                {isSpeaking ? (
+                  <View style={s.stopGlyph} />
+                ) : (
+                  <SpeakerGlyph color={colors.gold} />
+                )}
               </Pressable>
+              <View style={s.zoneActionsRight}>
+                <Pressable style={s.zoneAction} onPress={() => handleShare(currentZone)} hitSlop={6}>
+                  <Text style={s.zoneActionIcon}>↗</Text>
+                  <Text style={s.zoneActionText}>Share</Text>
+                </Pressable>
+                <Pressable
+                  style={s.zoneAction}
+                  onPress={() => {
+                    tapLight();
+                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                    setZoneExpanded(v => !v);
+                  }}
+                  hitSlop={6}
+                >
+                  <Text style={s.zoneActionText}>{zoneExpanded ? 'Less' : 'Read more'}</Text>
+                </Pressable>
+              </View>
             </View>
           </View>
         )}
@@ -473,6 +547,31 @@ export default function TodayScreen({ navigation }) {
               );
             })}
           </View>
+        )}
+
+        {/* Goal nudge — shown when the user hasn't set a goal yet (default
+            placeholder "feel better generally" set during onboarding shrink). */}
+        {showGoalNudge && (
+          <Pressable
+            style={s.goalNudge}
+            onPress={() => { tapLight(); navigation.navigate('GoalPicker'); }}
+          >
+            <Text style={s.goalNudgeLabel}>FROM IRIS</Text>
+            <Text style={s.goalNudgeBody}>
+              I can sharpen this if you tell me what actually matters. Pick one →
+            </Text>
+            <Pressable
+              style={s.goalNudgeDismiss}
+              onPress={async () => {
+                tapLight();
+                try { await AsyncStorage.setItem('livenew:goal_nudge_dismissed', String(Date.now())); } catch {}
+                setShowGoalNudge(false);
+              }}
+              hitSlop={8}
+            >
+              <Text style={s.goalNudgeDismissText}>×</Text>
+            </Pressable>
+          </Pressable>
         )}
 
         {/* Goal thread */}
@@ -571,11 +670,14 @@ export default function TodayScreen({ navigation }) {
       >
         <Pressable style={s.modalOverlay} onPress={() => setShowStressRelief(false)}>
           <Pressable style={s.modalContent} onPress={() => {}}>
-            <Text style={s.modalLabel}>RIGHT NOW, DO THIS</Text>
+            <View style={s.modalSignatureRow}>
+              <IrisSignature />
+              <Text style={s.modalLabelSoft}>for this moment</Text>
+            </View>
             {reliefLoading ? (
               <View style={s.modalLoading}>
                 <ActivityIndicator color={colors.gold} size="small" />
-                <Text style={s.modalLoadingText}>Generating something for this moment…</Text>
+                <Text style={s.modalLoadingText}>Iris is finding something for this moment…</Text>
               </View>
             ) : (
               <Text style={s.modalBody}>{reliefText}</Text>
@@ -606,10 +708,11 @@ export default function TodayScreen({ navigation }) {
               pullQuote={sharing.payload.pullQuote}
               zoneLabel={ZONE_LABELS[sharing.payload.id] || ''}
               score={score}
+              variant={shareVariant}
             />
           ) : null}
           {sharing.type === 'streak' ? (
-            <StreakShareCard innerRef={shareCardRef} days={sharing.payload.days} />
+            <StreakShareCard innerRef={shareCardRef} days={sharing.payload.days} variant={shareVariant} />
           ) : null}
         </View>
       ) : null}
@@ -878,6 +981,18 @@ function makeStyles(colors, fonts) {
     letterSpacing: 0.1,
     paddingLeft: 22,
   },
+  pullQuoteAttribution: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    paddingLeft: 22,
+    marginTop: 6,
+    gap: 4,
+  },
+  pullQuoteDash: {
+    fontFamily: fonts.italic,
+    fontSize: 13,
+    color: colors.gold,
+  },
   zoneBody: {
     fontFamily: fonts.display,
     fontSize: 15,
@@ -889,12 +1004,36 @@ function makeStyles(colors, fonts) {
   zoneActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 18,
+    justifyContent: 'space-between',
     paddingTop: 6,
     borderTopWidth: 1,
     borderTopColor: colors.line,
     marginTop: 4,
     paddingVertical: 12,
+  },
+  zoneActionsRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 18,
+  },
+  listenBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1.4,
+    borderColor: colors.gold,
+    backgroundColor: colors.goldSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  listenBtnActive: {
+    backgroundColor: colors.gold,
+  },
+  stopGlyph: {
+    width: 10,
+    height: 10,
+    backgroundColor: '#1a1612',
+    borderRadius: 1.5,
   },
   zoneAction: {
     flexDirection: 'row',
@@ -1015,6 +1154,47 @@ function makeStyles(colors, fonts) {
     lineHeight: 20,
   },
 
+  // Goal nudge card
+  goalNudge: {
+    backgroundColor: colors.goldSoft,
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    borderRadius: 14,
+    padding: 16,
+    paddingRight: 36,
+    marginBottom: 16,
+    position: 'relative',
+  },
+  goalNudgeLabel: {
+    fontFamily: fonts.displayBold,
+    fontSize: 10,
+    color: colors.gold,
+    letterSpacing: 2,
+    marginBottom: 6,
+  },
+  goalNudgeBody: {
+    fontFamily: fonts.italic,
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 22,
+    letterSpacing: 0.1,
+  },
+  goalNudgeDismiss: {
+    position: 'absolute',
+    top: 8,
+    right: 10,
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goalNudgeDismissText: {
+    fontFamily: fonts.body,
+    fontSize: 18,
+    color: colors.muted,
+    lineHeight: 18,
+  },
+
   // Goal thread card
   goalCard: {
     backgroundColor: colors.surface,
@@ -1119,7 +1299,7 @@ function makeStyles(colors, fonts) {
 
   // Modal
   modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.72)',
+    flex: 1, backgroundColor: colors.modalOverlay,
     justifyContent: 'center', alignItems: 'center', padding: 28,
   },
   modalContent: {
@@ -1130,6 +1310,18 @@ function makeStyles(colors, fonts) {
   modalLabel: {
     fontSize: 10, fontWeight: '700', color: colors.gold,
     letterSpacing: 2, marginBottom: 12,
+  },
+  modalSignatureRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginBottom: 14,
+  },
+  modalLabelSoft: {
+    fontFamily: fonts.italic,
+    fontSize: 13,
+    color: colors.muted,
+    letterSpacing: 0.2,
   },
   modalBody: {
     fontFamily: fonts.display,

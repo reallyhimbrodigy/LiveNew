@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getColors, fonts } from '../theme';
+import { fonts } from '../theme';
+import { shareCardPalette } from './shareCardPalette';
 
 const W = 1080;
 const H = 1920;
@@ -13,15 +14,15 @@ const LINES = [
   "Eight zones a day. No timers. No sessions.",
 ];
 
-export default function InviteShareCard({ innerRef, lineIndex = 0 }) {
-  const colors = getColors('dark');
-  const s = makeStyles(colors);
+export default function InviteShareCard({ innerRef, lineIndex = 0, variant = 'dark' }) {
+  const p = shareCardPalette(variant);
+  const s = makeStyles(p);
   const line = LINES[lineIndex % LINES.length];
 
   return (
     <View ref={innerRef} collapsable={false} style={s.outer}>
       <LinearGradient
-        colors={['#1a1612', '#0f0d0a']}
+        colors={p.gradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={s.bg}
@@ -52,7 +53,7 @@ export default function InviteShareCard({ innerRef, lineIndex = 0 }) {
   );
 }
 
-function makeStyles(colors) {
+function makeStyles(p) {
   return StyleSheet.create({
     outer: {
       width: W * SCALE,
@@ -68,7 +69,7 @@ function makeStyles(colors) {
       width: W * SCALE * 0.9,
       height: W * SCALE * 0.9,
       borderRadius: W * SCALE * 0.45,
-      backgroundColor: 'rgba(196,168,108,0.18)',
+      backgroundColor: p.glow,
     },
     content: {
       flex: 1,
@@ -81,13 +82,13 @@ function makeStyles(colors) {
     wordmark: {
       fontFamily: fonts.displayBold,
       fontSize: 36 * SCALE,
-      color: colors.gold,
+      color: p.wordmark,
       letterSpacing: 8 * SCALE,
     },
     tagline: {
       fontFamily: fonts.italic,
       fontSize: 30 * SCALE,
-      color: colors.muted,
+      color: p.muted,
     },
     center: {
       flex: 1,
@@ -97,21 +98,21 @@ function makeStyles(colors) {
     quoteMark: {
       fontFamily: fonts.accentBold,
       fontSize: 220 * SCALE,
-      color: colors.gold,
+      color: p.accent,
       lineHeight: 140 * SCALE,
       marginBottom: -40 * SCALE,
     },
     bigLine: {
       fontFamily: fonts.italic,
       fontSize: 92 * SCALE,
-      color: colors.text,
+      color: p.body,
       lineHeight: 116 * SCALE,
       letterSpacing: -0.4,
     },
     attribution: {
       fontFamily: fonts.displaySemibold,
       fontSize: 32 * SCALE,
-      color: colors.gold,
+      color: p.goldDeep,
       marginTop: 8 * SCALE,
       letterSpacing: 2 * SCALE,
     },
@@ -125,12 +126,12 @@ function makeStyles(colors) {
       width: 14 * SCALE,
       height: 14 * SCALE,
       borderRadius: 7 * SCALE,
-      backgroundColor: colors.gold,
+      backgroundColor: p.accent,
     },
     footerText: {
       fontFamily: fonts.displaySemibold,
       fontSize: 26 * SCALE,
-      color: colors.muted,
+      color: p.muted,
       letterSpacing: 1.5 * SCALE,
     },
   });

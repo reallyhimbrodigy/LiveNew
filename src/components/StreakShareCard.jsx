@@ -1,7 +1,8 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { getColors, fonts } from '../theme';
+import { fonts } from '../theme';
+import { shareCardPalette } from './shareCardPalette';
 
 const W = 1080;
 const H = 1920;
@@ -16,15 +17,15 @@ function milestoneTier(days) {
   return { label: 'DAY ONE', subtitle: 'just starting.' };
 }
 
-export default function StreakShareCard({ days, innerRef }) {
-  const colors = getColors('dark');
-  const s = makeStyles(colors);
+export default function StreakShareCard({ days, variant = 'dark', innerRef }) {
+  const p = shareCardPalette(variant);
+  const s = makeStyles(p);
   const tier = milestoneTier(days);
 
   return (
     <View ref={innerRef} collapsable={false} style={s.outer}>
       <LinearGradient
-        colors={['#1a1612', '#0f0d0a']}
+        colors={p.gradient}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={s.bg}
@@ -56,7 +57,7 @@ export default function StreakShareCard({ days, innerRef }) {
   );
 }
 
-function makeStyles(colors) {
+function makeStyles(p) {
   return StyleSheet.create({
     outer: {
       width: W * SCALE,
@@ -72,7 +73,7 @@ function makeStyles(colors) {
       width: W * SCALE * 0.9,
       height: W * SCALE * 0.9,
       borderRadius: W * SCALE * 0.45,
-      backgroundColor: 'rgba(196,168,108,0.18)',
+      backgroundColor: p.glow,
     },
     content: {
       flex: 1,
@@ -81,19 +82,17 @@ function makeStyles(colors) {
       paddingBottom: 64 * SCALE,
       justifyContent: 'space-between',
     },
-    top: {
-      gap: 14 * SCALE,
-    },
+    top: { gap: 14 * SCALE },
     wordmark: {
       fontFamily: fonts.displayBold,
       fontSize: 36 * SCALE,
-      color: colors.gold,
+      color: p.wordmark,
       letterSpacing: 8 * SCALE,
     },
     tierLabel: {
       fontFamily: fonts.displaySemibold,
       fontSize: 26 * SCALE,
-      color: colors.muted,
+      color: p.muted,
       letterSpacing: 4 * SCALE,
     },
     center: {
@@ -104,30 +103,28 @@ function makeStyles(colors) {
     daysNum: {
       fontFamily: fonts.accentBold,
       fontSize: 360 * SCALE,
-      color: colors.gold,
+      color: p.accent,
       letterSpacing: -8 * SCALE,
       lineHeight: 360 * SCALE,
     },
     daysSuffix: {
       fontFamily: fonts.italic,
       fontSize: 64 * SCALE,
-      color: colors.text,
+      color: p.body,
       marginTop: 8 * SCALE,
     },
     subtitle: {
       fontFamily: fonts.italic,
       fontSize: 48 * SCALE,
-      color: colors.muted,
+      color: p.muted,
       marginTop: 40 * SCALE,
       lineHeight: 64 * SCALE,
     },
-    bottom: {
-      gap: 28 * SCALE,
-    },
+    bottom: { gap: 28 * SCALE },
     attribution: {
       fontFamily: fonts.displaySemibold,
       fontSize: 32 * SCALE,
-      color: colors.gold,
+      color: p.goldDeep,
       letterSpacing: 2 * SCALE,
     },
     footerRow: {
@@ -139,12 +136,12 @@ function makeStyles(colors) {
       width: 14 * SCALE,
       height: 14 * SCALE,
       borderRadius: 7 * SCALE,
-      backgroundColor: colors.gold,
+      backgroundColor: p.accent,
     },
     footerText: {
       fontFamily: fonts.displaySemibold,
       fontSize: 26 * SCALE,
-      color: colors.muted,
+      color: p.muted,
       letterSpacing: 1.5 * SCALE,
     },
   });

@@ -3,6 +3,7 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { StatusBar } from 'expo-status-bar';
 import { useFonts, Lora_400Regular_Italic, Lora_500Medium, Lora_700Bold } from '@expo-google-fonts/lora';
 import {
   Manrope_400Regular,
@@ -23,6 +24,7 @@ import ProgressScreen from '../screens/ProgressScreen';
 import AccountScreen from '../screens/AccountScreen';
 import IntroScreen from '../screens/IntroScreen';
 import PaywallScreen from '../screens/PaywallScreen';
+import GoalPickerScreen from '../screens/GoalPickerScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -126,6 +128,7 @@ function TodayStack() {
       <Stack.Screen name="TodayMain" component={TodayScreen} />
       <Stack.Screen name="StressTap" component={StressTapScreen} />
       <Stack.Screen name="Paywall" component={PaywallScreen} options={{ presentation: 'modal' }} />
+      <Stack.Screen name="GoalPicker" component={GoalPickerScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>
   );
 }
@@ -182,6 +185,8 @@ export default function RootNavigator() {
   }
 
   return (
+    <>
+      <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
     <NavigationContainer
       theme={{
         dark: scheme === 'dark',
@@ -211,6 +216,7 @@ export default function RootNavigator() {
         )}
       </Stack.Navigator>
     </NavigationContainer>
+    </>
   );
 }
 

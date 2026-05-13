@@ -11,6 +11,8 @@ import { tapLight, tapSelect, tapMedium } from '../haptics';
 import { truncateGoal } from '../utils/goalText';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import InviteShareCard from '../components/InviteShareCard';
+import IrisSignature from '../components/IrisSignature';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getNotificationPermission, requestPermissions,
   getNotificationPrefs, setNotificationPrefs,
@@ -46,6 +48,23 @@ export default function AccountScreen({ navigation }) {
   const [sharing, setSharing] = useState(null);
   const shareCardRef = useRef(null);
   const todayPlan = useAuthStore(z => z.todayPlan);
+  const [shareVariant, setShareVariantState] = useState('dark');
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const v = await AsyncStorage.getItem('livenew:share_card_variant');
+        if (v === 'cream' || v === 'dark') setShareVariantState(v);
+      } catch {}
+    })();
+  }, []);
+
+  const toggleShareVariant = async () => {
+    tapLight();
+    const next = shareVariant === 'dark' ? 'cream' : 'dark';
+    setShareVariantState(next);
+    try { await AsyncStorage.setItem('livenew:share_card_variant', next); } catch {}
+  };
 
   // Notification state
   const [notifPerm, setNotifPerm] = useState('unknown');
@@ -112,7 +131,14 @@ export default function AccountScreen({ navigation }) {
   };
 
   const handleInviteFriend = () => {
-    shareAs('invite', {}, 'Lower your cortisol by tonight. — Iris @ LiveNew');
+    // Rotate through invite-card copy so back-to-back shares aren't identical.
+    const lineIndex = Math.floor(Math.random() * 3);
+    const messages = [
+      'Lower your cortisol by tonight. — Iris @ LiveNew',
+      'Iris reads bodies and tells the truth. — LiveNew',
+      "Eight zones a day. No timers. No sessions. — Iris @ LiveNew",
+    ];
+    shareAs('invite', { lineIndex }, messages[lineIndex]);
   };
 
   const handleEdit = (field) => {
@@ -267,7 +293,10 @@ export default function AccountScreen({ navigation }) {
     <SafeAreaView style={s.safe} edges={['top']}>
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-        <Text style={s.heading}>Account</Text>
+        <View style={s.headerRow}>
+          <Text style={s.heading}>Account</Text>
+          <IrisSignature />
+        </View>
 
         {/* Subscription status */}
         <View style={s.card}>
@@ -352,6 +381,16 @@ export default function AccountScreen({ navigation }) {
               <Text style={s.settingValue}>Send them what Iris told you today</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
+          </Pressable>
+          <View style={s.settingDivider} />
+          <Pressable style={s.settingRow} onPress={toggleShareVariant}>
+            <View style={s.settingContent}>
+              <Text style={s.settingTitle}>Card style</Text>
+              <Text style={s.settingValue}>
+                {shareVariant === 'dark' ? 'Dark · pops on any feed' : 'Cream · on-brand and soft'}
+              </Text>
+            </View>
+            <Text style={s.settingArrow}>↺</Text>
           </Pressable>
         </View>
 
@@ -504,10 +543,10 @@ export default function AccountScreen({ navigation }) {
       {sharing ? (
         <View style={s.shareCardHidden} pointerEvents="none">
           {sharing.type === 'streak' ? (
-            <StreakShareCard innerRef={shareCardRef} days={sharing.payload.days} />
+            <StreakShareCard innerRef={shareCardRef} days={sharing.payload.days} variant={shareVariant} />
           ) : null}
           {sharing.type === 'invite' ? (
-            <InviteShareCard innerRef={shareCardRef} />
+            <InviteShareCard innerRef={shareCardRef} lineIndex={sharing.payload?.lineIndex || 0} variant={shareVariant} />
           ) : null}
         </View>
       ) : null}
@@ -520,11 +559,16 @@ function makeStyles(colors, fonts) {
     safe: { flex: 1, backgroundColor: colors.bg },
     scroll: { padding: 20, paddingBottom: 100 },
 
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      marginBottom: 24,
+    },
     heading: {
-      fontFamily: fonts.display,
+      fontFamily: fonts.displayBold,
       fontSize: 32,
       color: colors.text,
-      marginBottom: 24,
       letterSpacing: 0.2,
     },
 
