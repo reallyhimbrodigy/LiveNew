@@ -13,6 +13,7 @@ import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
 import ShareCard from '../components/ShareCard';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
+import { writeWidgetPayload } from '../widgetBridge';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
@@ -187,6 +188,20 @@ export default function TodayScreen({ navigation }) {
 
 
   const { dayOfWeek, partOfDay } = getGreetingParts();
+
+  // Push the current zone payload into the App Group UserDefaults so the iOS
+  // home-screen widget can read it. Fires whenever the current zone or score
+  // changes — runs only on iOS, silently no-ops elsewhere.
+  useEffect(() => {
+    const z = zoneById[currentZoneId];
+    if (!z) return;
+    writeWidgetPayload({
+      headline: z.headline,
+      pullQuote: z.pullQuote,
+      zoneLabel: ZONE_LABELS[currentZoneId] || '',
+      score,
+    });
+  }, [currentZoneId, score, todayPlan]);
 
   const handleReflection = (feeling) => {
     tapSuccess();

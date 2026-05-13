@@ -41,6 +41,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@bacons/apple-targets": "^4.0.6",
     "@deepgram/sdk": "^4.11.3",
     "@expo-google-fonts/lora": "^0.4.2",
     "@expo-google-fonts/manrope": "^0.4.2",
@@ -70,6 +71,7 @@
     "react-native-purchases": "^9.12.0",
     "react-native-safe-area-context": "~5.6.0",
     "react-native-screens": "~4.16.0",
+    "react-native-shared-group-preferences": "^1.1.24",
     "react-native-view-shot": "^5.1.0",
     "uuid": "^13.0.0",
     "zustand": "^5.0.10"
