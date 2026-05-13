@@ -28,7 +28,7 @@ export default function IntroScreen({ navigation }) {
           <TouchableOpacity style={s.btn} onPress={() => navigation.replace('OnboardingFlow')} activeOpacity={0.8}>
             <Text style={s.btnText}>Get started</Text>
           </TouchableOpacity>
-          <Text style={s.note}>4 quick taps to your first plan</Text>
+          <Text style={s.note}>3 quick taps to your first plan</Text>
         </View>
       </View>
     </SafeAreaView>

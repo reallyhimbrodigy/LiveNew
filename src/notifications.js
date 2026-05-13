@@ -1,98 +1,196 @@
+// Local push notifications for each of the eight zones.
+//
+// Strategy: scheduled fresh every time a plan is generated/loaded. Cancels any
+// previously scheduled zone notifications, then schedules one local push per
+// enabled zone for *today* — using each zone's headline as the body and "Iris"
+// as the sender.
+//
+// No server involved — these are local notifications (iOS UNUserNotification via
+// expo-notifications). That means no backend, no APNS setup, no cost. The
+// trade-off: content is fixed at schedule time. For per-zone hooks on a daily
+// app, that's the right call.
+
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
+
+const PERM_KEY = 'livenew:notif_permission';
+const PREFS_KEY = 'livenew:notif_prefs_v1';
+const TAG = 'livenew:zone';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: false,
     shouldSetBadge: false,
   }),
 });
 
-export async function requestPermissions() {
-  if (!Device.isDevice) return false;
-  const { status: existing } = await Notifications.getPermissionsAsync();
-  if (existing === 'granted') return true;
-  const { status } = await Notifications.requestPermissionsAsync();
-  return status === 'granted';
-}
-
-// Default notification times per zone — the inflection points where the user
-// most benefits from a contextual nudge. These are floor times; the AI's
-// content for that zone is what gets shown.
-const ZONE_TIMES = {
-  morning:    { hour: 7,  minute: 0 },
-  peak:       { hour: 9,  minute: 0 },
-  midmorning: { hour: 11, minute: 0 },
-  lunch:      { hour: 12, minute: 30 },
-  afternoon:  { hour: 15, minute: 0 },
-  transition: { hour: 17, minute: 0 },
-  winddown:   { hour: 19, minute: 0 },
+// Zone-time triggers. Each notification fires at the start of the zone.
+export const ZONE_TIMES = {
+  morning:    { hour: 6,  minute: 30 },
+  peak:       { hour: 9,  minute: 0  },
+  midmorning: { hour: 11, minute: 30 },
+  lunch:      { hour: 13, minute: 0  },
+  afternoon:  { hour: 15, minute: 0  },
+  transition: { hour: 17, minute: 0  },
+  winddown:   { hour: 19, minute: 30 },
   sleep:      { hour: 21, minute: 30 },
 };
 
-// Which zones get notifications by default. Other zones are still in the app
-// (the user finds them when they open) but don't ping. This keeps daily push
-// volume reasonable (~3/day) and focused on the moments where intervention
-// timing actually matters.
-const DEFAULT_NOTIFY_ZONES = new Set(['midmorning', 'afternoon', 'winddown']);
+// Default enabled zones — high-leverage four for stress-arc coverage. User can
+// flip any of the eight in settings.
+const DEFAULT_ENABLED = ['peak', 'afternoon', 'winddown', 'sleep'];
 
-export async function scheduleSessionReminders(zones) {
-  await Notifications.cancelAllScheduledNotificationsAsync();
-  if (!Array.isArray(zones) || zones.length === 0) return;
+// Permission status — persisted so we can render the right CTA in settings
+// without having to call into the native layer on every render.
+export async function getNotificationPermission() {
+  try {
+    const stored = await AsyncStorage.getItem(PERM_KEY);
+    if (stored) return stored;
+  } catch {}
+  try {
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status === 'granted') return 'granted';
+    if (status === 'denied') return 'denied';
+  } catch {}
+  return 'unknown';
+}
 
+async function setStoredPermission(status) {
+  try { await AsyncStorage.setItem(PERM_KEY, status); } catch {}
+}
+
+export async function requestPermissions() {
+  if (!Device.isDevice) return false;
+  try {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    if (existing === 'granted') {
+      await setStoredPermission('granted');
+      return true;
+    }
+    const { status } = await Notifications.requestPermissionsAsync({
+      ios: { allowAlert: true, allowBadge: false, allowSound: true },
+    });
+    const ok = status === 'granted';
+    await setStoredPermission(ok ? 'granted' : 'denied');
+    return ok;
+  } catch {
+    await setStoredPermission('denied');
+    return false;
+  }
+}
+
+// Per-zone preferences. Returns an object { [zoneId]: boolean }.
+export async function getNotificationPrefs() {
+  try {
+    const raw = await AsyncStorage.getItem(PREFS_KEY);
+    if (raw) {
+      const stored = JSON.parse(raw);
+      // Ensure every zone has an entry — fill missing keys with defaults.
+      const filled = {};
+      for (const z of Object.keys(ZONE_TIMES)) {
+        filled[z] = stored[z] === undefined ? DEFAULT_ENABLED.includes(z) : !!stored[z];
+      }
+      return filled;
+    }
+  } catch {}
+  const initial = {};
+  for (const z of Object.keys(ZONE_TIMES)) {
+    initial[z] = DEFAULT_ENABLED.includes(z);
+  }
+  return initial;
+}
+
+export async function setNotificationPrefs(prefs) {
+  try { await AsyncStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch {}
+}
+
+// Cancel only the notifications we've tagged as zone notifications. Leaves any
+// other app-scheduled notifications intact.
+async function cancelZoneNotifications() {
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    const ids = scheduled
+      .filter((n) => n?.content?.data?.tag === TAG)
+      .map((n) => n.identifier);
+    for (const id of ids) {
+      await Notifications.cancelScheduledNotificationAsync(id);
+    }
+  } catch {}
+}
+
+// Build a Date for the next occurrence of {hour, minute} — today if not passed,
+// tomorrow otherwise.
+function nextOccurrence(hour, minute) {
   const now = new Date();
+  const target = new Date(now);
+  target.setHours(hour, minute, 0, 0);
+  if (target.getTime() <= now.getTime()) {
+    target.setDate(target.getDate() + 1);
+  }
+  return target;
+}
+
+// Schedule a notification per enabled zone using its headline as the body.
+// Called whenever a plan is generated or hydrated from cache.
+export async function scheduleSessionReminders(zones) {
+  if (!Array.isArray(zones) || zones.length === 0) return;
+  if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
+
+  const perm = await getNotificationPermission();
+  if (perm !== 'granted') return;
+
+  const prefs = await getNotificationPrefs();
+  await cancelZoneNotifications();
+
   for (const zone of zones) {
-    if (!zone || typeof zone !== 'object') continue;
-    if (!DEFAULT_NOTIFY_ZONES.has(zone.id)) continue;
-    const t = ZONE_TIMES[zone.id];
-    if (!t) continue;
-
-    const triggerDate = new Date(
-      now.getFullYear(),
-      now.getMonth(),
-      now.getDate(),
-      t.hour,
-      t.minute,
-      0,
-      0,
-    );
-    if (triggerDate <= now) continue;
-
-    const { title, body } = composeNotificationCopy(zone);
+    if (!zone || !zone.id || !ZONE_TIMES[zone.id]) continue;
+    if (!prefs[zone.id]) continue;
+    const { hour, minute } = ZONE_TIMES[zone.id];
+    const fireAt = nextOccurrence(hour, minute);
+    const body = composeBody(zone);
 
     try {
       await Notifications.scheduleNotificationAsync({
-        identifier: `livenew-zone-${zone.id}`,
         content: {
-          title,
+          title: 'Iris',
           body,
-          data: { zoneId: zone.id },
+          sound: 'default',
+          data: { tag: TAG, zoneId: zone.id },
         },
-        trigger: { type: 'date', date: triggerDate },
+        trigger: { type: 'date', date: fireAt },
       });
     } catch {}
   }
 }
 
 export async function cancelPlanItemNotification(zoneId) {
+  // Cancel just one zone's pending notification.
   try {
-    await Notifications.cancelScheduledNotificationAsync(`livenew-zone-${zoneId}`);
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    const match = scheduled.find(
+      (n) => n?.content?.data?.tag === TAG && n?.content?.data?.zoneId === zoneId,
+    );
+    if (match) await Notifications.cancelScheduledNotificationAsync(match.identifier);
   } catch {}
 }
 
-function composeNotificationCopy(zone) {
+export async function clearAllZoneNotifications() {
+  await cancelZoneNotifications();
+}
+
+function composeBody(zone) {
   const headline = (zone?.headline || '').trim();
+  const fallback = (zone?.pullQuote || '').trim();
   const body = (zone?.body || '').trim();
+
+  // Prefer headline (sharp, full-sentence), then pull quote, then first
+  // sentence of body as a last resort.
+  if (headline && headline.length <= 180) return headline;
+  if (fallback && fallback.length <= 180) return fallback;
   const firstSentence = body ? body.split(/(?<=[.!?])\s+/)[0] : '';
-
-  const notificationTitle = headline || 'LiveNew';
-  // Body of the notification = first sentence of the zone (the hook). The full
-  // 50-100 word zone content is read inside the app — the notification just
-  // earns the open.
-  const notificationBody = firstSentence && firstSentence.length < 180
-    ? firstSentence
-    : (body.length < 180 ? body : '');
-
-  return { title: notificationTitle, body: notificationBody };
+  return firstSentence && firstSentence.length <= 180 ? firstSentence : '';
 }

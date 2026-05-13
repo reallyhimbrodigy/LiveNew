@@ -1,6 +1,6 @@
-import React, { useState, useMemo, useRef } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
-  View, Text, ScrollView, Pressable, TextInput,
+  View, Text, ScrollView, Pressable, TextInput, Switch,
   StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,6 +11,12 @@ import { tapLight, tapSelect, tapMedium } from '../haptics';
 import { truncateGoal } from '../utils/goalText';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import InviteShareCard from '../components/InviteShareCard';
+import {
+  getNotificationPermission, requestPermissions,
+  getNotificationPrefs, setNotificationPrefs,
+  scheduleSessionReminders, clearAllZoneNotifications,
+} from '../notifications';
+import { ZONE_LABELS } from '../utils/score';
 
 const GOAL_OPTIONS = [
   { label: 'Sleep better', value: 'I want to sleep through the night and wake up rested', emoji: '\u{1F319}' },
@@ -39,6 +45,51 @@ export default function AccountScreen({ navigation }) {
   const [saving, setSaving] = useState(false);
   const [sharing, setSharing] = useState(null);
   const shareCardRef = useRef(null);
+  const todayPlan = useAuthStore(z => z.todayPlan);
+
+  // Notification state
+  const [notifPerm, setNotifPerm] = useState('unknown');
+  const [notifPrefs, setNotifPrefs] = useState(null);
+  const [showZonePrefs, setShowZonePrefs] = useState(false);
+
+  useEffect(() => {
+    (async () => {
+      const perm = await getNotificationPermission();
+      setNotifPerm(perm);
+      const prefs = await getNotificationPrefs();
+      setNotifPrefs(prefs);
+    })();
+  }, []);
+
+  const handleEnableNotifications = async () => {
+    tapSelect();
+    const ok = await requestPermissions();
+    setNotifPerm(ok ? 'granted' : 'denied');
+    if (ok && todayPlan?.zones) {
+      try { await scheduleSessionReminders(todayPlan.zones); } catch {}
+    }
+    if (!ok) {
+      Alert.alert(
+        'Notifications off',
+        'You can turn them on later in Settings → Notifications → LiveNew.',
+      );
+    }
+  };
+
+  const toggleZonePref = async (zoneId) => {
+    if (!notifPrefs) return;
+    tapLight();
+    const next = { ...notifPrefs, [zoneId]: !notifPrefs[zoneId] };
+    setNotifPrefs(next);
+    await setNotificationPrefs(next);
+    if (notifPerm === 'granted' && todayPlan?.zones) {
+      try { await scheduleSessionReminders(todayPlan.zones); } catch {}
+    }
+  };
+
+  const notifEnabledCount = notifPrefs
+    ? Object.values(notifPrefs).filter(Boolean).length
+    : 0;
 
   const shareAs = async (type, payload, message) => {
     tapSelect();
@@ -304,6 +355,51 @@ export default function AccountScreen({ navigation }) {
           </Pressable>
         </View>
 
+        {/* Notifications section */}
+        <Text style={s.sectionTitle}>Notifications</Text>
+
+        <View style={s.card}>
+          <Pressable
+            style={s.settingRow}
+            onPress={() => {
+              if (notifPerm !== 'granted') handleEnableNotifications();
+              else setShowZonePrefs(v => !v);
+            }}
+          >
+            <View style={s.settingContent}>
+              <Text style={s.settingTitle}>
+                {notifPerm === 'granted' ? `Iris pings: ${notifEnabledCount} of 8 zones` : 'Turn on Iris pings'}
+              </Text>
+              <Text style={s.settingValue}>
+                {notifPerm === 'granted'
+                  ? 'Tap to pick which zones notify you.'
+                  : 'A nudge from Iris at the moments that matter most.'}
+              </Text>
+            </View>
+            <Text style={s.settingArrow}>
+              {notifPerm === 'granted' ? (showZonePrefs ? '▾' : '›') : '›'}
+            </Text>
+          </Pressable>
+
+          {notifPerm === 'granted' && showZonePrefs && notifPrefs ? (
+            <View>
+              {Object.keys(ZONE_LABELS).map((zid, idx) => (
+                <View key={zid} style={[s.settingRow, idx === 0 && s.settingDivider]}>
+                  <View style={s.settingContent}>
+                    <Text style={s.zoneToggleTitle}>{ZONE_LABELS[zid]}</Text>
+                  </View>
+                  <Switch
+                    value={!!notifPrefs[zid]}
+                    onValueChange={() => toggleZonePref(zid)}
+                    trackColor={{ false: colors.line, true: colors.gold }}
+                    thumbColor={colors.bg}
+                  />
+                </View>
+              ))}
+            </View>
+          ) : null}
+        </View>
+
         {/* Apple Health section */}
         <Text style={s.sectionTitle}>Apple Health</Text>
 
@@ -511,6 +607,12 @@ function makeStyles(colors, fonts) {
       top: -10000,
       left: 0,
       opacity: 1,
+    },
+    zoneToggleTitle: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 14,
+      color: colors.text,
+      letterSpacing: 0.1,
     },
 
     // Setting rows

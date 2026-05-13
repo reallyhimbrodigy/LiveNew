@@ -7,14 +7,9 @@ import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
 
-const GOAL_OPTIONS = [
-  { label: 'Sleep better', value: 'I want to sleep through the night and wake up rested', sub: 'Through the night, wake rested.' },
-  { label: 'Less anxiety', value: 'I want to stop feeling anxious and overwhelmed all day', sub: 'Quiet the constant edge.' },
-  { label: 'More energy', value: 'I want consistent energy throughout the day without crashing', sub: 'Steady all day, no crashes.' },
-  { label: 'Lose weight', value: 'I want to lose weight and stop stress eating', sub: 'Stop the stress-eating cycle.' },
-  { label: 'Be calmer', value: 'I want to feel calm and in control of my stress', sub: 'In control, not reactive.' },
-  { label: 'Feel better', value: 'I just want to feel better overall', sub: 'Just better, generally.' },
-];
+// Goal is no longer asked in onboarding. Defaults to "feel better generally"
+// and can be set/changed any time in Account → Your profile → My goal.
+const DEFAULT_GOAL = 'I just want to feel better overall';
 
 const STRESS_OPTIONS = [
   { label: 'Good', value: 'good', sub: 'calm, steady' },
@@ -84,8 +79,7 @@ export default function OnboardingScreen() {
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
   const loadingStyles = useMemo(() => makeLoadingStyles(colors, fonts), [colors, fonts]);
 
-  const [step, setStep] = useState(1); // 1=goal, 2=stress, 3=sleep, 4=energy
-  const [goal, setGoal] = useState(null);
+  const [step, setStep] = useState(1); // 1=stress, 2=sleep, 3=energy
   const [stress, setStress] = useState(null);
   const [sleep, setSleep] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -103,22 +97,16 @@ export default function OnboardingScreen() {
     });
   };
 
-  const handleGoal = (option) => {
-    tapMedium();
-    setGoal(option.value);
-    animateTransition(() => setStep(2));
-  };
-
   const handleStress = (option) => {
     tapMedium();
     setStress(option.value);
-    animateTransition(() => setStep(3));
+    animateTransition(() => setStep(2));
   };
 
   const handleSleep = (option) => {
     tapMedium();
     setSleep(option.value);
-    animateTransition(() => setStep(4));
+    animateTransition(() => setStep(3));
   };
 
   const handleEnergy = async (option) => {
@@ -132,7 +120,7 @@ export default function OnboardingScreen() {
     });
 
     try {
-      await saveProfileWithoutNav({ goal });
+      await saveProfileWithoutNav({ goal: DEFAULT_GOAL });
       await Promise.race([
         generatePlan({ stress, sleepQuality: sleep, energy: option.value }),
         timeout,
@@ -144,39 +132,34 @@ export default function OnboardingScreen() {
       if (err.message === 'TIMEOUT') setError('Taking longer than usual. Tap to try again.');
       else if (err?.code === 'NETWORK_ERROR') setError('Check your internet connection.');
       else setError('Something went wrong. Tap to try again.');
-      setStep(4);
+      setStep(3);
       setLoading(false);
     }
   };
 
   const handleBack = () => {
     tapMedium();
-    if (step === 2) { setGoal(null); animateTransition(() => setStep(1)); }
-    else if (step === 3) { setStress(null); animateTransition(() => setStep(2)); }
-    else if (step === 4) { setSleep(null); animateTransition(() => setStep(3)); }
+    if (step === 2) { setStress(null); animateTransition(() => setStep(1)); }
+    else if (step === 3) { setSleep(null); animateTransition(() => setStep(2)); }
   };
 
-  const totalSteps = 4;
+  const totalSteps = 3;
 
   const stepHeading = {
-    1: 'What brings you here?',
-    2: 'How are you feeling?',
-    3: 'How did you sleep?',
-    4: 'Energy right now?',
+    1: 'How are you feeling?',
+    2: 'How did you sleep?',
+    3: 'Energy right now?',
   };
   const stepSub = {
-    1: 'Pick the one that matters most right now.',
+    1: null,
     2: null,
     3: null,
-    4: null,
   };
-  const stepOptions = step === 1 ? GOAL_OPTIONS
-    : step === 2 ? STRESS_OPTIONS
-    : step === 3 ? SLEEP_OPTIONS
+  const stepOptions = step === 1 ? STRESS_OPTIONS
+    : step === 2 ? SLEEP_OPTIONS
     : ENERGY_OPTIONS;
-  const stepHandler = step === 1 ? handleGoal
-    : step === 2 ? handleStress
-    : step === 3 ? handleSleep
+  const stepHandler = step === 1 ? handleStress
+    : step === 2 ? handleSleep
     : handleEnergy;
 
   return (
