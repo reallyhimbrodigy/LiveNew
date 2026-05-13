@@ -113,11 +113,18 @@ export default function AccountScreen({ navigation }) {
   const shareAs = async (type, payload, message) => {
     tapSelect();
     setSharing({ type, payload });
-    await new Promise(r => setTimeout(r, 80));
+    // Wait two frames for the hidden share card to paint before capturing.
+    // 80ms was tight on older devices; this is more forgiving.
+    await new Promise(r => setTimeout(r, 200));
+    let captured = false;
     try {
       const uri = await captureRef(shareCardRef, { format: 'png', quality: 1, result: 'tmpfile' });
+      captured = true;
       await Share.share({ url: uri, message });
     } catch (err) {
+      if (!captured) {
+        Alert.alert("Couldn't create share image", "Try again in a moment.");
+      }
       console.warn('[share]', err?.message);
     } finally {
       setSharing(null);
@@ -128,6 +135,22 @@ export default function AccountScreen({ navigation }) {
     if (!streak || streak < 1) return;
     const tier = milestoneTier(streak);
     shareAs('streak', { days: streak }, `${streak} day${streak === 1 ? '' : 's'} on LiveNew — ${tier.subtitle}`);
+  };
+
+  // Safe wrapper around Linking.openURL — guards against devices with no
+  // mail client / no browser configured. Shows a friendly Alert on failure
+  // instead of letting the unhandled promise rejection surface.
+  const safeOpenURL = async (url, fallbackMsg) => {
+    try {
+      const supported = await Linking.canOpenURL(url);
+      if (!supported) {
+        Alert.alert("Can't open this", fallbackMsg || 'No app on this device can handle that link.');
+        return;
+      }
+      await Linking.openURL(url);
+    } catch {
+      Alert.alert("Can't open this", fallbackMsg || 'Something went wrong opening that link.');
+    }
   };
 
   const handleInviteFriend = () => {
@@ -156,14 +179,9 @@ export default function AccountScreen({ navigation }) {
       await saveProfile(updated);
       setSaving(false);
       setEditing(null);
-      // Plan was cleared — send user to re-check-in with updated profile
-      try {
-        const parent = navigation.getParent();
-        if (parent) {
-          parent.navigate('Today', { screen: 'StressTap' });
-        }
-      } catch {}
-      Alert.alert('Updated', 'Your plan will refresh with your new profile on the next check-in.');
+      // Profile is saved. Iris will pick up the change on the next plan
+      // generation — we don't yank the user into a re-check-in. They're in
+      // Account for a reason; respect that.
     } catch {
       Alert.alert('Error', 'Could not save. Try again.');
       setSaving(false);
@@ -208,11 +226,7 @@ export default function AccountScreen({ navigation }) {
       await saveProfile(updated);
       setSaving(false);
       setEditing(null);
-      try {
-        const parent = navigation.getParent();
-        if (parent) parent.navigate('Today', { screen: 'StressTap' });
-      } catch {}
-      Alert.alert('Updated', 'Your plan will refresh with your new goal on the next check-in.');
+      // No nav, no alert. Iris will use the new goal on the next plan.
     } catch {
       Alert.alert('Error', 'Could not save. Try again.');
       setSaving(false);
@@ -300,7 +314,15 @@ export default function AccountScreen({ navigation }) {
 
         {/* Subscription status */}
         <View style={s.card}>
-          <View style={s.statusRow}>
+          <Pressable
+            style={s.statusRow}
+            onPress={() => {
+              if (isSubscribed) return;
+              tapSelect();
+              navigation.navigate('Paywall');
+            }}
+            disabled={isSubscribed}
+          >
             <View style={[s.statusBadge, isSubscribed && s.statusBadgeActive]}>
               <Text style={[s.statusBadgeText, isSubscribed && s.statusBadgeTextActive]}>
                 {isSubscribed ? 'PRO' : 'FREE'}
@@ -312,7 +334,8 @@ export default function AccountScreen({ navigation }) {
                 {isSubscribed ? 'Full access to all features' : 'Upgrade for unlimited plans'}
               </Text>
             </View>
-          </View>
+            {!isSubscribed ? <Text style={s.settingArrow}>›</Text> : null}
+          </Pressable>
           {streak > 0 && (
             <Pressable style={s.streakRow} onPress={handleShareStreak}>
               <Text style={s.streakText}>{streak} day streak 🔥</Text>
@@ -324,7 +347,7 @@ export default function AccountScreen({ navigation }) {
               <View style={s.settingDivider} />
               <Pressable
                 style={s.settingRow}
-                onPress={() => Linking.openURL('https://apps.apple.com/account/subscriptions')}
+                onPress={() => safeOpenURL('https://apps.apple.com/account/subscriptions')}
               >
                 <View style={s.settingContent}>
                   <Text style={s.settingTitle}>Manage subscription</Text>
@@ -423,17 +446,20 @@ export default function AccountScreen({ navigation }) {
           {notifPerm === 'granted' && showZonePrefs && notifPrefs ? (
             <View>
               {Object.keys(ZONE_LABELS).map((zid, idx) => (
-                <View key={zid} style={[s.settingRow, idx === 0 && s.settingDivider]}>
-                  <View style={s.settingContent}>
-                    <Text style={s.zoneToggleTitle}>{ZONE_LABELS[zid]}</Text>
+                <React.Fragment key={zid}>
+                  {idx === 0 ? <View style={s.settingDivider} /> : null}
+                  <View style={s.settingRow}>
+                    <View style={s.settingContent}>
+                      <Text style={s.zoneToggleTitle}>{ZONE_LABELS[zid]}</Text>
+                    </View>
+                    <Switch
+                      value={!!notifPrefs[zid]}
+                      onValueChange={() => toggleZonePref(zid)}
+                      trackColor={{ false: colors.line, true: colors.gold }}
+                      thumbColor={colors.bg}
+                    />
                   </View>
-                  <Switch
-                    value={!!notifPrefs[zid]}
-                    onValueChange={() => toggleZonePref(zid)}
-                    trackColor={{ false: colors.line, true: colors.gold }}
-                    thumbColor={colors.bg}
-                  />
-                </View>
+                </React.Fragment>
               ))}
             </View>
           ) : null}
@@ -454,7 +480,10 @@ export default function AccountScreen({ navigation }) {
                 return;
               }
               tapSelect();
-              await connectHealth();
+              const result = await connectHealth();
+              if (result && result.ok === false && result.error) {
+                Alert.alert("Couldn't connect", result.error);
+              }
             }}
           >
             <View style={s.settingContent}>
@@ -475,7 +504,7 @@ export default function AccountScreen({ navigation }) {
         <Text style={s.sectionTitle}>Support</Text>
 
         <View style={s.card}>
-          <Pressable style={s.settingRow} onPress={() => Linking.openURL('https://livenew.app/help')}>
+          <Pressable style={s.settingRow} onPress={() => safeOpenURL('https://livenew.app/help')}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Help center</Text>
             </View>
@@ -484,7 +513,7 @@ export default function AccountScreen({ navigation }) {
 
           <View style={s.settingDivider} />
 
-          <Pressable style={s.settingRow} onPress={() => Linking.openURL('mailto:support@livenew.app')}>
+          <Pressable style={s.settingRow} onPress={() => safeOpenURL('mailto:support@livenew.app', 'No mail app is set up on this device.')}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Contact us</Text>
               <Text style={s.settingValue}>support@livenew.app</Text>
@@ -494,7 +523,7 @@ export default function AccountScreen({ navigation }) {
 
           <View style={s.settingDivider} />
 
-          <Pressable style={s.settingRow} onPress={() => Linking.openURL('https://livenew.app/terms')}>
+          <Pressable style={s.settingRow} onPress={() => safeOpenURL('https://livenew.app/terms')}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Terms of service</Text>
             </View>
@@ -503,7 +532,7 @@ export default function AccountScreen({ navigation }) {
 
           <View style={s.settingDivider} />
 
-          <Pressable style={s.settingRow} onPress={() => Linking.openURL('https://livenew.app/privacy')}>
+          <Pressable style={s.settingRow} onPress={() => safeOpenURL('https://livenew.app/privacy')}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Privacy policy</Text>
             </View>

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useTheme } from '../theme';
 
@@ -12,22 +12,22 @@ export default function IrisSignature({ size = 'inline', color, style }) {
   const { colors, fonts } = useTheme();
   const isHeader = size === 'header';
   const tint = color || colors.gold;
-  const s = makeStyles(colors, fonts, isHeader, tint);
+  const s = useMemo(() => makeStyles(fonts, isHeader, tint), [fonts, isHeader, tint]);
   return (
     <View style={[s.row, style]}>
       <Text style={s.word}>Iris</Text>
-      <Text style={s.dot}>·</Text>
+      <View style={s.dot} />
     </View>
   );
 }
 
-function makeStyles(colors, fonts, isHeader, tint) {
+function makeStyles(fonts, isHeader, tint) {
   const wordSize = isHeader ? 18 : 13;
-  const dotSize = isHeader ? 22 : 16;
+  const dotSize = isHeader ? 5 : 4;
   return StyleSheet.create({
     row: {
       flexDirection: 'row',
-      alignItems: 'baseline',
+      alignItems: 'center',
     },
     word: {
       fontFamily: fonts.italic,
@@ -36,13 +36,12 @@ function makeStyles(colors, fonts, isHeader, tint) {
       letterSpacing: 0.3,
     },
     dot: {
-      fontFamily: fonts.displayBold,
-      fontSize: dotSize,
-      color: tint,
-      marginLeft: 4,
-      lineHeight: wordSize + 4,
-      // The dot sits a touch lower than the baseline; align it visually.
-      transform: [{ translateY: -2 }],
+      width: dotSize,
+      height: dotSize,
+      borderRadius: dotSize / 2,
+      backgroundColor: tint,
+      marginLeft: 5,
+      marginBottom: isHeader ? 2 : 1,
     },
   });
 }

@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, Text, Pressable, StyleSheet, Animated,
 } from 'react-native';
@@ -86,6 +86,12 @@ export default function OnboardingScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const saveProfileWithoutNav = useAuthStore(z => z.saveProfileWithoutNav);
   const generatePlan = useAuthStore(z => z.generatePlan);
@@ -130,9 +136,10 @@ export default function OnboardingScreen() {
       activateProfile();
     } catch (err) {
       clearTimeout(timeoutId);
-      if (err.message === 'TIMEOUT') setError('Taking longer than usual. Tap to try again.');
+      if (!mountedRef.current) return;
+      if (err.message === 'TIMEOUT') setError('Iris is taking longer than usual. Tap an option to try again.');
       else if (err?.code === 'NETWORK_ERROR') setError('Check your internet connection.');
-      else setError('Something went wrong. Tap to try again.');
+      else setError('Something went wrong. Tap an option to try again.');
       setStep(3);
       setLoading(false);
     }

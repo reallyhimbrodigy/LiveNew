@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo } from 'react';
+import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, Text, Pressable, StyleSheet, Animated, Alert,
 } from 'react-native';
@@ -89,9 +89,16 @@ export default function StressTapScreen({ navigation }) {
   const [connectingHealth, setConnectingHealth] = useState(false);
   const [error, setError] = useState('');
   const fadeAnim = useRef(new Animated.Value(1)).current;
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => { mountedRef.current = false; };
+  }, []);
 
   const generatePlan = useAuthStore(s => s.generatePlan);
   const skipToday = useAuthStore(s => s.skipToday);
+  const logout = useAuthStore(s => s.logout);
 
   // Total steps shown in the progress bar — 3 if no health step needed, 4 otherwise.
   const totalSteps = showHealthStep ? 4 : 3;
@@ -135,10 +142,15 @@ export default function StressTapScreen({ navigation }) {
       navigation.replace('TodayMain');
     } catch (err) {
       clearTimeout(timeoutId);
-      if (err.message === 'TIMEOUT') setError('Taking longer than usual. Tap to try again.');
-      else if (err.message === 'AUTH_EXPIRED') setError('Session expired. Please log in again.');
-      else if (err.code === 'NETWORK_ERROR') setError('Check your internet connection.');
-      else setError('Something went wrong. Tap to try again.');
+      if (err.message === 'AUTH_EXPIRED') {
+        // Hard re-auth — don't strand the user inside the check-in.
+        await logout();
+        return;
+      }
+      if (!mountedRef.current) return;
+      if (err.message === 'TIMEOUT') setError('Iris is taking longer than usual. Tap an option to try again.');
+      else if (err.code === 'NETWORK_ERROR') setError('Check your internet connection, then tap an option to retry.');
+      else setError('Something went wrong. Tap an option to try again.');
       setStep(3);
       setLoading(false);
     }
@@ -216,7 +228,7 @@ export default function StressTapScreen({ navigation }) {
           <Animated.View style={[s.body, { opacity: fadeAnim }]}>
             <Text style={s.heading}>Connect Apple Health</Text>
             <Text style={s.healthSub}>
-              We read your actual sleep, resting heart rate, and HRV from Apple Health. The plan you get back is calibrated to your real biometrics — not guesses.
+              I read your actual sleep, resting heart rate, and HRV from Apple Health. The plan I give you back is calibrated to your real biometrics — not guesses.
             </Text>
             <View style={s.healthBullets}>
               <Text style={s.healthBullet}>•  Real cortisol-aware insights from your data</Text>

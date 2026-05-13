@@ -3,6 +3,7 @@ import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../theme';
+import IrisSignature from '../components/IrisSignature';
 import { api } from '../api';
 import { useAuthStore } from '../store/authStore';
 import { truncateGoal } from '../utils/goalText';
@@ -92,7 +93,7 @@ export default function ProgressScreen() {
         out.push(`${TYPE_LABEL[top[0]]} stick — you've internalized ${top[1]} of them.`);
       }
       if (bottom && bottom[1] === 0 && totalItemsDoneLast14 >= 6) {
-        out.push(`${TYPE_LABEL[bottom[0]]} aren't landing. We're easing off them.`);
+        out.push(`${TYPE_LABEL[bottom[0]]} aren't landing. I'm easing off them.`);
       }
     }
     if (checkInsLast14 >= 5) {
@@ -133,7 +134,21 @@ export default function ProgressScreen() {
     <SafeAreaView style={s.safe} edges={['top']}>
       <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
 
-        <Text style={s.heading}>Progress</Text>
+        <View style={s.headerRow}>
+          <Text style={s.heading}>Progress</Text>
+          <IrisSignature />
+        </View>
+
+        {/* Stale-cache warning when refresh failed but we're rendering
+            cached data. Without this, the user thinks the numbers are
+            current. */}
+        {error && trend.length > 0 && (
+          <View style={s.staleBanner}>
+            <Text style={s.staleBannerText}>
+              Couldn't refresh — showing last data Iris has on you.
+            </Text>
+          </View>
+        )}
 
         {/* Goal reminder */}
         {profile?.goal && (
@@ -143,10 +158,13 @@ export default function ProgressScreen() {
           </View>
         )}
 
-        {/* What we've noticed — pattern callouts derived from behavior profile */}
+        {/* What Iris has noticed — pattern callouts derived from behavior profile */}
         {patternCallouts.length > 0 && (
           <View style={s.noticedCard}>
-            <Text style={s.noticedLabel}>WHAT WE'VE NOTICED</Text>
+            <View style={s.noticedHeader}>
+              <IrisSignature />
+              <Text style={s.noticedHeaderSuffix}>noticed</Text>
+            </View>
             {patternCallouts.map((line, i) => (
               <View key={i} style={[s.noticedRow, i > 0 && { borderTopWidth: 1, borderTopColor: colors.line, marginTop: 10, paddingTop: 10 }]}>
                 <View style={s.noticedDot} />
@@ -165,10 +183,13 @@ export default function ProgressScreen() {
           </View>
         )}
 
-        {/* AI insight */}
+        {/* Iris's weekly read */}
         {insight && (
           <View style={s.insightCard}>
-            <Text style={s.insightLabel}>THIS WEEK</Text>
+            <View style={s.insightHeader}>
+              <IrisSignature />
+              <Text style={s.insightHeaderSuffix}>this week</Text>
+            </View>
             <Text style={s.insightText}>{insight}</Text>
           </View>
         )}
@@ -351,11 +372,54 @@ function makeStyles(colors, fonts) {
     loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },
     scroll: { padding: 20, paddingBottom: 100 },
 
+    headerRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      marginBottom: 22,
+    },
     heading: {
-      fontFamily: fonts.display,
+      fontFamily: fonts.displayBold,
       fontSize: 32,
       color: colors.text,
-      marginBottom: 22,
+      letterSpacing: 0.2,
+    },
+    staleBanner: {
+      backgroundColor: colors.errorBg,
+      borderWidth: 1,
+      borderColor: colors.errorBorder,
+      borderRadius: 12,
+      padding: 12,
+      marginBottom: 16,
+    },
+    staleBannerText: {
+      fontFamily: fonts.italic,
+      fontSize: 13,
+      color: colors.error,
+      letterSpacing: 0.1,
+    },
+    noticedHeader: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 8,
+      marginBottom: 12,
+    },
+    noticedHeaderSuffix: {
+      fontFamily: fonts.italic,
+      fontSize: 13,
+      color: colors.muted,
+      letterSpacing: 0.2,
+    },
+    insightHeader: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 8,
+      marginBottom: 10,
+    },
+    insightHeaderSuffix: {
+      fontFamily: fonts.italic,
+      fontSize: 13,
+      color: colors.muted,
       letterSpacing: 0.2,
     },
 

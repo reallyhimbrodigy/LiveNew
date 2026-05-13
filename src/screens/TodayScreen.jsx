@@ -100,6 +100,7 @@ export default function TodayScreen({ navigation }) {
   const todayPlan = useAuthStore(s => s.todayPlan);
   const todayDate = useAuthStore(s => s.todayDate);
   const todayStress = useAuthStore(s => s.todayStress);
+  const todayStressLabel = useAuthStore(s => s.todayStressLabel);
   const todaySleep = useAuthStore(s => s.todaySleep);
   const todayEnergy = useAuthStore(s => s.todayEnergy);
   const streak = useAuthStore(s => s.streak);
@@ -125,6 +126,20 @@ export default function TodayScreen({ navigation }) {
   const [showGoalNudge, setShowGoalNudge] = useState(false);
   const [shareVariant, setShareVariant] = useState('dark');
   const shareCardRef = useRef(null);
+  const mountedRef = useRef(true);
+  const stressNotedTimerRef = useRef(null);
+  const reliefCallIdRef = useRef(0);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (stressNotedTimerRef.current) {
+        clearTimeout(stressNotedTimerRef.current);
+        stressNotedTimerRef.current = null;
+      }
+    };
+  }, []);
 
   useEffect(() => {
     (async () => {
@@ -213,7 +228,7 @@ export default function TodayScreen({ navigation }) {
   // Score — derived from check-in + behavior + trend, AND HealthKit when available.
   const stressTrend = Array.isArray(stressHistory) ? stressHistory : [];
   const score = computeScore({
-    stressLabel: typeof todayStress === 'string' ? todayStress : null,
+    stressLabel: todayStressLabel,
     sleepQuality: todaySleep,
     energy: todayEnergy,
     stressTrend,
@@ -232,13 +247,15 @@ export default function TodayScreen({ navigation }) {
 
   const { dayOfWeek, partOfDay } = getGreetingParts();
 
-  // Goal nudge: show when goal is default/missing and user hasn't dismissed
-  // it. Stops appearing after 3 days from dismissal so we don't nag.
+  // Goal nudge: show ONLY when goal is the onboarding default placeholder
+  // ("I just want to feel better overall") OR empty. If the user explicitly
+  // picked a goal (even one of the presets), they've engaged — don't nag.
+  // Suppressed for 3 days after dismissal.
   useEffect(() => {
     (async () => {
-      const goal = profile?.goal || '';
-      const isDefault = !goal || /just want to feel better/i.test(goal);
-      if (!isDefault) { setShowGoalNudge(false); return; }
+      const goal = (profile?.goal || '').trim();
+      const isPlaceholder = !goal || /^I just want to feel better overall$/i.test(goal);
+      if (!isPlaceholder) { setShowGoalNudge(false); return; }
       try {
         const dismissedAt = await AsyncStorage.getItem('livenew:goal_nudge_dismissed');
         const ts = dismissedAt ? parseInt(dismissedAt, 10) : 0;
@@ -278,11 +295,12 @@ export default function TodayScreen({ navigation }) {
     }
     tapLight();
     setIsSpeaking(true);
-    const text = `${zone.headline}. ${zone.body}`;
+    // Include the pull-quote in what Iris reads — it's the most quotable line.
+    const text = [zone.headline, zone.pullQuote, zone.body].filter(Boolean).join('. ');
     await speakAsIris(text, {
-      onDone: () => setIsSpeaking(false),
-      onStopped: () => setIsSpeaking(false),
-      onError: () => setIsSpeaking(false),
+      onDone: () => { if (mountedRef.current) setIsSpeaking(false); },
+      onStopped: () => { if (mountedRef.current) setIsSpeaking(false); },
+      onError: () => { if (mountedRef.current) setIsSpeaking(false); },
     });
   };
 
@@ -291,16 +309,23 @@ export default function TodayScreen({ navigation }) {
   const shareAs = async (type, payload, message) => {
     tapSelect();
     setSharing({ type, payload });
-    // Let the share card render first
-    await new Promise(r => setTimeout(r, 80));
+    // Wait two frames for the hidden share card to paint before capturing.
+    // Older devices need this extra time, otherwise capture fires on an
+    // unpainted view and the share image is blank.
+    await new Promise(r => setTimeout(r, 200));
+    let captured = false;
     try {
       const uri = await captureRef(shareCardRef, {
         format: 'png',
         quality: 1,
         result: 'tmpfile',
       });
+      captured = true;
       await Share.share({ url: uri, message });
     } catch (err) {
+      if (!captured) {
+        Alert.alert("Couldn't create share image", "Try again in a moment.");
+      }
       console.warn('[share]', err?.message);
     } finally {
       setSharing(null);
@@ -338,7 +363,7 @@ export default function TodayScreen({ navigation }) {
   // Empty / loading / skipped states
   const today = getLocalDateISO();
   if (!todayPlan) {
-    if (skippedDate === today || true) {
+    if (skippedDate === today) {
       // For first-time / skipped / day-roll: show a calm "ready when you are"
       const morning = new Date().getHours() < 12;
       return (
@@ -356,7 +381,7 @@ export default function TodayScreen({ navigation }) {
               <Text style={s.emptyLabel}>NO PLAN YET</Text>
               <Text style={s.emptyTitle}>{morning ? 'A new day.' : 'Ready when you are.'}</Text>
               <Text style={s.emptyBody}>
-                Three taps. We'll calibrate your day around your sleep, your stress, and your energy.
+                Three taps. I'll tune today around your sleep, your stress, and your energy.
               </Text>
               <Pressable
                 style={({ pressed }) => [s.emptyCta, pressed && { opacity: 0.85 }]}
@@ -556,7 +581,10 @@ export default function TodayScreen({ navigation }) {
             style={s.goalNudge}
             onPress={() => { tapLight(); navigation.navigate('GoalPicker'); }}
           >
-            <Text style={s.goalNudgeLabel}>FROM IRIS</Text>
+            <View style={s.goalNudgeHeader}>
+              <IrisSignature />
+              <Text style={s.goalNudgeHeaderSuffix}>wants to dial this in</Text>
+            </View>
             <Text style={s.goalNudgeBody}>
               I can sharpen this if you tell me what actually matters. Pick one →
             </Text>
@@ -623,7 +651,7 @@ export default function TodayScreen({ navigation }) {
         {reflection && (
           <View style={s.reflectionDoneCard}>
             <Text style={s.reflectionDoneText}>
-              {reflection === 'better' ? 'Glad today was better.' : reflection === 'harder' ? 'Tomorrow we adjust.' : 'Noted. Consistency compounds.'}
+              {reflection === 'better' ? 'Glad today was better.' : reflection === 'harder' ? 'Tomorrow I adjust.' : 'Noted. Consistency compounds.'}
             </Text>
           </View>
         )}
@@ -640,18 +668,25 @@ export default function TodayScreen({ navigation }) {
           <Pressable
             onPress={async () => {
               tapSelect();
+              const callId = ++reliefCallIdRef.current;
               setShowStressRelief(true);
               setReliefLoading(true);
               setReliefText('');
               api.feedback({ type: 'stress_spike', dateISO: getLocalDateISO() }).catch(() => {});
               try {
                 const r = await api.stressRelief();
+                // Stale response guard: if the user closed the modal and
+                // reopened (or unmounted) before this finished, ignore.
+                if (!mountedRef.current || callId !== reliefCallIdRef.current) return;
                 if (r?.text) setReliefText(r.text);
                 else setReliefText(stressRelief || 'Inhale through your nose for 4. Hold 7. Exhale through your mouth for 8. Once is enough.');
               } catch {
+                if (!mountedRef.current || callId !== reliefCallIdRef.current) return;
                 setReliefText(stressRelief || 'Inhale through your nose for 4. Hold 7. Exhale through your mouth for 8. Once is enough.');
               }
-              setReliefLoading(false);
+              if (mountedRef.current && callId === reliefCallIdRef.current) {
+                setReliefLoading(false);
+              }
             }}
             style={({ pressed }) => [s.stressBtnInner, pressed && { transform: [{ scale: 0.97 }] }]}
           >
@@ -689,7 +724,11 @@ export default function TodayScreen({ navigation }) {
                 tapLight();
                 setShowStressRelief(false);
                 setStressNoted(true);
-                setTimeout(() => setStressNoted(false), 4000);
+                if (stressNotedTimerRef.current) clearTimeout(stressNotedTimerRef.current);
+                stressNotedTimerRef.current = setTimeout(() => {
+                  if (mountedRef.current) setStressNoted(false);
+                  stressNotedTimerRef.current = null;
+                }, 4000);
               }}
             >
               <Text style={s.modalBtnText}>OK</Text>
@@ -726,6 +765,10 @@ export default function TodayScreen({ navigation }) {
       >
         <Pressable style={s.modalOverlay} onPress={() => setShowMilestone(null)}>
           <Pressable style={s.milestoneContent} onPress={() => {}}>
+            <View style={s.milestoneSignatureRow}>
+              <IrisSignature />
+              <Text style={s.milestoneSignatureSuffix}>noticed this</Text>
+            </View>
             <Text style={s.milestoneTier}>
               {showMilestone != null ? milestoneTier(showMilestone).label : ''}
             </Text>
@@ -1165,12 +1208,16 @@ function makeStyles(colors, fonts) {
     marginBottom: 16,
     position: 'relative',
   },
-  goalNudgeLabel: {
-    fontFamily: fonts.displayBold,
-    fontSize: 10,
-    color: colors.gold,
-    letterSpacing: 2,
-    marginBottom: 6,
+  goalNudgeHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginBottom: 8,
+  },
+  goalNudgeHeaderSuffix: {
+    fontFamily: fonts.italic,
+    fontSize: 13,
+    color: colors.muted,
   },
   goalNudgeBody: {
     fontFamily: fonts.italic,
@@ -1354,6 +1401,17 @@ function makeStyles(colors, fonts) {
     borderWidth: 1,
     borderColor: colors.goldBorder,
     alignItems: 'center',
+  },
+  milestoneSignatureRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginBottom: 14,
+  },
+  milestoneSignatureSuffix: {
+    fontFamily: fonts.italic,
+    fontSize: 13,
+    color: colors.muted,
   },
   milestoneTier: {
     fontFamily: fonts.displayBold,

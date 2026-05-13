@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { api, setTokens, clearTokens } from '../api';
+import { api, setTokens, clearTokens, setAuthExpiredHandler } from '../api';
 import { requestPermissions, scheduleSessionReminders } from '../notifications';
 import { getLocalDateISO, getYesterdayISO } from '../utils/localDate';
 import {
@@ -25,6 +25,7 @@ export const useAuthStore = create((set, get) => ({
   profile: null,
   todayPlan: null,       // { rightNow, plan, goalThread, stressRelief, eveningPrompt }
   todayStress: null,
+  todayStressLabel: null,
   todaySleep: null,
   todayEnergy: null,
   todayDate: null,
@@ -66,6 +67,7 @@ export const useAuthStore = create((set, get) => ({
         // Check if we have a valid plan for today
         let todayPlan = null;
         let todayStress = null;
+        let todayStressLabel = null;
         let todaySleep = null;
         let todayEnergy = null;
         let todayDate = null;
@@ -77,11 +79,16 @@ export const useAuthStore = create((set, get) => ({
           if (plan.date === today) {
             todayPlan = plan.contract;
             todayStress = plan.stress;
+            todayStressLabel = plan.stressLabel || null;
             todaySleep = plan.sleepQuality;
             todayEnergy = plan.energy;
             todayDate = plan.date;
             completed = plan.completed || {};
             reflection = plan.reflection || null;
+          } else {
+            // Stale cached plan from a previous day — purge it so we don't
+            // hand stale data to the rest of the app on a slow day-roll.
+            try { await AsyncStorage.removeItem(PLAN_KEY); } catch {}
           }
         }
 
@@ -106,6 +113,7 @@ export const useAuthStore = create((set, get) => ({
           profile,
           todayPlan,
           todayStress,
+          todayStressLabel,
           todaySleep,
           todayEnergy,
           todayDate,
@@ -121,22 +129,34 @@ export const useAuthStore = create((set, get) => ({
           get().refreshHealthSnapshot().catch(() => {});
         }
 
-        // Refresh profile from server in background
+        // Refresh profile from server in background — MERGE not clobber. The
+        // server response may not include every field (e.g. server only stores
+        // goal + routine; the client may have stored extras like injuries
+        // from an older session). Don't overwrite local fields with server
+        // null/undefined.
         try {
           const bootstrap = await api.bootstrap();
           const serverProfile = bootstrap?.profile || {};
           if (serverProfile.goal) {
-            const normalized = {
-              routine: serverProfile.routine || null,
-              goal: serverProfile.goal || null,
-              stressSource: serverProfile.stressSource || null,
-              wakeTime: serverProfile.wakeTime || null,
-              timeMin: serverProfile.timeMin || null,
-              injuries: serverProfile.injuries || [],
+            const localProfile = profile || {};
+            const pickServer = (key) => (
+              serverProfile[key] !== undefined && serverProfile[key] !== null
+                ? serverProfile[key]
+                : localProfile[key] !== undefined
+                  ? localProfile[key]
+                  : null
+            );
+            const merged = {
+              routine: pickServer('routine'),
+              goal: pickServer('goal'),
+              stressSource: pickServer('stressSource'),
+              wakeTime: pickServer('wakeTime'),
+              timeMin: pickServer('timeMin'),
+              injuries: serverProfile.injuries || localProfile.injuries || [],
             };
-            await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(normalized));
-            const refreshedHasProfile = !!(normalized.routine && normalized.goal) || !!(normalized.goal && normalized.goal !== 'all');
-            set({ profile: normalized, hasProfile: refreshedHasProfile });
+            await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(merged));
+            const refreshedHasProfile = !!(merged.routine && merged.goal) || !!(merged.goal && merged.goal !== 'all');
+            set({ profile: merged, hasProfile: refreshedHasProfile });
           }
         } catch {}
 
@@ -341,6 +361,7 @@ export const useAuthStore = create((set, get) => ({
     set({
       todayPlan: data,
       todayStress: stressValue,
+      todayStressLabel: stressLabel,
       todaySleep: sleepQuality,
       todayEnergy: energy,
       todayDate: today,
@@ -348,11 +369,17 @@ export const useAuthStore = create((set, get) => ({
       reflection: null,
     });
 
-    // Increment plan count for trial tracking
+    // Increment plan count for trial tracking — but only ONCE per day, even
+    // if the user re-runs the check-in. Same-day regenerations shouldn't
+    // count against any plan/quota limit.
     try {
-      const countRaw = await AsyncStorage.getItem('livenew:plan_count');
-      const count = countRaw ? parseInt(countRaw, 10) : 0;
-      await AsyncStorage.setItem('livenew:plan_count', (count + 1).toString());
+      const lastDay = await AsyncStorage.getItem('livenew:plan_count_last_day');
+      if (lastDay !== today) {
+        const countRaw = await AsyncStorage.getItem('livenew:plan_count');
+        const count = countRaw ? parseInt(countRaw, 10) : 0;
+        await AsyncStorage.setItem('livenew:plan_count', (count + 1).toString());
+        await AsyncStorage.setItem('livenew:plan_count_last_day', today);
+      }
     } catch {}
 
     // Schedule notifications at the inflection-point zones (mid-morning dip,
@@ -450,27 +477,71 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
   },
 
-  // Logout
+  // Logout — clears EVERY per-user AsyncStorage key plus the widget payload.
+  // Missing any one of these means the next user inherits state from the
+  // previous user.
   logout: async () => {
     try { await api.logout(); } catch {}
     clearTokens();
-    await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, PLAN_KEY, 'livenew:subscribed', 'livenew:streak', 'livenew:plan_count']);
+    await AsyncStorage.multiRemove([
+      AUTH_KEY, PROFILE_KEY, PLAN_KEY,
+      'livenew:subscribed', 'livenew:streak', 'livenew:plan_count',
+      'livenew:notif_prefs_v1', 'livenew:notif_permission',
+      'livenew:goal_nudge_dismissed', 'livenew:share_card_variant',
+      'livenew:lastCelebratedStreak', 'livenew:goal_set_at',
+      'livenew:progress_cache_v1', 'livenew:health_snapshot_v1',
+      'livenew:health_permission_status', 'livenew:review_prompted',
+    ]);
+    try {
+      const { clearWidgetPayload } = require('../widgetBridge');
+      await clearWidgetPayload();
+    } catch {}
+    try {
+      const { clearAllZoneNotifications } = require('../notifications');
+      await clearAllZoneNotifications();
+    } catch {}
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
-      todayPlan: null, todayDate: null, isSubscribed: false,
+      todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
+      todaySleep: null, todayEnergy: null, isSubscribed: false,
       completed: {}, reflection: null, streak: 0,
+      healthPermission: 'unknown', healthSnapshot: null,
     });
   },
 
-  // Delete account
+  // Delete account — same cleanup as logout, plus server-side delete.
   deleteAccount: async () => {
     await api.deleteAccount();
     clearTokens();
-    await AsyncStorage.multiRemove([AUTH_KEY, PROFILE_KEY, PLAN_KEY, 'livenew:subscribed', 'livenew:streak', 'livenew:plan_count']);
+    await AsyncStorage.multiRemove([
+      AUTH_KEY, PROFILE_KEY, PLAN_KEY,
+      'livenew:subscribed', 'livenew:streak', 'livenew:plan_count',
+      'livenew:notif_prefs_v1', 'livenew:notif_permission',
+      'livenew:goal_nudge_dismissed', 'livenew:share_card_variant',
+      'livenew:lastCelebratedStreak', 'livenew:goal_set_at',
+      'livenew:progress_cache_v1', 'livenew:health_snapshot_v1',
+      'livenew:health_permission_status', 'livenew:review_prompted',
+    ]);
+    try {
+      const { clearWidgetPayload } = require('../widgetBridge');
+      await clearWidgetPayload();
+    } catch {}
+    try {
+      const { clearAllZoneNotifications } = require('../notifications');
+      await clearAllZoneNotifications();
+    } catch {}
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
-      todayPlan: null, todayDate: null, isSubscribed: false,
+      todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
+      todaySleep: null, todayEnergy: null, isSubscribed: false,
       completed: {}, reflection: null, streak: 0,
+      healthPermission: 'unknown', healthSnapshot: null,
     });
   },
 }));
+
+// Wire api.js -> authStore: when the refresh-token flow fails, force a
+// full logout so the user lands on AuthScreen instead of a zombie session.
+setAuthExpiredHandler(() => {
+  try { useAuthStore.getState().logout(); } catch {}
+});

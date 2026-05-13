@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../api';
+import IrisSignature from '../components/IrisSignature';
 
 export default function AuthScreen() {
   const { colors, fonts } = useTheme();
@@ -19,6 +20,7 @@ export default function AuthScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
+  const [info, setInfo] = useState(''); // soft warning (not error, not success)
   const [showPassword, setShowPassword] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
   const [resetEmail, setResetEmail] = useState('');
@@ -32,6 +34,7 @@ export default function AuthScreen() {
   const handleSubmit = async () => {
     setError('');
     setSuccess('');
+    setInfo('');
 
     if (!email.trim()) { setError('Enter your email address.'); return; }
     if (!password) { setError('Enter your password.'); return; }
@@ -62,7 +65,9 @@ export default function AuthScreen() {
       } else if (err.code === 'INVALID_CREDENTIALS') {
         setError('Invalid email or password.');
       } else if (err.code === 'EMAIL_NOT_CONFIRMED') {
-        setSuccess('Check your email to confirm your account.');
+        setInfo('Check your email to confirm your account before logging in.');
+      } else if (err.code === 'NETWORK_ERROR') {
+        setError('Check your internet connection.');
       } else {
         setError(err.message || 'Something went wrong.');
       }
@@ -119,7 +124,7 @@ export default function AuthScreen() {
               ) : (
                 <>
                   <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 14, textAlign: 'center', marginBottom: 24 }}>
-                    Enter your email and we'll send you a link to reset your password.
+                    Enter your email. I'll send you a link to reset your password.
                   </Text>
                   <TextInput
                     style={s.input}
@@ -153,7 +158,10 @@ export default function AuthScreen() {
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.flex}>
         <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
 
-          <Text style={s.logo}>LiveNew</Text>
+          <View style={s.logoRow}>
+            <Text style={s.logo}>LiveNew</Text>
+            <IrisSignature />
+          </View>
 
           <Text style={s.heading}>
             {isSignUp ? 'Create account' : 'Log in'}
@@ -161,6 +169,7 @@ export default function AuthScreen() {
 
           {error ? <View style={s.errorBox}><Text style={s.errorText}>{error}</Text></View> : null}
           {success ? <View style={s.successBox}><Text style={s.successText}>{success}</Text></View> : null}
+          {info ? <View style={s.infoBox}><Text style={s.infoText}>{info}</Text></View> : null}
 
           {isSignUp && (
             <TextInput
@@ -214,7 +223,7 @@ export default function AuthScreen() {
               <ActivityIndicator color="#1a1612" size="small" />
             ) : (
               <Text style={s.submitText}>
-                {isSignUp ? 'Create Account' : 'Continue'}
+                {isSignUp ? 'Create Account' : 'Log in'}
               </Text>
             )}
           </TouchableOpacity>
@@ -255,12 +264,17 @@ function makeStyles(colors, fonts) {
       fontSize: 16,
     },
 
+    logoRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'center',
+      gap: 12,
+      marginBottom: 40,
+    },
     logo: {
       fontFamily: fonts.displaySemibold,
-      fontSize: 28,
-      color: colors.text,
-      textAlign: 'center',
-      marginBottom: 40,
+      fontSize: 26,
+      color: colors.gold,
       letterSpacing: 1,
     },
 
@@ -333,6 +347,15 @@ function makeStyles(colors, fonts) {
     errorText: { color: colors.error, fontFamily: fonts.body, fontSize: 14 },
 
     successBox: {
+      backgroundColor: colors.successBg,
+      borderWidth: 1,
+      borderColor: colors.success,
+      borderRadius: 10,
+      padding: 12,
+      marginBottom: 16,
+    },
+    successText: { color: colors.success, fontFamily: fonts.body, fontSize: 14 },
+    infoBox: {
       backgroundColor: colors.goldDim,
       borderWidth: 1,
       borderColor: colors.goldBorder,
@@ -340,6 +363,6 @@ function makeStyles(colors, fonts) {
       padding: 12,
       marginBottom: 16,
     },
-    successText: { color: colors.gold, fontFamily: fonts.body, fontSize: 14 },
+    infoText: { color: colors.gold, fontFamily: fonts.body, fontSize: 14 },
   });
 }

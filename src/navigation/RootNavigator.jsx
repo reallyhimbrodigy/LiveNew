@@ -161,16 +161,19 @@ export default function RootNavigator() {
 
   useEffect(() => {
     (async () => {
+      // Initialize Purchases BEFORE hydrate so the subscription check inside
+      // hydrate has a working RevenueCat session. Without this, the cold-boot
+      // checkSubscription call silently fails and paying users get downgraded
+      // until the next app launch.
+      try {
+        const AsyncStorage = require('@react-native-async-storage/async-storage').default;
+        const authRaw = await AsyncStorage.getItem('livenew:auth');
+        const authData = authRaw ? JSON.parse(authRaw) : {};
+        if (authData?.userId) {
+          await initPurchases(authData.userId);
+        }
+      } catch {}
       await hydrate();
-      const auth = useAuthStore.getState();
-      if (auth.isLoggedIn) {
-        try {
-          const AsyncStorage = require('@react-native-async-storage/async-storage').default;
-          const authRaw = await AsyncStorage.getItem('livenew:auth');
-          const authData = authRaw ? JSON.parse(authRaw) : {};
-          await initPurchases(authData.userId || null);
-        } catch {}
-      }
     })();
   }, []);
 

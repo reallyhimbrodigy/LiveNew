@@ -7,6 +7,7 @@ import { useTheme } from '../theme';
 import { getOfferings, purchasePackage, restorePurchases } from '../purchases';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSuccess } from '../haptics';
+import IrisSignature from '../components/IrisSignature';
 
 export default function PaywallScreen({ navigation, route }) {
   const { colors, fonts } = useTheme();
@@ -74,11 +75,14 @@ export default function PaywallScreen({ navigation, route }) {
         </TouchableOpacity>
 
         <View style={s.content}>
-          <Text style={s.logo}>LiveNew</Text>
-          <Text style={s.title}>Keep going with Iris</Text>
+          <View style={s.brandRow}>
+            <Text style={s.logo}>LiveNew</Text>
+            <IrisSignature size="header" />
+          </View>
+          <Text style={s.title}>Keep going.</Text>
 
           <Text style={s.sub}>
-            You've been using LiveNew for a week. People who stick with it past this point report feeling measurably calmer within 2 weeks.
+            You've spent a week with me. People who stick past this point feel measurably calmer in two.
           </Text>
 
           <View style={s.features}>
@@ -155,12 +159,17 @@ function makeStyles(colors, fonts) {
       justifyContent: 'center',
     },
 
+    brandRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      marginBottom: 14,
+    },
     logo: {
       fontFamily: fonts.displaySemibold,
       fontSize: 18,
       color: colors.gold,
       letterSpacing: 1.2,
-      marginBottom: 14,
     },
 
     title: {

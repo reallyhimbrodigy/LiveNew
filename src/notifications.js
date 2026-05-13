@@ -122,20 +122,11 @@ async function cancelZoneNotifications() {
   } catch {}
 }
 
-// Build a Date for the next occurrence of {hour, minute} — today if not passed,
-// tomorrow otherwise.
-function nextOccurrence(hour, minute) {
-  const now = new Date();
-  const target = new Date(now);
-  target.setHours(hour, minute, 0, 0);
-  if (target.getTime() <= now.getTime()) {
-    target.setDate(target.getDate() + 1);
-  }
-  return target;
-}
-
 // Schedule a notification per enabled zone using its headline as the body.
-// Called whenever a plan is generated or hydrated from cache.
+// Uses a DAILY-repeating calendar trigger so reminders keep firing even if
+// the user doesn't open the app to regenerate a plan. The content (headline)
+// is fixed at schedule time — when a new plan generates, we cancel-and-
+// reschedule with the fresh headlines.
 export async function scheduleSessionReminders(zones) {
   if (!Array.isArray(zones) || zones.length === 0) return;
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
@@ -150,7 +141,6 @@ export async function scheduleSessionReminders(zones) {
     if (!zone || !zone.id || !ZONE_TIMES[zone.id]) continue;
     if (!prefs[zone.id]) continue;
     const { hour, minute } = ZONE_TIMES[zone.id];
-    const fireAt = nextOccurrence(hour, minute);
     const body = composeBody(zone);
 
     try {
@@ -161,7 +151,9 @@ export async function scheduleSessionReminders(zones) {
           sound: 'default',
           data: { tag: TAG, zoneId: zone.id },
         },
-        trigger: { type: 'date', date: fireAt },
+        // Daily-repeating trigger. Fires at hour:minute every day until
+        // explicitly cancelled or rescheduled.
+        trigger: { type: 'calendar', hour, minute, repeats: true },
       });
     } catch {}
   }
