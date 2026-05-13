@@ -1,9 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useMemo } from 'react';
 import {
   View, Text, Pressable, StyleSheet, Animated, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, fonts } from '../theme';
+import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
 
@@ -26,7 +26,7 @@ const ENERGY_OPTIONS = [
   { label: 'Low', value: 'low', sub: 'dragging' },
 ];
 
-function PressRow({ onPress, children }) {
+function PressRow({ onPress, children, rowStyle }) {
   const scale = useRef(new Animated.Value(1)).current;
   return (
     <Animated.View style={{ transform: [{ scale }] }}>
@@ -34,7 +34,7 @@ function PressRow({ onPress, children }) {
         onPressIn={() => Animated.spring(scale, { toValue: 0.98, useNativeDriver: true, speed: 60, bounciness: 0 }).start()}
         onPressOut={() => Animated.spring(scale, { toValue: 1, useNativeDriver: true, speed: 60, bounciness: 4 }).start()}
         onPress={onPress}
-        style={s.optionRow}
+        style={rowStyle}
       >
         {children}
       </Pressable>
@@ -42,7 +42,7 @@ function PressRow({ onPress, children }) {
   );
 }
 
-function LoadingAnimation() {
+function LoadingAnimation({ loadingStyles }) {
   const [messageIndex, setMessageIndex] = useState(0);
   const messages = [
     'Reading your signals…',
@@ -71,6 +71,10 @@ function LoadingAnimation() {
 }
 
 export default function StressTapScreen({ navigation }) {
+  const { colors, fonts } = useTheme();
+  const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
+  const loadingStyles = useMemo(() => makeLoadingStyles(colors, fonts), [colors, fonts]);
+
   const healthPermission = useAuthStore(s => s.healthPermission);
   const connectHealth = useAuthStore(s => s.connectHealth);
   // If the user has never been asked, surface the HealthKit step FIRST,
@@ -200,7 +204,7 @@ export default function StressTapScreen({ navigation }) {
         )}
 
         {loading ? (
-          <LoadingAnimation />
+          <LoadingAnimation loadingStyles={loadingStyles} />
         ) : step === 0 ? (
           // STEP 0 — Apple Health permission. Pre-plan, system-style.
           <Animated.View style={[s.body, { opacity: fadeAnim }]}>
@@ -240,7 +244,7 @@ export default function StressTapScreen({ navigation }) {
 
             <View style={s.list}>
               {options.map(option => (
-                <PressRow key={option.value} onPress={() => handler(option)}>
+                <PressRow key={option.value} onPress={() => handler(option)} rowStyle={s.optionRow}>
                   <View style={s.optionContent}>
                     <Text style={s.optionLabel}>{option.label}</Text>
                     {option.sub && <Text style={s.optionSub}>{option.sub}</Text>}
@@ -262,134 +266,141 @@ export default function StressTapScreen({ navigation }) {
   );
 }
 
-const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  container: { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
+function makeStyles(colors, fonts) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: colors.bg },
+    container: { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
 
-  progressTrack: {
-    height: 2,
-    backgroundColor: colors.line,
-    borderRadius: 1,
-    marginBottom: 48,
-    overflow: 'hidden',
-  },
-  progressFill: { height: 2, backgroundColor: colors.gold },
+    progressTrack: {
+      height: 2,
+      backgroundColor: colors.line,
+      borderRadius: 1,
+      marginBottom: 48,
+      overflow: 'hidden',
+    },
+    progressFill: { height: 2, backgroundColor: colors.gold },
 
-  body: { flex: 1 },
+    body: { flex: 1 },
 
-  backBtn: { alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 4, marginBottom: 12 },
-  backText: { color: colors.muted, fontSize: 14, letterSpacing: 0.2 },
+    backBtn: { alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 4, marginBottom: 12 },
+    backText: { color: colors.muted, fontFamily: fonts.body, fontSize: 14, letterSpacing: 0.2 },
 
-  heading: {
-    fontFamily: fonts.display,
-    fontSize: 30,
-    color: colors.text,
-    textAlign: 'left',
-    marginBottom: 28,
-    letterSpacing: 0.2,
-    lineHeight: 36,
-  },
+    heading: {
+      fontFamily: fonts.display,
+      fontSize: 30,
+      color: colors.text,
+      textAlign: 'left',
+      marginBottom: 28,
+      letterSpacing: 0.2,
+      lineHeight: 36,
+    },
 
-  error: {
-    color: colors.error,
-    fontSize: 14,
-    marginBottom: 16,
-    fontStyle: 'italic',
-  },
+    error: {
+      color: colors.error,
+      fontFamily: fonts.body,
+      fontSize: 14,
+      marginBottom: 16,
+      fontStyle: 'italic',
+    },
 
-  list: { gap: 10 },
+    list: { gap: 10 },
 
-  optionRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    paddingVertical: 18,
-    paddingHorizontal: 20,
-  },
-  optionContent: { flex: 1, marginRight: 8 },
-  optionLabel: {
-    fontSize: 17,
-    fontWeight: '600',
-    color: colors.text,
-    letterSpacing: 0.1,
-  },
-  optionSub: {
-    fontFamily: fonts.displayItalic,
-    fontSize: 13,
-    color: colors.muted,
-    marginTop: 3,
-    letterSpacing: 0.1,
-  },
-  optionChevron: {
-    fontSize: 22,
-    color: colors.gold,
-    fontWeight: '300',
-    marginLeft: 8,
-    lineHeight: 22,
-  },
+    optionRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 14,
+      paddingVertical: 18,
+      paddingHorizontal: 20,
+    },
+    optionContent: { flex: 1, marginRight: 8 },
+    optionLabel: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 17,
+      color: colors.text,
+      letterSpacing: 0.1,
+    },
+    optionSub: {
+      fontFamily: fonts.displayItalic,
+      fontSize: 13,
+      color: colors.muted,
+      marginTop: 3,
+      letterSpacing: 0.1,
+    },
+    optionChevron: {
+      fontFamily: fonts.body,
+      fontSize: 22,
+      color: colors.gold,
+      fontWeight: '300',
+      marginLeft: 8,
+      lineHeight: 22,
+    },
 
-  skipLink: {
-    alignSelf: 'center',
-    marginTop: 32,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-  },
-  skipText: { color: colors.muted, fontSize: 13, letterSpacing: 0.2 },
+    skipLink: {
+      alignSelf: 'center',
+      marginTop: 32,
+      paddingVertical: 10,
+      paddingHorizontal: 16,
+    },
+    skipText: { color: colors.muted, fontFamily: fonts.body, fontSize: 13, letterSpacing: 0.2 },
 
-  // Step 0 — Apple Health permission
-  healthSub: {
-    fontFamily: fonts.display,
-    fontSize: 15,
-    color: colors.muted,
-    lineHeight: 23,
-    marginBottom: 24,
-    letterSpacing: 0.1,
-  },
-  healthBullets: {
-    gap: 10,
-    marginBottom: 36,
-  },
-  healthBullet: {
-    fontFamily: fonts.display,
-    fontSize: 14,
-    color: colors.text,
-    lineHeight: 22,
-    letterSpacing: 0.1,
-  },
-  healthPrimary: {
-    backgroundColor: colors.gold,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginBottom: 10,
-  },
-  healthPrimaryText: {
-    color: colors.bg,
-    fontSize: 16,
-    fontWeight: '700',
-    letterSpacing: 0.3,
-  },
-  healthSecondary: {
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  healthSecondaryText: {
-    color: colors.muted,
-    fontSize: 14,
-    letterSpacing: 0.2,
-  },
-});
+    // Step 0 — Apple Health permission
+    healthSub: {
+      fontFamily: fonts.display,
+      fontSize: 15,
+      color: colors.muted,
+      lineHeight: 23,
+      marginBottom: 24,
+      letterSpacing: 0.1,
+    },
+    healthBullets: {
+      gap: 10,
+      marginBottom: 36,
+    },
+    healthBullet: {
+      fontFamily: fonts.display,
+      fontSize: 14,
+      color: colors.text,
+      lineHeight: 22,
+      letterSpacing: 0.1,
+    },
+    healthPrimary: {
+      backgroundColor: colors.gold,
+      borderRadius: 14,
+      paddingVertical: 16,
+      alignItems: 'center',
+      marginBottom: 10,
+    },
+    healthPrimaryText: {
+      color: '#1a1612',
+      fontFamily: fonts.displayBold,
+      fontSize: 16,
+      letterSpacing: 0.3,
+    },
+    healthSecondary: {
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+    healthSecondaryText: {
+      color: colors.muted,
+      fontFamily: fonts.body,
+      fontSize: 14,
+      letterSpacing: 0.2,
+    },
+  });
+}
 
-const loadingStyles = StyleSheet.create({
-  wrap: { alignItems: 'center', justifyContent: 'center', flex: 1, gap: 24, paddingBottom: 80 },
-  dotsRow: { flexDirection: 'row', gap: 8 },
-  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.gold },
-  message: {
-    fontFamily: fonts.displayItalic,
-    color: colors.muted,
-    fontSize: 16,
-  },
-});
+function makeLoadingStyles(colors, fonts) {
+  return StyleSheet.create({
+    wrap: { alignItems: 'center', justifyContent: 'center', flex: 1, gap: 24, paddingBottom: 80 },
+    dotsRow: { flexDirection: 'row', gap: 8 },
+    dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.gold },
+    message: {
+      fontFamily: fonts.displayItalic,
+      color: colors.muted,
+      fontSize: 16,
+    },
+  });
+}

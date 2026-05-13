@@ -1,24 +1,27 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, ScrollView, Pressable, TextInput,
   StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, fonts } from '../theme';
+import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapMedium } from '../haptics';
 import { truncateGoal } from '../utils/goalText';
 
 const GOAL_OPTIONS = [
   { label: 'Sleep better', value: 'I want to sleep through the night and wake up rested', emoji: '\u{1F319}' },
-  { label: 'Less anxiety', value: 'I want to stop feeling anxious and overwhelmed all day', emoji: '\u{1F32C}\uFE0F' },
-  { label: 'More energy', value: 'I want consistent energy throughout the day without crashing', emoji: '\u26A1' },
+  { label: 'Less anxiety', value: 'I want to stop feeling anxious and overwhelmed all day', emoji: '\u{1F32C}️' },
+  { label: 'More energy', value: 'I want consistent energy throughout the day without crashing', emoji: '⚡' },
   { label: 'Lose weight', value: 'I want to lose weight and stop stress eating', emoji: '\u{1F331}' },
   { label: 'Be calmer', value: 'I want to feel calm and in control of my stress', emoji: '\u{1F9D8}' },
-  { label: 'Feel better', value: 'I just want to feel better overall', emoji: '\u2728' },
+  { label: 'Feel better', value: 'I just want to feel better overall', emoji: '✨' },
 ];
 
 export default function AccountScreen({ navigation }) {
+  const { colors, fonts } = useTheme();
+  const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
+
   const profile = useAuthStore(s => s.profile);
   const isSubscribed = useAuthStore(s => s.isSubscribed);
   const logout = useAuthStore(s => s.logout);
@@ -121,7 +124,7 @@ export default function AccountScreen({ navigation }) {
             <Text style={s.editSub}>Pick the one that matters most right now</Text>
             {saving ? (
               <View style={{ alignItems: 'center', paddingTop: 32 }}>
-                <Text style={{ color: colors.muted, fontSize: 16 }}>Saving...</Text>
+                <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 16 }}>Saving...</Text>
               </View>
             ) : (
               <View style={s.goalGrid}>
@@ -130,7 +133,7 @@ export default function AccountScreen({ navigation }) {
                     key={option.value}
                     style={s.goalOption}
                     onPress={() => handleGoalSelect(option.value)}
-                   
+
                   >
                     <Text style={s.goalEmoji}>{option.emoji}</Text>
                     <Text style={s.goalLabel}>{option.label}</Text>
@@ -167,7 +170,7 @@ export default function AccountScreen({ navigation }) {
               style={[s.saveBtn, (!editValue.trim() || saving) && { opacity: 0.4 }]}
               onPress={handleSave}
               disabled={!editValue.trim() || saving}
-             
+
             >
               <Text style={s.saveBtnText}>{saving ? 'Saving...' : 'Save'}</Text>
             </Pressable>
@@ -350,140 +353,144 @@ export default function AccountScreen({ navigation }) {
   );
 }
 
-const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  scroll: { padding: 20, paddingBottom: 100 },
+function makeStyles(colors, fonts) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: colors.bg },
+    scroll: { padding: 20, paddingBottom: 100 },
 
-  heading: {
-    fontFamily: fonts.display,
-    fontSize: 32,
-    color: colors.text,
-    marginBottom: 24,
-    letterSpacing: 0.2,
-  },
+    heading: {
+      fontFamily: fonts.display,
+      fontSize: 32,
+      color: colors.text,
+      marginBottom: 24,
+      letterSpacing: 0.2,
+    },
 
-  // Section titles
-  sectionTitle: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.dim,
-    textTransform: 'uppercase',
-    letterSpacing: 2,
-    marginBottom: 10,
-    marginTop: 8,
-    marginLeft: 4,
-  },
+    // Section titles
+    sectionTitle: {
+      fontFamily: fonts.displayBold,
+      fontSize: 10,
+      color: colors.dim,
+      textTransform: 'uppercase',
+      letterSpacing: 2,
+      marginBottom: 10,
+      marginTop: 8,
+      marginLeft: 4,
+    },
 
-  // Cards
-  card: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    marginBottom: 16,
-    overflow: 'hidden',
-  },
+    // Cards
+    card: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 14,
+      marginBottom: 16,
+      overflow: 'hidden',
+    },
 
-  // Status row
-  statusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 18,
-  },
-  statusBadge: {
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    marginRight: 14,
-  },
-  statusBadgeActive: {
-    borderColor: colors.goldBorder,
-    backgroundColor: 'rgba(196,168,108,0.08)',
-  },
-  statusBadgeText: {
-    fontSize: 9,
-    fontWeight: '700',
-    color: colors.dim,
-    letterSpacing: 1.6,
-  },
-  statusBadgeTextActive: {
-    color: colors.gold,
-  },
-  statusContent: { flex: 1 },
-  statusTitle: { fontSize: 16, fontWeight: '600', color: colors.text, letterSpacing: 0.1 },
-  statusSub: { fontSize: 13, color: colors.muted, marginTop: 2 },
+    // Status row
+    statusRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingHorizontal: 18,
+      paddingVertical: 18,
+    },
+    statusBadge: {
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+      marginRight: 14,
+    },
+    statusBadgeActive: {
+      borderColor: colors.goldBorder,
+      backgroundColor: 'rgba(196,168,108,0.08)',
+    },
+    statusBadgeText: {
+      fontFamily: fonts.displayBold,
+      fontSize: 9,
+      color: colors.dim,
+      letterSpacing: 1.6,
+    },
+    statusBadgeTextActive: {
+      color: colors.gold,
+    },
+    statusContent: { flex: 1 },
+    statusTitle: { fontFamily: fonts.displaySemibold, fontSize: 16, color: colors.text, letterSpacing: 0.1 },
+    statusSub: { fontFamily: fonts.body, fontSize: 13, color: colors.muted, marginTop: 2 },
 
-  streakRow: {
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-    padding: 12,
-    paddingLeft: 16,
-  },
-  streakText: {
-    fontSize: 14,
-    color: colors.gold,
-    fontWeight: '600',
-  },
+    streakRow: {
+      borderTopWidth: 1,
+      borderTopColor: colors.line,
+      padding: 12,
+      paddingLeft: 16,
+    },
+    streakText: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 14,
+      color: colors.gold,
+    },
 
-  // Setting rows
-  settingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-  },
-  settingContent: { flex: 1 },
-  settingTitle: { fontSize: 15, fontWeight: '500', color: colors.text, letterSpacing: 0.1 },
-  settingValue: { fontSize: 13, color: colors.muted, marginTop: 3, lineHeight: 18 },
-  settingArrow: { fontSize: 20, color: colors.dim, fontWeight: '300', marginLeft: 12 },
-  settingDivider: { height: 1, backgroundColor: colors.line, marginLeft: 18 },
+    // Setting rows
+    settingRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 16,
+      paddingHorizontal: 18,
+    },
+    settingContent: { flex: 1 },
+    settingTitle: { fontFamily: fonts.displaySemibold, fontSize: 15, color: colors.text, letterSpacing: 0.1 },
+    settingValue: { fontFamily: fonts.body, fontSize: 13, color: colors.muted, marginTop: 3, lineHeight: 18 },
+    settingArrow: { fontFamily: fonts.body, fontSize: 20, color: colors.dim, marginLeft: 12 },
+    settingDivider: { height: 1, backgroundColor: colors.line, marginLeft: 18 },
 
-  // Version
-  version: {
-    textAlign: 'center',
-    fontSize: 12,
-    color: colors.dim,
-    marginTop: 8,
-  },
+    // Version
+    version: {
+      fontFamily: fonts.body,
+      textAlign: 'center',
+      fontSize: 12,
+      color: colors.dim,
+      marginTop: 8,
+    },
 
-  // Edit screen
-  editWrap: { flex: 1, padding: 24, justifyContent: 'center' },
-  editTitle: { fontFamily: fonts.display, fontSize: 26, color: colors.text, marginBottom: 8, textAlign: 'center', letterSpacing: 0.2 },
-  editSub: { fontFamily: fonts.displayItalic, fontSize: 14, color: colors.muted, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
-  editInput: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    fontSize: 16,
-    color: colors.text,
-    minHeight: 140,
-    lineHeight: 22,
-    marginBottom: 16,
-  },
-  saveBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
-  saveBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
-  cancelBtn: { alignItems: 'center', marginTop: 12, padding: 8 },
-  cancelText: { color: colors.muted, fontSize: 14 },
+    // Edit screen
+    editWrap: { flex: 1, padding: 24, justifyContent: 'center' },
+    editTitle: { fontFamily: fonts.display, fontSize: 26, color: colors.text, marginBottom: 8, textAlign: 'center', letterSpacing: 0.2 },
+    editSub: { fontFamily: fonts.body, fontSize: 14, color: colors.muted, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
+    editInput: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 12,
+      paddingHorizontal: 18,
+      paddingVertical: 16,
+      fontFamily: fonts.body,
+      fontSize: 16,
+      color: colors.text,
+      minHeight: 140,
+      lineHeight: 22,
+      marginBottom: 16,
+    },
+    saveBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 16, alignItems: 'center' },
+    saveBtnText: { color: '#1a1612', fontFamily: fonts.displaySemibold, fontSize: 16 },
+    cancelBtn: { alignItems: 'center', marginTop: 12, padding: 8 },
+    cancelText: { color: colors.muted, fontFamily: fonts.body, fontSize: 14 },
 
-  // Goal preset grid
-  goalGrid: { gap: 10 },
-  goalOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-    gap: 14,
-  },
-  goalEmoji: { fontSize: 22 },
-  goalLabel: { fontSize: 16, fontWeight: '500', color: colors.text },
-});
+    // Goal preset grid
+    goalGrid: { gap: 10 },
+    goalOption: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 14,
+      paddingVertical: 16,
+      paddingHorizontal: 18,
+      gap: 14,
+    },
+    goalEmoji: { fontSize: 22 },
+    goalLabel: { fontFamily: fonts.displaySemibold, fontSize: 16, color: colors.text },
+  });
+}

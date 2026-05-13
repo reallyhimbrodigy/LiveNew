@@ -1,8 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors, fonts } from '../theme';
+import { useTheme } from '../theme';
 import { api } from '../api';
 import { useAuthStore } from '../store/authStore';
 import { truncateGoal } from '../utils/goalText';
@@ -10,6 +10,9 @@ import { truncateGoal } from '../utils/goalText';
 const PROGRESS_CACHE_KEY = 'livenew:progress_cache_v1';
 
 export default function ProgressScreen() {
+  const { colors, fonts } = useTheme();
+  const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
+
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
@@ -193,7 +196,7 @@ export default function ProgressScreen() {
             {stressChange !== null && (
               <View style={s.insightRow}>
                 <View style={[s.insightIcon, { backgroundColor: stressChange > 0 ? colors.successBg : colors.errorBg }]}>
-                  <Text style={{ color: stressChange > 0 ? colors.success : colors.error, fontSize: 16, fontWeight: '700' }}>
+                  <Text style={{ color: stressChange > 0 ? colors.success : colors.error, fontSize: 16, fontFamily: fonts.displayBold }}>
                     {stressChange > 0 ? '\u2193' : '\u2191'}
                   </Text>
                 </View>
@@ -213,7 +216,7 @@ export default function ProgressScreen() {
             {bestDay && (
               <View style={s.insightRow}>
                 <View style={[s.insightIcon, { backgroundColor: colors.goldBorder }]}>
-                  <Text style={{ color: colors.gold, fontSize: 14, fontWeight: '700' }}>{'\u2605'}</Text>
+                  <Text style={{ color: colors.gold, fontSize: 14, fontFamily: fonts.displayBold }}>{'\u2605'}</Text>
                 </View>
                 <View style={s.insightContent}>
                   <Text style={s.insightTitle}>Best day</Text>
@@ -226,7 +229,7 @@ export default function ProgressScreen() {
             {stressAvg != null && (
               <View style={[s.insightRow, { borderBottomWidth: 0 }]}>
                 <View style={[s.insightIcon, { backgroundColor: colors.goldSoft }]}>
-                  <Text style={{ color: colors.muted, fontSize: 14, fontWeight: '700' }}>~</Text>
+                  <Text style={{ color: colors.muted, fontSize: 14, fontFamily: fonts.displayBold }}>~</Text>
                 </View>
                 <View style={s.insightContent}>
                   <Text style={s.insightTitle}>7-day average</Text>
@@ -286,7 +289,7 @@ export default function ProgressScreen() {
                 return (
                   <View key={i} style={s.chartCol}>
                     <View style={[s.chartBar, { height, backgroundColor: barColor }]} />
-                    <Text style={[s.chartNum, isBest && { color: colors.gold, fontWeight: '700' }]}>{stress}</Text>
+                    <Text style={[s.chartNum, isBest && { color: colors.gold, fontFamily: fonts.displayBold }]}>{stress}</Text>
                     <Text style={s.chartDay}>{dayLabel}</Text>
                   </View>
                 );
@@ -342,221 +345,223 @@ function buildStoryText({ daysActive, streak, stressChange, stressAvg, recentAvg
   return `${daysActive} days in.`;
 }
 
-const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },
-  scroll: { padding: 20, paddingBottom: 100 },
+function makeStyles(colors, fonts) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: colors.bg },
+    loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },
+    scroll: { padding: 20, paddingBottom: 100 },
 
-  heading: {
-    fontFamily: fonts.display,
-    fontSize: 32,
-    color: colors.text,
-    marginBottom: 22,
-    letterSpacing: 0.2,
-  },
+    heading: {
+      fontFamily: fonts.display,
+      fontSize: 32,
+      color: colors.text,
+      marginBottom: 22,
+      letterSpacing: 0.2,
+    },
 
-  // Goal
-  goalCard: {
-    backgroundColor: colors.goldSoft,
-    borderWidth: 1,
-    borderColor: colors.goldBorder,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 16,
-  },
-  goalLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.gold,
-    letterSpacing: 2,
-    marginBottom: 8,
-  },
-  goalText: {
-    fontFamily: fonts.display,
-    fontSize: 16,
-    color: colors.text,
-    lineHeight: 24,
-    letterSpacing: 0.1,
-  },
+    // Goal
+    goalCard: {
+      backgroundColor: colors.goldSoft,
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      borderRadius: 14,
+      padding: 16,
+      marginBottom: 16,
+    },
+    goalLabel: {
+      fontFamily: fonts.displayBold,
+      fontSize: 10,
+      color: colors.gold,
+      letterSpacing: 2,
+      marginBottom: 8,
+    },
+    goalText: {
+      fontFamily: fonts.display,
+      fontSize: 16,
+      color: colors.text,
+      lineHeight: 24,
+      letterSpacing: 0.1,
+    },
 
-  // What we've noticed — pattern callouts
-  noticedCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.goldBorder,
-    borderRadius: 14,
-    padding: 18,
-    marginBottom: 16,
-  },
-  noticedLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.gold,
-    letterSpacing: 1.6,
-    marginBottom: 12,
-  },
-  noticedRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  noticedDot: {
-    width: 5,
-    height: 5,
-    borderRadius: 2.5,
-    backgroundColor: colors.gold,
-    marginTop: 9,
-  },
-  noticedText: {
-    fontFamily: fonts.display,
-    fontSize: 15,
-    color: colors.text,
-    lineHeight: 22,
-    letterSpacing: 0.1,
-    flex: 1,
-  },
+    // What we've noticed — pattern callouts
+    noticedCard: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      borderRadius: 14,
+      padding: 18,
+      marginBottom: 16,
+    },
+    noticedLabel: {
+      fontFamily: fonts.displayBold,
+      fontSize: 10,
+      color: colors.gold,
+      letterSpacing: 1.6,
+      marginBottom: 12,
+    },
+    noticedRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    noticedDot: {
+      width: 5,
+      height: 5,
+      borderRadius: 2.5,
+      backgroundColor: colors.gold,
+      marginTop: 9,
+    },
+    noticedText: {
+      fontFamily: fonts.display,
+      fontSize: 15,
+      color: colors.text,
+      lineHeight: 22,
+      letterSpacing: 0.1,
+      flex: 1,
+    },
 
-  // Story
-  storyCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    padding: 20,
-    marginBottom: 16,
-  },
-  storyText: {
-    fontFamily: fonts.display,
-    fontSize: 16,
-    color: colors.text,
-    lineHeight: 26,
-    letterSpacing: 0.1,
-  },
+    // Story
+    storyCard: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 14,
+      padding: 20,
+      marginBottom: 16,
+    },
+    storyText: {
+      fontFamily: fonts.display,
+      fontSize: 16,
+      color: colors.text,
+      lineHeight: 26,
+      letterSpacing: 0.1,
+    },
 
-  // AI Insight
-  insightCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    padding: 18,
-    marginBottom: 16,
-  },
-  insightLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: colors.dim,
-    letterSpacing: 1.5,
-    marginBottom: 8,
-  },
-  insightText: {
-    fontFamily: fonts.display,
-    fontSize: 15,
-    color: colors.text,
-    lineHeight: 24,
-    letterSpacing: 0.1,
-  },
+    // AI Insight
+    insightCard: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 14,
+      padding: 18,
+      marginBottom: 16,
+    },
+    insightLabel: {
+      fontFamily: fonts.displayBold,
+      fontSize: 11,
+      color: colors.dim,
+      letterSpacing: 1.5,
+      marginBottom: 8,
+    },
+    insightText: {
+      fontFamily: fonts.display,
+      fontSize: 15,
+      color: colors.text,
+      lineHeight: 24,
+      letterSpacing: 0.1,
+    },
 
-  // Summary row
-  summaryRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  summaryCard: {
-    flex: 1,
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    paddingVertical: 22,
-    alignItems: 'center',
-  },
-  summaryValue: {
-    fontFamily: fonts.displayBold,
-    fontSize: 32,
-    color: colors.text,
-    marginBottom: 4,
-    letterSpacing: 0.2,
-  },
-  summaryLabel: { fontSize: 10, color: colors.dim, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1.2 },
+    // Summary row
+    summaryRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
+    summaryCard: {
+      flex: 1,
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 14,
+      paddingVertical: 22,
+      alignItems: 'center',
+    },
+    summaryValue: {
+      fontFamily: fonts.displayBold,
+      fontSize: 32,
+      color: colors.text,
+      marginBottom: 4,
+      letterSpacing: 0.2,
+    },
+    summaryLabel: { fontFamily: fonts.displaySemibold, fontSize: 10, color: colors.dim, textTransform: 'uppercase', letterSpacing: 1.2 },
 
-  // Cards
-  card: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    padding: 18,
-    marginBottom: 12,
-  },
-  cardTitle: { fontSize: 16, fontWeight: '600', color: colors.text, marginBottom: 4 },
-  cardSub: { fontSize: 12, color: colors.dim, marginBottom: 16 },
+    // Cards
+    card: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 14,
+      padding: 18,
+      marginBottom: 12,
+    },
+    cardTitle: { fontFamily: fonts.displaySemibold, fontSize: 16, color: colors.text, marginBottom: 4 },
+    cardSub: { fontFamily: fonts.body, fontSize: 12, color: colors.dim, marginBottom: 16 },
 
-  // Insights rows
-  insightRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.line,
-  },
-  insightIcon: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  insightContent: { flex: 1 },
-  insightTitle: { fontSize: 14, fontWeight: '600', color: colors.text },
-  insightSub: { fontSize: 12, color: colors.muted, marginTop: 1 },
+    // Insights rows
+    insightRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      paddingVertical: 10,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.line,
+    },
+    insightIcon: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      alignItems: 'center',
+      justifyContent: 'center',
+      marginRight: 12,
+    },
+    insightContent: { flex: 1 },
+    insightTitle: { fontFamily: fonts.displaySemibold, fontSize: 14, color: colors.text },
+    insightSub: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: 1 },
 
-  // Reflections
-  reflectionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
-  reflectionStat: {
-    flex: 1,
-    backgroundColor: colors.bg,
-    borderRadius: 10,
-    paddingVertical: 14,
-    alignItems: 'center',
-  },
-  reflectionValue: {
-    fontFamily: fonts.displayBold,
-    fontSize: 24,
-    color: colors.text,
-    marginBottom: 2,
-  },
-  reflectionLabel: { fontSize: 10, color: colors.dim, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 1.2 },
-  reflectionInsight: {
-    fontFamily: fonts.displayItalic,
-    fontSize: 13,
-    color: colors.muted,
-    marginTop: 14,
-    lineHeight: 19,
-  },
+    // Reflections
+    reflectionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
+    reflectionStat: {
+      flex: 1,
+      backgroundColor: colors.bg,
+      borderRadius: 10,
+      paddingVertical: 14,
+      alignItems: 'center',
+    },
+    reflectionValue: {
+      fontFamily: fonts.displayBold,
+      fontSize: 24,
+      color: colors.text,
+      marginBottom: 2,
+    },
+    reflectionLabel: { fontFamily: fonts.displaySemibold, fontSize: 10, color: colors.dim, textTransform: 'uppercase', letterSpacing: 1.2 },
+    reflectionInsight: {
+      fontFamily: fonts.displayItalic,
+      fontSize: 13,
+      color: colors.muted,
+      marginTop: 14,
+      lineHeight: 19,
+    },
 
-  // Chart
-  chartWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 110, paddingTop: 8 },
-  chartCol: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
-  chartBar: { width: '80%', borderRadius: 3, minHeight: 6 },
-  chartNum: { fontSize: 9, color: colors.dim, marginTop: 4 },
-  chartDay: { fontSize: 9, color: colors.dim, marginTop: 1 },
+    // Chart
+    chartWrap: { flexDirection: 'row', alignItems: 'flex-end', gap: 4, height: 110, paddingTop: 8 },
+    chartCol: { flex: 1, alignItems: 'center', justifyContent: 'flex-end' },
+    chartBar: { width: '80%', borderRadius: 3, minHeight: 6 },
+    chartNum: { fontFamily: fonts.body, fontSize: 9, color: colors.dim, marginTop: 4 },
+    chartDay: { fontFamily: fonts.body, fontSize: 9, color: colors.dim, marginTop: 1 },
 
-  // Empty
-  emptyCard: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    padding: 32,
-    alignItems: 'center',
-  },
-  emptyTitle: { fontSize: 18, fontWeight: '600', color: colors.text, marginBottom: 8 },
-  emptySub: { fontSize: 14, color: colors.muted, textAlign: 'center', lineHeight: 20 },
-  retryBtn: {
-    marginTop: 16,
-    backgroundColor: colors.gold,
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-  },
-  retryText: { color: colors.bg, fontSize: 14, fontWeight: '600' },
-});
+    // Empty
+    emptyCard: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 14,
+      padding: 32,
+      alignItems: 'center',
+    },
+    emptyTitle: { fontFamily: fonts.displaySemibold, fontSize: 18, color: colors.text, marginBottom: 8 },
+    emptySub: { fontFamily: fonts.body, fontSize: 14, color: colors.muted, textAlign: 'center', lineHeight: 20 },
+    retryBtn: {
+      marginTop: 16,
+      backgroundColor: colors.gold,
+      borderRadius: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 24,
+    },
+    retryText: { color: '#1a1612', fontFamily: fonts.displaySemibold, fontSize: 14 },
+  });
+}

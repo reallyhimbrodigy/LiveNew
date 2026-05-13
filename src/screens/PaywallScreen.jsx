@@ -1,21 +1,21 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors, fonts } from '../theme';
+import { useTheme } from '../theme';
 import { getOfferings, purchasePackage, restorePurchases } from '../purchases';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSuccess } from '../haptics';
 
 export default function PaywallScreen({ navigation, route }) {
+  const { colors, fonts } = useTheme();
+  const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
+
   const [offering, setOffering] = useState(null);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
-  const setSubscribed = useAuthStore(s => s.setSubscribed);
-
-  // Preview data passed from Today screen
-  const planPreview = route?.params?.planPreview || null;
+  const setSubscribed = useAuthStore(z => z.setSubscribed);
 
   useEffect(() => {
     (async () => {
@@ -69,27 +69,25 @@ export default function PaywallScreen({ navigation, route }) {
     <SafeAreaView style={s.safe}>
       <View style={s.container}>
 
-        {/* Close button */}
         <TouchableOpacity style={s.closeBtn} onPress={() => navigation.goBack()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
           <Text style={s.closeText}>✕</Text>
         </TouchableOpacity>
 
         <View style={s.content}>
           <Text style={s.logo}>LiveNew</Text>
-          <Text style={s.title}>Keep going</Text>
+          <Text style={s.title}>Keep going with Iris</Text>
 
           <Text style={s.sub}>
             You've been using LiveNew for a week. People who stick with it past this point report feeling measurably calmer within 2 weeks.
           </Text>
 
-          {/* Features */}
           <View style={s.features}>
             {[
-              'Unlimited daily plans that learn from your patterns',
-              'Plans that reference your actual routine',
+              'Unlimited daily plans tuned to your patterns',
+              'Iris references your real routine and biometrics',
               'Evening reflections that shape tomorrow',
               'Stress tracking that tells a story, not just numbers',
-              'A plan that gets better the longer you use it',
+              'A plan that gets sharper the longer you use it',
             ].map((f, i) => (
               <View key={i} style={s.featureRow}>
                 <Text style={s.featureCheck}>✓</Text>
@@ -111,7 +109,7 @@ export default function PaywallScreen({ navigation, route }) {
                 activeOpacity={0.8}
               >
                 {purchasing ? (
-                  <ActivityIndicator color={colors.bg} size="small" />
+                  <ActivityIndicator color="#1a1612" size="small" />
                 ) : (
                   <Text style={s.purchaseBtnText}>
                     {trialText ? `Start free trial` : `Subscribe for ${price}`}
@@ -132,147 +130,116 @@ export default function PaywallScreen({ navigation, route }) {
   );
 }
 
-const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  container: { flex: 1 },
+function makeStyles(colors, fonts) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: colors.bg },
+    container: { flex: 1 },
 
-  closeBtn: {
-    position: 'absolute',
-    top: 16,
-    right: 20,
-    zIndex: 10,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeText: { color: colors.muted, fontSize: 16 },
+    closeBtn: {
+      position: 'absolute',
+      top: 16,
+      right: 20,
+      zIndex: 10,
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      backgroundColor: colors.surface,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    closeText: { color: colors.muted, fontSize: 16 },
 
-  content: {
-    flex: 1,
-    padding: 24,
-    justifyContent: 'center',
-  },
+    content: {
+      flex: 1,
+      padding: 24,
+      justifyContent: 'center',
+    },
 
-  logo: {
-    fontFamily: fonts.display,
-    fontSize: 18,
-    color: colors.gold,
-    letterSpacing: 1.2,
-    marginBottom: 14,
-  },
+    logo: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 18,
+      color: colors.gold,
+      letterSpacing: 1.2,
+      marginBottom: 14,
+    },
 
-  title: {
-    fontFamily: fonts.display,
-    fontSize: 32,
-    color: colors.text,
-    marginBottom: 20,
-    letterSpacing: 0.2,
-  },
+    title: {
+      fontFamily: fonts.displayBold,
+      fontSize: 32,
+      color: colors.text,
+      marginBottom: 20,
+      letterSpacing: 0.2,
+    },
 
-  previewWrap: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
-    padding: 16,
-    marginBottom: 20,
-  },
+    sub: {
+      fontFamily: fonts.body,
+      fontSize: 16,
+      color: colors.muted,
+      lineHeight: 25,
+      marginBottom: 24,
+      letterSpacing: 0.1,
+    },
 
-  previewRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 6,
-  },
+    features: {
+      gap: 10,
+    },
 
-  previewDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: colors.gold,
-    marginRight: 12,
-  },
+    featureRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+    },
 
-  previewContent: { flex: 1 },
+    featureCheck: {
+      color: colors.gold,
+      fontFamily: fonts.displayBold,
+      fontSize: 15,
+      marginRight: 10,
+      width: 18,
+    },
 
-  previewTitle: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: colors.text,
-  },
+    featureText: {
+      color: colors.text,
+      fontFamily: fonts.body,
+      fontSize: 14,
+      flex: 1,
+    },
 
-  previewTime: {
-    fontSize: 12,
-    color: colors.dim,
-  },
+    bottom: {
+      padding: 24,
+      paddingBottom: 16,
+    },
 
-  sub: {
-    fontFamily: fonts.display,
-    fontSize: 16,
-    color: colors.muted,
-    lineHeight: 25,
-    marginBottom: 24,
-    letterSpacing: 0.1,
-  },
+    purchaseBtn: {
+      backgroundColor: colors.gold,
+      borderRadius: 14,
+      paddingVertical: 16,
+      alignItems: 'center',
+    },
 
-  features: {
-    gap: 10,
-  },
+    purchaseBtnText: {
+      color: '#1a1612',
+      fontFamily: fonts.displaySemibold,
+      fontSize: 17,
+    },
 
-  featureRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+    priceNote: {
+      color: colors.dim,
+      fontFamily: fonts.body,
+      fontSize: 12,
+      textAlign: 'center',
+      marginTop: 8,
+    },
 
-  featureCheck: {
-    color: colors.gold,
-    fontSize: 15,
-    fontWeight: '600',
-    marginRight: 10,
-    width: 18,
-  },
+    restoreBtn: {
+      alignItems: 'center',
+      marginTop: 12,
+      padding: 8,
+    },
 
-  featureText: {
-    color: colors.text,
-    fontSize: 14,
-    flex: 1,
-  },
-
-  bottom: {
-    padding: 24,
-    paddingBottom: 16,
-  },
-
-  purchaseBtn: {
-    backgroundColor: colors.gold,
-    borderRadius: 14,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-
-  purchaseBtnText: {
-    color: colors.bg,
-    fontSize: 17,
-    fontWeight: '600',
-  },
-
-  priceNote: {
-    color: colors.dim,
-    fontSize: 12,
-    textAlign: 'center',
-    marginTop: 8,
-  },
-
-  restoreBtn: {
-    alignItems: 'center',
-    marginTop: 12,
-    padding: 8,
-  },
-
-  restoreText: {
-    color: colors.muted,
-    fontSize: 13,
-  },
-});
+    restoreText: {
+      color: colors.muted,
+      fontFamily: fonts.body,
+      fontSize: 13,
+    },
+  });
+}

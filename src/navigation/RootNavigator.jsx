@@ -3,15 +3,15 @@ import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { useFonts, Lora_400Regular_Italic, Lora_500Medium, Lora_700Bold } from '@expo-google-fonts/lora';
 import {
-  useFonts,
-  Lora_400Regular,
-  Lora_400Regular_Italic,
-  Lora_500Medium,
-  Lora_700Bold,
-} from '@expo-google-fonts/lora';
+  Manrope_400Regular,
+  Manrope_500Medium,
+  Manrope_600SemiBold,
+  Manrope_700Bold,
+} from '@expo-google-fonts/manrope';
 import { useAuthStore } from '../store/authStore';
-import { colors } from '../theme';
+import { useTheme } from '../theme';
 import { initPurchases } from '../purchases';
 
 // Screens
@@ -86,6 +86,7 @@ function TabBarIcon({ name, color }) {
 }
 
 function MainTabs() {
+  const { colors, fonts } = useTheme();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -103,8 +104,8 @@ function MainTabs() {
         tabBarActiveTintColor: colors.gold,
         tabBarInactiveTintColor: colors.dim,
         tabBarLabelStyle: {
+          fontFamily: fonts.displaySemibold,
           fontSize: 11,
-          fontWeight: '500',
           letterSpacing: 0.3,
         },
         tabBarIcon: ({ focused, color, size }) => {
@@ -143,9 +144,13 @@ export default function RootNavigator() {
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn);
   const hasProfile = useAuthStore((s) => s.hasProfile);
   const hydrate = useAuthStore((s) => s.hydrate);
+  const { colors, scheme } = useTheme();
 
   const [fontsLoaded] = useFonts({
-    Lora_400Regular,
+    Manrope_400Regular,
+    Manrope_500Medium,
+    Manrope_600SemiBold,
+    Manrope_700Bold,
     Lora_400Regular_Italic,
     Lora_500Medium,
     Lora_700Bold,
@@ -167,10 +172,10 @@ export default function RootNavigator() {
   }, []);
 
   // Don't gate render on fontsLoaded — system fallback shows for first frame,
-  // Lora swaps in seamlessly when ready. Saves 0.5–2s on cold boot.
+  // Manrope/Lora swap in when ready. Saves 0.5–2s on cold boot.
   if (isLoading) {
     return (
-      <View style={styles.loading}>
+      <View style={[styles.loading, { backgroundColor: colors.bg }]}>
         <ActivityIndicator size="large" color={colors.gold} />
       </View>
     );
@@ -179,7 +184,7 @@ export default function RootNavigator() {
   return (
     <NavigationContainer
       theme={{
-        dark: true,
+        dark: scheme === 'dark',
         colors: {
           primary: colors.gold,
           background: colors.bg,
@@ -189,10 +194,10 @@ export default function RootNavigator() {
           notification: colors.gold,
         },
         fonts: {
-          regular: { fontFamily: 'System', fontWeight: '400' },
-          medium: { fontFamily: 'System', fontWeight: '500' },
-          bold: { fontFamily: 'System', fontWeight: '700' },
-          heavy: { fontFamily: 'System', fontWeight: '800' },
+          regular: { fontFamily: 'Manrope_400Regular', fontWeight: '400' },
+          medium: { fontFamily: 'Manrope_500Medium', fontWeight: '500' },
+          bold: { fontFamily: 'Manrope_700Bold', fontWeight: '700' },
+          heavy: { fontFamily: 'Manrope_700Bold', fontWeight: '800' },
         },
       }}
     >
@@ -214,6 +219,5 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: colors.bg,
   },
 });

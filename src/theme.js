@@ -1,8 +1,13 @@
-export const colors = {
+import { useColorScheme } from 'react-native';
+
+// Gold is the signature — preserved across both modes. Everything else flips.
+const GOLD = '#c4a86c';
+
+const darkColors = {
   bg: '#0f0d0a',
   card: '#161412',
   surface: '#1c1a17',
-  gold: '#c4a86c',
+  gold: GOLD,
   goldDim: 'rgba(196,168,108,0.12)',
   goldSoft: 'rgba(196,168,108,0.06)',
   goldBorder: 'rgba(196,168,108,0.2)',
@@ -17,15 +22,44 @@ export const colors = {
   successBg: 'rgba(122,173,122,0.15)',
   accent: '#8a8acd',
   tabBar: '#111110',
+  scheme: 'dark',
 };
 
-// Display font (Lora) is loaded via expo-font in RootNavigator.
-// Falls back to system serif if not yet loaded — never blocks render.
+const lightColors = {
+  bg: '#faf5ec',
+  card: '#ffffff',
+  surface: '#fefcf7',
+  gold: GOLD,
+  goldDim: 'rgba(196,168,108,0.18)',
+  goldSoft: 'rgba(196,168,108,0.08)',
+  goldBorder: 'rgba(196,168,108,0.35)',
+  text: '#2a2620',
+  muted: '#6b6357',
+  dim: '#a59f93',
+  line: 'rgba(42,38,32,0.08)',
+  error: '#b85555',
+  errorBg: 'rgba(184,85,85,0.08)',
+  errorBorder: 'rgba(184,85,85,0.25)',
+  success: '#4a8a4a',
+  successBg: 'rgba(74,138,74,0.1)',
+  accent: '#5a5aa8',
+  tabBar: '#ffffff',
+  scheme: 'light',
+};
+
+// Manrope is the primary type — rounded sans, modern, Gen-Z-coded.
+// Lora is preserved ONLY for accent moments (big score number, occasional
+// italic accents) where serif character earns its keep.
 export const fonts = {
-  display: 'Lora_500Medium',
+  display: 'Manrope_500Medium',
+  displaySemibold: 'Manrope_600SemiBold',
+  displayBold: 'Manrope_700Bold',
+  body: 'Manrope_400Regular',
+  italic: 'Lora_400Regular_Italic',
+  accent: 'Lora_500Medium',
+  accentBold: 'Lora_700Bold',
+  // Backwards-compat alias used by some screens.
   displayItalic: 'Lora_400Regular_Italic',
-  displayBold: 'Lora_700Bold',
-  body: 'System',
 };
 
 export const spacing = {
@@ -36,3 +70,18 @@ export const spacing = {
   xl: 32,
   xxl: 48,
 };
+
+// Backwards-compat export. Screens that haven't migrated to useTheme() still
+// import { colors } — they'll get dark mode (the previous behavior). New code
+// must use useTheme().
+export const colors = darkColors;
+
+export function getColors(scheme) {
+  return scheme === 'light' ? lightColors : darkColors;
+}
+
+export function useTheme() {
+  const scheme = useColorScheme();
+  const colors = getColors(scheme);
+  return { colors, fonts, spacing, scheme: colors.scheme };
+}

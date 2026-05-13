@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, ScrollView, Pressable, StyleSheet, AppState,
   Modal, ActivityIndicator,
@@ -8,7 +8,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { colors, fonts } from '../theme';
+import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
@@ -57,6 +57,8 @@ function PressCard({ onPress, style, children, disabled }) {
 }
 
 export default function TodayScreen({ navigation }) {
+  const { colors, fonts } = useTheme();
+  const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
   const insets = useSafeAreaInsets();
   const todayPlan = useAuthStore(s => s.todayPlan);
   const todayDate = useAuthStore(s => s.todayDate);
@@ -466,7 +468,8 @@ export default function TodayScreen({ navigation }) {
   );
 }
 
-const s = StyleSheet.create({
+function makeStyles(colors, fonts) {
+  return StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 80 },
   centered: { flex: 1, justifyContent: 'center', alignItems: 'center' },
@@ -570,9 +573,9 @@ const s = StyleSheet.create({
     paddingHorizontal: 22,
   },
   healthBannerCtaText: {
-    color: colors.bg,
+    color: '#1a1612',
+    fontFamily: fonts.displayBold,
     fontSize: 14,
-    fontWeight: '700',
     letterSpacing: 0.3,
   },
   healthBannerSkip: {
@@ -623,12 +626,12 @@ const s = StyleSheet.create({
     gap: 5,
   },
   nowPillDot: {
-    width: 5, height: 5, borderRadius: 2.5, backgroundColor: colors.bg,
+    width: 5, height: 5, borderRadius: 2.5, backgroundColor: '#1a1612',
   },
   nowPillText: {
+    fontFamily: fonts.displayBold,
     fontSize: 9,
-    fontWeight: '800',
-    color: colors.bg,
+    color: '#1a1612',
     letterSpacing: 1.4,
   },
   zoneHeadline: {
@@ -878,7 +881,7 @@ const s = StyleSheet.create({
     backgroundColor: colors.gold,
     borderRadius: 12, paddingVertical: 14, alignItems: 'center',
   },
-  modalBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600', letterSpacing: 0.2 },
+  modalBtnText: { color: '#1a1612', fontFamily: fonts.displaySemibold, fontSize: 16, letterSpacing: 0.2 },
 
   // Empty state
   emptyCard: {
@@ -909,7 +912,7 @@ const s = StyleSheet.create({
     borderRadius: 12, paddingVertical: 14, alignItems: 'center', marginBottom: 12,
   },
   emptyCtaText: {
-    color: colors.bg, fontSize: 15, fontWeight: '600', letterSpacing: 0.2,
+    color: '#1a1612', fontFamily: fonts.displaySemibold, fontSize: 15, letterSpacing: 0.2,
   },
   emptyHint: {
     fontFamily: fonts.displayItalic,
@@ -918,5 +921,6 @@ const s = StyleSheet.create({
 
   // Shared
   goldBtn: { backgroundColor: colors.gold, borderRadius: 12, paddingVertical: 14, paddingHorizontal: 32, alignItems: 'center' },
-  goldBtnText: { color: colors.bg, fontSize: 16, fontWeight: '600' },
-});
+  goldBtnText: { color: '#1a1612', fontFamily: fonts.displaySemibold, fontSize: 16 },
+  });
+}

@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../api';
 
 export default function AuthScreen() {
+  const { colors, fonts } = useTheme();
+  const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
+
   const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -22,8 +25,8 @@ export default function AuthScreen() {
   const [resetSent, setResetSent] = useState(false);
   const [resetLoading, setResetLoading] = useState(false);
 
-  const login = useAuthStore(s => s.login);
-  const signup = useAuthStore(s => s.signup);
+  const login = useAuthStore(z => z.login);
+  const signup = useAuthStore(z => z.signup);
   const isSignUp = mode === 'signup';
 
   const handleSubmit = async () => {
@@ -44,7 +47,6 @@ export default function AuthScreen() {
           setLoading(false);
           return;
         }
-        // If no confirmation needed, auto-login
         await login(email.trim(), password);
       } else {
         await login(email.trim(), password);
@@ -95,7 +97,7 @@ export default function AuthScreen() {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={s.container}>
             <TouchableOpacity onPress={() => { setShowForgot(false); setResetSent(false); }} style={{ paddingVertical: 12 }}>
-              <Text style={{ color: colors.muted, fontSize: 15 }}>← Back</Text>
+              <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 15 }}>← Back</Text>
             </TouchableOpacity>
 
             <View style={{ flex: 1, justifyContent: 'center' }}>
@@ -103,7 +105,7 @@ export default function AuthScreen() {
 
               {resetSent ? (
                 <>
-                  <Text style={{ color: colors.gold, fontSize: 16, textAlign: 'center', marginTop: 16, lineHeight: 24 }}>
+                  <Text style={{ color: colors.gold, fontFamily: fonts.body, fontSize: 16, textAlign: 'center', marginTop: 16, lineHeight: 24 }}>
                     Check your email for a password reset link.
                   </Text>
                   <TouchableOpacity
@@ -116,7 +118,7 @@ export default function AuthScreen() {
                 </>
               ) : (
                 <>
-                  <Text style={{ color: colors.muted, fontSize: 14, textAlign: 'center', marginBottom: 24 }}>
+                  <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 14, textAlign: 'center', marginBottom: 24 }}>
                     Enter your email and we'll send you a link to reset your password.
                   </Text>
                   <TextInput
@@ -186,7 +188,7 @@ export default function AuthScreen() {
 
           <View style={s.passWrap}>
             <TextInput
-              style={[s.input, { flex: 1, marginBottom: 0 }]}
+              style={[s.input, { flex: 1, marginBottom: 0, borderWidth: 0, backgroundColor: 'transparent' }]}
               placeholder="Password"
               placeholderTextColor={colors.dim}
               value={password}
@@ -203,13 +205,13 @@ export default function AuthScreen() {
 
           {!isSignUp && (
             <TouchableOpacity onPress={() => setShowForgot(true)} style={{ alignSelf: 'flex-end', marginBottom: 16, marginTop: -4 }}>
-              <Text style={{ color: colors.gold, fontSize: 13 }}>Forgot password?</Text>
+              <Text style={{ color: colors.gold, fontFamily: fonts.displaySemibold, fontSize: 13 }}>Forgot password?</Text>
             </TouchableOpacity>
           )}
 
           <TouchableOpacity style={s.submitBtn} onPress={handleSubmit} disabled={loading} activeOpacity={0.8}>
             {loading ? (
-              <ActivityIndicator color={colors.bg} size="small" />
+              <ActivityIndicator color="#1a1612" size="small" />
             ) : (
               <Text style={s.submitText}>
                 {isSignUp ? 'Create Account' : 'Continue'}
@@ -234,107 +236,110 @@ export default function AuthScreen() {
   );
 }
 
-const s = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: colors.bg },
-  flex: { flex: 1 },
-  scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-  container: { flex: 1, padding: 24 },
-  title: { fontSize: 28, fontWeight: '700', color: colors.text, textAlign: 'center' },
-  btn: {
-    backgroundColor: colors.gold,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  btnText: {
-    color: colors.bg,
-    fontSize: 16,
-    fontWeight: '600',
-  },
+function makeStyles(colors, fonts) {
+  return StyleSheet.create({
+    safe: { flex: 1, backgroundColor: colors.bg },
+    flex: { flex: 1 },
+    scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
+    container: { flex: 1, padding: 24 },
+    title: { fontFamily: fonts.displayBold, fontSize: 28, color: colors.text, textAlign: 'center' },
+    btn: {
+      backgroundColor: colors.gold,
+      borderRadius: 12,
+      paddingVertical: 16,
+      alignItems: 'center',
+    },
+    btnText: {
+      color: '#1a1612',
+      fontFamily: fonts.displaySemibold,
+      fontSize: 16,
+    },
 
-  logo: {
-    fontSize: 28,
-    fontWeight: '500',
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 40,
-    letterSpacing: 1,
-  },
+    logo: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 28,
+      color: colors.text,
+      textAlign: 'center',
+      marginBottom: 40,
+      letterSpacing: 1,
+    },
 
-  heading: {
-    fontSize: 22,
-    fontWeight: '600',
-    color: colors.text,
-    textAlign: 'center',
-    marginBottom: 28,
-  },
+    heading: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 22,
+      color: colors.text,
+      textAlign: 'center',
+      marginBottom: 28,
+    },
 
-  input: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    fontSize: 16,
-    color: colors.text,
-    marginBottom: 12,
-  },
+    input: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 12,
+      paddingHorizontal: 18,
+      paddingVertical: 16,
+      fontFamily: fonts.body,
+      fontSize: 16,
+      color: colors.text,
+      marginBottom: 12,
+    },
 
-  passWrap: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 12,
-    marginBottom: 12,
-    paddingRight: 12,
-  },
+    passWrap: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 12,
+      marginBottom: 12,
+      paddingRight: 12,
+    },
 
-  eyeBtn: { padding: 8 },
-  eyeText: { color: colors.dim, fontSize: 14, fontWeight: '500' },
+    eyeBtn: { padding: 8 },
+    eyeText: { color: colors.dim, fontFamily: fonts.displaySemibold, fontSize: 14 },
 
-  submitBtn: {
-    backgroundColor: colors.gold,
-    borderRadius: 12,
-    paddingVertical: 16,
-    alignItems: 'center',
-    marginTop: 8,
-  },
+    submitBtn: {
+      backgroundColor: colors.gold,
+      borderRadius: 12,
+      paddingVertical: 16,
+      alignItems: 'center',
+      marginTop: 8,
+    },
 
-  submitText: {
-    color: colors.bg,
-    fontSize: 16,
-    fontWeight: '600',
-  },
+    submitText: {
+      color: '#1a1612',
+      fontFamily: fonts.displaySemibold,
+      fontSize: 16,
+    },
 
-  switchRow: {
-    flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 24,
-  },
+    switchRow: {
+      flexDirection: 'row',
+      justifyContent: 'center',
+      marginTop: 24,
+    },
 
-  switchText: { color: colors.muted, fontSize: 14 },
-  switchLink: { color: colors.gold, fontSize: 14, fontWeight: '600' },
+    switchText: { color: colors.muted, fontFamily: fonts.body, fontSize: 14 },
+    switchLink: { color: colors.gold, fontFamily: fonts.displaySemibold, fontSize: 14 },
 
-  errorBox: {
-    backgroundColor: 'rgba(200,80,80,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(200,80,80,0.15)',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
-  },
-  errorText: { color: colors.error, fontSize: 14 },
+    errorBox: {
+      backgroundColor: colors.errorBg,
+      borderWidth: 1,
+      borderColor: colors.errorBorder,
+      borderRadius: 10,
+      padding: 12,
+      marginBottom: 16,
+    },
+    errorText: { color: colors.error, fontFamily: fonts.body, fontSize: 14 },
 
-  successBox: {
-    backgroundColor: 'rgba(196,168,108,0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(196,168,108,0.15)',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 16,
-  },
-  successText: { color: colors.gold, fontSize: 14 },
-});
+    successBox: {
+      backgroundColor: colors.goldDim,
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      borderRadius: 10,
+      padding: 12,
+      marginBottom: 16,
+    },
+    successText: { color: colors.gold, fontFamily: fonts.body, fontSize: 14 },
+  });
+}
