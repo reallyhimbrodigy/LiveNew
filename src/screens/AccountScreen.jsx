@@ -1,13 +1,16 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   View, Text, ScrollView, Pressable, TextInput,
-  StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking,
+  StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking, Share,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapMedium } from '../haptics';
 import { truncateGoal } from '../utils/goalText';
+import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
+import InviteShareCard from '../components/InviteShareCard';
 
 const GOAL_OPTIONS = [
   { label: 'Sleep better', value: 'I want to sleep through the night and wake up rested', emoji: '\u{1F319}' },
@@ -34,6 +37,32 @@ export default function AccountScreen({ navigation }) {
   const [editing, setEditing] = useState(null);
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
+  const [sharing, setSharing] = useState(null);
+  const shareCardRef = useRef(null);
+
+  const shareAs = async (type, payload, message) => {
+    tapSelect();
+    setSharing({ type, payload });
+    await new Promise(r => setTimeout(r, 80));
+    try {
+      const uri = await captureRef(shareCardRef, { format: 'png', quality: 1, result: 'tmpfile' });
+      await Share.share({ url: uri, message });
+    } catch (err) {
+      console.warn('[share]', err?.message);
+    } finally {
+      setSharing(null);
+    }
+  };
+
+  const handleShareStreak = () => {
+    if (!streak || streak < 1) return;
+    const tier = milestoneTier(streak);
+    shareAs('streak', { days: streak }, `${streak} day${streak === 1 ? '' : 's'} on LiveNew — ${tier.subtitle}`);
+  };
+
+  const handleInviteFriend = () => {
+    shareAs('invite', {}, 'Lower your cortisol by tonight. — Iris @ LiveNew');
+  };
 
   const handleEdit = (field) => {
     tapSelect();
@@ -205,9 +234,10 @@ export default function AccountScreen({ navigation }) {
             </View>
           </View>
           {streak > 0 && (
-            <View style={s.streakRow}>
+            <Pressable style={s.streakRow} onPress={handleShareStreak}>
               <Text style={s.streakText}>{streak} day streak 🔥</Text>
-            </View>
+              <Text style={s.streakShareHint}>Tap to share</Text>
+            </Pressable>
           )}
           {isSubscribed && (
             <>
@@ -244,6 +274,31 @@ export default function AccountScreen({ navigation }) {
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>My goal</Text>
               <Text style={s.settingValue} numberOfLines={2}>{profile?.goal ? truncateGoal(profile.goal) : 'Not set'}</Text>
+            </View>
+            <Text style={s.settingArrow}>›</Text>
+          </Pressable>
+        </View>
+
+        {/* Share section */}
+        <Text style={s.sectionTitle}>Share</Text>
+
+        <View style={s.card}>
+          {streak > 0 ? (
+            <>
+              <Pressable style={s.settingRow} onPress={handleShareStreak}>
+                <View style={s.settingContent}>
+                  <Text style={s.settingTitle}>Share my streak</Text>
+                  <Text style={s.settingValue}>{streak} day{streak === 1 ? '' : 's'} with Iris</Text>
+                </View>
+                <Text style={s.settingArrow}>›</Text>
+              </Pressable>
+              <View style={s.settingDivider} />
+            </>
+          ) : null}
+          <Pressable style={s.settingRow} onPress={handleInviteFriend}>
+            <View style={s.settingContent}>
+              <Text style={s.settingTitle}>Invite a friend</Text>
+              <Text style={s.settingValue}>Send them what Iris told you today</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
           </Pressable>
@@ -349,6 +404,17 @@ export default function AccountScreen({ navigation }) {
 
         <View style={{ height: 40 }} />
       </ScrollView>
+
+      {sharing ? (
+        <View style={s.shareCardHidden} pointerEvents="none">
+          {sharing.type === 'streak' ? (
+            <StreakShareCard innerRef={shareCardRef} days={sharing.payload.days} />
+          ) : null}
+          {sharing.type === 'invite' ? (
+            <InviteShareCard innerRef={shareCardRef} />
+          ) : null}
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -421,6 +487,9 @@ function makeStyles(colors, fonts) {
     statusSub: { fontFamily: fonts.body, fontSize: 13, color: colors.muted, marginTop: 2 },
 
     streakRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
       borderTopWidth: 1,
       borderTopColor: colors.line,
       padding: 12,
@@ -430,6 +499,18 @@ function makeStyles(colors, fonts) {
       fontFamily: fonts.displaySemibold,
       fontSize: 14,
       color: colors.gold,
+    },
+    streakShareHint: {
+      fontFamily: fonts.body,
+      fontSize: 12,
+      color: colors.muted,
+      letterSpacing: 0.2,
+    },
+    shareCardHidden: {
+      position: 'absolute',
+      top: -10000,
+      left: 0,
+      opacity: 1,
     },
 
     // Setting rows

@@ -12,6 +12,7 @@ import * as Speech from 'expo-speech';
 import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
 import ShareCard from '../components/ShareCard';
+import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
@@ -86,7 +87,8 @@ export default function TodayScreen({ navigation }) {
   const [showAllZones, setShowAllZones] = useState(false);
   const [zoneExpanded, setZoneExpanded] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [sharingZone, setSharingZone] = useState(null);
+  const [sharing, setSharing] = useState(null); // { type: 'zone'|'streak', payload }
+  const [showMilestone, setShowMilestone] = useState(null); // milestone days int
   const shareCardRef = useRef(null);
   // Fresh stress-relief content per tap. NOT cached — every open of the
   // modal triggers a new AI generation.
@@ -213,28 +215,52 @@ export default function TodayScreen({ navigation }) {
 
   useEffect(() => () => { Speech.stop(); }, []);
 
-  const handleShare = async (zone) => {
-    if (!zone) return;
+  const shareAs = async (type, payload, message) => {
     tapSelect();
-    setSharingZone(zone);
-    // Let the ShareCard render first
-    await new Promise(r => setTimeout(r, 60));
+    setSharing({ type, payload });
+    // Let the share card render first
+    await new Promise(r => setTimeout(r, 80));
     try {
       const uri = await captureRef(shareCardRef, {
         format: 'png',
         quality: 1,
         result: 'tmpfile',
       });
-      await Share.share({
-        url: uri,
-        message: `${zone.pullQuote || zone.headline} — Iris @ LiveNew`,
-      });
+      await Share.share({ url: uri, message });
     } catch (err) {
       console.warn('[share]', err?.message);
     } finally {
-      setSharingZone(null);
+      setSharing(null);
     }
   };
+
+  const handleShare = (zone) => {
+    if (!zone) return;
+    shareAs('zone', zone, `${zone.pullQuote || zone.headline} — Iris @ LiveNew`);
+  };
+
+  const handleShareStreak = () => {
+    if (!streak || streak < 1) return;
+    const tier = milestoneTier(streak);
+    shareAs('streak', { days: streak }, `${streak} day${streak === 1 ? '' : 's'} on LiveNew — ${tier.subtitle}`);
+  };
+
+  // Milestone celebration — fire once per milestone crossed.
+  useEffect(() => {
+    if (!streak) return;
+    const milestones = [3, 7, 14, 30, 100];
+    if (!milestones.includes(streak)) return;
+    (async () => {
+      const key = 'livenew:lastCelebratedStreak';
+      try {
+        const lastRaw = await AsyncStorage.getItem(key);
+        const last = lastRaw ? parseInt(lastRaw, 10) : 0;
+        if (streak <= last) return;
+        await AsyncStorage.setItem(key, String(streak));
+        setShowMilestone(streak);
+      } catch {}
+    })();
+  }, [streak]);
 
   // Empty / loading / skipped states
   const today = getLocalDateISO();
@@ -307,12 +333,18 @@ export default function TodayScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* Header — score + greeting + redo */}
+        {/* Header — score + streak + greeting + redo */}
         <View style={s.headerRow}>
           <View style={{ flex: 1 }}>
             <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
             <Text style={s.greetingPart}>{partOfDay}</Text>
           </View>
+          {streak > 0 ? (
+            <Pressable onPress={handleShareStreak} hitSlop={6} style={s.streakChip}>
+              <Text style={s.streakNum}>{streak}</Text>
+              <Text style={s.streakLabel}>day{streak === 1 ? '' : 's'}</Text>
+            </Pressable>
+          ) : null}
           <View style={s.scoreChip}>
             <Text style={[s.scoreNum, band === 'high' && { color: colors.gold }]}>{score}</Text>
             <Text style={s.scoreLabel}>score</Text>
@@ -550,17 +582,58 @@ export default function TodayScreen({ navigation }) {
       </Modal>
 
       {/* Hidden share card — positioned off-screen, captured by view-shot when sharing */}
-      {sharingZone ? (
+      {sharing ? (
         <View style={s.shareCardHidden} pointerEvents="none">
-          <ShareCard
-            innerRef={shareCardRef}
-            headline={sharingZone.headline}
-            pullQuote={sharingZone.pullQuote}
-            zoneLabel={ZONE_LABELS[sharingZone.id] || ''}
-            score={score}
-          />
+          {sharing.type === 'zone' ? (
+            <ShareCard
+              innerRef={shareCardRef}
+              headline={sharing.payload.headline}
+              pullQuote={sharing.payload.pullQuote}
+              zoneLabel={ZONE_LABELS[sharing.payload.id] || ''}
+              score={score}
+            />
+          ) : null}
+          {sharing.type === 'streak' ? (
+            <StreakShareCard innerRef={shareCardRef} days={sharing.payload.days} />
+          ) : null}
         </View>
       ) : null}
+
+      {/* Milestone celebration modal */}
+      <Modal
+        visible={showMilestone != null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowMilestone(null)}
+      >
+        <Pressable style={s.modalOverlay} onPress={() => setShowMilestone(null)}>
+          <Pressable style={s.milestoneContent} onPress={() => {}}>
+            <Text style={s.milestoneTier}>
+              {showMilestone != null ? milestoneTier(showMilestone).label : ''}
+            </Text>
+            <Text style={s.milestoneNum}>{showMilestone}</Text>
+            <Text style={s.milestoneSub}>
+              {showMilestone != null ? milestoneTier(showMilestone).subtitle : ''}
+            </Text>
+            <View style={{ height: 8 }} />
+            <Pressable
+              style={({ pressed }) => [s.modalBtn, pressed && { opacity: 0.85 }]}
+              onPress={() => {
+                setShowMilestone(null);
+                handleShareStreak();
+              }}
+            >
+              <Text style={s.modalBtnText}>Share this</Text>
+            </Pressable>
+            <Pressable
+              style={s.milestoneSecondary}
+              onPress={() => setShowMilestone(null)}
+            >
+              <Text style={s.milestoneSecondaryText}>Keep going</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -603,6 +676,32 @@ function makeStyles(colors, fonts) {
     paddingVertical: 8,
     marginRight: 8,
     minWidth: 64,
+  },
+  streakChip: {
+    alignItems: 'center',
+    backgroundColor: colors.goldSoft,
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginRight: 8,
+    minWidth: 60,
+  },
+  streakNum: {
+    fontFamily: fonts.accentBold,
+    fontSize: 22,
+    color: colors.gold,
+    lineHeight: 26,
+    letterSpacing: 0.3,
+  },
+  streakLabel: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 9,
+    color: colors.muted,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginTop: -2,
   },
   scoreNum: {
     fontFamily: fonts.displayBold,
@@ -1039,6 +1138,48 @@ function makeStyles(colors, fonts) {
     borderRadius: 12, paddingVertical: 14, alignItems: 'center',
   },
   modalBtnText: { color: '#1a1612', fontFamily: fonts.displaySemibold, fontSize: 16, letterSpacing: 0.2 },
+
+  milestoneContent: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 32,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    alignItems: 'center',
+  },
+  milestoneTier: {
+    fontFamily: fonts.displayBold,
+    fontSize: 12,
+    color: colors.gold,
+    letterSpacing: 3,
+    marginBottom: 16,
+  },
+  milestoneNum: {
+    fontFamily: fonts.accentBold,
+    fontSize: 96,
+    color: colors.gold,
+    letterSpacing: -2,
+    lineHeight: 100,
+  },
+  milestoneSub: {
+    fontFamily: fonts.italic,
+    fontSize: 18,
+    color: colors.muted,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 24,
+  },
+  milestoneSecondary: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  milestoneSecondaryText: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 13,
+    color: colors.muted,
+    letterSpacing: 0.5,
+  },
 
   // Empty state
   emptyCard: {
