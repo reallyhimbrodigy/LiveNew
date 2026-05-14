@@ -363,45 +363,41 @@ export default function TodayScreen({ navigation }) {
   // Empty / loading / skipped states
   const today = getLocalDateISO();
   if (!todayPlan) {
-    if (skippedDate === today) {
-      // For first-time / skipped / day-roll: show a calm "ready when you are"
-      const morning = new Date().getHours() < 12;
-      return (
-        <SafeAreaView style={s.safe} edges={['top']}>
-          <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-            <View style={s.headerRow}>
-              <View style={{ flex: 1 }}>
-                <IrisSignature size="header" style={{ marginBottom: 4 }} />
-                <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
-                <Text style={s.greetingPart}>{partOfDay}</Text>
-              </View>
-            </View>
-
-            <View style={s.emptyCard}>
-              <Text style={s.emptyLabel}>NO PLAN YET</Text>
-              <Text style={s.emptyTitle}>{morning ? 'A new day.' : 'Ready when you are.'}</Text>
-              <Text style={s.emptyBody}>
-                Three taps. I'll tune today around your sleep, your stress, and your energy.
-              </Text>
-              <Pressable
-                style={({ pressed }) => [s.emptyCta, pressed && { opacity: 0.85 }]}
-                onPress={async () => {
-                  tapSelect();
-                  await clearSkip();
-                  navigation.replace('StressTap');
-                }}
-              >
-                <Text style={s.emptyCtaText}>Start today</Text>
-              </Pressable>
-              <Text style={s.emptyHint}>Or browse Progress and Account anytime.</Text>
-            </View>
-          </ScrollView>
-        </SafeAreaView>
-      );
-    }
+    // No plan loaded — show the "Start today" empty card. There's no
+    // auto-generation; the user has to tap Start to begin a check-in.
+    // (Earlier `if (skippedDate === today || true)` was load-bearing despite
+    // looking like a bug; removing it stranded users on a forever-spinner.)
+    const morning = new Date().getHours() < 12;
     return (
       <SafeAreaView style={s.safe} edges={['top']}>
-        <View style={s.centered}><ActivityIndicator size="large" color={colors.gold} /></View>
+        <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+          <View style={s.headerRow}>
+            <View style={{ flex: 1 }}>
+              <IrisSignature size="header" style={{ marginBottom: 4 }} />
+              <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
+              <Text style={s.greetingPart}>{partOfDay}</Text>
+            </View>
+          </View>
+
+          <View style={s.emptyCard}>
+            <Text style={s.emptyLabel}>NO PLAN YET</Text>
+            <Text style={s.emptyTitle}>{morning ? 'A new day.' : 'Ready when you are.'}</Text>
+            <Text style={s.emptyBody}>
+              Three taps. I'll tune today around your sleep, your stress, and your energy.
+            </Text>
+            <Pressable
+              style={({ pressed }) => [s.emptyCta, pressed && { opacity: 0.85 }]}
+              onPress={async () => {
+                tapSelect();
+                await clearSkip();
+                navigation.replace('StressTap');
+              }}
+            >
+              <Text style={s.emptyCtaText}>Start today</Text>
+            </Pressable>
+            <Text style={s.emptyHint}>Or browse Progress and Account anytime.</Text>
+          </View>
+        </ScrollView>
       </SafeAreaView>
     );
   }
