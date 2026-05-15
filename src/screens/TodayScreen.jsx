@@ -293,6 +293,21 @@ export default function TodayScreen({ navigation }) {
 
   const { dayOfWeek, partOfDay } = getGreetingParts();
 
+  // Auto-route to the daily check-in on app open when there's no plan and
+  // no explicit skip. The user shouldn't have to tap "Start today" — opening
+  // the app IS the intent. Only runs once on initial mount; if the user
+  // skips (or backs out via the in-screen Skip link), they land back here
+  // and won't be re-routed.
+  const autoRoutedRef = useRef(false);
+  useEffect(() => {
+    if (autoRoutedRef.current) return;
+    if (todayPlan) return;
+    const today = getLocalDateISO();
+    if (skippedDate === today) return;
+    autoRoutedRef.current = true;
+    navigation.replace('StressTap');
+  }, [todayPlan, skippedDate, navigation]);
+
   // Read yesterday's reflection — drives the visible payoff callout that
   // shows the user Iris is actually using their evening reflection input.
   useEffect(() => {
