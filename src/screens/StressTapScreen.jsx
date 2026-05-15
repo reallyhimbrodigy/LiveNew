@@ -7,6 +7,7 @@ import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
 import IrisSignature from '../components/IrisSignature';
+import { deriveFromHealth, canSkipSleepAndEnergy } from '../utils/healthInference';
 
 const STRESS_OPTIONS = [
   { label: 'Good', value: 'good', sub: 'calm, steady' },
@@ -78,6 +79,12 @@ export default function StressTapScreen({ navigation }) {
 
   const healthPermission = useAuthStore(s => s.healthPermission);
   const connectHealth = useAuthStore(s => s.connectHealth);
+  const healthSnapshot = useAuthStore(s => s.healthSnapshot);
+  // If HealthKit gave us sleep AND HRV/RHR, skip the sleep + energy questions
+  // entirely — biometrics are more accurate than self-report anyway.
+  // Only stress (subjective, irreplaceable) still needs asking.
+  const healthDerived = useMemo(() => deriveFromHealth(healthSnapshot), [healthSnapshot]);
+  const skipSleepEnergy = canSkipSleepAndEnergy(healthSnapshot);
   // If the user has never been asked, surface the HealthKit step FIRST,
   // before any check-in input. Production apps ask for system permissions
   // before they generate personalized content, not after.
@@ -100,8 +107,14 @@ export default function StressTapScreen({ navigation }) {
   const skipToday = useAuthStore(s => s.skipToday);
   const logout = useAuthStore(s => s.logout);
 
-  // Total steps shown in the progress bar — 3 if no health step needed, 4 otherwise.
-  const totalSteps = showHealthStep ? 4 : 3;
+  // Step count depends on whether we still need to ask sleep+energy. When
+  // HealthKit covers those, we only ask stress.
+  //   skipSleepEnergy + showHealthStep → [Health, Stress] = 2 steps
+  //   skipSleepEnergy alone             → [Stress] = 1 step
+  //   showHealthStep alone              → [Health, Stress, Sleep, Energy] = 4
+  //   default                           → [Stress, Sleep, Energy] = 3
+  const askedSteps = skipSleepEnergy ? 1 : 3;
+  const totalSteps = (showHealthStep ? 1 : 0) + askedSteps;
   const currentStepIndex = showHealthStep ? step + 1 : step;
 
   const animateTransition = (callback) => {
@@ -111,9 +124,47 @@ export default function StressTapScreen({ navigation }) {
     });
   };
 
-  const handleStress = (option) => {
+  const runPlanGeneration = async (stressValue, sleepValue, energyValue) => {
+    setError('');
+    setLoading(true);
+
+    let timeoutId;
+    const timeout = new Promise((_, reject) => {
+      timeoutId = setTimeout(() => reject(new Error('TIMEOUT')), 50000);
+    });
+
+    try {
+      await Promise.race([
+        generatePlan({ stress: stressValue, sleepQuality: sleepValue, energy: energyValue }),
+        timeout,
+      ]);
+      clearTimeout(timeoutId);
+      navigation.replace('TodayMain');
+    } catch (err) {
+      clearTimeout(timeoutId);
+      if (err.message === 'AUTH_EXPIRED') {
+        await logout();
+        return;
+      }
+      if (!mountedRef.current) return;
+      if (err.message === 'TIMEOUT') setError('Iris is taking longer than usual. Tap an option to try again.');
+      else if (err.code === 'NETWORK_ERROR') setError('Check your internet connection, then tap an option to retry.');
+      else setError('Something went wrong. Tap an option to try again.');
+      // Land on whatever the last asked step was so retry works.
+      setStep(skipSleepEnergy ? 1 : 3);
+      setLoading(false);
+    }
+  };
+
+  const handleStress = async (option) => {
     tapMedium();
     setStress(option.value);
+    if (skipSleepEnergy) {
+      // Biometrics cover sleep + energy. Go straight to the plan with Iris's
+      // derived values — no more questions needed.
+      await runPlanGeneration(option.value, healthDerived.sleepQuality, healthDerived.energy);
+      return;
+    }
     animateTransition(() => setStep(2));
   };
 
@@ -125,35 +176,7 @@ export default function StressTapScreen({ navigation }) {
 
   const handleEnergy = async (option) => {
     tapMedium();
-    setError('');
-    setLoading(true);
-
-    let timeoutId;
-    const timeout = new Promise((_, reject) => {
-      timeoutId = setTimeout(() => reject(new Error('TIMEOUT')), 50000);
-    });
-
-    try {
-      await Promise.race([
-        generatePlan({ stress, sleepQuality: sleep, energy: option.value }),
-        timeout,
-      ]);
-      clearTimeout(timeoutId);
-      navigation.replace('TodayMain');
-    } catch (err) {
-      clearTimeout(timeoutId);
-      if (err.message === 'AUTH_EXPIRED') {
-        // Hard re-auth — don't strand the user inside the check-in.
-        await logout();
-        return;
-      }
-      if (!mountedRef.current) return;
-      if (err.message === 'TIMEOUT') setError('Iris is taking longer than usual. Tap an option to try again.');
-      else if (err.code === 'NETWORK_ERROR') setError('Check your internet connection, then tap an option to retry.');
-      else setError('Something went wrong. Tap an option to try again.');
-      setStep(3);
-      setLoading(false);
-    }
+    await runPlanGeneration(stress, sleep, option.value);
   };
 
   const handleBack = () => {
@@ -257,6 +280,12 @@ export default function StressTapScreen({ navigation }) {
             )}
 
             <Text style={s.heading}>{stepHeading[step]}</Text>
+
+            {step === 1 && skipSleepEnergy && healthDerived.summary ? (
+              <Text style={s.healthSummary}>
+                I already read {healthDerived.summary} Just your stress now.
+              </Text>
+            ) : null}
 
             {error ? <Text style={s.error}>{error}</Text> : null}
 
@@ -368,6 +397,15 @@ function makeStyles(colors, fonts) {
       paddingHorizontal: 16,
     },
     skipText: { color: colors.muted, fontFamily: fonts.body, fontSize: 13, letterSpacing: 0.2 },
+    healthSummary: {
+      fontFamily: fonts.italic,
+      fontSize: 14,
+      color: colors.gold,
+      lineHeight: 20,
+      letterSpacing: 0.1,
+      marginBottom: 20,
+      marginTop: -8,
+    },
 
     // Step 0 — Apple Health permission
     healthSub: {
