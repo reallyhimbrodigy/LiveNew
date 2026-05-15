@@ -107,6 +107,7 @@ export default function TodayScreen({ navigation }) {
   const completed = useAuthStore(s => s.completed);
   const reflection = useAuthStore(s => s.reflection);
   const profile = useAuthStore(s => s.profile);
+  const userName = useAuthStore(s => s.userName);
   const skippedDate = useAuthStore(s => s.skippedDate);
   const submitReflection = useAuthStore(s => s.submitReflection);
   const clearSkip = useAuthStore(s => s.clearSkip);
@@ -123,7 +124,7 @@ export default function TodayScreen({ navigation }) {
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [sharing, setSharing] = useState(null); // { type: 'zone'|'streak', payload }
   const [showMilestone, setShowMilestone] = useState(null); // milestone days int
-  const [showGoalNudge, setShowGoalNudge] = useState(false);
+  const [showScoreInfo, setShowScoreInfo] = useState(false);
   const [shareVariant, setShareVariant] = useState('dark');
   const shareCardRef = useRef(null);
   const mountedRef = useRef(true);
@@ -223,7 +224,10 @@ export default function TodayScreen({ navigation }) {
   const stressRelief = todayPlan?.stressRelief || null;
   const eveningPrompt = todayPlan?.eveningPrompt || null;
   const showEveningReflection = isEvening() && !reflection && zones.length > 0;
-  const showStressBtn = !!stressRelief;
+  // Stress button is ALWAYS available — even with no plan loaded. The relief
+  // is fresh AI per tap, falls back to a curated string if the API can't
+  // reach. Don't gate the highest-value feature behind having a plan.
+  const showStressBtn = true;
 
   // Score — derived from check-in + behavior + trend, AND HealthKit when available.
   const stressTrend = Array.isArray(stressHistory) ? stressHistory : [];
@@ -234,6 +238,45 @@ export default function TodayScreen({ navigation }) {
     stressTrend,
     healthSnapshot,
   });
+
+  // Plain-English breakdown of what's feeding the score, for the tap-to-explain modal.
+  const scoreFactors = useMemo(() => {
+    const out = [];
+    const h = healthSnapshot;
+    if (h?.sleepLastNightMinutes != null) {
+      const hrs = Math.floor(h.sleepLastNightMinutes / 60);
+      const mins = h.sleepLastNightMinutes % 60;
+      out.push({ label: 'Sleep last night', value: `${hrs}h ${mins}m` });
+    } else if (todaySleep) {
+      out.push({ label: 'Sleep quality', value: todaySleep });
+    }
+    if (h?.hrvDeltaPct != null) {
+      const sign = h.hrvDeltaPct >= 0 ? '+' : '';
+      out.push({ label: 'HRV vs baseline', value: `${sign}${h.hrvDeltaPct}%` });
+    }
+    if (h?.rhrDelta != null) {
+      const sign = h.rhrDelta >= 0 ? '+' : '';
+      out.push({ label: 'Resting HR vs baseline', value: `${sign}${h.rhrDelta} bpm` });
+    }
+    if (todayStressLabel) {
+      out.push({ label: 'Stress today', value: todayStressLabel });
+    }
+    if (todayEnergy && !h?.hrvDeltaPct) {
+      out.push({ label: 'Energy', value: todayEnergy });
+    }
+    if (streak > 0) {
+      out.push({ label: 'Streak', value: `${streak} day${streak === 1 ? '' : 's'}` });
+    }
+    return out;
+  }, [healthSnapshot, todaySleep, todayStressLabel, todayEnergy, streak]);
+
+  const scoreBandLabel = useMemo(() => {
+    if (score >= 80) return "High — you're in a good zone.";
+    if (score >= 60) return 'Mid-high — solid foundation, small wins available.';
+    if (score >= 40) return "Mid — pay attention to what's pulling you down.";
+    if (score >= 20) return 'Mid-low — be intentional today.';
+    return 'Low — conserve. Tonight matters more than this morning.';
+  }, [score]);
   const band = scoreBand(score);
 
   // Refresh the HealthKit snapshot whenever Today gains focus so the score
@@ -246,26 +289,6 @@ export default function TodayScreen({ navigation }) {
 
 
   const { dayOfWeek, partOfDay } = getGreetingParts();
-
-  // Goal nudge: show ONLY when goal is the onboarding default placeholder
-  // ("I just want to feel better overall") OR empty. If the user explicitly
-  // picked a goal (even one of the presets), they've engaged — don't nag.
-  // Suppressed for 3 days after dismissal.
-  useEffect(() => {
-    (async () => {
-      const goal = (profile?.goal || '').trim();
-      const isPlaceholder = !goal || /^I just want to feel better overall$/i.test(goal);
-      if (!isPlaceholder) { setShowGoalNudge(false); return; }
-      try {
-        const dismissedAt = await AsyncStorage.getItem('livenew:goal_nudge_dismissed');
-        const ts = dismissedAt ? parseInt(dismissedAt, 10) : 0;
-        const days = (Date.now() - ts) / (1000 * 60 * 60 * 24);
-        setShowGoalNudge(!ts || days > 3);
-      } catch {
-        setShowGoalNudge(true);
-      }
-    })();
-  }, [profile?.goal]);
 
   // Push the current zone payload into the App Group UserDefaults so the iOS
   // home-screen widget can read it. Fires whenever the current zone or score
@@ -360,6 +383,80 @@ export default function TodayScreen({ navigation }) {
     })();
   }, [streak]);
 
+  // Stress button + modal — reused across the with-plan and empty-state
+  // renders so it's available from the very first app open.
+  const stressBtnAndModal = (
+    <>
+      <View style={[s.stressBtnSticky, { bottom: insets.bottom + 16 }]} pointerEvents="box-none">
+        <Pressable
+          onPress={async () => {
+            tapSelect();
+            const callId = ++reliefCallIdRef.current;
+            setShowStressRelief(true);
+            setReliefLoading(true);
+            setReliefText('');
+            api.feedback({ type: 'stress_spike', dateISO: getLocalDateISO() }).catch(() => {});
+            try {
+              const r = await api.stressRelief();
+              if (!mountedRef.current || callId !== reliefCallIdRef.current) return;
+              if (r?.text) setReliefText(r.text);
+              else setReliefText(stressRelief || 'Inhale through your nose for 4. Hold 7. Exhale through your mouth for 8. Once is enough.');
+            } catch {
+              if (!mountedRef.current || callId !== reliefCallIdRef.current) return;
+              setReliefText(stressRelief || 'Inhale through your nose for 4. Hold 7. Exhale through your mouth for 8. Once is enough.');
+            }
+            if (mountedRef.current && callId === reliefCallIdRef.current) {
+              setReliefLoading(false);
+            }
+          }}
+          style={({ pressed }) => [s.stressBtnInner, pressed && { transform: [{ scale: 0.97 }] }]}
+        >
+          <Animated.View style={[s.stressBtnDot, { opacity: stressDotOpacity }]} />
+          <Text style={s.stressBtnText}>I'm stressed</Text>
+        </Pressable>
+      </View>
+      <Modal
+        visible={showStressRelief}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowStressRelief(false)}
+      >
+        <Pressable style={s.modalOverlay} onPress={() => setShowStressRelief(false)}>
+          <Pressable style={s.modalContent} onPress={() => {}}>
+            <View style={s.modalSignatureRow}>
+              <IrisSignature />
+              <Text style={s.modalLabelSoft}>for this moment</Text>
+            </View>
+            {reliefLoading ? (
+              <View style={s.modalLoading}>
+                <ActivityIndicator color={colors.gold} size="small" />
+                <Text style={s.modalLoadingText}>Iris is finding something for this moment…</Text>
+              </View>
+            ) : (
+              <Text style={s.modalBody}>{reliefText}</Text>
+            )}
+            <Pressable
+              style={({ pressed }) => [s.modalBtn, pressed && { opacity: 0.85 }, reliefLoading && { opacity: 0.5 }]}
+              disabled={reliefLoading}
+              onPress={() => {
+                tapLight();
+                setShowStressRelief(false);
+                setStressNoted(true);
+                if (stressNotedTimerRef.current) clearTimeout(stressNotedTimerRef.current);
+                stressNotedTimerRef.current = setTimeout(() => {
+                  if (mountedRef.current) setStressNoted(false);
+                  stressNotedTimerRef.current = null;
+                }, 4000);
+              }}
+            >
+              <Text style={s.modalBtnText}>Got it</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
+  );
+
   // Empty / loading / skipped states
   const today = getLocalDateISO();
   if (!todayPlan) {
@@ -374,10 +471,25 @@ export default function TodayScreen({ navigation }) {
           <View style={s.headerRow}>
             <View style={{ flex: 1 }}>
               <IrisSignature size="header" style={{ marginBottom: 4 }} />
-              <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
-              <Text style={s.greetingPart}>{partOfDay}</Text>
+              <Text style={s.greetingDay}>{userName ? `Hi, ${userName}.` : dayOfWeek.toLowerCase()}</Text>
+              <Text style={s.greetingPart}>{userName ? `${dayOfWeek.toLowerCase()} ${partOfDay}` : partOfDay}</Text>
             </View>
           </View>
+
+          {/* Streak-at-risk nudge — after 7pm with no plan today and a
+              streak worth saving. Quiet, not nagging. */}
+          {streak >= 1 && new Date().getHours() >= 19 ? (
+            <View style={s.streakRiskCard}>
+              <View style={s.streakRiskHeader}>
+                <Text style={s.streakRiskFire}>🔥</Text>
+                <Text style={s.streakRiskNum}>{streak}</Text>
+                <Text style={s.streakRiskLabel}>day{streak === 1 ? '' : 's'} at risk</Text>
+              </View>
+              <Text style={s.streakRiskBody}>
+                Three taps keep it alive. Past midnight, the streak resets.
+              </Text>
+            </View>
+          ) : null}
 
           <View style={s.emptyCard}>
             <Text style={s.emptyLabel}>NO PLAN YET</Text>
@@ -395,9 +507,10 @@ export default function TodayScreen({ navigation }) {
             >
               <Text style={s.emptyCtaText}>Start today</Text>
             </Pressable>
-            <Text style={s.emptyHint}>Or browse Progress and Account anytime.</Text>
+            <Text style={s.emptyHint}>Or tap "I'm stressed" if you just need a moment.</Text>
           </View>
         </ScrollView>
+        {stressBtnAndModal}
       </SafeAreaView>
     );
   }
@@ -432,8 +545,8 @@ export default function TodayScreen({ navigation }) {
         <View style={s.headerRow}>
           <View style={{ flex: 1 }}>
             <IrisSignature size="header" style={{ marginBottom: 4 }} />
-            <Text style={s.greetingDay}>{dayOfWeek.toLowerCase()}</Text>
-            <Text style={s.greetingPart}>{partOfDay}</Text>
+            <Text style={s.greetingDay}>{userName ? `Hi, ${userName}.` : dayOfWeek.toLowerCase()}</Text>
+            <Text style={s.greetingPart}>{userName ? `${dayOfWeek.toLowerCase()} ${partOfDay}` : partOfDay}</Text>
           </View>
           {streak > 0 ? (
             <Pressable onPress={handleShareStreak} hitSlop={6} style={s.streakChip}>
@@ -441,10 +554,15 @@ export default function TodayScreen({ navigation }) {
               <Text style={s.streakLabel}>day{streak === 1 ? '' : 's'}</Text>
             </Pressable>
           ) : null}
-          <View style={s.scoreChip}>
+          <Pressable
+            onPress={() => { tapLight(); setShowScoreInfo(true); }}
+            hitSlop={6}
+            style={s.scoreChip}
+            accessibilityLabel="Show what this score means"
+          >
             <Text style={[s.scoreNum, band === 'high' && { color: colors.gold }]}>{score}</Text>
             <Text style={s.scoreLabel}>score</Text>
-          </View>
+          </Pressable>
           <Pressable
             onPress={() => { tapSelect(); navigation.replace('StressTap'); }}
             hitSlop={10}
@@ -570,34 +688,6 @@ export default function TodayScreen({ navigation }) {
           </View>
         )}
 
-        {/* Goal nudge — shown when the user hasn't set a goal yet (default
-            placeholder "feel better generally" set during onboarding shrink). */}
-        {showGoalNudge && (
-          <Pressable
-            style={s.goalNudge}
-            onPress={() => { tapLight(); navigation.navigate('GoalPicker'); }}
-          >
-            <View style={s.goalNudgeHeader}>
-              <IrisSignature />
-              <Text style={s.goalNudgeHeaderSuffix}>wants to dial this in</Text>
-            </View>
-            <Text style={s.goalNudgeBody}>
-              I can sharpen this if you tell me what actually matters. Pick one →
-            </Text>
-            <Pressable
-              style={s.goalNudgeDismiss}
-              onPress={async () => {
-                tapLight();
-                try { await AsyncStorage.setItem('livenew:goal_nudge_dismissed', String(Date.now())); } catch {}
-                setShowGoalNudge(false);
-              }}
-              hitSlop={8}
-            >
-              <Text style={s.goalNudgeDismissText}>×</Text>
-            </Pressable>
-          </Pressable>
-        )}
-
         {/* Goal thread */}
         {(profile?.goal || goalThread?.weeklyFocus || goalThread?.todayConnection) && (
           <View style={s.goalCard}>
@@ -658,80 +748,10 @@ export default function TodayScreen({ navigation }) {
         )}
       </ScrollView>
 
-      {/* Sticky stress button — sleek pill, centered, breathing dot */}
-      {showStressBtn && (
-        <View style={[s.stressBtnSticky, { bottom: insets.bottom + 16 }]} pointerEvents="box-none">
-          <Pressable
-            onPress={async () => {
-              tapSelect();
-              const callId = ++reliefCallIdRef.current;
-              setShowStressRelief(true);
-              setReliefLoading(true);
-              setReliefText('');
-              api.feedback({ type: 'stress_spike', dateISO: getLocalDateISO() }).catch(() => {});
-              try {
-                const r = await api.stressRelief();
-                // Stale response guard: if the user closed the modal and
-                // reopened (or unmounted) before this finished, ignore.
-                if (!mountedRef.current || callId !== reliefCallIdRef.current) return;
-                if (r?.text) setReliefText(r.text);
-                else setReliefText(stressRelief || 'Inhale through your nose for 4. Hold 7. Exhale through your mouth for 8. Once is enough.');
-              } catch {
-                if (!mountedRef.current || callId !== reliefCallIdRef.current) return;
-                setReliefText(stressRelief || 'Inhale through your nose for 4. Hold 7. Exhale through your mouth for 8. Once is enough.');
-              }
-              if (mountedRef.current && callId === reliefCallIdRef.current) {
-                setReliefLoading(false);
-              }
-            }}
-            style={({ pressed }) => [s.stressBtnInner, pressed && { transform: [{ scale: 0.97 }] }]}
-          >
-            <Animated.View style={[s.stressBtnDot, { opacity: stressDotOpacity }]} />
-            <Text style={s.stressBtnText}>I'm stressed</Text>
-          </Pressable>
-        </View>
-      )}
-
-      {/* Stress relief modal — content fetched fresh per open */}
-      <Modal
-        visible={showStressRelief}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowStressRelief(false)}
-      >
-        <Pressable style={s.modalOverlay} onPress={() => setShowStressRelief(false)}>
-          <Pressable style={s.modalContent} onPress={() => {}}>
-            <View style={s.modalSignatureRow}>
-              <IrisSignature />
-              <Text style={s.modalLabelSoft}>for this moment</Text>
-            </View>
-            {reliefLoading ? (
-              <View style={s.modalLoading}>
-                <ActivityIndicator color={colors.gold} size="small" />
-                <Text style={s.modalLoadingText}>Iris is finding something for this moment…</Text>
-              </View>
-            ) : (
-              <Text style={s.modalBody}>{reliefText}</Text>
-            )}
-            <Pressable
-              style={({ pressed }) => [s.modalBtn, pressed && { opacity: 0.85 }, reliefLoading && { opacity: 0.5 }]}
-              disabled={reliefLoading}
-              onPress={() => {
-                tapLight();
-                setShowStressRelief(false);
-                setStressNoted(true);
-                if (stressNotedTimerRef.current) clearTimeout(stressNotedTimerRef.current);
-                stressNotedTimerRef.current = setTimeout(() => {
-                  if (mountedRef.current) setStressNoted(false);
-                  stressNotedTimerRef.current = null;
-                }, 4000);
-              }}
-            >
-              <Text style={s.modalBtnText}>OK</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Sticky stress button + relief modal — defined once above, reused
+          here AND on the empty-state branch so the most valuable feature is
+          always one tap away. */}
+      {stressBtnAndModal}
 
       {/* Hidden share card — positioned off-screen, captured by view-shot when sharing */}
       {sharing ? (
@@ -751,6 +771,44 @@ export default function TodayScreen({ navigation }) {
           ) : null}
         </View>
       ) : null}
+
+      {/* Score breakdown modal — what's contributing to today's number */}
+      <Modal
+        visible={showScoreInfo}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowScoreInfo(false)}
+      >
+        <Pressable style={s.modalOverlay} onPress={() => setShowScoreInfo(false)}>
+          <Pressable style={s.scoreInfoContent} onPress={() => {}}>
+            <View style={s.modalSignatureRow}>
+              <IrisSignature />
+              <Text style={s.modalLabelSoft}>what this score means</Text>
+            </View>
+            <Text style={s.scoreInfoNum}>{score}</Text>
+            <Text style={s.scoreInfoBand}>{scoreBandLabel}</Text>
+            <View style={s.scoreFactorList}>
+              {scoreFactors.map((f, i) => (
+                <View key={i} style={[s.scoreFactorRow, i > 0 && s.scoreFactorDivider]}>
+                  <Text style={s.scoreFactorLabel}>{f.label}</Text>
+                  <Text style={s.scoreFactorValue}>{f.value}</Text>
+                </View>
+              ))}
+              {scoreFactors.length === 0 ? (
+                <Text style={s.scoreFactorEmpty}>
+                  Defaults until you check in or connect Apple Health.
+                </Text>
+              ) : null}
+            </View>
+            <Pressable
+              style={({ pressed }) => [s.modalBtn, pressed && { opacity: 0.85 }]}
+              onPress={() => setShowScoreInfo(false)}
+            >
+              <Text style={s.modalBtnText}>Got it</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Milestone celebration modal */}
       <Modal
@@ -1193,50 +1251,6 @@ function makeStyles(colors, fonts) {
     lineHeight: 20,
   },
 
-  // Goal nudge card
-  goalNudge: {
-    backgroundColor: colors.goldSoft,
-    borderWidth: 1,
-    borderColor: colors.goldBorder,
-    borderRadius: 14,
-    padding: 16,
-    paddingRight: 36,
-    marginBottom: 16,
-    position: 'relative',
-  },
-  goalNudgeHeader: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    gap: 8,
-    marginBottom: 8,
-  },
-  goalNudgeHeaderSuffix: {
-    fontFamily: fonts.italic,
-    fontSize: 13,
-    color: colors.muted,
-  },
-  goalNudgeBody: {
-    fontFamily: fonts.italic,
-    fontSize: 15,
-    color: colors.text,
-    lineHeight: 22,
-    letterSpacing: 0.1,
-  },
-  goalNudgeDismiss: {
-    position: 'absolute',
-    top: 8,
-    right: 10,
-    width: 24,
-    height: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  goalNudgeDismissText: {
-    fontFamily: fonts.body,
-    fontSize: 18,
-    color: colors.muted,
-    lineHeight: 18,
-  },
 
   // Goal thread card
   goalCard: {
@@ -1397,6 +1411,103 @@ function makeStyles(colors, fonts) {
     borderWidth: 1,
     borderColor: colors.goldBorder,
     alignItems: 'center',
+  },
+  streakRiskCard: {
+    backgroundColor: colors.errorBg,
+    borderWidth: 1,
+    borderColor: colors.errorBorder,
+    borderRadius: 14,
+    padding: 16,
+    marginBottom: 16,
+  },
+  streakRiskHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 6,
+    marginBottom: 6,
+  },
+  streakRiskFire: { fontSize: 18 },
+  streakRiskNum: {
+    fontFamily: fonts.accentBold,
+    fontSize: 22,
+    color: colors.error,
+    letterSpacing: 0.2,
+  },
+  streakRiskLabel: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 12,
+    color: colors.error,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
+  streakRiskBody: {
+    fontFamily: fonts.italic,
+    fontSize: 14,
+    color: colors.text,
+    lineHeight: 20,
+    letterSpacing: 0.1,
+  },
+  scoreInfoContent: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 28,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+  },
+  scoreInfoNum: {
+    fontFamily: fonts.accentBold,
+    fontSize: 72,
+    color: colors.gold,
+    letterSpacing: -2,
+    lineHeight: 76,
+    textAlign: 'center',
+    marginTop: 4,
+  },
+  scoreInfoBand: {
+    fontFamily: fonts.italic,
+    fontSize: 15,
+    color: colors.muted,
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 20,
+    lineHeight: 22,
+    paddingHorizontal: 8,
+  },
+  scoreFactorList: {
+    backgroundColor: colors.goldSoft,
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    marginBottom: 20,
+  },
+  scoreFactorRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  scoreFactorDivider: {
+    borderTopWidth: 1,
+    borderTopColor: colors.line,
+  },
+  scoreFactorLabel: {
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.muted,
+    letterSpacing: 0.1,
+  },
+  scoreFactorValue: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 14,
+    color: colors.text,
+    letterSpacing: 0.1,
+  },
+  scoreFactorEmpty: {
+    fontFamily: fonts.italic,
+    fontSize: 13,
+    color: colors.muted,
+    paddingVertical: 14,
+    textAlign: 'center',
   },
   milestoneSignatureRow: {
     flexDirection: 'row',

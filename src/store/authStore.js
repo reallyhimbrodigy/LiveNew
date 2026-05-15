@@ -15,6 +15,7 @@ const AUTH_KEY = 'livenew:auth';
 const PROFILE_KEY = 'livenew:profile';
 const PLAN_KEY = 'livenew:plan';
 const SKIPPED_KEY = 'livenew:skipped_date';
+const NAME_KEY = 'livenew:user_name';
 
 export const useAuthStore = create((set, get) => ({
   // State
@@ -36,15 +37,17 @@ export const useAuthStore = create((set, get) => ({
   skippedDate: null,     // YYYY-MM-DD when user chose "skip" today; cleared on day change
   healthPermission: 'unknown', // "granted" | "denied" | "unknown"
   healthSnapshot: null,        // cached HealthKit summary, refreshed on app focus
+  userName: null,              // first name (captured at signup, persisted locally)
 
   // Hydrate from storage
   hydrate: async () => {
     try {
-      const [authJson, profileJson, planJson, skippedJson] = await Promise.all([
+      const [authJson, profileJson, planJson, skippedJson, nameJson] = await Promise.all([
         AsyncStorage.getItem(AUTH_KEY),
         AsyncStorage.getItem(PROFILE_KEY),
         AsyncStorage.getItem(PLAN_KEY),
         AsyncStorage.getItem(SKIPPED_KEY),
+        AsyncStorage.getItem(NAME_KEY),
       ]);
 
       if (authJson) {
@@ -111,6 +114,7 @@ export const useAuthStore = create((set, get) => ({
           isSubscribed,
           hasProfile,
           profile,
+          userName: nameJson || null,
           todayPlan,
           todayStress,
           todayStressLabel,
@@ -211,6 +215,15 @@ export const useAuthStore = create((set, get) => ({
   // Signup
   signup: async (email, password, name) => {
     const data = await api.signup(email, password, name);
+    // Server doesn't store the name yet — persist locally so we can use it
+    // in greetings + Iris-voiced moments. First name only for natural copy.
+    if (name && typeof name === 'string') {
+      const first = name.trim().split(/\s+/)[0] || null;
+      if (first) {
+        try { await AsyncStorage.setItem(NAME_KEY, first); } catch {}
+        set({ userName: first });
+      }
+    }
     return data;
   },
 
@@ -308,6 +321,25 @@ export const useAuthStore = create((set, get) => ({
 
   // Generate day plan — called after the 3-step check-in (stress + sleep + energy)
   generatePlan: async ({ stress, sleepQuality, energy }) => {
+    // Paywall gate: 7 free plans (one per distinct day). After that, free
+    // users must subscribe before generating a new plan. We throw a typed
+    // error so the calling screen can route to the Paywall instead of
+    // showing a generic "something went wrong" message.
+    if (!get().isSubscribed) {
+      try {
+        const countRaw = await AsyncStorage.getItem('livenew:plan_count');
+        const count = countRaw ? parseInt(countRaw, 10) : 0;
+        if (count >= 7) {
+          const err = new Error('Free trial complete — subscribe to keep generating plans.');
+          err.code = 'PAYWALL_REQUIRED';
+          throw err;
+        }
+      } catch (err) {
+        if (err?.code === 'PAYWALL_REQUIRED') throw err;
+        // Other AsyncStorage errors — don't block the user.
+      }
+    }
+
     const profile = get().profile || {};
     const stressMap = { good: 2, okay: 5, stressed: 8, overwhelmed: 10 };
     const stressValue = stressMap[stress] || (typeof stress === 'number' ? stress : 5);
@@ -484,13 +516,15 @@ export const useAuthStore = create((set, get) => ({
     try { await api.logout(); } catch {}
     clearTokens();
     await AsyncStorage.multiRemove([
-      AUTH_KEY, PROFILE_KEY, PLAN_KEY,
+      AUTH_KEY, PROFILE_KEY, PLAN_KEY, NAME_KEY,
       'livenew:subscribed', 'livenew:streak', 'livenew:plan_count',
+      'livenew:plan_count_last_day', 'livenew:first_plan_at',
       'livenew:notif_prefs_v1', 'livenew:notif_permission',
       'livenew:goal_nudge_dismissed', 'livenew:share_card_variant',
       'livenew:lastCelebratedStreak', 'livenew:goal_set_at',
       'livenew:progress_cache_v1', 'livenew:health_snapshot_v1',
       'livenew:health_permission_status', 'livenew:review_prompted',
+      'livenew:streak_risk_dismissed',
     ]);
     try {
       const { clearWidgetPayload } = require('../widgetBridge');
@@ -502,6 +536,7 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
+      userName: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
       todaySleep: null, todayEnergy: null, isSubscribed: false,
       completed: {}, reflection: null, streak: 0,
@@ -514,13 +549,15 @@ export const useAuthStore = create((set, get) => ({
     await api.deleteAccount();
     clearTokens();
     await AsyncStorage.multiRemove([
-      AUTH_KEY, PROFILE_KEY, PLAN_KEY,
+      AUTH_KEY, PROFILE_KEY, PLAN_KEY, NAME_KEY,
       'livenew:subscribed', 'livenew:streak', 'livenew:plan_count',
+      'livenew:plan_count_last_day', 'livenew:first_plan_at',
       'livenew:notif_prefs_v1', 'livenew:notif_permission',
       'livenew:goal_nudge_dismissed', 'livenew:share_card_variant',
       'livenew:lastCelebratedStreak', 'livenew:goal_set_at',
       'livenew:progress_cache_v1', 'livenew:health_snapshot_v1',
       'livenew:health_permission_status', 'livenew:review_prompted',
+      'livenew:streak_risk_dismissed',
     ]);
     try {
       const { clearWidgetPayload } = require('../widgetBridge');
@@ -532,6 +569,7 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
+      userName: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
       todaySleep: null, todayEnergy: null, isSubscribed: false,
       completed: {}, reflection: null, streak: 0,

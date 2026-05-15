@@ -65,30 +65,35 @@ function PressRow({ onPress, children, s }) {
   );
 }
 
+// Messages cycle indefinitely so the screen never goes static while the AI
+// is still working. Six messages × 3s = 18s before repeating — long enough
+// that the user doesn't feel a loop, short enough to always have movement.
+const LOADING_MESSAGES = [
+  'Reading your signals…',
+  'Pulling your cortisol pattern…',
+  'Mapping the curve…',
+  'Finding what matters today…',
+  'Building zone by zone…',
+  'Iris is being thorough…',
+];
+
 function LoadingAnimation({ loadingStyles }) {
-  const [messageIndex, setMessageIndex] = useState(0);
-  const messages = [
-    'Reading your signals…',
-    'Mapping your day…',
-    'Finding what matters…',
-    'Building your plan…',
-  ];
+  const [tick, setTick] = useState(0);
 
   React.useEffect(() => {
-    const interval = setInterval(() => {
-      setMessageIndex(prev => (prev < messages.length - 1 ? prev + 1 : prev));
-    }, 3000);
+    const interval = setInterval(() => setTick(t => t + 1), 3000);
     return () => clearInterval(interval);
   }, []);
 
+  const message = LOADING_MESSAGES[tick % LOADING_MESSAGES.length];
   return (
     <View style={loadingStyles.wrap}>
       <View style={loadingStyles.dotsRow}>
         {[0, 1, 2].map(i => (
-          <View key={i} style={[loadingStyles.dot, { opacity: messageIndex % 3 === i ? 1 : 0.2 }]} />
+          <View key={i} style={[loadingStyles.dot, { opacity: tick % 3 === i ? 1 : 0.2 }]} />
         ))}
       </View>
-      <Text style={loadingStyles.message}>{messages[messageIndex]}</Text>
+      <Text style={loadingStyles.message}>{message}</Text>
     </View>
   );
 }
@@ -216,11 +221,17 @@ export default function OnboardingScreen() {
       activateProfile();
     } catch (err) {
       clearTimeout(timeoutId);
+      // Paywall during onboarding is an edge case (user must have re-signed
+      // up after exhausting the trial on a prior account). Activate the
+      // profile so they at least land on the app and can see Paywall.
+      if (err?.code === 'PAYWALL_REQUIRED') {
+        activateProfile();
+        return;
+      }
       if (!mountedRef.current) return;
       if (err.message === 'TIMEOUT') setError('Iris is taking longer than usual. Tap an option to try again.');
       else if (err?.code === 'NETWORK_ERROR') setError('Check your internet connection.');
       else setError('Something went wrong. Tap an option to try again.');
-      // Land on the last asked step so retry works.
       setStep(skipSleepEnergy ? 3 : 5);
       setLoading(false);
     }
