@@ -645,6 +645,18 @@ export default function TodayScreen({ navigation }) {
           </Pressable>
         </View>
 
+        {/* Daily first read — single Iris-voiced sentence anchored in
+            today's actual data. Earns the open. Shown above everything else. */}
+        {todayPlan?.firstRead ? (
+          <View style={s.firstRead}>
+            <View style={s.firstReadMarkRow}>
+              <View style={s.firstReadMark} />
+              <IrisSignature />
+            </View>
+            <Text style={s.firstReadText}>{todayPlan.firstRead}</Text>
+          </View>
+        ) : null}
+
         {/* Yesterday's reflection payoff — show that Iris listened. */}
         {yesterdayReflection ? (
           <View style={s.reflectionPayoff}>
@@ -1556,6 +1568,31 @@ function makeStyles(colors, fonts) {
     fontSize: 12,
     color: colors.gold,
     letterSpacing: 0.2,
+  },
+  // Daily first read — the magnetic single-sentence opener Iris writes per day
+  firstRead: {
+    marginBottom: 18,
+    paddingLeft: 14,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.gold,
+  },
+  firstReadMarkRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  firstReadMark: {
+    width: 16,
+    height: 1,
+    backgroundColor: colors.gold,
+  },
+  firstReadText: {
+    fontFamily: fonts.italic,
+    fontSize: 19,
+    color: colors.text,
+    lineHeight: 28,
+    letterSpacing: -0.1,
   },
   reflectionPayoff: {
     backgroundColor: colors.goldSoft,

@@ -124,6 +124,62 @@ export default function ProgressScreen() {
   const dayInitials = ['Su', 'M', 'Tu', 'W', 'Th', 'F', 'Sa'];
   const daysActive = consistency.checkinDays || 0;
 
+  // Week-over-week outcomes — REAL deltas the user can screenshot.
+  // Without this, the user has to trust on faith that the app is working.
+  const outcomes = useMemo(() => {
+    if (trend.length < 5) return null; // not enough data yet
+    // Stress avg this week vs last
+    const stressDelta = (recentAvg != null && olderAvg != null)
+      ? Math.round((olderAvg - recentAvg) * 10) / 10
+      : null;
+    // Reflection breakdown this week vs last
+    const sortedReflections = [...reflections].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const recentRefl = sortedReflections.slice(-7);
+    const olderRefl = sortedReflections.slice(-14, -7);
+    const countOf = (arr, key) => arr.filter((r) => r.feeling === key).length;
+    const recentBetter = countOf(recentRefl, 'better');
+    const recentHarder = countOf(recentRefl, 'harder');
+    const olderBetter = countOf(olderRefl, 'better');
+    const olderHarder = countOf(olderRefl, 'harder');
+    const reflectionShift = (recentBetter - recentHarder) - (olderBetter - olderHarder);
+    // Days active this week vs last
+    const allDays = trend.map((t) => t.date).filter(Boolean);
+    const last7Days = new Set(allDays.slice(-7));
+    const prior7Days = new Set(allDays.slice(-14, -7));
+    return {
+      stressDelta,
+      recentAvg,
+      olderAvg,
+      recentBetter,
+      recentHarder,
+      olderBetter,
+      olderHarder,
+      reflectionShift,
+      daysThisWeek: last7Days.size,
+      daysLastWeek: prior7Days.size,
+      hasReflectionData: sortedReflections.length >= 3,
+    };
+  }, [trend, recentAvg, olderAvg, reflections]);
+
+  // Iris-voiced one-sentence summary of the week
+  const outcomesSummary = useMemo(() => {
+    if (!outcomes) return null;
+    const parts = [];
+    if (outcomes.stressDelta != null && Math.abs(outcomes.stressDelta) >= 0.5) {
+      if (outcomes.stressDelta > 0) parts.push(`stress down ${outcomes.stressDelta.toFixed(1)}`);
+      else parts.push(`stress up ${Math.abs(outcomes.stressDelta).toFixed(1)}`);
+    }
+    if (outcomes.hasReflectionData && outcomes.reflectionShift !== 0) {
+      if (outcomes.reflectionShift > 0) parts.push("more 'better' days than the week before");
+      else parts.push("more 'harder' days than the week before");
+    }
+    if (outcomes.daysThisWeek > outcomes.daysLastWeek) {
+      parts.push(`showed up ${outcomes.daysThisWeek - outcomes.daysLastWeek} more day${outcomes.daysThisWeek - outcomes.daysLastWeek === 1 ? '' : 's'}`);
+    }
+    if (parts.length === 0) return "Steady week — held the line. That counts.";
+    return "This week vs last: " + parts.join(', ') + ".";
+  }, [outcomes]);
+
   // Chart slice (trend is already sorted chronologically asc)
   const chartTrend = trend.slice(-14);
   const minStress = chartTrend.length > 0
@@ -157,6 +213,39 @@ export default function ProgressScreen() {
             <Text style={s.goalText}>{truncateGoal(profile.goal)}</Text>
           </View>
         )}
+
+        {/* Weekly outcomes — REAL deltas so the user can feel the app working. */}
+        {outcomes && outcomesSummary ? (
+          <View style={s.outcomesCard}>
+            <View style={s.outcomesHeader}>
+              <IrisSignature />
+              <Text style={s.outcomesHeaderSuffix}>this week vs last</Text>
+            </View>
+            <Text style={s.outcomesSummary}>{outcomesSummary}</Text>
+            <View style={s.outcomesGrid}>
+              {outcomes.stressDelta != null && Math.abs(outcomes.stressDelta) >= 0.3 ? (
+                <View style={s.outcomeStat}>
+                  <Text style={[s.outcomeStatNum, { color: outcomes.stressDelta > 0 ? colors.success : colors.error }]}>
+                    {outcomes.stressDelta > 0 ? `−${outcomes.stressDelta.toFixed(1)}` : `+${Math.abs(outcomes.stressDelta).toFixed(1)}`}
+                  </Text>
+                  <Text style={s.outcomeStatLabel}>stress avg</Text>
+                </View>
+              ) : null}
+              {outcomes.hasReflectionData ? (
+                <View style={s.outcomeStat}>
+                  <Text style={s.outcomeStatNum}>
+                    {outcomes.recentBetter}<Text style={s.outcomeStatNumDim}>/{outcomes.recentBetter + outcomes.recentHarder || '0'}</Text>
+                  </Text>
+                  <Text style={s.outcomeStatLabel}>"better" days</Text>
+                </View>
+              ) : null}
+              <View style={s.outcomeStat}>
+                <Text style={s.outcomeStatNum}>{outcomes.daysThisWeek}<Text style={s.outcomeStatNumDim}>/7</Text></Text>
+                <Text style={s.outcomeStatLabel}>days active</Text>
+              </View>
+            </View>
+          </View>
+        ) : null}
 
         {/* What Iris has noticed — pattern callouts derived from behavior profile */}
         {patternCallouts.length > 0 && (
@@ -383,6 +472,64 @@ function makeStyles(colors, fonts) {
       fontSize: 32,
       color: colors.text,
       letterSpacing: 0.2,
+    },
+    outcomesCard: {
+      backgroundColor: colors.goldSoft,
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      borderRadius: 14,
+      padding: 16,
+      marginBottom: 16,
+    },
+    outcomesHeader: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      gap: 8,
+      marginBottom: 10,
+    },
+    outcomesHeaderSuffix: {
+      fontFamily: fonts.italic,
+      fontSize: 13,
+      color: colors.muted,
+    },
+    outcomesSummary: {
+      fontFamily: fonts.italic,
+      fontSize: 15,
+      color: colors.text,
+      lineHeight: 22,
+      letterSpacing: 0.1,
+      marginBottom: 14,
+    },
+    outcomesGrid: {
+      flexDirection: 'row',
+      justifyContent: 'space-between',
+      gap: 12,
+    },
+    outcomeStat: {
+      flex: 1,
+      alignItems: 'center',
+      paddingVertical: 10,
+      paddingHorizontal: 6,
+      backgroundColor: colors.surface,
+      borderRadius: 10,
+    },
+    outcomeStatNum: {
+      fontFamily: fonts.accentBold,
+      fontSize: 22,
+      color: colors.text,
+      letterSpacing: 0.2,
+    },
+    outcomeStatNumDim: {
+      fontSize: 14,
+      color: colors.muted,
+    },
+    outcomeStatLabel: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 10,
+      color: colors.muted,
+      letterSpacing: 1.2,
+      marginTop: 2,
+      textTransform: 'uppercase',
     },
     staleBanner: {
       backgroundColor: colors.errorBg,

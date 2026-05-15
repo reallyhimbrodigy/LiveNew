@@ -162,8 +162,21 @@ A short open-ended reflection question that references a specific zone from toda
 GOOD: "What changed when you ate at 6 instead of 8?", "How did the no-caffeine-after-10 protocol feel by the afternoon?"
 BAD: "Did you do the protocol?", "How was today?"
 
+[FIRST READ — your opening sentence to the user]
+A single magnetic sentence that the user sees at the very top of the app the moment they open it. 10–18 words. Reads as your immediate take on where their body is right now, based on biometrics + reflections + history.
+
+GOOD examples (vary the structure, match the user's actual data):
+"You slept 5h44m, HRV's down 8%, stress is trending up — treat today gentle."
+"HRV's recovering, you slept 7h20m, three calm days in a row — push something today."
+"Yesterday felt harder so I've pulled today's training zones back."
+"Same sleep as yesterday, slightly better HRV, stress holding — steady day."
+"You're four days into a streak. Sleep is improving. Keep the wind-down protocol."
+
+NEVER write generic "good morning" / "let's begin" / "here's your day" — useless. Always anchor in actual numbers or yesterday's reflection.
+
 [OUTPUT — JSON ONLY, NOTHING ELSE]
 {
+  "firstRead": "Single 10–18 word sentence anchored in real data, per the rules above",
   "zones": [
     {
       "id": "morning" | "peak" | "midmorning" | "lunch" | "afternoon" | "transition" | "winddown" | "sleep",
@@ -265,6 +278,55 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
       `Behavior so far: ${bp.daysActive} days active, streak ${bp.streak}. Last 14 days: ${bp.totalItemsDoneLast14} engagements. By type: ${typeLine}.${reflLine}`,
     );
     lines.push("");
+
+    // 7b. PATTERNS NOTICED — what makes Iris feel like she's paying attention.
+    // Reference these explicitly in zone content when relevant. ONE pattern
+    // per zone max; don't pile them up. The point is the user feels seen.
+    const pat = bp.patterns || {};
+    const patternLines = [];
+    if (pat.reflectionStreak && pat.reflectionStreak.count >= 3) {
+      const f = pat.reflectionStreak.feeling;
+      const word = f === 'harder' ? 'felt harder' : f === 'better' ? 'felt better' : 'stayed the same';
+      patternLines.push(
+        `The user has said today ${word} for ${pat.reflectionStreak.count} days in a row.${
+          f === 'harder' ? " Today must noticeably ease the load — explicitly name it in one zone (e.g., 'three rough days in a row — today is conservation, not progress')." :
+          f === 'better' ? " Today should compound — build on what's working." :
+          " Today should add a deliberate change to break the plateau."
+        }`
+      );
+    }
+    if (pat.worstStressDay && pat.worstStressDay.dayName) {
+      const todayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
+      const worst = pat.worstStressDay.dayName;
+      if (worst === todayName) {
+        patternLines.push(
+          `${todayName}s are historically this user's most stressful day (avg ${pat.worstStressDay.avgStress}/10). Name it directly in one zone — they should feel seen.`
+        );
+      } else {
+        patternLines.push(
+          `Note: ${worst}s tend to be the user's worst day (avg ${pat.worstStressDay.avgStress}/10). Not today, but worth knowing when planning.`
+        );
+      }
+    }
+    if (pat.stressDirection === 'rising') {
+      patternLines.push(
+        "Stress has been rising over the last week vs the week before. Today should be deliberately conservative — protocol zones over counter-intuitive challenges. Name the trend in one zone."
+      );
+    } else if (pat.stressDirection === 'falling') {
+      patternLines.push(
+        "Stress has been falling over the last week. Reinforce what's working — keep the same protocol family."
+      );
+    }
+    if (pat.daysSinceLastReflection != null && pat.daysSinceLastReflection >= 4) {
+      patternLines.push(
+        `User hasn't done an evening reflection in ${pat.daysSinceLastReflection} days. The eveningPrompt today should be especially low-friction (no setup needed).`
+      );
+    }
+    if (patternLines.length > 0) {
+      lines.push("Patterns Iris has noticed (use these to make the plan feel seen — pick at most ONE to surface explicitly):");
+      for (const p of patternLines) lines.push(`- ${p}`);
+      lines.push("");
+    }
   }
 
   // 8. Stress trend.

@@ -2793,6 +2793,15 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       totalItemsDoneLast14: 0,
       completionsByType: { breathe: 0, food: 0, mindset: 0, habit: 0 },
       lastReflection: null,
+      // Patterns Iris has noticed — used in the AI prompt to make plans feel
+      // truly personal rather than just substantive. These are the difference
+      // between "good AI app" and "Iris."
+      patterns: {
+        reflectionStreak: null,   // { feeling, count } if 3+ in a row
+        worstStressDay: null,     // { dayName, avgStress } if pattern is clear
+        stressDirection: null,    // "rising" | "falling" | "stable"
+        daysSinceLastReflection: null,
+      },
     };
     try {
       const todayMs = new Date(todayDateKey + "T12:00:00Z").getTime();
@@ -2855,16 +2864,74 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         profile.streak = streak;
       }
 
-      // Most recent reflection
+      // Most recent reflection + reflection streak pattern
       const { data: reflectionRows } = await userSupabase
         .from("event")
         .select("payload, date_key")
         .eq("user_id", userId)
         .eq("type", "reflection_submitted")
         .order("date_key", { ascending: false })
-        .limit(1);
-      if (Array.isArray(reflectionRows) && reflectionRows[0]?.payload?.feeling) {
-        profile.lastReflection = reflectionRows[0].payload.feeling;
+        .limit(14);
+      const reflections = Array.isArray(reflectionRows) ? reflectionRows : [];
+      if (reflections[0]?.payload?.feeling) {
+        profile.lastReflection = reflections[0].payload.feeling;
+        // Days since last reflection — high number means user is disengaged
+        // with the reflection loop, AI should NOT lean on "yesterday's feeling"
+        const lastReflMs = new Date(reflections[0].date_key + "T12:00:00Z").getTime();
+        const todayMs2 = new Date(todayDateKey + "T12:00:00Z").getTime();
+        profile.patterns.daysSinceLastReflection = Math.round((todayMs2 - lastReflMs) / 86400000);
+      }
+      // Reflection streak — same feeling 3+ days in a row
+      if (reflections.length >= 3) {
+        const recent3 = reflections.slice(0, 3).map((r) => r?.payload?.feeling).filter(Boolean);
+        if (recent3.length === 3 && recent3[0] === recent3[1] && recent3[1] === recent3[2]) {
+          let count = 3;
+          for (let i = 3; i < reflections.length; i++) {
+            if (reflections[i]?.payload?.feeling === recent3[0]) count++;
+            else break;
+          }
+          profile.patterns.reflectionStreak = { feeling: recent3[0], count };
+        }
+      }
+
+      // Day-of-week stress pattern + stress direction (last 28 days)
+      const startKey28 = new Date(todayMs - 28 * 86400000).toISOString().slice(0, 10);
+      const { data: stressRows } = await userSupabase
+        .from("checkin")
+        .select("date_key, stress")
+        .eq("user_id", userId)
+        .gte("date_key", startKey28)
+        .order("date_key", { ascending: false });
+      if (Array.isArray(stressRows) && stressRows.length >= 5) {
+        // Day-of-week aggregation (only call out a "worst day" if pattern is clear)
+        const buckets = {}; // dayName -> [stresses]
+        for (const r of stressRows) {
+          const d = new Date(r.date_key + "T12:00:00Z");
+          const dayName = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][d.getUTCDay()];
+          if (!buckets[dayName]) buckets[dayName] = [];
+          if (Number.isFinite(r.stress)) buckets[dayName].push(r.stress);
+        }
+        let worst = null;
+        for (const day of Object.keys(buckets)) {
+          const arr = buckets[day];
+          if (arr.length < 2) continue;
+          const avg = arr.reduce((a, b) => a + b, 0) / arr.length;
+          if (!worst || avg > worst.avgStress) worst = { dayName: day, avgStress: Math.round(avg * 10) / 10 };
+        }
+        // Only surface if the pattern is meaningfully elevated (avg > 6 = stressed+)
+        if (worst && worst.avgStress >= 6) profile.patterns.worstStressDay = worst;
+
+        // Stress trend direction (last 7 vs prior 7)
+        const last7 = stressRows.slice(0, 7).map((r) => r.stress).filter(Number.isFinite);
+        const prior7 = stressRows.slice(7, 14).map((r) => r.stress).filter(Number.isFinite);
+        if (last7.length >= 3 && prior7.length >= 3) {
+          const avgLast = last7.reduce((a, b) => a + b, 0) / last7.length;
+          const avgPrior = prior7.reduce((a, b) => a + b, 0) / prior7.length;
+          const delta = avgLast - avgPrior;
+          if (delta >= 1.5) profile.patterns.stressDirection = 'rising';
+          else if (delta <= -1.5) profile.patterns.stressDirection = 'falling';
+          else profile.patterns.stressDirection = 'stable';
+        }
       }
     } catch (err) {
       console.error("[BEHAVIOR_PROFILE_ERROR]", err?.message);
