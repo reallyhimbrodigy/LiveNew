@@ -455,6 +455,7 @@ export const useAuthStore = create((set, get) => ({
   // Submit evening reflection
   submitReflection: async (feeling) => {
     set({ reflection: feeling });
+    const today = getLocalDateISO();
     try {
       const raw = await AsyncStorage.getItem(PLAN_KEY);
       if (raw) {
@@ -463,11 +464,15 @@ export const useAuthStore = create((set, get) => ({
         await AsyncStorage.setItem(PLAN_KEY, JSON.stringify(plan));
       }
     } catch {}
+    // Persist reflection date-keyed so Today can show the "yesterday felt X"
+    // callout tomorrow morning — the user sees that Iris is actually using
+    // their input, closing the feedback loop visibly.
+    try { await AsyncStorage.setItem(`livenew:reflection:${today}`, feeling); } catch {}
     // Send to server (fire and forget)
     try {
       api.reflect({
         feeling,
-        dateISO: getLocalDateISO(),
+        dateISO: today,
         completed: get().completed,
       }).catch(() => {});
     } catch {}

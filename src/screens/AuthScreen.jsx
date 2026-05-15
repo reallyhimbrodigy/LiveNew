@@ -37,7 +37,15 @@ export default function AuthScreen() {
     setInfo('');
 
     if (!email.trim()) { setError('Enter your email address.'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("That doesn't look like a valid email address.");
+      return;
+    }
     if (!password) { setError('Enter your password.'); return; }
+    if (mode === 'signup' && password.length < 8) {
+      setError('Password must be at least 8 characters.');
+      return;
+    }
     if (mode === 'signup' && !name.trim()) { setError('Enter your name.'); return; }
 
     setLoading(true);

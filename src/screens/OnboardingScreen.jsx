@@ -1,7 +1,7 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
   View, Text, Pressable, StyleSheet, Animated, TextInput,
-  KeyboardAvoidingView, Platform, ScrollView,
+  KeyboardAvoidingView, Platform, ScrollView, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
@@ -109,6 +109,19 @@ export default function OnboardingScreen() {
   const saveProfileWithoutNav = useAuthStore(z => z.saveProfileWithoutNav);
   const generatePlan = useAuthStore(z => z.generatePlan);
   const activateProfile = useAuthStore(z => z.activateProfile);
+  const logout = useAuthStore(z => z.logout);
+
+  const handleSignOut = () => {
+    tapMedium();
+    Alert.alert(
+      'Sign out?',
+      "You can come back any time. Your account stays put.",
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Sign out', style: 'destructive', onPress: () => logout() },
+      ],
+    );
+  };
 
   // Derived: skip sleep + energy questions when HealthKit gives us the data.
   const healthDerived = useMemo(() => deriveFromHealth(healthSnapshot), [healthSnapshot]);
@@ -261,7 +274,12 @@ export default function OnboardingScreen() {
 
           <View style={s.brandRow}>
             <Text style={s.logo}>LiveNew</Text>
-            <IrisSignature />
+            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 14 }}>
+              <IrisSignature />
+              <Pressable onPress={handleSignOut} hitSlop={8}>
+                <Text style={s.signOutLink}>Sign out</Text>
+              </Pressable>
+            </View>
           </View>
 
           {!loading && (
@@ -442,6 +460,14 @@ function makeStyles(colors, fonts) {
       fontSize: 18,
       color: colors.gold,
       letterSpacing: 1.6,
+    },
+
+    signOutLink: {
+      fontFamily: fonts.body,
+      fontSize: 12,
+      color: colors.muted,
+      letterSpacing: 0.3,
+      textDecorationLine: 'underline',
     },
 
     progressTrack: {

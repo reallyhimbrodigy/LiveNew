@@ -18,7 +18,7 @@ import { writeWidgetPayload } from '../widgetBridge';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
-import { getLocalDateISO } from '../utils/localDate';
+import { getLocalDateISO, getYesterdayISO } from '../utils/localDate';
 import { truncateGoal } from '../utils/goalText';
 import { computeScore, scoreBand, getCurrentZoneId, ZONE_ORDER, ZONE_LABELS } from '../utils/score';
 import { api } from '../api';
@@ -125,6 +125,9 @@ export default function TodayScreen({ navigation }) {
   const [sharing, setSharing] = useState(null); // { type: 'zone'|'streak', payload }
   const [showMilestone, setShowMilestone] = useState(null); // milestone days int
   const [showScoreInfo, setShowScoreInfo] = useState(false);
+  const [yesterdayReflection, setYesterdayReflection] = useState(null);
+  const [showWelcome, setShowWelcome] = useState(false);
+  const [showTtsHint, setShowTtsHint] = useState(false);
   const [shareVariant, setShareVariant] = useState('dark');
   const shareCardRef = useRef(null);
   const mountedRef = useRef(true);
@@ -289,6 +292,61 @@ export default function TodayScreen({ navigation }) {
 
 
   const { dayOfWeek, partOfDay } = getGreetingParts();
+
+  // Read yesterday's reflection — drives the visible payoff callout that
+  // shows the user Iris is actually using their evening reflection input.
+  useEffect(() => {
+    (async () => {
+      try {
+        const r = await AsyncStorage.getItem(`livenew:reflection:${getYesterdayISO()}`);
+        if (r === 'better' || r === 'same' || r === 'harder') setYesterdayReflection(r);
+        else setYesterdayReflection(null);
+      } catch {}
+    })();
+  }, [todayPlan]);
+
+  // First-plan welcome — one-time modal when the user lands on Today with
+  // a plan loaded for the first time. Marks the arrival moment.
+  useEffect(() => {
+    if (!todayPlan) return;
+    (async () => {
+      try {
+        const seen = await AsyncStorage.getItem('livenew:seen_first_plan_welcome');
+        if (!seen) setShowWelcome(true);
+      } catch {}
+    })();
+  }, [todayPlan]);
+
+  // TTS hint — one-time tooltip pointing at the gold speaker button. Fires
+  // when the user has a plan loaded but hasn't seen the hint yet.
+  useEffect(() => {
+    if (!todayPlan) return;
+    (async () => {
+      try {
+        const seen = await AsyncStorage.getItem('livenew:seen_tts_hint');
+        if (!seen) setShowTtsHint(true);
+      } catch {}
+    })();
+  }, [todayPlan]);
+
+  const dismissTtsHint = async () => {
+    setShowTtsHint(false);
+    try { await AsyncStorage.setItem('livenew:seen_tts_hint', '1'); } catch {}
+  };
+  const dismissWelcome = async () => {
+    setShowWelcome(false);
+    try { await AsyncStorage.setItem('livenew:seen_first_plan_welcome', '1'); } catch {}
+  };
+
+  // When the user taps Listen for the first time, dismiss the hint too —
+  // they've discovered it without needing the tooltip.
+  const handleListenWithHintDismiss = async (zone) => {
+    if (showTtsHint) {
+      setShowTtsHint(false);
+      try { await AsyncStorage.setItem('livenew:seen_tts_hint', '1'); } catch {}
+    }
+    await handleListen(zone);
+  };
 
   // Push the current zone payload into the App Group UserDefaults so the iOS
   // home-screen widget can read it. Fires whenever the current zone or score
@@ -572,6 +630,24 @@ export default function TodayScreen({ navigation }) {
           </Pressable>
         </View>
 
+        {/* Yesterday's reflection payoff — show that Iris listened. */}
+        {yesterdayReflection ? (
+          <View style={s.reflectionPayoff}>
+            <View style={s.reflectionPayoffHeader}>
+              <IrisSignature />
+              <Text style={s.reflectionPayoffSuffix}>
+                {yesterdayReflection === 'better' ? 'kept what worked' :
+                 yesterdayReflection === 'harder' ? 'eased off' : 'kept things steady'}
+              </Text>
+            </View>
+            <Text style={s.reflectionPayoffBody}>
+              {yesterdayReflection === 'better' && "Yesterday felt better. Today builds on what worked."}
+              {yesterdayReflection === 'same' && "Yesterday felt steady. Today holds the line."}
+              {yesterdayReflection === 'harder' && "Yesterday felt harder. Today eases the load."}
+            </Text>
+          </View>
+        ) : null}
+
         {/* Current zone — hero card */}
         {currentZone && (
           <View style={s.zoneHero}>
@@ -603,9 +679,15 @@ export default function TodayScreen({ navigation }) {
               <Text style={s.zoneBody}>{currentZone.body}</Text>
             ) : null}
 
+            {showTtsHint ? (
+              <Pressable style={s.ttsHint} onPress={dismissTtsHint}>
+                <Text style={s.ttsHintText}>← Tap the gold speaker to hear me read this aloud.</Text>
+              </Pressable>
+            ) : null}
+
             <View style={s.zoneActions}>
               <Pressable
-                onPress={() => handleListen(currentZone)}
+                onPress={() => handleListenWithHintDismiss(currentZone)}
                 hitSlop={10}
                 style={[s.listenBtn, isSpeaking && s.listenBtnActive]}
                 accessibilityLabel={isSpeaking ? 'Stop Iris' : 'Hear from Iris'}
@@ -771,6 +853,37 @@ export default function TodayScreen({ navigation }) {
           ) : null}
         </View>
       ) : null}
+
+      {/* First-plan welcome — one-time arrival moment */}
+      <Modal
+        visible={showWelcome}
+        transparent
+        animationType="fade"
+        onRequestClose={dismissWelcome}
+      >
+        <Pressable style={s.modalOverlay} onPress={dismissWelcome}>
+          <Pressable style={s.welcomeContent} onPress={() => {}}>
+            <View style={s.modalSignatureRow}>
+              <IrisSignature size="header" />
+            </View>
+            <Text style={s.welcomeTitle}>
+              {userName ? `Hi, ${userName}.` : 'Hi.'}
+            </Text>
+            <Text style={s.welcomeBody}>
+              This is your first day with me. I'll give you a read at each of the eight inflection points of your cortisol curve. Tap a zone to expand it. Tap the gold speaker to hear me read it. Tap share to send a moment.
+            </Text>
+            <Text style={s.welcomeBody}>
+              I'll get sharper the longer you use me. Tonight, the evening reflection takes 3 taps and shapes tomorrow.
+            </Text>
+            <Pressable
+              style={({ pressed }) => [s.modalBtn, pressed && { opacity: 0.85 }]}
+              onPress={dismissWelcome}
+            >
+              <Text style={s.modalBtnText}>Let's go</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       {/* Score breakdown modal — what's contributing to today's number */}
       <Modal
@@ -1412,6 +1525,49 @@ function makeStyles(colors, fonts) {
     borderColor: colors.goldBorder,
     alignItems: 'center',
   },
+  ttsHint: {
+    backgroundColor: colors.goldSoft,
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    marginBottom: 10,
+    marginTop: -4,
+    alignSelf: 'flex-start',
+  },
+  ttsHintText: {
+    fontFamily: fonts.italic,
+    fontSize: 12,
+    color: colors.gold,
+    letterSpacing: 0.2,
+  },
+  reflectionPayoff: {
+    backgroundColor: colors.goldSoft,
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    borderRadius: 14,
+    padding: 14,
+    marginBottom: 16,
+  },
+  reflectionPayoffHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    gap: 8,
+    marginBottom: 6,
+  },
+  reflectionPayoffSuffix: {
+    fontFamily: fonts.italic,
+    fontSize: 13,
+    color: colors.muted,
+  },
+  reflectionPayoffBody: {
+    fontFamily: fonts.italic,
+    fontSize: 14,
+    color: colors.text,
+    lineHeight: 20,
+    letterSpacing: 0.1,
+  },
   streakRiskCard: {
     backgroundColor: colors.errorBg,
     borderWidth: 1,
@@ -1445,6 +1601,30 @@ function makeStyles(colors, fonts) {
     fontSize: 14,
     color: colors.text,
     lineHeight: 20,
+    letterSpacing: 0.1,
+  },
+  welcomeContent: {
+    backgroundColor: colors.surface,
+    borderRadius: 18,
+    padding: 28,
+    width: '100%',
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+  },
+  welcomeTitle: {
+    fontFamily: fonts.displayBold,
+    fontSize: 28,
+    color: colors.text,
+    letterSpacing: -0.2,
+    marginTop: 12,
+    marginBottom: 16,
+  },
+  welcomeBody: {
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 23,
+    marginBottom: 14,
     letterSpacing: 0.1,
   },
   scoreInfoContent: {
