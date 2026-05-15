@@ -3033,12 +3033,26 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           : checkIn.stress >= 4 ? "okay"
           : "good");
 
-      // Keep-alive: write a space every 10s so Render's 30s proxy timeout doesn't kill the connection
-      res.setHeader('Content-Type', 'application/json');
-      res.setHeader('X-Accel-Buffering', 'no');
+      // Flush status + headers + a starter byte IMMEDIATELY so the client
+      // sees a 200 OK and begins receiving the body within milliseconds.
+      // Without this, the response stays in "headers pending" state until the
+      // first keep-alive `res.write()` fires (previously at 10s), and any
+      // TCP-level timeout in the chain — iOS NSURLSession, ISP, Render proxy,
+      // a WiFi access-point handoff — drops the connection mid-wait. That's
+      // the source of the "network error at ~15-20s on WiFi" symptom.
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'X-Accel-Buffering': 'no',
+      });
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      // Write one space immediately so the response body actually starts on
+      // the wire (some Node setups buffer until first body byte).
+      res.write(' ');
+      // Keep-alive: 5s cadence. Cumulative bytes streamed within every
+      // upstream/downstream idle timeout window (Render's proxy, iOS, etc.).
       keepAlive = setInterval(() => {
         if (!res.writableEnded) res.write(' ');
-      }, 10000);
+      }, 5000);
 
       // Build AI history context from yesterday + recent days
       const userSupabaseForCheckin = supabaseForUser(auth.jwt);
