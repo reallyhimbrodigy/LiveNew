@@ -248,7 +248,13 @@ export const useAuthStore = create((set, get) => ({
     if (!available) {
       set({ healthPermission: 'denied' });
       await setHealthPermissionStatus('denied');
-      return { ok: false, error: 'HealthKit not available on this device.' };
+      let reason = '';
+      try {
+        const { getHealthKitLoadError } = require('../healthkit');
+        const err = getHealthKitLoadError();
+        if (err) reason = ` (${err})`;
+      } catch {}
+      return { ok: false, error: `HealthKit not available on this device.${reason}` };
     }
     const result = await requestHealthPermissions();
     if (!result.ok) {
