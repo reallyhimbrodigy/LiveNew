@@ -620,6 +620,13 @@ export default function TodayScreen({ navigation }) {
             <IrisSignature size="header" style={{ marginBottom: 4 }} />
             <Text style={s.greetingDay}>{userName ? `Hi, ${userName}.` : dayOfWeek.toLowerCase()}</Text>
             <Text style={s.greetingPart}>{userName ? `${dayOfWeek.toLowerCase()} ${partOfDay}` : partOfDay}</Text>
+            <Pressable
+              onPress={() => { tapLight(); navigation.navigate('Chat'); }}
+              hitSlop={6}
+              style={s.askIris}
+            >
+              <Text style={s.askIrisText}>Ask Iris anything →</Text>
+            </Pressable>
           </View>
           {streak > 0 ? (
             <Pressable onPress={handleShareStreak} hitSlop={6} style={s.streakChip}>
@@ -1031,6 +1038,17 @@ function makeStyles(colors, fonts) {
     paddingVertical: 8,
     marginRight: 8,
     minWidth: 64,
+  },
+  askIris: {
+    marginTop: 8,
+    alignSelf: 'flex-start',
+    paddingVertical: 4,
+  },
+  askIrisText: {
+    fontFamily: fonts.italic,
+    fontSize: 13,
+    color: colors.gold,
+    letterSpacing: 0.3,
   },
   streakChip: {
     alignItems: 'center',

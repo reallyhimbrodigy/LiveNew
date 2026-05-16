@@ -146,6 +146,13 @@ export const api = {
   // Fresh AI stress relief — generated per-tap, never cached
   stressRelief: () => request('POST', '/v1/stress-relief', {}),
 
+  // Free-form chat with Iris. `messages` is the rolling conversation
+  // history (last 12 turns; server caps too). `healthSnapshot` optional.
+  irisChat: (messages, healthSnapshot) => request('POST', '/v1/iris/chat', {
+    messages,
+    healthSnapshot: healthSnapshot || null,
+  }),
+
   // Progress
   progress: () => request('GET', '/v1/progress'),
 

@@ -21,6 +21,7 @@ import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
 import { generateDayPlan } from "../domain/aiDayPlan.js";
 import { generateInsight } from "../domain/aiInsight.js";
 import { generateStressRelief } from "../domain/aiStressRelief.js";
+import { generateChatReply } from "../domain/aiChat.js";
 
 // In-memory insight cache. Key: `${userId}:${dateKey}`. Cleared on server restart.
 // One Anthropic call per user per day instead of one per Progress mount.
@@ -2347,6 +2348,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/stats",
     "/v1/feedback",
     "/v1/stress-relief",
+    "/v1/iris/chat",
     "/v1/reflect",
     "/v1/subscription/status",
     "/v1/profile/update",
@@ -3624,6 +3626,105 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         category: "BREATH",
         fallback: true,
       }, auth.userId);
+      return true;
+    }
+  }
+
+  if (pathname === "/v1/iris/chat" && req.method === "POST") {
+    try {
+      const body = await parseJson(req);
+      const messages = Array.isArray(body?.messages) ? body.messages : [];
+      // Basic validation — each message must have role and content.
+      const cleaned = messages
+        .filter((m) => m && typeof m.content === 'string' && (m.role === 'user' || m.role === 'assistant'))
+        .slice(-12); // hard cap on conversation length per request
+      if (cleaned.length === 0 || cleaned[cleaned.length - 1].role !== 'user') {
+        sendErrorCodeOnly(res, 400, "INVALID_CHAT_INPUT");
+        return true;
+      }
+
+      // Rate limit: 50 chat messages per user per rolling 24h. Free-form
+      // chat is the most expensive call we make; cap it.
+      const userSupabase = supabaseForUser(auth.jwt);
+      const dayAgo = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+      const { count: recentCount } = await userSupabase
+        .from("event")
+        .select("*", { count: "exact", head: true })
+        .eq("user_id", auth.userId)
+        .eq("type", "iris_chat_message")
+        .gte("date_key", dayAgo);
+      if ((recentCount || 0) >= 50) {
+        sendJson(res, 200, {
+          ok: false,
+          rateLimit: true,
+          message: "You've reached today's chat limit. I'll be back at midnight.",
+        }, auth.userId);
+        return true;
+      }
+
+      // Pull user context — name, goal, last reflection. Keeps Iris in chat
+      // mode tethered to the same person the day-plan engine is reading.
+      let userContext = null;
+      try {
+        const persist = createPersist(userSupabase);
+        const profile = await persist.getOrCreateUserProfile(auth.userId);
+        const { data: reflRows } = await userSupabase
+          .from("event")
+          .select("payload, date_key")
+          .eq("user_id", auth.userId)
+          .eq("type", "reflection_submitted")
+          .order("date_key", { ascending: false })
+          .limit(1);
+        const lastRefl = reflRows?.[0]?.payload?.feeling || null;
+        userContext = {
+          firstName: profile?.first_name || null,
+          goal: profile?.goal || null,
+          lastReflection: lastRefl,
+          healthSnapshot: body?.healthSnapshot || null,
+        };
+      } catch {}
+
+      // Flush headers immediately so iOS sees a 200 response and holds the
+      // connection while we wait for Claude. Same fix as /v1/checkin.
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'X-Accel-Buffering': 'no',
+      });
+      if (typeof res.flushHeaders === 'function') res.flushHeaders();
+      res.write(' ');
+      const keepAlive = setInterval(() => {
+        if (!res.writableEnded) res.write(' ');
+      }, 5000);
+
+      const reply = await generateChatReply({ messages: cleaned, userContext });
+      clearInterval(keepAlive);
+
+      const responseText = reply?.text || "I can't reach the network right now — try again in a moment.";
+
+      // Log the exchange (tag for rate limiting + future analytics)
+      try {
+        await userSupabase.from("event").insert({
+          user_id: auth.userId,
+          date_key: new Date().toISOString().slice(0, 10),
+          type: "iris_chat_message",
+          payload: {
+            user: cleaned[cleaned.length - 1].content.slice(0, 500),
+            assistant: responseText.slice(0, 1000),
+          },
+        });
+      } catch {}
+
+      res.end(JSON.stringify({ ok: true, text: responseText }));
+      return true;
+    } catch (err) {
+      console.error("[IRIS_CHAT_ERROR]", err?.message);
+      if (!res.writableEnded) {
+        if (res.headersSent) {
+          res.end(JSON.stringify({ ok: false, error: { code: "internal", message: "Chat failed" } }));
+        } else {
+          sendError(res, 500, "internal", "Chat failed");
+        }
+      }
       return true;
     }
   }
