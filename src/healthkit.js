@@ -10,25 +10,42 @@
 //
 // iOS only. On Android the module is a no-op.
 
-import { Platform } from 'react-native';
+import { Platform, NativeModules } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const HEALTH_CACHE_KEY = 'livenew:health_snapshot_v1';
 const HEALTH_PERM_KEY = 'livenew:health_permission_status';
 
-// react-native-health exports the class as the module's default (ES) AND
-// as the bare module export (CommonJS). The previous `.default` access was
-// hitting undefined on some build modes — that's why the Connect button
-// silently did nothing in build #35.
+// react-native-health uses an old-style RCT_EXPORT_MODULE bridge. Under New
+// Architecture, accessing NativeModules at module-load time can come back
+// before the bridge has resolved the module, so the library's own
+// `const { AppleHealthKit } = require('react-native').NativeModules` line
+// captures `undefined`, and its merged `HealthKit` object loses
+// `initHealthKit`. That left us showing "HealthKit not available" in #56.
+//
+// Resilience: try the library export first; if it's missing the runtime
+// method, fall back to NativeModules.AppleHealthKit directly (which is the
+// same native module the library wraps — minus its hardcoded Constants).
 let AppleHealthKit = null;
 let HEALTHKIT_LOAD_ERROR = null;
 if (Platform.OS === 'ios') {
   try {
     const mod = require('react-native-health');
-    AppleHealthKit = mod?.default || mod;
-    if (!AppleHealthKit || !AppleHealthKit.initHealthKit) {
-      HEALTHKIT_LOAD_ERROR = `Module loaded but initHealthKit is missing (keys: ${Object.keys(mod || {}).join(',')})`;
-      AppleHealthKit = null;
+    const fromLib = mod?.default || mod;
+    if (fromLib?.initHealthKit) {
+      AppleHealthKit = fromLib;
+    } else {
+      const native = NativeModules.AppleHealthKit;
+      if (native?.initHealthKit) {
+        // Compose: native methods + library's Constants. The library bundled
+        // the Constants in JS (Permissions/Units/etc.) so we still want them.
+        AppleHealthKit = Object.assign({}, native, {
+          Constants: fromLib?.Constants || {},
+        });
+        HEALTHKIT_LOAD_ERROR = `Recovered via NativeModules fallback (lib had keys: ${Object.keys(fromLib || {}).join(',')})`;
+      } else {
+        HEALTHKIT_LOAD_ERROR = `Module loaded but initHealthKit is missing (lib keys: ${Object.keys(fromLib || {}).join(',')}; native: ${native ? Object.keys(native).slice(0, 5).join(',') : 'undefined'})`;
+      }
     }
   } catch (err) {
     HEALTHKIT_LOAD_ERROR = err?.message || String(err);
