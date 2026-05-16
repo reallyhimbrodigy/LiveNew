@@ -62,7 +62,8 @@
           "healthSharePermission": "LiveNew reads your sleep, heart rate, and HRV from Apple Health to give you contextual cortisol-regulation insights tied to your actual data.",
           "healthUpdatePermission": "LiveNew does not write data back to Apple Health."
         }
-      ]
+      ],
+      "expo-live-activity"
     ],
     "extra": {
       "eas": {
