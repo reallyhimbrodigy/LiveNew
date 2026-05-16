@@ -15,6 +15,7 @@ import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import IrisSignature from '../components/IrisSignature';
 import { speakAsIris, stopSpeaking } from '../utils/irisVoice';
 import { writeWidgetPayload } from '../widgetBridge';
+import { startOrUpdateLiveActivity } from '../liveActivityBridge';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
@@ -363,9 +364,10 @@ export default function TodayScreen({ navigation }) {
     await handleListen(zone);
   };
 
-  // Push the current zone payload into the App Group UserDefaults so the iOS
-  // home-screen widget can read it. Fires whenever the current zone or score
-  // changes — runs only on iOS, silently no-ops elsewhere.
+  // Push the current zone payload into the App Group UserDefaults (home-screen
+  // widget reads from here) AND start/update the iOS Live Activity for the
+  // lockscreen + Dynamic Island. Both fire whenever current zone or score
+  // changes. iOS-only; both helpers silently no-op elsewhere.
   useEffect(() => {
     const z = zoneById[currentZoneId];
     if (!z) return;
@@ -375,6 +377,7 @@ export default function TodayScreen({ navigation }) {
       zoneLabel: ZONE_LABELS[currentZoneId] || '',
       score,
     });
+    startOrUpdateLiveActivity(z, score);
   }, [currentZoneId, score, todayPlan]);
 
   const handleReflection = (feeling) => {

@@ -529,7 +529,8 @@ export const useAuthStore = create((set, get) => ({
       'livenew:lastCelebratedStreak', 'livenew:goal_set_at',
       'livenew:progress_cache_v1', 'livenew:health_snapshot_v1',
       'livenew:health_permission_status', 'livenew:review_prompted',
-      'livenew:streak_risk_dismissed',
+      'livenew:streak_risk_dismissed', 'livenew:live_activity_id',
+      'livenew:seen_first_plan_welcome', 'livenew:seen_tts_hint',
     ]);
     try {
       const { clearWidgetPayload } = require('../widgetBridge');
@@ -538,6 +539,10 @@ export const useAuthStore = create((set, get) => ({
     try {
       const { clearAllZoneNotifications } = require('../notifications');
       await clearAllZoneNotifications();
+    } catch {}
+    try {
+      const { endLiveActivity } = require('../liveActivityBridge');
+      await endLiveActivity(null, null);
     } catch {}
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
@@ -562,7 +567,8 @@ export const useAuthStore = create((set, get) => ({
       'livenew:lastCelebratedStreak', 'livenew:goal_set_at',
       'livenew:progress_cache_v1', 'livenew:health_snapshot_v1',
       'livenew:health_permission_status', 'livenew:review_prompted',
-      'livenew:streak_risk_dismissed',
+      'livenew:streak_risk_dismissed', 'livenew:live_activity_id',
+      'livenew:seen_first_plan_welcome', 'livenew:seen_tts_hint',
     ]);
     try {
       const { clearWidgetPayload } = require('../widgetBridge');
@@ -571,6 +577,10 @@ export const useAuthStore = create((set, get) => ({
     try {
       const { clearAllZoneNotifications } = require('../notifications');
       await clearAllZoneNotifications();
+    } catch {}
+    try {
+      const { endLiveActivity } = require('../liveActivityBridge');
+      await endLiveActivity(null, null);
     } catch {}
     set({
       isLoggedIn: false, hasProfile: false, profile: null,

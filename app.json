@@ -21,13 +21,17 @@
         "NSAppTransportSecurity": {
           "NSAllowsArbitraryLoads": false
         },
+        "NSSupportsLiveActivities": true,
+        "NSSupportsLiveActivitiesFrequentUpdates": false,
         "NSHealthShareUsageDescription": "LiveNew reads your sleep, heart rate, and HRV from Apple Health to give you contextual cortisol-regulation insights tied to your actual data — not guesses.",
         "NSHealthUpdateUsageDescription": "LiveNew does not write data back to Apple Health."
       },
       "entitlements": {
         "com.apple.developer.healthkit": true,
         "com.apple.developer.healthkit.access": [],
-        "com.apple.security.application-groups": ["group.app.livenew.mobile"]
+        "com.apple.security.application-groups": [
+          "group.app.livenew.mobile"
+        ]
       },
       "appleTeamId": "8KT9332327",
       "config": {
@@ -58,7 +62,8 @@
           "healthSharePermission": "LiveNew reads your sleep, heart rate, and HRV from Apple Health to give you contextual cortisol-regulation insights tied to your actual data.",
           "healthUpdatePermission": "LiveNew does not write data back to Apple Health."
         }
-      ]
+      ],
+      "expo-live-activity"
     ],
     "extra": {
       "eas": {
