@@ -20,7 +20,6 @@ import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
 import { getLocalDateISO, getYesterdayISO } from '../utils/localDate';
-import { truncateGoal } from '../utils/goalText';
 import { computeScore, scoreBand, getCurrentZoneId, ZONE_ORDER, ZONE_LABELS } from '../utils/score';
 import { api } from '../api';
 
@@ -807,23 +806,17 @@ export default function TodayScreen({ navigation }) {
           </View>
         )}
 
-        {/* Goal thread */}
-        {(profile?.goal || goalThread?.weeklyFocus || goalThread?.todayConnection) && (
+        {/* Iris's week + day thread — what she's narratively working toward */}
+        {(goalThread?.weeklyFocus || goalThread?.todayConnection) && (
           <View style={s.goalCard}>
-            {profile?.goal && (
-              <View style={s.goalLine}>
-                <Text style={s.goalLineLabel}>Your goal</Text>
-                <Text style={s.goalLineValue}>{truncateGoal(profile.goal)}</Text>
-              </View>
-            )}
             {goalThread?.weeklyFocus && (
-              <View style={[s.goalLine, profile?.goal && s.goalLineDivider]}>
+              <View style={s.goalLine}>
                 <Text style={s.goalLineLabel}>This week's focus</Text>
                 <Text style={s.goalLineValue}>{goalThread.weeklyFocus}</Text>
               </View>
             )}
             {goalThread?.todayConnection && (
-              <View style={[s.goalLine, (profile?.goal || goalThread?.weeklyFocus) && s.goalLineDivider]}>
+              <View style={[s.goalLine, goalThread?.weeklyFocus && s.goalLineDivider]}>
                 <Text style={s.goalLineLabel}>Today's thread</Text>
                 <Text style={s.goalLineValue}>{goalThread.todayConnection}</Text>
               </View>

@@ -8,7 +8,6 @@ import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapMedium } from '../haptics';
-import { truncateGoal } from '../utils/goalText';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import InviteShareCard from '../components/InviteShareCard';
 import IrisSignature from '../components/IrisSignature';
@@ -19,15 +18,6 @@ import {
   scheduleSessionReminders, clearAllZoneNotifications,
 } from '../notifications';
 import { ZONE_LABELS } from '../utils/score';
-
-const GOAL_OPTIONS = [
-  { label: 'Sleep better', value: 'I want to sleep through the night and wake up rested', emoji: '\u{1F319}' },
-  { label: 'Less anxiety', value: 'I want to stop feeling anxious and overwhelmed all day', emoji: '\u{1F32C}️' },
-  { label: 'More energy', value: 'I want consistent energy throughout the day without crashing', emoji: '⚡' },
-  { label: 'Lose weight', value: 'I want to lose weight and stop stress eating', emoji: '\u{1F331}' },
-  { label: 'Be calmer', value: 'I want to feel calm and in control of my stress', emoji: '\u{1F9D8}' },
-  { label: 'Feel better', value: 'I just want to feel better overall', emoji: '✨' },
-];
 
 export default function AccountScreen({ navigation }) {
   const { colors, fonts } = useTheme();
@@ -166,7 +156,7 @@ export default function AccountScreen({ navigation }) {
 
   const handleEdit = (field) => {
     tapSelect();
-    setEditValue(field === 'routine' ? (profile?.routine || '') : (profile?.goal || ''));
+    setEditValue(profile?.[field] || '');
     setEditing(field);
   };
 
@@ -218,58 +208,8 @@ export default function AccountScreen({ navigation }) {
     );
   };
 
-  const handleGoalSelect = async (goalValue) => {
-    tapMedium();
-    setSaving(true);
-    try {
-      const updated = { ...profile, goal: goalValue };
-      await saveProfile(updated);
-      setSaving(false);
-      setEditing(null);
-      // No nav, no alert. Iris will use the new goal on the next plan.
-    } catch {
-      Alert.alert('Error', 'Could not save. Try again.');
-      setSaving(false);
-    }
-  };
-
-  // Edit screen
+  // Edit screen — routine only (goal removed in 2026-05-16 simplification)
   if (editing) {
-    // Goal editing uses preset options (same as onboarding)
-    if (editing === 'goal') {
-      return (
-        <SafeAreaView style={s.safe}>
-          <View style={s.editWrap}>
-            <Text style={s.editTitle}>What's your goal?</Text>
-            <Text style={s.editSub}>Pick the one that matters most right now</Text>
-            {saving ? (
-              <View style={{ alignItems: 'center', paddingTop: 32 }}>
-                <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 16 }}>Saving...</Text>
-              </View>
-            ) : (
-              <View style={s.goalGrid}>
-                {GOAL_OPTIONS.map(option => (
-                  <Pressable
-                    key={option.value}
-                    style={s.goalOption}
-                    onPress={() => handleGoalSelect(option.value)}
-
-                  >
-                    <Text style={s.goalEmoji}>{option.emoji}</Text>
-                    <Text style={s.goalLabel}>{option.label}</Text>
-                  </Pressable>
-                ))}
-              </View>
-            )}
-            <Pressable style={s.cancelBtn} onPress={() => setEditing(null)}>
-              <Text style={s.cancelText}>Cancel</Text>
-            </Pressable>
-          </View>
-        </SafeAreaView>
-      );
-    }
-
-    // Routine editing uses text input
     return (
       <SafeAreaView style={s.safe}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
@@ -290,7 +230,6 @@ export default function AccountScreen({ navigation }) {
               style={[s.saveBtn, (!editValue.trim() || saving) && { opacity: 0.4 }]}
               onPress={handleSave}
               disabled={!editValue.trim() || saving}
-
             >
               <Text style={s.saveBtnText}>{saving ? 'Saving...' : 'Save'}</Text>
             </Pressable>
@@ -371,15 +310,6 @@ export default function AccountScreen({ navigation }) {
             <Text style={s.settingArrow}>›</Text>
           </Pressable>
 
-          <View style={s.settingDivider} />
-
-          <Pressable style={s.settingRow} onPress={() => handleEdit('goal')}>
-            <View style={s.settingContent}>
-              <Text style={s.settingTitle}>My goal</Text>
-              <Text style={s.settingValue} numberOfLines={2}>{profile?.goal ? truncateGoal(profile.goal) : 'Not set'}</Text>
-            </View>
-            <Text style={s.settingArrow}>›</Text>
-          </Pressable>
         </View>
 
         {/* Share section */}

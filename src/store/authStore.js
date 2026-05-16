@@ -64,7 +64,9 @@ export const useAuthStore = create((set, get) => ({
         let hasProfile = false;
         if (profileJson) {
           profile = JSON.parse(profileJson);
-          hasProfile = !!(profile && profile.routine && profile.goal) || !!(profile && profile.goal && profile.goal !== 'all');
+          // Onboarding completion is gated on routine (the schedule) only.
+          // Goal was removed — cortisol regulation is the universal lever.
+          hasProfile = !!(profile && profile.routine);
         }
 
         // Check if we have a valid plan for today
@@ -141,7 +143,7 @@ export const useAuthStore = create((set, get) => ({
         try {
           const bootstrap = await api.bootstrap();
           const serverProfile = bootstrap?.profile || {};
-          if (serverProfile.goal) {
+          if (serverProfile.routine) {
             const localProfile = profile || {};
             const pickServer = (key) => (
               serverProfile[key] !== undefined && serverProfile[key] !== null
@@ -152,15 +154,13 @@ export const useAuthStore = create((set, get) => ({
             );
             const merged = {
               routine: pickServer('routine'),
-              goal: pickServer('goal'),
               stressSource: pickServer('stressSource'),
               wakeTime: pickServer('wakeTime'),
               timeMin: pickServer('timeMin'),
               injuries: serverProfile.injuries || localProfile.injuries || [],
             };
             await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(merged));
-            const refreshedHasProfile = !!(merged.routine && merged.goal) || !!(merged.goal && merged.goal !== 'all');
-            set({ profile: merged, hasProfile: refreshedHasProfile });
+            set({ profile: merged, hasProfile: !!merged.routine });
           }
         } catch {}
 
@@ -198,13 +198,12 @@ export const useAuthStore = create((set, get) => ({
       const p = bootstrap?.profile || {};
       const profile = {
         routine: p.routine || null,
-        goal: p.goal || null,
         stressSource: p.stressSource || null,
         wakeTime: p.wakeTime || null,
         timeMin: p.timeMin || null,
         injuries: p.injuries || [],
       };
-      const hasProfile = !!(profile.routine && profile.goal) || !!(profile.goal && profile.goal !== 'all');
+      const hasProfile = !!profile.routine;
       await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
       set({ isLoggedIn: true, hasProfile, profile });
     } catch {
@@ -371,7 +370,6 @@ export const useAuthStore = create((set, get) => ({
       sleepQuality,   // "great" | "okay" | "rough"
       energy,         // "high" | "medium" | "low"
       routine: profile.routine || '',
-      goal: profile.goal || '',
       healthSnapshot, // null if not connected; server handles either way
     });
 

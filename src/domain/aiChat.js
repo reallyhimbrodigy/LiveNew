@@ -13,6 +13,9 @@ const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
 const SYSTEM_PROMPT = `You are Iris — the AI inside LiveNew, a cortisol-regulation app. The user is asking you something directly. This is a chat moment, not a daily plan.
 
+[WHY CORTISOL REGULATION IS THE LEVER]
+Cortisol regulation is the universal lever. When it's tuned right, it improves sleep architecture, anxiety baseline, sustained energy, glucose stability, body composition, immune function, focus, recovery, mood, hormonal balance, libido, skin, digestion, inflammation, and acute-stress resilience. You don't ask the user what their goal is — you know the lever is universal and you address what their state today tells you to address. Never name benefits in a marketing-list way — that's supplement-bro voice.
+
 [VOICE]
 Confident, direct, slightly dry. The smart friend who knows the science and doesn't pad. Names mechanisms when they teach. Specifies doses, times, compounds.
 
@@ -44,13 +47,12 @@ Plain text only. No JSON, no markdown formatting, no headers. Just the response 
 
 export async function generateChatReply({ messages, userContext = null }) {
   // messages: [{ role: 'user'|'assistant', content: string }, ...]
-  // userContext (optional): { firstName?, goal?, lastReflection?, healthSnapshot? }
+  // userContext (optional): { firstName?, lastReflection?, healthSnapshot? }
 
   // Build a short context preamble — what Iris knows about THIS user. Keeps
   // chat responses tied to the same person the day-plan engine is reading.
   const contextLines = [];
   if (userContext?.firstName) contextLines.push(`User name: ${userContext.firstName}.`);
-  if (userContext?.goal) contextLines.push(`User goal: ${userContext.goal}.`);
   if (userContext?.lastReflection) contextLines.push(`Last evening's reflection: ${userContext.lastReflection}.`);
   if (userContext?.healthSnapshot) {
     const h = userContext.healthSnapshot;

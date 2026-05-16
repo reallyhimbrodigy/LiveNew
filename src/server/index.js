@@ -3145,7 +3145,6 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           sleepQuality: sleepLabel,
           energy: energyLabel,
           routine: checkIn.routine || "",
-          goal: checkIn.goal || "",
           history: aiHistory,
           healthSnapshot,
         });
@@ -3678,7 +3677,6 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         const lastRefl = reflRows?.[0]?.payload?.feeling || null;
         userContext = {
           firstName: profile?.first_name || null,
-          goal: profile?.goal || null,
           lastReflection: lastRefl,
           healthSnapshot: body?.healthSnapshot || null,
         };

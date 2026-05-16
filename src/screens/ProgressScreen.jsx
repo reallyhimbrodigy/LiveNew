@@ -6,7 +6,6 @@ import { useTheme } from '../theme';
 import IrisSignature from '../components/IrisSignature';
 import { api } from '../api';
 import { useAuthStore } from '../store/authStore';
-import { truncateGoal } from '../utils/goalText';
 
 const PROGRESS_CACHE_KEY = 'livenew:progress_cache_v1';
 
@@ -203,14 +202,6 @@ export default function ProgressScreen() {
             <Text style={s.staleBannerText}>
               Couldn't refresh — showing last data Iris has on you.
             </Text>
-          </View>
-        )}
-
-        {/* Goal reminder */}
-        {profile?.goal && (
-          <View style={s.goalCard}>
-            <Text style={s.goalLabel}>YOUR GOAL</Text>
-            <Text style={s.goalText}>{truncateGoal(profile.goal)}</Text>
           </View>
         )}
 

@@ -12,23 +12,16 @@ import { deriveFromHealth, canSkipSleepAndEnergy } from '../utils/healthInferenc
 
 // Onboarding step machine:
 //   0 — Apple Health (always asked, FIRST)
-//   1 — Goal (6 chips)
-//   2 — Schedule (free-text typed input — needed for real personalization)
-//   3 — Stress (always asked, subjective)
-//   4 — Sleep  (SKIPPED if HealthKit granted with data)
-//   5 — Energy (SKIPPED if HealthKit granted with data)
+//   1 — Schedule (free-text typed input — needed for real personalization)
+//   2 — Stress (always asked, subjective)
+//   3 — Sleep  (SKIPPED if HealthKit granted with data)
+//   4 — Energy (SKIPPED if HealthKit granted with data)
 //
-// Total steps shown in the progress bar adapts: 4 for HealthKit-granted users,
-// 6 for users who decline HealthKit.
-
-const GOAL_OPTIONS = [
-  { label: 'Sleep better',  value: 'I want to sleep through the night and wake up rested' },
-  { label: 'Less anxiety',  value: 'I want to stop feeling anxious and overwhelmed all day' },
-  { label: 'More energy',   value: 'I want consistent energy throughout the day without crashing' },
-  { label: 'Lose weight',   value: 'I want to lose weight and stop stress eating' },
-  { label: 'Be calmer',     value: 'I want to feel calm and in control of my stress' },
-  { label: 'Feel better',   value: 'I want to feel better in my body, day to day' },
-];
+// Goal removed: cortisol regulation is the universal lever — Iris targets the
+// full benefit spectrum based on daily state, not a stated goal.
+//
+// Total steps shown in the progress bar adapts: 3 for HealthKit-granted users,
+// 5 for users who decline HealthKit.
 
 const STRESS_OPTIONS = [
   { label: 'Good',         value: 'good',         sub: 'calm, steady' },
@@ -127,8 +120,7 @@ export default function OnboardingScreen() {
   const healthDerived = useMemo(() => deriveFromHealth(healthSnapshot), [healthSnapshot]);
   const skipSleepEnergy = canSkipSleepAndEnergy(healthSnapshot);
 
-  const [step, setStep] = useState(0); // 0=Health, 1=Goal, 2=Schedule, 3=Stress, 4=Sleep, 5=Energy
-  const [goal, setGoal] = useState(null);
+  const [step, setStep] = useState(0); // 0=Health, 1=Schedule, 2=Stress, 3=Sleep, 4=Energy
   const [routine, setRoutine] = useState('');
   const [stress, setStress] = useState(null);
   const [sleep, setSleep] = useState(null);
@@ -157,8 +149,6 @@ export default function OnboardingScreen() {
     setConnectingHealth(true);
     await connectHealth();
     setConnectingHealth(false);
-    // Whether granted or not, advance to Goal. We re-check skipSleepEnergy at
-    // generation time using the live store state.
     animateTransition(() => setStep(1));
   };
   const handleSkipHealth = () => {
@@ -168,26 +158,18 @@ export default function OnboardingScreen() {
     animateTransition(() => setStep(1));
   };
 
-  // Step 1 — Goal
-  const handleGoal = (option) => {
-    tapMedium();
-    setGoal(option.value);
-    animateTransition(() => setStep(2));
-  };
-
-  // Step 2 — Schedule
+  // Step 1 — Schedule
   const handleScheduleNext = () => {
     if (!routine.trim()) return;
     tapMedium();
-    animateTransition(() => setStep(3));
+    animateTransition(() => setStep(2));
   };
 
-  // Step 3 — Stress
+  // Step 2 — Stress
   const handleStress = async (option) => {
     tapMedium();
     setStress(option.value);
     if (skipSleepEnergy) {
-      // HealthKit covers sleep + energy. Go straight to generation with derived values.
       await runPlanGeneration({
         stressValue: option.value,
         sleepValue: healthDerived.sleepQuality,
@@ -195,17 +177,17 @@ export default function OnboardingScreen() {
       });
       return;
     }
-    animateTransition(() => setStep(4));
+    animateTransition(() => setStep(3));
   };
 
-  // Step 4 — Sleep
+  // Step 3 — Sleep
   const handleSleep = (option) => {
     tapMedium();
     setSleep(option.value);
-    animateTransition(() => setStep(5));
+    animateTransition(() => setStep(4));
   };
 
-  // Step 5 — Energy → triggers plan generation
+  // Step 4 — Energy → triggers plan generation
   const handleEnergy = async (option) => {
     tapMedium();
     await runPlanGeneration({
@@ -225,7 +207,7 @@ export default function OnboardingScreen() {
     });
 
     try {
-      await saveProfileWithoutNav({ goal, routine: routine.trim() });
+      await saveProfileWithoutNav({ routine: routine.trim() });
       await Promise.race([
         generatePlan({ stress: stressValue, sleepQuality: sleepValue, energy: energyValue }),
         timeout,
@@ -234,9 +216,6 @@ export default function OnboardingScreen() {
       activateProfile();
     } catch (err) {
       clearTimeout(timeoutId);
-      // Paywall during onboarding is an edge case (user must have re-signed
-      // up after exhausting the trial on a prior account). Activate the
-      // profile so they at least land on the app and can see Paywall.
       if (err?.code === 'PAYWALL_REQUIRED') {
         activateProfile();
         return;
@@ -245,7 +224,7 @@ export default function OnboardingScreen() {
       if (err.message === 'TIMEOUT') setError('Iris is taking longer than usual. Tap an option to try again.');
       else if (err?.code === 'NETWORK_ERROR') setError('Check your internet connection.');
       else setError('Something went wrong. Tap an option to try again.');
-      setStep(skipSleepEnergy ? 3 : 5);
+      setStep(skipSleepEnergy ? 2 : 4);
       setLoading(false);
     }
   };
@@ -256,12 +235,10 @@ export default function OnboardingScreen() {
     else if (step === 2) animateTransition(() => setStep(1));
     else if (step === 3) animateTransition(() => setStep(2));
     else if (step === 4) animateTransition(() => setStep(3));
-    else if (step === 5) animateTransition(() => setStep(4));
   };
 
   // Progress bar math
-  const totalSteps = skipSleepEnergy ? 4 : 6;
-  // Visible step index for progress (Health is step 0 → progress 1, etc.)
+  const totalSteps = skipSleepEnergy ? 3 : 5;
   const visibleIndex = step + 1;
 
   return (
@@ -326,28 +303,8 @@ export default function OnboardingScreen() {
                 </ScrollView>
               )}
 
-              {/* Step 1 — Goal (chip picker) */}
+              {/* Step 1 — Schedule (free text) */}
               {step === 1 && (
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
-                  <Text style={s.heading}>What actually matters?</Text>
-                  <Text style={s.sub}>Pick one. I'll bend the plan toward it.</Text>
-                  {error ? <Text style={s.error}>{error}</Text> : null}
-                  <View style={s.chipGrid}>
-                    {GOAL_OPTIONS.map((option) => (
-                      <Pressable
-                        key={option.value}
-                        onPress={() => handleGoal(option)}
-                        style={({ pressed }) => [s.chip, pressed && { opacity: 0.85 }]}
-                      >
-                        <Text style={s.chipText}>{option.label}</Text>
-                      </Pressable>
-                    ))}
-                  </View>
-                </ScrollView>
-              )}
-
-              {/* Step 2 — Schedule (free text) */}
-              {step === 2 && (
                 <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }}>
                   <Text style={s.heading}>What does a typical day look like?</Text>
                   <Text style={s.sub}>
@@ -375,8 +332,8 @@ export default function OnboardingScreen() {
                 </ScrollView>
               )}
 
-              {/* Step 3 — Stress (always) */}
-              {step === 3 && (
+              {/* Step 2 — Stress (always) */}
+              {step === 2 && (
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
                   <Text style={s.heading}>How are you feeling right now?</Text>
                   {skipSleepEnergy && healthDerived.summary ? (
@@ -399,8 +356,8 @@ export default function OnboardingScreen() {
                 </ScrollView>
               )}
 
-              {/* Step 4 — Sleep (only if HealthKit didn't cover it) */}
-              {step === 4 && (
+              {/* Step 3 — Sleep (only if HealthKit didn't cover it) */}
+              {step === 3 && (
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
                   <Text style={s.heading}>How did you sleep?</Text>
                   {error ? <Text style={s.error}>{error}</Text> : null}
@@ -418,8 +375,8 @@ export default function OnboardingScreen() {
                 </ScrollView>
               )}
 
-              {/* Step 5 — Energy (only if HealthKit didn't cover it) */}
-              {step === 5 && (
+              {/* Step 4 — Energy (only if HealthKit didn't cover it) */}
+              {step === 4 && (
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
                   <Text style={s.heading}>Your energy right now?</Text>
                   {error ? <Text style={s.error}>{error}</Text> : null}
