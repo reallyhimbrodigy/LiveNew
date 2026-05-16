@@ -52,14 +52,6 @@ export default function ProgressScreen() {
     return () => { mounted = false; };
   }, []);
 
-  if (loading && !data) {
-    return (
-      <View style={s.loadingWrap}>
-        <ActivityIndicator size="large" color={colors.gold} />
-      </View>
-    );
-  }
-
   const rawTrend = data?.stressTrend || [];
   const trend = [...rawTrend].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
   const consistency = data?.consistency || {};
@@ -185,6 +177,14 @@ export default function ProgressScreen() {
   const minStress = chartTrend.length > 0
     ? Math.min(...chartTrend.map(t => t.stress ?? 999))
     : null;
+
+  if (loading && !data) {
+    return (
+      <View style={s.loadingWrap}>
+        <ActivityIndicator size="large" color={colors.gold} />
+      </View>
+    );
+  }
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
