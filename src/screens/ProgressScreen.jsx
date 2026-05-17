@@ -9,6 +9,66 @@ import { useAuthStore } from '../store/authStore';
 
 const PROGRESS_CACHE_KEY = 'livenew:progress_cache_v1';
 
+// Universal milestone tiers — same for everyone, because the cortisol-
+// regulation lever is universal (see product_no_user_goal memory). Each tier
+// promises a real product behavior that unlocks at the threshold, not a
+// fake badge. Foundation -> Calibration -> Pattern -> Rhythm -> Maintenance.
+function getMilestone(daysActive, weeklyDays) {
+  const d = Math.max(0, daysActive | 0);
+  if (d < 3) {
+    return {
+      phase: 'Foundation',
+      current: d,
+      target: 3,
+      narrative: d === 0
+        ? "Day one. The count starts when you check in."
+        : d === 1
+        ? "One down. Two more and the baseline locks."
+        : "Two days in. One more to lock the foundation.",
+      payoff: "Three check-ins teach Iris your baseline.",
+    };
+  }
+  if (d < 7) {
+    return {
+      phase: 'Calibration',
+      current: d,
+      target: 7,
+      narrative: `Day ${d} of 7. The trend is starting to show.`,
+      payoff: "Day 7: a full week of trend data — Iris starts naming patterns specific to you.",
+    };
+  }
+  if (d < 14) {
+    return {
+      phase: 'Pattern phase',
+      current: d,
+      target: 14,
+      narrative: `Day ${d} of 14. Patterns are emerging.`,
+      payoff: "Day 14: behavior profile fully calibrated. Recommendations sharpen.",
+    };
+  }
+  if (d < 30) {
+    return {
+      phase: 'Rhythm phase',
+      current: d,
+      target: 30,
+      narrative: `Day ${d} of 30. The rhythm is taking hold.`,
+      payoff: "Day 30: weekly outcome deltas become visible. You'll see what actually changed.",
+    };
+  }
+  // Maintenance — ongoing. Progress shown as this-week's days active.
+  const w = Math.max(0, Math.min(7, weeklyDays | 0));
+  return {
+    phase: 'Maintenance',
+    current: w,
+    target: 7,
+    isWeekly: true,
+    narrative: `${d} days in. Week-by-week from here.`,
+    payoff: w >= 5
+      ? "You're hitting the weekly target. Compounding."
+      : "Hit 5 of 7 days this week to keep the curve regulated. That's the compounding window.",
+  };
+}
+
 export default function ProgressScreen() {
   const { colors, fonts } = useTheme();
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
@@ -16,6 +76,7 @@ export default function ProgressScreen() {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [errorDetail, setErrorDetail] = useState('');
   const streak = useAuthStore(s => s.streak);
   const profile = useAuthStore(s => s.profile);
 
@@ -27,11 +88,15 @@ export default function ProgressScreen() {
       const next = res?.progress || null;
       setData(next);
       setError(false);
+      setErrorDetail('');
       if (next) {
         try { await AsyncStorage.setItem(PROGRESS_CACHE_KEY, JSON.stringify(next)); } catch {}
       }
-    } catch {
+    } catch (err) {
       setError(true);
+      // Capture the actual failure mode so we can diagnose the day-1
+      // "could not load" report instead of swallowing the cause.
+      setErrorDetail(err?.code || err?.message || 'unknown');
     }
     setLoading(false);
   };
@@ -115,6 +180,19 @@ export default function ProgressScreen() {
   const dayInitials = ['Su', 'M', 'Tu', 'W', 'Th', 'F', 'Sa'];
   const daysActive = consistency.checkinDays || 0;
 
+  // Milestone — always computed, always rendered. Falls back to streak from
+  // the auth store when /v1/progress fails, so day-1 users with a transient
+  // network error still see forward motion instead of "could not load."
+  const milestoneDays = daysActive > 0 ? daysActive : (streak || 0);
+  // Weekly days active (for the Maintenance phase progress) — derived from
+  // the trend dates, last 7 unique dates.
+  const weeklyDays = (() => {
+    if (trend.length === 0) return 0;
+    const last7 = trend.slice(-7).map((t) => t.date).filter(Boolean);
+    return new Set(last7).size;
+  })();
+  const milestone = getMilestone(milestoneDays, weeklyDays);
+
   // Week-over-week outcomes — REAL deltas the user can screenshot.
   // Without this, the user has to trust on faith that the app is working.
   const outcomes = useMemo(() => {
@@ -192,6 +270,32 @@ export default function ProgressScreen() {
         <View style={s.headerRow}>
           <Text style={s.heading}>Progress</Text>
           <IrisSignature />
+        </View>
+
+        {/* Milestone — always rendered, even on error / day 1. This IS the
+            forward-motion anchor of Progress. Every user is in some tier of
+            the universal cortisol-regulation curve, and each tier's payoff is
+            a real product behavior that unlocks. */}
+        <View style={s.milestoneCard}>
+          <Text style={s.milestoneLabel}>{milestone.phase.toUpperCase()}</Text>
+          <View style={s.milestoneRow}>
+            <Text style={s.milestoneCurrent}>
+              {milestone.isWeekly ? `${milestone.current}` : `Day ${milestone.current}`}
+            </Text>
+            <Text style={s.milestoneTarget}>
+              {milestone.isWeekly ? ` / ${milestone.target} this week` : ` / ${milestone.target}`}
+            </Text>
+          </View>
+          <View style={s.milestoneTrack}>
+            <View
+              style={[
+                s.milestoneFill,
+                { width: `${Math.min(100, (milestone.current / milestone.target) * 100)}%` },
+              ]}
+            />
+          </View>
+          <Text style={s.milestoneNarrative}>{milestone.narrative}</Text>
+          <Text style={s.milestonePayoff}>{milestone.payoff}</Text>
         </View>
 
         {/* Stale-cache warning when refresh failed but we're rendering
@@ -399,23 +503,28 @@ export default function ProgressScreen() {
           </View>
         )}
 
-        {/* Empty / Error state */}
-        {trend.length === 0 && (
+        {/* Day-1 / pre-trend state. The milestone above is now the hero,
+            so this is a small contextual nudge — not the alarming "could
+            not load" that day-1 users hit before. Refresh failure shows a
+            quiet link, not a takeover. */}
+        {trend.length === 0 && !error && (
           <View style={s.emptyCard}>
-            <Text style={s.emptyTitle}>{error ? 'Could not load' : 'No data yet'}</Text>
             <Text style={s.emptySub}>
-              {error
-                ? 'Check your connection and try again.'
-                : 'Check in daily to start seeing your stress trend and insights.'}
+              Your stress trend and weekly outcomes appear here as you check in. Show up tomorrow to start the curve.
             </Text>
-            {error && (
-              <Pressable
-                style={({ pressed }) => [s.retryBtn, pressed && { opacity: 0.85 }]}
-                onPress={() => { setLoading(true); refresh(); }}
-              >
-                <Text style={s.retryText}>Retry</Text>
-              </Pressable>
-            )}
+          </View>
+        )}
+        {trend.length === 0 && error && (
+          <View style={s.emptyCard}>
+            <Text style={s.emptySub}>
+              Couldn't reach Iris to refresh your trend{errorDetail ? ` (${errorDetail})` : ''}. Your milestone is current — pull to refresh or retry below.
+            </Text>
+            <Pressable
+              style={({ pressed }) => [s.retryBtn, pressed && { opacity: 0.85 }]}
+              onPress={() => { setLoading(true); refresh(); }}
+            >
+              <Text style={s.retryText}>Retry</Text>
+            </Pressable>
           </View>
         )}
 
@@ -464,6 +573,67 @@ function makeStyles(colors, fonts) {
       color: colors.text,
       letterSpacing: 0.2,
     },
+
+    // Milestone card — the forward-motion anchor at the top of Progress.
+    milestoneCard: {
+      backgroundColor: colors.goldSoft,
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      borderRadius: 16,
+      padding: 18,
+      marginBottom: 16,
+    },
+    milestoneLabel: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 11,
+      color: colors.gold,
+      letterSpacing: 1.6,
+      marginBottom: 8,
+    },
+    milestoneRow: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      marginBottom: 12,
+    },
+    milestoneCurrent: {
+      fontFamily: fonts.displayBold,
+      fontSize: 34,
+      color: colors.text,
+      letterSpacing: -0.4,
+    },
+    milestoneTarget: {
+      fontFamily: fonts.body,
+      fontSize: 15,
+      color: colors.muted,
+      marginLeft: 2,
+    },
+    milestoneTrack: {
+      height: 4,
+      backgroundColor: colors.line,
+      borderRadius: 2,
+      overflow: 'hidden',
+      marginBottom: 12,
+    },
+    milestoneFill: {
+      height: 4,
+      backgroundColor: colors.gold,
+      borderRadius: 2,
+    },
+    milestoneNarrative: {
+      fontFamily: fonts.italic,
+      fontSize: 14,
+      color: colors.text,
+      lineHeight: 20,
+      letterSpacing: 0.1,
+      marginBottom: 6,
+    },
+    milestonePayoff: {
+      fontFamily: fonts.body,
+      fontSize: 13,
+      color: colors.muted,
+      lineHeight: 19,
+    },
+
     outcomesCard: {
       backgroundColor: colors.goldSoft,
       borderWidth: 1,
