@@ -13,6 +13,17 @@ const PROGRESS_CACHE_KEY = 'livenew:progress_cache_v1';
 // regulation lever is universal (see product_no_user_goal memory). Each tier
 // promises a real product behavior that unlocks at the threshold, not a
 // fake badge. Foundation -> Calibration -> Pattern -> Rhythm -> Maintenance.
+//
+// MILESTONE_PEEKS = a sequenced look at what's coming next. Renders below
+// the current-milestone card during the Foundation phase so day-1 users have
+// something to anticipate, not just an empty page.
+const MILESTONE_PEEKS = [
+  { phase: 'Calibration',  at: 'Day 7',  promise: "A full week of trend data. Iris starts naming the patterns specific to you." },
+  { phase: 'Pattern',      at: 'Day 14', promise: "Your behavior profile fully calibrates. Recommendations sharpen visibly." },
+  { phase: 'Rhythm',       at: 'Day 30', promise: "Weekly outcome deltas appear. You see what actually changed in numbers." },
+  { phase: 'Maintenance',  at: 'Day 31+', promise: "Sustained regulation. Compounding starts here." },
+];
+
 function getMilestone(daysActive, weeklyDays) {
   const d = Math.max(0, daysActive | 0);
   if (d < 3) {
@@ -276,6 +287,11 @@ export default function ProgressScreen() {
             forward-motion anchor of Progress. Every user is in some tier of
             the universal cortisol-regulation curve, and each tier's payoff is
             a real product behavior that unlocks. */}
+        {milestone.phase === 'Foundation' && (
+          <Text style={s.heroLead}>
+            Each tier here unlocks something real — pattern recognition, behavior calibration, weekly outcome deltas. Not badges. The app gets sharper the longer you show up.
+          </Text>
+        )}
         <View style={s.milestoneCard}>
           <Text style={s.milestoneLabel}>{milestone.phase.toUpperCase()}</Text>
           <View style={s.milestoneRow}>
@@ -297,6 +313,26 @@ export default function ProgressScreen() {
           <Text style={s.milestoneNarrative}>{milestone.narrative}</Text>
           <Text style={s.milestonePayoff}>{milestone.payoff}</Text>
         </View>
+
+        {/* Milestone peek — the road ahead. Only during Foundation, to give
+            day-1 users something to anticipate instead of an empty page. */}
+        {milestone.phase === 'Foundation' && (
+          <View style={s.peekCard}>
+            <Text style={s.peekLabel}>WHAT UNLOCKS NEXT</Text>
+            {MILESTONE_PEEKS.map((p, i) => (
+              <View
+                key={p.phase}
+                style={[s.peekRow, i < MILESTONE_PEEKS.length - 1 && s.peekRowDivider]}
+              >
+                <View style={s.peekRowHead}>
+                  <Text style={s.peekPhase}>{p.phase}</Text>
+                  <Text style={s.peekAt}>{p.at}</Text>
+                </View>
+                <Text style={s.peekPromise}>{p.promise}</Text>
+              </View>
+            ))}
+          </View>
+        )}
 
         {/* Stale-cache warning when refresh failed but we're rendering
             cached data. Without this, the user thinks the numbers are
@@ -378,21 +414,26 @@ export default function ProgressScreen() {
           </View>
         )}
 
-        {/* Summary cards row */}
-        <View style={s.summaryRow}>
-          <View style={s.summaryCard}>
-            <Text style={s.summaryValue}>{daysActive}</Text>
-            <Text style={s.summaryLabel}>Days</Text>
+        {/* Summary tiles — only meaningful once foundation is complete.
+            Showing 0 / 0 / 1 on day one reads as "you're not doing well"
+            when the truth is the user just signed up. Milestone card carries
+            day 1; tiles appear when there's actually a story to tell. */}
+        {daysActive >= 3 && (
+          <View style={s.summaryRow}>
+            <View style={s.summaryCard}>
+              <Text style={s.summaryValue}>{daysActive}</Text>
+              <Text style={s.summaryLabel}>Days</Text>
+            </View>
+            <View style={s.summaryCard}>
+              <Text style={s.summaryValue}>{totalSessions}</Text>
+              <Text style={s.summaryLabel}>Done</Text>
+            </View>
+            <View style={s.summaryCard}>
+              <Text style={s.summaryValue}>{streak || 0}</Text>
+              <Text style={s.summaryLabel}>Streak</Text>
+            </View>
           </View>
-          <View style={s.summaryCard}>
-            <Text style={s.summaryValue}>{totalSessions}</Text>
-            <Text style={s.summaryLabel}>Done</Text>
-          </View>
-          <View style={s.summaryCard}>
-            <Text style={s.summaryValue}>{streak || 0}</Text>
-            <Text style={s.summaryLabel}>Streak</Text>
-          </View>
-        </View>
+        )}
 
         {/* Key insights */}
         {(stressChange !== null || bestDay || stressAvg != null) && (
@@ -517,7 +558,7 @@ export default function ProgressScreen() {
         {trend.length === 0 && error && (
           <View style={s.emptyCard}>
             <Text style={s.emptySub}>
-              Couldn't reach Iris to refresh your trend{errorDetail ? ` (${errorDetail})` : ''}. Your milestone is current — pull to refresh or retry below.
+              Iris is offline for a moment. Your milestone above is still current — try again in a few seconds.
             </Text>
             <Pressable
               style={({ pressed }) => [s.retryBtn, pressed && { opacity: 0.85 }]}
@@ -628,6 +669,65 @@ function makeStyles(colors, fonts) {
       marginBottom: 6,
     },
     milestonePayoff: {
+      fontFamily: fonts.body,
+      fontSize: 13,
+      color: colors.muted,
+      lineHeight: 19,
+    },
+
+    // Hero lead — single italic line introducing the milestone concept on
+    // day 1 so the user knows the tiers aren't gamification fluff.
+    heroLead: {
+      fontFamily: fonts.italic,
+      fontSize: 14,
+      color: colors.muted,
+      lineHeight: 21,
+      marginBottom: 16,
+      paddingHorizontal: 2,
+    },
+
+    // What unlocks next — peek into upcoming tiers, only during Foundation
+    peekCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 16,
+      paddingVertical: 4,
+      paddingHorizontal: 18,
+      marginBottom: 16,
+    },
+    peekLabel: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 11,
+      color: colors.muted,
+      letterSpacing: 1.6,
+      paddingTop: 16,
+      paddingBottom: 10,
+    },
+    peekRow: {
+      paddingVertical: 12,
+    },
+    peekRowDivider: {
+      borderBottomWidth: 1,
+      borderBottomColor: colors.line,
+    },
+    peekRowHead: {
+      flexDirection: 'row',
+      alignItems: 'baseline',
+      justifyContent: 'space-between',
+      marginBottom: 4,
+    },
+    peekPhase: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 15,
+      color: colors.text,
+      letterSpacing: 0.1,
+    },
+    peekAt: {
+      fontFamily: fonts.italic,
+      fontSize: 12,
+      color: colors.gold,
+      letterSpacing: 0.4,
+    },
+    peekPromise: {
       fontFamily: fonts.body,
       fontSize: 13,
       color: colors.muted,

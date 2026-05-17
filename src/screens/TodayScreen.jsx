@@ -630,10 +630,13 @@ export default function TodayScreen({ navigation }) {
               <Text style={s.askIrisText}>Ask Iris anything →</Text>
             </Pressable>
           </View>
-          {streak > 0 ? (
+          {/* Streak chip — only when the number is meaningful. Showing
+              "1 DAY" on day one reads as filler, not pride. From day 2 the
+              streak becomes the social-shareable hook. */}
+          {streak >= 2 ? (
             <Pressable onPress={handleShareStreak} hitSlop={6} style={s.streakChip}>
               <Text style={s.streakNum}>{streak}</Text>
-              <Text style={s.streakLabel}>day{streak === 1 ? '' : 's'}</Text>
+              <Text style={s.streakLabel}>days</Text>
             </Pressable>
           ) : null}
           <Pressable

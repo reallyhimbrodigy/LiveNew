@@ -395,40 +395,40 @@ export default function AccountScreen({ navigation }) {
           ) : null}
         </View>
 
-        {/* Apple Health section */}
+        {/* Apple Health — promoted to a real CTA card, not a settings row.
+            Connecting Health is the highest-leverage thing a non-connected
+            user can do here; the UI should reflect that, not bury it in a
+            list. */}
         <Text style={s.sectionTitle}>Apple Health</Text>
 
-        <View style={s.card}>
-          <Pressable
-            style={s.settingRow}
-            onPress={async () => {
-              if (healthPermission === 'granted') {
-                Alert.alert(
-                  'Apple Health',
-                  'You\'re connected. To revoke access, open the Health app → Sharing → Apps → LiveNew.',
-                );
-                return;
-              }
-              tapSelect();
-              const result = await connectHealth();
-              if (result && result.ok === false && result.error) {
-                Alert.alert("Couldn't connect", result.error);
-              }
-            }}
-          >
-            <View style={s.settingContent}>
-              <Text style={s.settingTitle}>
-                {healthPermission === 'granted' ? 'Connected' : 'Connect Apple Health'}
-              </Text>
-              <Text style={s.settingValue}>
-                {healthPermission === 'granted'
-                  ? 'Sleep, resting heart rate, and HRV power your score.'
-                  : 'Reads sleep, RHR, and HRV. The score becomes legitimate.'}
-              </Text>
-            </View>
-            <Text style={s.settingArrow}>{healthPermission === 'granted' ? '✓' : '›'}</Text>
-          </Pressable>
-        </View>
+        {healthPermission === 'granted' ? (
+          <View style={s.healthGrantedCard}>
+            <Text style={s.healthGrantedBadge}>● CONNECTED</Text>
+            <Text style={s.healthGrantedTitle}>Iris is reading your real biometrics.</Text>
+            <Text style={s.healthGrantedBody}>
+              Sleep, resting heart rate, and HRV are powering your score and the daily plan. To revoke, open Health → Sharing → Apps → LiveNew.
+            </Text>
+          </View>
+        ) : (
+          <View style={s.healthConnectCard}>
+            <Text style={s.healthConnectTitle}>Connect Apple Health</Text>
+            <Text style={s.healthConnectBody}>
+              Read-only access to your sleep, RHR, and HRV. The score and Iris's daily read both become calibrated to your actual biometrics instead of self-report.
+            </Text>
+            <Pressable
+              style={({ pressed }) => [s.healthConnectBtn, pressed && { opacity: 0.88 }]}
+              onPress={async () => {
+                tapSelect();
+                const result = await connectHealth();
+                if (result && result.ok === false) {
+                  Alert.alert("Couldn't connect", result.error || 'Apple Health is unavailable on this device.');
+                }
+              }}
+            >
+              <Text style={s.healthConnectBtnText}>Connect</Text>
+            </Pressable>
+          </View>
+        )}
 
         {/* Support section */}
         <Text style={s.sectionTitle}>Support</Text>
@@ -551,6 +551,70 @@ function makeStyles(colors, fonts) {
       borderRadius: 14,
       marginBottom: 16,
       overflow: 'hidden',
+    },
+
+    // Apple Health — promoted CTA card (not granted) + status card (granted)
+    healthConnectCard: {
+      backgroundColor: colors.goldSoft,
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      borderRadius: 16,
+      padding: 18,
+      marginBottom: 16,
+    },
+    healthConnectTitle: {
+      fontFamily: fonts.displayBold,
+      fontSize: 20,
+      color: colors.text,
+      letterSpacing: -0.2,
+      marginBottom: 6,
+    },
+    healthConnectBody: {
+      fontFamily: fonts.body,
+      fontSize: 14,
+      color: colors.muted,
+      lineHeight: 20,
+      marginBottom: 14,
+    },
+    healthConnectBtn: {
+      backgroundColor: colors.gold,
+      borderRadius: 999,
+      paddingVertical: 12,
+      paddingHorizontal: 20,
+      alignSelf: 'flex-start',
+    },
+    healthConnectBtnText: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 14,
+      color: '#1a1612',
+      letterSpacing: 0.3,
+    },
+    healthGrantedCard: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 16,
+      padding: 18,
+      marginBottom: 16,
+    },
+    healthGrantedBadge: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 11,
+      color: colors.gold,
+      letterSpacing: 1.6,
+      marginBottom: 8,
+    },
+    healthGrantedTitle: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 16,
+      color: colors.text,
+      marginBottom: 6,
+    },
+    healthGrantedBody: {
+      fontFamily: fonts.body,
+      fontSize: 13,
+      color: colors.muted,
+      lineHeight: 19,
     },
 
     // Status row
