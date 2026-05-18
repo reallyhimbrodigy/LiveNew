@@ -1,14 +1,22 @@
-// Local push notifications for each of the eight zones.
+// Local push notifications for LiveNew.
 //
-// Strategy: scheduled fresh every time a plan is generated/loaded. Cancels any
-// previously scheduled zone notifications, then schedules one local push per
-// enabled zone for *today* — using each zone's headline as the body and "Iris"
-// as the sender.
+// Two distinct categories, with independent lifecycles:
 //
-// No server involved — these are local notifications (iOS UNUserNotification via
-// expo-notifications). That means no backend, no APNS setup, no cost. The
-// trade-off: content is fixed at schedule time. For per-zone hooks on a daily
-// app, that's the right call.
+// 1. MORNING CHECK-IN (tag = livenew:checkin)
+//    A daily-repeating notification at 7:30am that prompts the user to open
+//    the app and start their day. This is the "always on" anchor — it
+//    fires every morning whether or not the user has a plan yet, and is
+//    the ONLY notification a user gets when they haven't checked in for
+//    today.
+//
+// 2. ZONE NOTIFICATIONS (tag = livenew:zone)
+//    One-shot notifications for each zone of today's plan, scheduled at
+//    plan-generation time. These do NOT repeat. They fire once at the zone's
+//    hour:minute today and are gone. This fixes the "hallucinated plan"
+//    problem where yesterday's headlines kept firing on a new day before
+//    the user had checked in.
+//
+// No backend — these are local iOS notifications via expo-notifications.
 
 import * as Notifications from 'expo-notifications';
 import * as Device from 'expo-device';
@@ -17,7 +25,9 @@ import { Platform } from 'react-native';
 
 const PERM_KEY = 'livenew:notif_permission';
 const PREFS_KEY = 'livenew:notif_prefs_v1';
-const TAG = 'livenew:zone';
+const MIGRATION_KEY = 'livenew:notif_migration_v2';
+const ZONE_TAG = 'livenew:zone';
+const CHECKIN_TAG = 'livenew:checkin';
 
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
@@ -43,6 +53,11 @@ export const ZONE_TIMES = {
 // Default enabled zones — high-leverage four for stress-arc coverage. User can
 // flip any of the eight in settings.
 const DEFAULT_ENABLED = ['peak', 'afternoon', 'winddown', 'sleep'];
+
+// Morning check-in default time. The user is gently nudged to open the app
+// and start their day.
+const CHECKIN_HOUR = 7;
+const CHECKIN_MINUTE = 30;
 
 // Permission status — persisted so we can render the right CTA in settings
 // without having to call into the native layer on every render.
@@ -108,13 +123,13 @@ export async function setNotificationPrefs(prefs) {
   try { await AsyncStorage.setItem(PREFS_KEY, JSON.stringify(prefs)); } catch {}
 }
 
-// Cancel only the notifications we've tagged as zone notifications. Leaves any
-// other app-scheduled notifications intact.
+// Cancel ONLY the zone notifications. Leaves the morning check-in (and any
+// other app-scheduled notifications) intact.
 async function cancelZoneNotifications() {
   try {
     const scheduled = await Notifications.getAllScheduledNotificationsAsync();
     const ids = scheduled
-      .filter((n) => n?.content?.data?.tag === TAG)
+      .filter((n) => n?.content?.data?.tag === ZONE_TAG)
       .map((n) => n.identifier);
     for (const id of ids) {
       await Notifications.cancelScheduledNotificationAsync(id);
@@ -122,11 +137,26 @@ async function cancelZoneNotifications() {
   } catch {}
 }
 
-// Schedule a notification per enabled zone using its headline as the body.
-// Uses a DAILY-repeating calendar trigger so reminders keep firing even if
-// the user doesn't open the app to regenerate a plan. The content (headline)
-// is fixed at schedule time — when a new plan generates, we cancel-and-
-// reschedule with the fresh headlines.
+// Cancel the morning check-in reminder, if any.
+async function cancelMorningCheckin() {
+  try {
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    const ids = scheduled
+      .filter((n) => n?.content?.data?.tag === CHECKIN_TAG)
+      .map((n) => n.identifier);
+    for (const id of ids) {
+      await Notifications.cancelScheduledNotificationAsync(id);
+    }
+  } catch {}
+}
+
+// Schedule per-zone notifications for TODAY ONLY (no repeats). Each fires
+// once at hour:minute today and is gone — they don't haunt the user with
+// stale content on subsequent mornings before they've checked in.
+//
+// If the zone time is already in the past for today, we skip it. The point
+// of a zone notification is to anchor a moment-of-day; firing late
+// undermines that.
 export async function scheduleSessionReminders(zones) {
   if (!Array.isArray(zones) || zones.length === 0) return;
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
@@ -137,11 +167,17 @@ export async function scheduleSessionReminders(zones) {
   const prefs = await getNotificationPrefs();
   await cancelZoneNotifications();
 
+  const now = new Date();
+
   for (const zone of zones) {
     if (!zone || !zone.id || !ZONE_TIMES[zone.id]) continue;
     if (!prefs[zone.id]) continue;
     const { hour, minute } = ZONE_TIMES[zone.id];
+    const fireAt = new Date(now);
+    fireAt.setHours(hour, minute, 0, 0);
+    if (fireAt.getTime() <= now.getTime()) continue; // zone time already passed today
     const body = composeBody(zone);
+    if (!body) continue;
 
     try {
       await Notifications.scheduleNotificationAsync({
@@ -149,14 +185,55 @@ export async function scheduleSessionReminders(zones) {
           title: 'Iris',
           body,
           sound: 'default',
-          data: { tag: TAG, zoneId: zone.id },
+          data: { tag: ZONE_TAG, zoneId: zone.id },
         },
-        // Daily-repeating trigger. Fires at hour:minute every day until
-        // explicitly cancelled or rescheduled.
-        trigger: { type: 'calendar', hour, minute, repeats: true },
+        // One-shot at a specific date+time. No repeats — fresh content is
+        // scheduled when a new plan is generated.
+        trigger: { type: 'date', date: fireAt },
       });
     } catch {}
   }
+}
+
+// Daily-repeating "good morning, time to check in" notification at 7:30am.
+// This is the ALWAYS-ON anchor that prompts the user to start each new day,
+// independent of whether a plan exists. Fires every day until disabled.
+export async function scheduleMorningCheckin() {
+  if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
+  const perm = await getNotificationPermission();
+  if (perm !== 'granted') return;
+
+  await cancelMorningCheckin();
+
+  try {
+    await Notifications.scheduleNotificationAsync({
+      content: {
+        title: 'Iris',
+        body: 'Good morning. Tap to check in and start your day.',
+        sound: 'default',
+        data: { tag: CHECKIN_TAG },
+      },
+      trigger: {
+        type: 'calendar',
+        hour: CHECKIN_HOUR,
+        minute: CHECKIN_MINUTE,
+        repeats: true,
+      },
+    });
+  } catch {}
+}
+
+// One-time migration: prior versions scheduled per-zone notifications with
+// `repeats: true`, which made yesterday's plan keep firing every day. This
+// cancels every existing zone notification on those users' devices so the
+// new model (one-shot zones + daily morning check-in) can take over cleanly.
+export async function migrateLegacyZoneNotifications() {
+  try {
+    const done = await AsyncStorage.getItem(MIGRATION_KEY);
+    if (done === '1') return;
+    await cancelZoneNotifications();
+    await AsyncStorage.setItem(MIGRATION_KEY, '1');
+  } catch {}
 }
 
 export async function cancelPlanItemNotification(zoneId) {
@@ -164,7 +241,7 @@ export async function cancelPlanItemNotification(zoneId) {
   try {
     const scheduled = await Notifications.getAllScheduledNotificationsAsync();
     const match = scheduled.find(
-      (n) => n?.content?.data?.tag === TAG && n?.content?.data?.zoneId === zoneId,
+      (n) => n?.content?.data?.tag === ZONE_TAG && n?.content?.data?.zoneId === zoneId,
     );
     if (match) await Notifications.cancelScheduledNotificationAsync(match.identifier);
   } catch {}
@@ -172,6 +249,12 @@ export async function cancelPlanItemNotification(zoneId) {
 
 export async function clearAllZoneNotifications() {
   await cancelZoneNotifications();
+}
+
+// Disable the morning check-in entirely (for users who turn it off in
+// settings).
+export async function disableMorningCheckin() {
+  await cancelMorningCheckin();
 }
 
 function composeBody(zone) {

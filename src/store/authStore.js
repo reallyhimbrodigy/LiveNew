@@ -1,7 +1,12 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, setTokens, clearTokens, setAuthExpiredHandler } from '../api';
-import { requestPermissions, scheduleSessionReminders } from '../notifications';
+import {
+  requestPermissions,
+  scheduleSessionReminders,
+  scheduleMorningCheckin,
+  migrateLegacyZoneNotifications,
+} from '../notifications';
 import { getLocalDateISO, getYesterdayISO } from '../utils/localDate';
 import {
   isHealthAvailable,
@@ -41,6 +46,14 @@ export const useAuthStore = create((set, get) => ({
 
   // Hydrate from storage
   hydrate: async () => {
+    // One-time migration: cancel any per-zone notifications scheduled by
+    // older builds with `repeats: true`, which kept firing stale plan
+    // content on subsequent mornings. Safe no-op once it's run.
+    migrateLegacyZoneNotifications().catch(() => {});
+    // Make sure the daily morning check-in is scheduled. Idempotent —
+    // re-schedules with the same content if already present.
+    scheduleMorningCheckin().catch(() => {});
+
     try {
       const [authJson, profileJson, planJson, skippedJson, nameJson] = await Promise.all([
         AsyncStorage.getItem(AUTH_KEY),
@@ -418,12 +431,14 @@ export const useAuthStore = create((set, get) => ({
       }
     } catch {}
 
-    // Schedule notifications at the inflection-point zones (mid-morning dip,
-    // afternoon dip, wind-down) — not one per item like the old plan format.
+    // Schedule notifications. Zone reminders are one-shot for today; the
+    // daily morning check-in is the always-on anchor that prompts the user
+    // to start each new day.
     try {
       const granted = await requestPermissions();
-      if (granted && hasZones) {
-        await scheduleSessionReminders(data.zones);
+      if (granted) {
+        await scheduleMorningCheckin();
+        if (hasZones) await scheduleSessionReminders(data.zones);
       }
     } catch {}
 

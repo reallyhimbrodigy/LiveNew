@@ -1,20 +1,20 @@
 import React, { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, Pressable, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ScrollView, Animated, Easing, Keyboard,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { api } from '../api';
 import { tapLight, tapSelect } from '../haptics';
 import IrisSignature from '../components/IrisSignature';
 
-// Free-form chat with Iris. Not a replacement for the structured 8-zone plan;
-// an addition for the "I have a specific question" moment.
-//
-// Conversation lives only in this session — no cross-session persistence
-// for v1. Server rate-limits at 50 messages per 24h per user.
+// Free-form chat with Iris. Modal-presented from TodayStack. The input bar
+// is anchored to just above the keyboard; messages auto-scroll; loading
+// shows a typing-dots animation (three pulsing dots) instead of a generic
+// spinner. Conversation is in-memory only — no cross-session persistence
+// in v1. Server rate-limits at 50 messages per 24h per user.
 
 const SUGGESTIONS = [
   "Best supplement for sleep?",
@@ -23,28 +23,109 @@ const SUGGESTIONS = [
   "How do I lower morning anxiety?",
 ];
 
+// Three-dot typing indicator. Each dot pulses on a staggered offset, the
+// pattern you see in iMessage / ChatGPT / Claude. Looks alive without being
+// distracting.
+function TypingDots({ color }) {
+  const a = useRef(new Animated.Value(0)).current;
+  const b = useRef(new Animated.Value(0)).current;
+  const c = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const make = (val, delay) =>
+      Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(val, { toValue: 1, duration: 380, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+          Animated.timing(val, { toValue: 0, duration: 380, easing: Easing.inOut(Easing.quad), useNativeDriver: true }),
+          Animated.delay(420 - delay),
+        ])
+      );
+    const loops = [make(a, 0), make(b, 140), make(c, 280)];
+    loops.forEach((l) => l.start());
+    return () => loops.forEach((l) => l.stop());
+  }, [a, b, c]);
+
+  const dot = (val) => ({
+    opacity: val.interpolate({ inputRange: [0, 1], outputRange: [0.25, 1] }),
+    transform: [{ translateY: val.interpolate({ inputRange: [0, 1], outputRange: [0, -3] }) }],
+  });
+
+  return (
+    <View style={typingStyles.row}>
+      <Animated.View style={[typingStyles.dot, { backgroundColor: color }, dot(a)]} />
+      <Animated.View style={[typingStyles.dot, { backgroundColor: color }, dot(b)]} />
+      <Animated.View style={[typingStyles.dot, { backgroundColor: color }, dot(c)]} />
+    </View>
+  );
+}
+
+const typingStyles = StyleSheet.create({
+  row: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 4, paddingHorizontal: 2 },
+  dot:  { width: 6, height: 6, borderRadius: 3 },
+});
+
+// Bubble row that fades in on mount. Subtle entrance gives chat a less
+// "thrown on the screen" feel.
+function Bubble({ role, content, s, fade }) {
+  const opacity = useRef(new Animated.Value(fade ? 0 : 1)).current;
+  const translateY = useRef(new Animated.Value(fade ? 6 : 0)).current;
+  useEffect(() => {
+    if (!fade) return;
+    Animated.parallel([
+      Animated.timing(opacity,    { toValue: 1, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+      Animated.timing(translateY, { toValue: 0, duration: 220, easing: Easing.out(Easing.cubic), useNativeDriver: true }),
+    ]).start();
+  }, [fade, opacity, translateY]);
+  const isUser = role === 'user';
+  return (
+    <Animated.View
+      style={[
+        s.bubbleRow,
+        isUser ? s.bubbleRowUser : s.bubbleRowAssistant,
+        { opacity, transform: [{ translateY }] },
+      ]}
+    >
+      <View style={isUser ? s.bubbleUser : s.bubbleAssistant}>
+        <Text style={isUser ? s.bubbleUserText : s.bubbleAssistantText}>{content}</Text>
+      </View>
+    </Animated.View>
+  );
+}
+
 export default function ChatScreen({ navigation }) {
   const { colors, fonts } = useTheme();
-  const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
+  const insets = useSafeAreaInsets();
+  const s = useMemo(() => makeStyles(colors, fonts, insets), [colors, fonts, insets]);
   const userName = useAuthStore(z => z.userName);
   const healthSnapshot = useAuthStore(z => z.healthSnapshot);
 
-  const [messages, setMessages] = useState([]); // { role, content }
+  const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
+  const [inputFocused, setInputFocused] = useState(false);
   const scrollRef = useRef(null);
   const mountedRef = useRef(true);
+  const sendScale = useRef(new Animated.Value(1)).current;
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
-  // Auto-scroll to bottom on new message
+  // Auto-scroll to bottom on new message or while typing dots are showing.
   useEffect(() => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 80);
+    requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
   }, [messages.length, sending]);
+
+  // Scroll to bottom when keyboard shows so the latest message stays in view.
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      requestAnimationFrame(() => scrollRef.current?.scrollToEnd({ animated: true }));
+    });
+    return () => sub.remove();
+  }, []);
 
   const send = useCallback(async (text) => {
     const trimmed = (text || '').trim();
@@ -52,6 +133,12 @@ export default function ChatScreen({ navigation }) {
     setError('');
     setInput('');
     tapSelect();
+    // Send-button press pulse.
+    Animated.sequence([
+      Animated.timing(sendScale, { toValue: 0.88, duration: 80, useNativeDriver: true }),
+      Animated.timing(sendScale, { toValue: 1,    duration: 120, useNativeDriver: true }),
+    ]).start();
+
     const newMessages = [...messages, { role: 'user', content: trimmed }];
     setMessages(newMessages);
     setSending(true);
@@ -72,18 +159,20 @@ export default function ChatScreen({ navigation }) {
     } finally {
       if (mountedRef.current) setSending(false);
     }
-  }, [messages, sending, healthSnapshot]);
+  }, [messages, sending, healthSnapshot, sendScale]);
+
+  const canSend = !!input.trim() && !sending;
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
       <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         style={{ flex: 1 }}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+        keyboardVerticalOffset={0}
       >
         {/* Header */}
         <View style={s.header}>
-          <Pressable onPress={() => { tapLight(); navigation.goBack(); }} hitSlop={10}>
+          <Pressable onPress={() => { tapLight(); navigation.goBack(); }} hitSlop={10} style={s.closeBtnHit}>
             <Text style={s.closeBtn}>✕</Text>
           </Pressable>
           <View style={{ flex: 1, alignItems: 'center' }}>
@@ -114,7 +203,7 @@ export default function ChatScreen({ navigation }) {
                 {SUGGESTIONS.map((q, i) => (
                   <Pressable
                     key={i}
-                    style={({ pressed }) => [s.suggestionChip, pressed && { opacity: 0.85 }]}
+                    style={({ pressed }) => [s.suggestionChip, pressed && { opacity: 0.78, transform: [{ scale: 0.98 }] }]}
                     onPress={() => send(q)}
                   >
                     <Text style={s.suggestionText}>{q}</Text>
@@ -124,26 +213,20 @@ export default function ChatScreen({ navigation }) {
             </View>
           ) : (
             messages.map((m, i) => (
-              <View
+              <Bubble
                 key={i}
-                style={[
-                  s.bubbleRow,
-                  m.role === 'user' ? s.bubbleRowUser : s.bubbleRowAssistant,
-                ]}
-              >
-                <View style={m.role === 'user' ? s.bubbleUser : s.bubbleAssistant}>
-                  <Text style={m.role === 'user' ? s.bubbleUserText : s.bubbleAssistantText}>
-                    {m.content}
-                  </Text>
-                </View>
-              </View>
+                role={m.role}
+                content={m.content}
+                s={s}
+                fade={i === messages.length - 1}
+              />
             ))
           )}
 
           {sending ? (
             <View style={[s.bubbleRow, s.bubbleRowAssistant]}>
-              <View style={s.bubbleAssistant}>
-                <ActivityIndicator color={colors.gold} size="small" />
+              <View style={[s.bubbleAssistant, s.typingBubble]}>
+                <TypingDots color={colors.muted} />
               </View>
             </View>
           ) : null}
@@ -151,39 +234,48 @@ export default function ChatScreen({ navigation }) {
           {error ? <Text style={s.error}>{error}</Text> : null}
         </ScrollView>
 
-        {/* Input */}
-        <View style={s.inputRow}>
-          <TextInput
-            style={s.input}
-            placeholder="Ask Iris…"
-            placeholderTextColor={colors.dim}
-            value={input}
-            onChangeText={setInput}
-            multiline
-            maxLength={500}
-            onSubmitEditing={() => send(input)}
-            blurOnSubmit={false}
-            editable={!sending}
-          />
-          <Pressable
-            style={({ pressed }) => [
-              s.sendBtn,
-              (!input.trim() || sending) && { opacity: 0.4 },
-              pressed && { opacity: 0.85 },
-            ]}
-            onPress={() => send(input)}
-            disabled={!input.trim() || sending}
-            hitSlop={8}
-          >
-            <Text style={s.sendBtnText}>↑</Text>
-          </Pressable>
+        {/* Input bar — anchored above keyboard. Pill shape; gold circular
+            send button only enables when there's a non-empty draft. */}
+        <View style={[s.inputBar, inputFocused && s.inputBarFocused]}>
+          <View style={[s.inputWrap, inputFocused && s.inputWrapFocused]}>
+            <TextInput
+              style={s.input}
+              placeholder="Ask Iris…"
+              placeholderTextColor={colors.dim}
+              value={input}
+              onChangeText={setInput}
+              multiline
+              maxLength={500}
+              onFocus={() => setInputFocused(true)}
+              onBlur={() => setInputFocused(false)}
+              onSubmitEditing={() => send(input)}
+              blurOnSubmit={false}
+              editable={!sending}
+              returnKeyType="send"
+            />
+          </View>
+          <Animated.View style={{ transform: [{ scale: sendScale }] }}>
+            <Pressable
+              style={({ pressed }) => [
+                s.sendBtn,
+                !canSend && s.sendBtnDisabled,
+                pressed && canSend && { opacity: 0.85 },
+              ]}
+              onPress={() => send(input)}
+              disabled={!canSend}
+              hitSlop={8}
+              accessibilityLabel="Send message"
+            >
+              <Text style={[s.sendBtnText, !canSend && s.sendBtnTextDisabled]}>↑</Text>
+            </Pressable>
+          </Animated.View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
-function makeStyles(colors, fonts) {
+function makeStyles(colors, fonts, insets) {
   return StyleSheet.create({
     safe: { flex: 1, backgroundColor: colors.bg },
 
@@ -196,11 +288,8 @@ function makeStyles(colors, fonts) {
       borderBottomWidth: 1,
       borderBottomColor: colors.line,
     },
-    closeBtn: {
-      fontSize: 20,
-      color: colors.muted,
-      width: 28,
-    },
+    closeBtnHit: { width: 28, height: 28, alignItems: 'flex-start', justifyContent: 'center' },
+    closeBtn: { fontSize: 20, color: colors.muted },
     headerCenter: {
       flexDirection: 'row',
       alignItems: 'baseline',
@@ -260,19 +349,19 @@ function makeStyles(colors, fonts) {
       marginBottom: 8,
       flexDirection: 'row',
     },
-    bubbleRowUser: { justifyContent: 'flex-end' },
+    bubbleRowUser:      { justifyContent: 'flex-end' },
     bubbleRowAssistant: { justifyContent: 'flex-start' },
     bubbleUser: {
       maxWidth: '80%',
       backgroundColor: colors.gold,
-      borderRadius: 18,
-      borderBottomRightRadius: 4,
+      borderRadius: 20,
+      borderBottomRightRadius: 6,
       paddingVertical: 10,
       paddingHorizontal: 14,
     },
     bubbleUserText: {
       fontFamily: fonts.body,
-      fontSize: 15,
+      fontSize: 15.5,
       color: '#1a1612',
       lineHeight: 22,
     },
@@ -281,16 +370,20 @@ function makeStyles(colors, fonts) {
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.line,
-      borderRadius: 18,
-      borderBottomLeftRadius: 4,
+      borderRadius: 20,
+      borderBottomLeftRadius: 6,
       paddingVertical: 10,
       paddingHorizontal: 14,
     },
     bubbleAssistantText: {
       fontFamily: fonts.body,
-      fontSize: 15,
+      fontSize: 15.5,
       color: colors.text,
       lineHeight: 22,
+    },
+    typingBubble: {
+      paddingVertical: 12,
+      paddingHorizontal: 16,
     },
 
     error: {
@@ -301,44 +394,67 @@ function makeStyles(colors, fonts) {
       marginTop: 12,
     },
 
-    // Input
-    inputRow: {
+    // Input bar — pill input + circular gold send button
+    inputBar: {
       flexDirection: 'row',
       alignItems: 'flex-end',
-      paddingHorizontal: 16,
+      paddingHorizontal: 14,
       paddingTop: 10,
-      paddingBottom: Platform.OS === 'ios' ? 10 : 14,
-      borderTopWidth: 1,
+      paddingBottom: Platform.OS === 'ios' ? Math.max(insets.bottom, 10) : 12,
+      borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: colors.line,
       backgroundColor: colors.bg,
       gap: 10,
     },
-    input: {
+    inputBarFocused: {
+      // No visible change — focus styling is on the pill itself.
+    },
+    inputWrap: {
       flex: 1,
       backgroundColor: colors.surface,
       borderRadius: 22,
-      paddingVertical: 10,
-      paddingHorizontal: 16,
-      fontFamily: fonts.body,
-      fontSize: 15,
-      color: colors.text,
-      maxHeight: 120,
       borderWidth: 1,
       borderColor: colors.line,
+      minHeight: 44,
+      justifyContent: 'center',
+    },
+    inputWrapFocused: {
+      borderColor: colors.goldBorder,
+    },
+    input: {
+      fontFamily: fonts.body,
+      fontSize: 16,
+      color: colors.text,
+      paddingHorizontal: 16,
+      paddingVertical: Platform.OS === 'ios' ? 11 : 8,
+      maxHeight: 120,
     },
     sendBtn: {
-      width: 38,
-      height: 38,
-      borderRadius: 19,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       backgroundColor: colors.gold,
       alignItems: 'center',
       justifyContent: 'center',
+      shadowColor: colors.gold,
+      shadowOffset: { width: 0, height: 2 },
+      shadowOpacity: 0.25,
+      shadowRadius: 5,
+    },
+    sendBtnDisabled: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      shadowOpacity: 0,
     },
     sendBtnText: {
-      fontSize: 18,
+      fontSize: 20,
       color: '#1a1612',
       fontFamily: fonts.displayBold,
-      lineHeight: 20,
+      lineHeight: 22,
+    },
+    sendBtnTextDisabled: {
+      color: colors.dim,
     },
   });
 }
