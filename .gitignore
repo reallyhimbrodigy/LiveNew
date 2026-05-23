@@ -43,3 +43,8 @@ yarn-error.*
 ios/
 android/
 .claude/
+
+# @bacons/apple-targets generated artifacts (regenerated each prebuild)
+targets/**/Assets.xcassets/
+targets/**/Info.plist
+targets/**/generated.entitlements
