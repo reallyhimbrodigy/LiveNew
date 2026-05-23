@@ -103,7 +103,11 @@ export async function requestHealthPermissions() {
     return { ok: false, error: msg };
   }
   try {
-    await healthkit.requestAuthorization({ read: READ_TYPES, write: [] });
+    // Nitro Modules library expects { toRead, toShare } — NOT { read, write }.
+    // Passing the wrong keys means the native side gets undefined arrays and
+    // the C++ bridge crashes the app, no JS error to catch. This was the
+    // crash on tapping Connect Apple Health in build #N.
+    await healthkit.requestAuthorization({ toRead: READ_TYPES, toShare: [] });
     // Probe for actual data to infer whether the user granted anything.
     // iOS hides per-permission status for read access (privacy by design).
     try {
