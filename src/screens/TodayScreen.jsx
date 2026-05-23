@@ -13,7 +13,6 @@ import { useTheme } from '../theme';
 import ShareCard from '../components/ShareCard';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import IrisSignature from '../components/IrisSignature';
-import { speakAsIris, stopSpeaking } from '../utils/irisVoice';
 import { writeWidgetPayload } from '../widgetBridge';
 import { startOrUpdateLiveActivity } from '../liveActivityBridge';
 import { useAuthStore } from '../store/authStore';
@@ -39,37 +38,6 @@ function getGreetingParts() {
 
 function isEvening() {
   return new Date().getHours() >= 19;
-}
-
-// Small SVG-free speaker icon drawn with View primitives. A trapezoid body
-// and two sound-wave arcs (approximated with thin bordered circles). Looks
-// clean at the 28x28 size we use for the Listen button.
-function SpeakerGlyph({ color = '#c4a86c', size = 14 }) {
-  const body = {
-    width: size * 0.5,
-    height: size * 0.7,
-    backgroundColor: color,
-    borderTopRightRadius: 2,
-    borderBottomRightRadius: 2,
-  };
-  const wave = {
-    position: 'absolute',
-    right: -4,
-    width: size * 0.45,
-    height: size * 0.45,
-    borderRadius: size * 0.225,
-    borderWidth: 1.6,
-    borderColor: color,
-    borderLeftColor: 'transparent',
-    borderTopColor: 'transparent',
-    borderBottomColor: 'transparent',
-  };
-  return (
-    <View style={{ width: size + 4, height: size + 2, alignItems: 'center', justifyContent: 'center' }}>
-      <View style={body} />
-      <View style={wave} />
-    </View>
-  );
 }
 
 function PressCard({ onPress, style, children, disabled }) {
@@ -121,13 +89,11 @@ export default function TodayScreen({ navigation }) {
   const [stressNoted, setStressNoted] = useState(false);
   const [showAllZones, setShowAllZones] = useState(false);
   const [zoneExpanded, setZoneExpanded] = useState(false);
-  const [isSpeaking, setIsSpeaking] = useState(false);
   const [sharing, setSharing] = useState(null); // { type: 'zone'|'streak', payload }
   const [showMilestone, setShowMilestone] = useState(null); // milestone days int
   const [showScoreInfo, setShowScoreInfo] = useState(false);
   const [yesterdayReflection, setYesterdayReflection] = useState(null);
   const [showWelcome, setShowWelcome] = useState(false);
-  const [showTtsHint, setShowTtsHint] = useState(false);
   const [shareVariant, setShareVariant] = useState('dark');
   const shareCardRef = useRef(null);
   const mountedRef = useRef(true);
@@ -332,35 +298,9 @@ export default function TodayScreen({ navigation }) {
     })();
   }, [todayPlan]);
 
-  // TTS hint — one-time tooltip pointing at the gold speaker button. Fires
-  // when the user has a plan loaded but hasn't seen the hint yet.
-  useEffect(() => {
-    if (!todayPlan) return;
-    (async () => {
-      try {
-        const seen = await AsyncStorage.getItem('livenew:seen_tts_hint');
-        if (!seen) setShowTtsHint(true);
-      } catch {}
-    })();
-  }, [todayPlan]);
-
-  const dismissTtsHint = async () => {
-    setShowTtsHint(false);
-    try { await AsyncStorage.setItem('livenew:seen_tts_hint', '1'); } catch {}
-  };
   const dismissWelcome = async () => {
     setShowWelcome(false);
     try { await AsyncStorage.setItem('livenew:seen_first_plan_welcome', '1'); } catch {}
-  };
-
-  // When the user taps Listen for the first time, dismiss the hint too —
-  // they've discovered it without needing the tooltip.
-  const handleListenWithHintDismiss = async (zone) => {
-    if (showTtsHint) {
-      setShowTtsHint(false);
-      try { await AsyncStorage.setItem('livenew:seen_tts_hint', '1'); } catch {}
-    }
-    await handleListen(zone);
   };
 
   // Push the FULL day's plan into the App Group UserDefaults whenever a new
@@ -380,26 +320,6 @@ export default function TodayScreen({ navigation }) {
     tapSuccess();
     submitReflection(feeling);
   };
-
-  const handleListen = async (zone) => {
-    if (!zone) return;
-    if (isSpeaking) {
-      stopSpeaking();
-      setIsSpeaking(false);
-      return;
-    }
-    tapLight();
-    setIsSpeaking(true);
-    // Include the pull-quote in what Iris reads — it's the most quotable line.
-    const text = [zone.headline, zone.pullQuote, zone.body].filter(Boolean).join('. ');
-    await speakAsIris(text, {
-      onDone: () => { if (mountedRef.current) setIsSpeaking(false); },
-      onStopped: () => { if (mountedRef.current) setIsSpeaking(false); },
-      onError: () => { if (mountedRef.current) setIsSpeaking(false); },
-    });
-  };
-
-  useEffect(() => () => { stopSpeaking(); }, []);
 
   const shareAs = async (type, payload, message) => {
     tapSelect();
@@ -715,43 +635,24 @@ export default function TodayScreen({ navigation }) {
               <Text style={s.zoneBody}>{currentZone.body}</Text>
             ) : null}
 
-            {showTtsHint ? (
-              <Pressable style={s.ttsHint} onPress={dismissTtsHint}>
-                <Text style={s.ttsHintText}>← Tap the gold speaker to hear me read this aloud.</Text>
-              </Pressable>
-            ) : null}
-
-            <View style={s.zoneActions}>
-              <Pressable
-                onPress={() => handleListenWithHintDismiss(currentZone)}
-                hitSlop={10}
-                style={[s.listenBtn, isSpeaking && s.listenBtnActive]}
-                accessibilityLabel={isSpeaking ? 'Stop Iris' : 'Hear from Iris'}
-              >
-                {isSpeaking ? (
-                  <View style={s.stopGlyph} />
-                ) : (
-                  <SpeakerGlyph color={colors.gold} />
-                )}
-              </Pressable>
-              <View style={s.zoneActionsRight}>
-                <Pressable style={s.zoneAction} onPress={() => handleShare(currentZone)} hitSlop={6}>
-                  <Text style={s.zoneActionIcon}>↗</Text>
-                  <Text style={s.zoneActionText}>Share</Text>
-                </Pressable>
-                <Pressable
-                  style={s.zoneAction}
-                  onPress={() => {
-                    tapLight();
-                    LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                    setZoneExpanded(v => !v);
-                  }}
-                  hitSlop={6}
-                >
-                  <Text style={s.zoneActionText}>{zoneExpanded ? 'Less' : 'Read more'}</Text>
-                </Pressable>
-              </View>
-            </View>
+            {/* Single elegant Show more / Show less link — centered, gold
+                italic. Replaces the previous cluttered Listen + Share +
+                Read more button row. The hairline divider above gives it
+                weight without competing visually with the headline. */}
+            <View style={s.zoneFooterDivider} />
+            <Pressable
+              onPress={() => {
+                tapLight();
+                LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                setZoneExpanded(v => !v);
+              }}
+              hitSlop={12}
+              style={s.zoneShowMore}
+            >
+              <Text style={s.zoneShowMoreText}>
+                {zoneExpanded ? 'Show less' : 'Show more'}
+              </Text>
+            </Pressable>
           </View>
         )}
 
@@ -1252,57 +1153,25 @@ function makeStyles(colors, fonts) {
     letterSpacing: 0.1,
     marginBottom: 16,
   },
-  zoneActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 6,
-    borderTopWidth: 1,
-    borderTopColor: colors.line,
-    marginTop: 4,
-    paddingVertical: 12,
+  // Hairline divider above the Show more / Show less link. Subtle weight
+  // separation between the content and the toggle without a heavy bar.
+  zoneFooterDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.line,
+    marginTop: 18,
+    marginHorizontal: -4,
   },
-  zoneActionsRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 18,
+  zoneShowMore: {
+    alignSelf: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 22,
   },
-  listenBtn: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    borderWidth: 1.4,
-    borderColor: colors.gold,
-    backgroundColor: colors.goldSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  listenBtnActive: {
-    backgroundColor: colors.gold,
-  },
-  stopGlyph: {
-    width: 10,
-    height: 10,
-    backgroundColor: '#1a1612',
-    borderRadius: 1.5,
-  },
-  zoneAction: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 6,
-  },
-  zoneActionIcon: {
-    fontFamily: fonts.displayBold,
-    fontSize: 11,
+  zoneShowMoreText: {
+    fontFamily: fonts.italic,
+    fontSize: 14,
     color: colors.gold,
-    letterSpacing: 0.5,
-  },
-  zoneActionText: {
-    fontFamily: fonts.displaySemibold,
-    fontSize: 13,
-    color: colors.text,
-    letterSpacing: 0.3,
+    letterSpacing: 0.6,
+    textAlign: 'center',
   },
   shareCardHidden: {
     position: 'absolute',
@@ -1565,23 +1434,6 @@ function makeStyles(colors, fonts) {
     borderWidth: 1,
     borderColor: colors.goldBorder,
     alignItems: 'center',
-  },
-  ttsHint: {
-    backgroundColor: colors.goldSoft,
-    borderWidth: 1,
-    borderColor: colors.goldBorder,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    marginBottom: 10,
-    marginTop: -4,
-    alignSelf: 'flex-start',
-  },
-  ttsHintText: {
-    fontFamily: fonts.italic,
-    fontSize: 12,
-    color: colors.gold,
-    letterSpacing: 0.2,
   },
   // Daily first read — the magnetic single-sentence opener Iris writes per day
   firstRead: {
