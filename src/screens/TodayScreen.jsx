@@ -363,21 +363,18 @@ export default function TodayScreen({ navigation }) {
     await handleListen(zone);
   };
 
-  // Push the current zone payload into the App Group UserDefaults (home-screen
-  // widget reads from here) AND start/update the iOS Live Activity for the
-  // lockscreen + Dynamic Island. Both fire whenever current zone or score
-  // changes. iOS-only; both helpers silently no-op elsewhere.
+  // Push the FULL day's plan into the App Group UserDefaults whenever a new
+  // plan loads. The widget reads this once and self-rotates the displayed
+  // zone by the system clock — no per-zone-tick re-writes needed. We also
+  // start/update the Live Activity for the lockscreen + Dynamic Island. Both
+  // helpers are iOS-only and silently no-op elsewhere.
   useEffect(() => {
+    if (todayPlan?.zones?.length) {
+      writeWidgetPayload({ zones: todayPlan.zones, score });
+    }
     const z = zoneById[currentZoneId];
-    if (!z) return;
-    writeWidgetPayload({
-      headline: z.headline,
-      pullQuote: z.pullQuote,
-      zoneLabel: ZONE_LABELS[currentZoneId] || '',
-      score,
-    });
-    startOrUpdateLiveActivity(z, score);
-  }, [currentZoneId, score, todayPlan]);
+    if (z) startOrUpdateLiveActivity(z, score);
+  }, [todayPlan, score, currentZoneId]);
 
   const handleReflection = (feeling) => {
     tapSuccess();
