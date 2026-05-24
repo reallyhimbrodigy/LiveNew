@@ -106,15 +106,17 @@ export default function ProgressScreen() {
       }
     } catch (err) {
       setError(true);
-      // Capture the actual failure mode so we can diagnose the day-1
-      // "could not load" report instead of swallowing the cause.
-      const detail = err?.code || err?.message || 'unknown';
+      // Build a compact human-readable detail string with everything we
+      // know: HTTP status if available, error code, message. Shown inline
+      // so users can screenshot it and tell us exactly what's failing.
+      const parts = [];
+      if (err?.status) parts.push(`HTTP ${err.status}`);
+      if (err?.code) parts.push(err.code);
+      if (err?.message && err.message !== err.code) parts.push(err.message.slice(0, 60));
+      const detail = parts.join(' · ') || 'unknown';
       setErrorDetail(detail);
-      // Surface to console so we can see what's actually failing on device
-      // logs (Xcode console / Console.app). Don't show to user — generic
-      // "Iris is offline" copy stays.
       // eslint-disable-next-line no-console
-      console.warn('[PROGRESS] fetch failed:', detail, err?.status || '');
+      console.warn('[PROGRESS] fetch failed:', detail);
     }
     setLoading(false);
   };
@@ -578,6 +580,11 @@ export default function ProgressScreen() {
             <Text style={s.emptySub}>
               Iris is offline for a moment. Your milestone above is still current — try again in a few seconds.
             </Text>
+            {/* Show the actual failure reason so we can diagnose instead of
+                guessing. Muted, small, screenshot-able. */}
+            {errorDetail ? (
+              <Text style={s.emptyDebug}>reason: {errorDetail}</Text>
+            ) : null}
             <Pressable
               style={({ pressed }) => [s.retryBtn, pressed && { opacity: 0.85 }]}
               onPress={() => { setLoading(true); refresh(); }}
@@ -1045,6 +1052,7 @@ function makeStyles(colors, fonts) {
     },
     emptyTitle: { fontFamily: fonts.displaySemibold, fontSize: 18, color: colors.text, marginBottom: 8 },
     emptySub: { fontFamily: fonts.body, fontSize: 14, color: colors.muted, textAlign: 'center', lineHeight: 20 },
+    emptyDebug: { fontFamily: fonts.body, fontSize: 11, color: colors.dim, textAlign: 'center', marginTop: 8, fontStyle: 'italic' },
     retryBtn: {
       marginTop: 16,
       backgroundColor: colors.gold,
