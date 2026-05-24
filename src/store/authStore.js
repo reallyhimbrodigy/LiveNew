@@ -4,7 +4,8 @@ import { api, setTokens, clearTokens, setAuthExpiredHandler } from '../api';
 import {
   requestPermissions,
   scheduleSessionReminders,
-  scheduleMorningCheckin,
+  scheduleCheckInReminders,
+  clearStaleZoneNotificationsIfNoPlanToday,
   migrateLegacyZoneNotifications,
 } from '../notifications';
 import { getLocalDateISO, getYesterdayISO } from '../utils/localDate';
@@ -50,9 +51,6 @@ export const useAuthStore = create((set, get) => ({
     // older builds with `repeats: true`, which kept firing stale plan
     // content on subsequent mornings. Safe no-op once it's run.
     migrateLegacyZoneNotifications().catch(() => {});
-    // Make sure the daily morning check-in is scheduled. Idempotent —
-    // re-schedules with the same content if already present.
-    scheduleMorningCheckin().catch(() => {});
 
     try {
       const [authJson, profileJson, planJson, skippedJson, nameJson] = await Promise.all([
@@ -142,6 +140,16 @@ export const useAuthStore = create((set, get) => ({
           healthPermission,
         });
         get().loadStreak();
+
+        // Reconcile notifications based on whether the user has a plan today.
+        // No plan today → cancel any lingering zone notifications (defensive,
+        // catches anything that survived past day rollover) AND schedule the
+        // check-in reminders so the user gets pulled back to the app.
+        // Has plan today → today's check-in reminders are suppressed.
+        const hasPlanToday = !!todayPlan && todayDate === getLocalDateISO();
+        clearStaleZoneNotificationsIfNoPlanToday(hasPlanToday).catch(() => {});
+        scheduleCheckInReminders({ hasPlanToday }).catch(() => {});
+
         // If we already have permission, refresh the health snapshot in the
         // background so the score and AI prompt have fresh data.
         if (healthPermission === 'granted') {
@@ -431,13 +439,17 @@ export const useAuthStore = create((set, get) => ({
       }
     } catch {}
 
-    // Schedule notifications. Zone reminders are one-shot for today; the
-    // daily morning check-in is the always-on anchor that prompts the user
-    // to start each new day.
+    // Schedule notifications.
+    //   - scheduleCheckInReminders({ hasPlanToday: true }) cancels TODAY's
+    //     remaining check-in nags (user just engaged, no need to nag) and
+    //     reschedules the next 6 days' worth of slots.
+    //   - scheduleSessionReminders schedules today's zone notifications
+    //     as one-shots — each fires once at its zone time with that
+    //     zone's headline, then gone.
     try {
       const granted = await requestPermissions();
       if (granted) {
-        await scheduleMorningCheckin();
+        await scheduleCheckInReminders({ hasPlanToday: true });
         if (hasZones) await scheduleSessionReminders(data.zones);
       }
     } catch {}

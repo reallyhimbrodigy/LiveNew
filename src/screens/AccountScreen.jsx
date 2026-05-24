@@ -16,7 +16,7 @@ import {
   getNotificationPermission, requestPermissions,
   getNotificationPrefs, setNotificationPrefs,
   scheduleSessionReminders, clearAllZoneNotifications,
-  scheduleMorningCheckin,
+  scheduleCheckInReminders,
 } from '../notifications';
 import { ZONE_LABELS } from '../utils/score';
 
@@ -76,7 +76,7 @@ export default function AccountScreen({ navigation }) {
     const ok = await requestPermissions();
     setNotifPerm(ok ? 'granted' : 'denied');
     if (ok) {
-      try { await scheduleMorningCheckin(); } catch {}
+      try { await scheduleCheckInReminders({ hasPlanToday: !!todayPlan?.zones }); } catch {}
       if (todayPlan?.zones) {
         try { await scheduleSessionReminders(todayPlan.zones); } catch {}
       }
