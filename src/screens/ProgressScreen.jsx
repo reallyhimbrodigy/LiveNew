@@ -1,6 +1,7 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../theme';
 import IrisSignature from '../components/IrisSignature';
@@ -107,11 +108,18 @@ export default function ProgressScreen() {
       setError(true);
       // Capture the actual failure mode so we can diagnose the day-1
       // "could not load" report instead of swallowing the cause.
-      setErrorDetail(err?.code || err?.message || 'unknown');
+      const detail = err?.code || err?.message || 'unknown';
+      setErrorDetail(detail);
+      // Surface to console so we can see what's actually failing on device
+      // logs (Xcode console / Console.app). Don't show to user — generic
+      // "Iris is offline" copy stays.
+      // eslint-disable-next-line no-console
+      console.warn('[PROGRESS] fetch failed:', detail, err?.status || '');
     }
     setLoading(false);
   };
 
+  // Initial mount: hydrate from cache, then refresh.
   useEffect(() => {
     let mounted = true;
     (async () => {
@@ -126,6 +134,16 @@ export default function ProgressScreen() {
     })();
     return () => { mounted = false; };
   }, []);
+
+  // Auto-retry on tab focus. Without this, the first failed fetch sticks
+  // the screen on "Iris is offline" forever (since lazy:false means the
+  // screen never unmounts/remounts). Tab focus = the user is looking at
+  // Progress = the right moment to re-try without a manual Retry tap.
+  useFocusEffect(
+    useCallback(() => {
+      refresh();
+    }, [])
+  );
 
   const rawTrend = data?.stressTrend || [];
   const trend = [...rawTrend].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
