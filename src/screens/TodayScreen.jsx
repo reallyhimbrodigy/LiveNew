@@ -40,6 +40,35 @@ function isEvening() {
   return new Date().getHours() >= 19;
 }
 
+// Pulsing dot used for the "current zone" position on Today's Arc. A
+// fixed-size gold core with an expanding ring around it — the ring loops
+// scale + opacity so the dot reads as alive. The pulse animation is
+// shared with the breathing dot on the stress button (passed in).
+function ArcCurrentDot({ pulse }) {
+  const ringStyle = {
+    position: 'absolute',
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#c4a86c',
+    opacity: pulse.interpolate({ inputRange: [0.35, 1], outputRange: [0.45, 0] }),
+    transform: [
+      { scale: pulse.interpolate({ inputRange: [0.35, 1], outputRange: [1, 2.2] }) },
+    ],
+  };
+  return (
+    <View style={{ width: 18, height: 18, alignItems: 'center', justifyContent: 'center' }}>
+      <Animated.View style={ringStyle} />
+      <View style={{
+        width: 10,
+        height: 10,
+        borderRadius: 5,
+        backgroundColor: '#c4a86c',
+      }} />
+    </View>
+  );
+}
+
 function PressCard({ onPress, style, children, disabled }) {
   const scale = useRef(new Animated.Value(1)).current;
   return (
@@ -462,7 +491,6 @@ export default function TodayScreen({ navigation }) {
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
           <View style={s.headerRow}>
             <View style={{ flex: 1 }}>
-              <IrisSignature size="header" style={{ marginBottom: 4 }} />
               <Text style={s.greetingDay}>{userName ? `Hi, ${userName}.` : dayOfWeek.toLowerCase()}</Text>
               <Text style={s.greetingPart}>{userName ? `${dayOfWeek.toLowerCase()} ${partOfDay}` : partOfDay}</Text>
             </View>
@@ -533,10 +561,11 @@ export default function TodayScreen({ navigation }) {
         showsVerticalScrollIndicator={false}
       >
 
-        {/* Header — Iris signature + greeting + streak/score + redo */}
+        {/* Header — greeting + streak/score + redo. The Iris signature mark
+            was removed here; the "Ask Iris anything →" gold link below
+            already carries the brand and is interactive. */}
         <View style={s.headerRow}>
           <View style={{ flex: 1 }}>
-            <IrisSignature size="header" style={{ marginBottom: 4 }} />
             <Text style={s.greetingDay}>{userName ? `Hi, ${userName}.` : dayOfWeek.toLowerCase()}</Text>
             <Text style={s.greetingPart}>{userName ? `${dayOfWeek.toLowerCase()} ${partOfDay}` : partOfDay}</Text>
             <Pressable
@@ -656,7 +685,10 @@ export default function TodayScreen({ navigation }) {
           </View>
         )}
 
-        {/* Today's arc — visual position + tap to expand */}
+        {/* Today's arc — animated timeline. Current dot pulses with a gold
+            glow ring; past dots are solid gold; future dots are outlined.
+            Line between dots is gold up to the current segment, muted
+            after. The whole card taps to expand all zones below. */}
         <Pressable
           style={s.arcCard}
           onPress={() => {
@@ -675,13 +707,16 @@ export default function TodayScreen({ navigation }) {
               const isPast = i < currentZoneIndex;
               return (
                 <View key={zid} style={s.arcSegment}>
-                  <View style={[
-                    s.arcDot,
-                    isPast && s.arcDotPast,
-                    isCurrent && s.arcDotCurrent,
-                  ]} />
+                  {isCurrent ? (
+                    <ArcCurrentDot pulse={stressDotOpacity} />
+                  ) : (
+                    <View style={[s.arcDot, isPast && s.arcDotPast]} />
+                  )}
                   {i < ZONE_ORDER.length - 1 && (
-                    <View style={[s.arcLine, isPast && s.arcLinePast]} />
+                    <View style={[
+                      s.arcLine,
+                      (isPast || isCurrent) && s.arcLinePast,
+                    ]} />
                   )}
                 </View>
               );
@@ -1219,25 +1254,23 @@ function makeStyles(colors, fonts) {
     borderColor: colors.dim,
   },
   arcDotPast: {
-    backgroundColor: colors.muted,
-    borderColor: colors.muted,
-  },
-  arcDotCurrent: {
-    width: 14, height: 14, borderRadius: 7,
     backgroundColor: colors.gold,
     borderColor: colors.gold,
   },
   arcLine: {
     flex: 1,
-    height: 1,
+    height: 1.5,
     backgroundColor: colors.line,
-    marginHorizontal: 2,
+    marginHorizontal: 3,
+    borderRadius: 1,
   },
-  arcLinePast: { backgroundColor: colors.muted },
+  arcLinePast: { backgroundColor: colors.gold },
   arcCurrent: {
-    fontFamily: fonts.displayItalic,
-    fontSize: 13,
-    color: colors.muted,
+    fontFamily: fonts.italic,
+    fontSize: 14,
+    color: colors.gold,
+    letterSpacing: 0.4,
+    marginTop: 4,
   },
 
   // All zones (expanded)

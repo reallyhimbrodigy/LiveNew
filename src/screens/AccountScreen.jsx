@@ -9,8 +9,6 @@ import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapMedium } from '../haptics';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
-import InviteShareCard from '../components/InviteShareCard';
-import IrisSignature from '../components/IrisSignature';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getNotificationPermission, requestPermissions,
@@ -21,10 +19,12 @@ import {
 import { ZONE_LABELS } from '../utils/score';
 
 export default function AccountScreen({ navigation }) {
-  const { colors, fonts } = useTheme();
+  const { colors, fonts, scheme } = useTheme();
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
 
   const profile = useAuthStore(s => s.profile);
+  const themeMode = useAuthStore(s => s.themeMode);
+  const setThemeMode = useAuthStore(s => s.setThemeMode);
   const isSubscribed = useAuthStore(s => s.isSubscribed);
   const logout = useAuthStore(s => s.logout);
   const deleteAccount = useAuthStore(s => s.deleteAccount);
@@ -39,23 +39,6 @@ export default function AccountScreen({ navigation }) {
   const [sharing, setSharing] = useState(null);
   const shareCardRef = useRef(null);
   const todayPlan = useAuthStore(z => z.todayPlan);
-  const [shareVariant, setShareVariantState] = useState('dark');
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const v = await AsyncStorage.getItem('livenew:share_card_variant');
-        if (v === 'cream' || v === 'dark') setShareVariantState(v);
-      } catch {}
-    })();
-  }, []);
-
-  const toggleShareVariant = async () => {
-    tapLight();
-    const next = shareVariant === 'dark' ? 'cream' : 'dark';
-    setShareVariantState(next);
-    try { await AsyncStorage.setItem('livenew:share_card_variant', next); } catch {}
-  };
 
   // Notification state
   const [notifPerm, setNotifPerm] = useState('unknown');
@@ -147,15 +130,22 @@ export default function AccountScreen({ navigation }) {
     }
   };
 
-  const handleInviteFriend = () => {
-    // Rotate through invite-card copy so back-to-back shares aren't identical.
-    const lineIndex = Math.floor(Math.random() * 3);
-    const messages = [
-      'Lower your cortisol by tonight. — Iris @ LiveNew',
-      'Iris reads bodies and tells the truth. — LiveNew',
-      "Eight zones a day. No timers. No sessions. — Iris @ LiveNew",
+  // Invite a friend — opens the native share sheet with a personalized
+  // message + the App Store link. They can send it via iMessage, AirDrop,
+  // Slack, anywhere. No image, no card preview — just text that travels
+  // cleanly through any channel.
+  const handleInviteFriend = async () => {
+    tapSelect();
+    const url = 'https://livenew.app';
+    const lines = [
+      'I’ve been using LiveNew — it reads your body and tells you exactly what to do to regulate your cortisol through the day. Way better than I expected.',
+      "I’ve been using this app called LiveNew. Iris (the AI inside it) is sharper than any wellness app I’ve tried — eight cortisol-aware moments a day, no fluff.",
+      "Try LiveNew. The AI inside (Iris) actually knows the science — cortisol, sleep, HRV, the whole thing. Daily plan tailored to where your body actually is.",
     ];
-    shareAs('invite', { lineIndex }, messages[lineIndex]);
+    const message = `${lines[Math.floor(Math.random() * lines.length)]}\n\n${url}`;
+    try {
+      await Share.share({ message, url });
+    } catch {}
   };
 
   const handleEdit = (field) => {
@@ -252,7 +242,6 @@ export default function AccountScreen({ navigation }) {
 
         <View style={s.headerRow}>
           <Text style={s.heading}>Account</Text>
-          <IrisSignature />
         </View>
 
         {/* Subscription status */}
@@ -316,39 +305,39 @@ export default function AccountScreen({ navigation }) {
 
         </View>
 
-        {/* Share section */}
+        {/* Share section — streak share moved up to the subscription card,
+            card-style toggle replaced with appearance (light/dark). */}
         <Text style={s.sectionTitle}>Share</Text>
 
         <View style={s.card}>
-          {streak > 0 ? (
-            <>
-              <Pressable style={s.settingRow} onPress={handleShareStreak}>
-                <View style={s.settingContent}>
-                  <Text style={s.settingTitle}>Share my streak</Text>
-                  <Text style={s.settingValue}>{streak} day{streak === 1 ? '' : 's'} with Iris</Text>
-                </View>
-                <Text style={s.settingArrow}>›</Text>
-              </Pressable>
-              <View style={s.settingDivider} />
-            </>
-          ) : null}
           <Pressable style={s.settingRow} onPress={handleInviteFriend}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Invite a friend</Text>
-              <Text style={s.settingValue}>Send them what Iris told you today</Text>
+              <Text style={s.settingValue}>Send a personal link to LiveNew.</Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
           </Pressable>
-          <View style={s.settingDivider} />
-          <Pressable style={s.settingRow} onPress={toggleShareVariant}>
+        </View>
+
+        {/* Appearance — manual light/dark override. */}
+        <Text style={s.sectionTitle}>Appearance</Text>
+
+        <View style={s.card}>
+          <View style={s.settingRow}>
             <View style={s.settingContent}>
-              <Text style={s.settingTitle}>Card style</Text>
+              <Text style={s.settingTitle}>Dark mode</Text>
               <Text style={s.settingValue}>
-                {shareVariant === 'dark' ? 'Dark · pops on any feed' : 'Cream · on-brand and soft'}
+                {themeMode === 'system' ? 'Following system' : (themeMode === 'dark' ? 'Always dark' : 'Always light')}
               </Text>
             </View>
-            <Text style={s.settingArrow}>↺</Text>
-          </Pressable>
+            <Switch
+              value={themeMode === 'dark' || (themeMode === 'system' && scheme === 'dark')}
+              onValueChange={(v) => { tapLight(); setThemeMode(v ? 'dark' : 'light'); }}
+              trackColor={{ false: colors.line, true: colors.gold }}
+              thumbColor={'#fff'}
+              ios_backgroundColor={colors.line}
+            />
+          </View>
         </View>
 
         {/* Notifications section */}
@@ -505,12 +494,7 @@ export default function AccountScreen({ navigation }) {
 
       {sharing ? (
         <View style={s.shareCardHidden} pointerEvents="none">
-          {sharing.type === 'streak' ? (
-            <StreakShareCard innerRef={shareCardRef} days={sharing.payload.days} variant={shareVariant} />
-          ) : null}
-          {sharing.type === 'invite' ? (
-            <InviteShareCard innerRef={shareCardRef} lineIndex={sharing.payload?.lineIndex || 0} variant={shareVariant} />
-          ) : null}
+          <StreakShareCard innerRef={shareCardRef} days={sharing.payload.days} />
         </View>
       ) : null}
     </SafeAreaView>

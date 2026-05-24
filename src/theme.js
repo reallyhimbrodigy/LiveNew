@@ -1,4 +1,5 @@
 import { useColorScheme } from 'react-native';
+import { useAuthStore } from './store/authStore';
 
 // Gold is the signature — preserved across both modes. Everything else flips.
 const GOLD = '#c4a86c';
@@ -90,7 +91,13 @@ export function getColors(scheme) {
 }
 
 export function useTheme() {
-  const scheme = useColorScheme();
-  const colors = getColors(scheme);
+  const systemScheme = useColorScheme();
+  // themeMode is 'system' | 'light' | 'dark' (persisted in authStore).
+  // 'system' follows the OS, 'light' / 'dark' override it explicitly.
+  const themeMode = useAuthStore((s) => s.themeMode);
+  const effectiveScheme = themeMode === 'light' || themeMode === 'dark'
+    ? themeMode
+    : systemScheme;
+  const colors = getColors(effectiveScheme);
   return { colors, fonts, spacing, scheme: colors.scheme };
 }

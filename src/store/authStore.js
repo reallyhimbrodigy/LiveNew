@@ -44,6 +44,7 @@ export const useAuthStore = create((set, get) => ({
   healthPermission: 'unknown', // "granted" | "denied" | "unknown"
   healthSnapshot: null,        // cached HealthKit summary, refreshed on app focus
   userName: null,              // first name (captured at signup, persisted locally)
+  themeMode: 'system',         // 'system' | 'light' | 'dark' — overrides useColorScheme()
 
   // Hydrate from storage
   hydrate: async () => {
@@ -51,6 +52,13 @@ export const useAuthStore = create((set, get) => ({
     // older builds with `repeats: true`, which kept firing stale plan
     // content on subsequent mornings. Safe no-op once it's run.
     migrateLegacyZoneNotifications().catch(() => {});
+
+    // Theme preference (light/dark/system) — independent of auth state,
+    // load it first so the app paints in the right mode immediately.
+    try {
+      const m = await AsyncStorage.getItem('livenew:theme_mode');
+      if (m === 'light' || m === 'dark' || m === 'system') set({ themeMode: m });
+    } catch {}
 
     try {
       const [authJson, profileJson, planJson, skippedJson, nameJson] = await Promise.all([
@@ -334,6 +342,13 @@ export const useAuthStore = create((set, get) => ({
   // Flip hasProfile to trigger navigation to MainTabs
   activateProfile: () => {
     set({ hasProfile: true });
+  },
+
+  // Manual light/dark mode override. 'system' falls back to the OS scheme.
+  setThemeMode: async (mode) => {
+    const valid = mode === 'light' || mode === 'dark' ? mode : 'system';
+    set({ themeMode: valid });
+    try { await AsyncStorage.setItem('livenew:theme_mode', valid); } catch {}
   },
 
   // Save routine upgrade (after user has seen their first plan and wants personalization)

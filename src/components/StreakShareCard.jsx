@@ -4,9 +4,11 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { fonts } from '../theme';
 import { shareCardPalette } from './shareCardPalette';
 
+// Instagram-story aspect ratio. Renders at FULL resolution off-screen so
+// captureRef produces a sharp 1080x1920 PNG instead of the tiny 378x672
+// blur the old SCALE=0.35 version was producing.
 const W = 1080;
 const H = 1920;
-const SCALE = 0.35;
 
 function milestoneTier(days) {
   if (days >= 100) return { label: 'CENTURY', subtitle: 'one hundred days in.' };
@@ -30,27 +32,31 @@ export default function StreakShareCard({ days, variant = 'dark', innerRef }) {
         end={{ x: 1, y: 1 }}
         style={s.bg}
       >
+        {/* Soft top-right glow — adds depth without being heavy */}
         <View style={s.glow} />
 
-        <View style={s.content}>
-          <View style={s.top}>
-            <Text style={s.wordmark}>LIVENEW</Text>
-            <Text style={s.tierLabel}>{tier.label}</Text>
-          </View>
+        {/* Top wordmark — centered, restrained */}
+        <View style={s.top}>
+          <Text style={s.wordmark}>LIVENEW</Text>
+        </View>
 
-          <View style={s.center}>
+        {/* Hero block — tier label tiny, massive day number, italic subtitle */}
+        <View style={s.center}>
+          <Text style={s.tierLabel}>{tier.label}</Text>
+          <View style={s.numberRow}>
             <Text style={s.daysNum}>{days}</Text>
-            <Text style={s.daysSuffix}>day{days === 1 ? '' : 's'}</Text>
-            <Text style={s.subtitle}>{tier.subtitle}</Text>
           </View>
+          <Text style={s.daysSuffix}>day{days === 1 ? '' : 's'} on the curve</Text>
+          <Text style={s.subtitle}>{tier.subtitle}</Text>
+        </View>
 
-          <View style={s.bottom}>
-            <Text style={s.attribution}>— Iris</Text>
-            <View style={s.footerRow}>
-              <View style={s.goldDot} />
-              <Text style={s.footerText}>livenew.app</Text>
-            </View>
+        {/* Bottom — Iris signature + URL, centered */}
+        <View style={s.bottom}>
+          <View style={s.signature}>
+            <Text style={s.signatureName}>Iris</Text>
+            <View style={s.signatureDot} />
           </View>
+          <Text style={s.url}>livenew.app</Text>
         </View>
       </LinearGradient>
     </View>
@@ -60,89 +66,105 @@ export default function StreakShareCard({ days, variant = 'dark', innerRef }) {
 function makeStyles(p) {
   return StyleSheet.create({
     outer: {
-      width: W * SCALE,
-      height: H * SCALE,
+      width: W,
+      height: H,
       overflow: 'hidden',
-      borderRadius: 24,
+      borderRadius: 0,
     },
-    bg: { width: '100%', height: '100%' },
+    bg: {
+      width: '100%',
+      height: '100%',
+      paddingHorizontal: 72,
+      paddingTop: 140,
+      paddingBottom: 140,
+      justifyContent: 'space-between',
+      alignItems: 'center',
+    },
     glow: {
       position: 'absolute',
-      top: -W * SCALE * 0.3,
-      left: -W * SCALE * 0.3,
-      width: W * SCALE * 0.9,
-      height: W * SCALE * 0.9,
-      borderRadius: W * SCALE * 0.45,
+      top: -260,
+      right: -260,
+      width: 720,
+      height: 720,
+      borderRadius: 360,
       backgroundColor: p.glow,
     },
-    content: {
-      flex: 1,
-      padding: 44 * SCALE,
-      paddingTop: 64 * SCALE,
-      paddingBottom: 64 * SCALE,
-      justifyContent: 'space-between',
-    },
-    top: { gap: 14 * SCALE },
+
+    top: { alignItems: 'center' },
     wordmark: {
       fontFamily: fonts.displayBold,
-      fontSize: 36 * SCALE,
+      fontSize: 36,
       color: p.wordmark,
-      letterSpacing: 8 * SCALE,
+      letterSpacing: 10,
+    },
+
+    center: {
+      alignItems: 'center',
+      gap: 0,
     },
     tierLabel: {
       fontFamily: fonts.displaySemibold,
-      fontSize: 26 * SCALE,
-      color: p.muted,
-      letterSpacing: 4 * SCALE,
+      fontSize: 22,
+      color: p.accent,
+      letterSpacing: 5,
+      marginBottom: 24,
     },
-    center: {
-      flex: 1,
+    numberRow: {
+      alignItems: 'center',
       justifyContent: 'center',
-      alignItems: 'flex-start',
     },
     daysNum: {
       fontFamily: fonts.accentBold,
-      fontSize: 360 * SCALE,
+      fontSize: 480,
       color: p.accent,
-      letterSpacing: -8 * SCALE,
-      lineHeight: 360 * SCALE,
+      letterSpacing: -16,
+      lineHeight: 480,
+      textAlign: 'center',
     },
     daysSuffix: {
       fontFamily: fonts.italic,
-      fontSize: 64 * SCALE,
+      fontSize: 44,
       color: p.body,
-      marginTop: 8 * SCALE,
+      marginTop: 16,
+      textAlign: 'center',
     },
     subtitle: {
       fontFamily: fonts.italic,
-      fontSize: 48 * SCALE,
+      fontSize: 36,
       color: p.muted,
-      marginTop: 40 * SCALE,
-      lineHeight: 64 * SCALE,
+      marginTop: 48,
+      textAlign: 'center',
+      lineHeight: 50,
+      paddingHorizontal: 24,
     },
-    bottom: { gap: 28 * SCALE },
-    attribution: {
-      fontFamily: fonts.displaySemibold,
-      fontSize: 32 * SCALE,
-      color: p.goldDeep,
-      letterSpacing: 2 * SCALE,
+
+    bottom: {
+      alignItems: 'center',
+      gap: 18,
     },
-    footerRow: {
+    signature: {
       flexDirection: 'row',
       alignItems: 'center',
-      gap: 14 * SCALE,
+      gap: 10,
     },
-    goldDot: {
-      width: 14 * SCALE,
-      height: 14 * SCALE,
-      borderRadius: 7 * SCALE,
+    signatureName: {
+      fontFamily: fonts.italic,
+      fontSize: 38,
+      color: p.accent,
+      letterSpacing: 1.5,
+    },
+    signatureDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
       backgroundColor: p.accent,
+      marginBottom: 4,
     },
-    footerText: {
+    url: {
       fontFamily: fonts.displaySemibold,
-      fontSize: 26 * SCALE,
+      fontSize: 22,
       color: p.muted,
-      letterSpacing: 1.5 * SCALE,
+      letterSpacing: 4,
     },
   });
 }
