@@ -8,6 +8,7 @@ import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapMedium } from '../haptics';
+import { Asset } from 'expo-asset';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
@@ -130,21 +131,39 @@ export default function AccountScreen({ navigation }) {
     }
   };
 
-  // Invite a friend — opens the native share sheet with a personalized
-  // message + the App Store link. They can send it via iMessage, AirDrop,
-  // Slack, anywhere. No image, no card preview — just text that travels
-  // cleanly through any channel.
+  // Invite a friend — share the actual LiveNew icon as the preview image
+  // (iOS otherwise pulls a "L" from the website's favicon, which looks
+  // off-brand). Resolve the bundled icon to a local URI, then pass it as
+  // the `url` field to Share.share so the share sheet shows OUR mark.
+  // Message copy is short, personal, and Iris-voiced — feels like a real
+  // recommendation from a friend, not marketing.
   const handleInviteFriend = async () => {
     tapSelect();
-    const url = 'https://livenew.app';
+    const link = 'https://livenew.app';
     const lines = [
-      'I’ve been using LiveNew — it reads your body and tells you exactly what to do to regulate your cortisol through the day. Way better than I expected.',
-      "I’ve been using this app called LiveNew. Iris (the AI inside it) is sharper than any wellness app I’ve tried — eight cortisol-aware moments a day, no fluff.",
-      "Try LiveNew. The AI inside (Iris) actually knows the science — cortisol, sleep, HRV, the whole thing. Daily plan tailored to where your body actually is.",
+      "ok you have to try this app. it literally tells you when your cortisol crashes and exactly what to do about it. iris (the ai inside) is wild → " + link,
+      "if you've ever been wired-but-tired, this app fixes it. eight cortisol-aware moments a day, real protocols, no 'just breathe' nonsense → " + link,
+      "this app reads your body and tells you the truth. closest thing to a personal doctor in your pocket. iris > every wellness app i've tried → " + link,
+      "stumbled into this app and now i can't stop. it's like a coach that actually knows the science — sleep, hrv, cortisol, the whole thing → " + link,
+      "the afternoon crash isn't you, it's your cortisol curve. this app finally taught me what to do about it. iris is the real deal → " + link,
     ];
-    const message = `${lines[Math.floor(Math.random() * lines.length)]}\n\n${url}`;
+    const message = lines[Math.floor(Math.random() * lines.length)];
+
+    let imageUri = null;
     try {
-      await Share.share({ message, url });
+      const asset = Asset.fromModule(require('../../assets/icon.png'));
+      await asset.downloadAsync();
+      imageUri = asset.localUri || asset.uri;
+    } catch {}
+
+    try {
+      if (imageUri) {
+        // Share image + message together — iOS shows our icon as the preview.
+        await Share.share({ url: imageUri, message });
+      } else {
+        // Fallback: text + link only.
+        await Share.share({ message });
+      }
     } catch {}
   };
 

@@ -651,7 +651,6 @@ export default function TodayScreen({ navigation }) {
 
             {currentZone.pullQuote ? (
               <View style={s.pullQuoteWrap}>
-                <Text style={s.pullQuoteMark}>"</Text>
                 <Text style={s.pullQuoteText}>{currentZone.pullQuote}</Text>
                 <View style={s.pullQuoteAttribution}>
                   <Text style={s.pullQuoteDash}>—</Text>
@@ -1091,10 +1090,10 @@ function makeStyles(colors, fonts) {
   // Zone hero
   zoneHero: {
     borderRadius: 18,
-    paddingVertical: 22,
-    paddingHorizontal: 22,
-    paddingLeft: 26,
-    marginBottom: 20,
+    paddingVertical: 18,
+    paddingHorizontal: 20,
+    paddingLeft: 24,
+    marginBottom: 18,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: colors.goldBorder,
@@ -1109,7 +1108,7 @@ function makeStyles(colors, fonts) {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginBottom: 10,
   },
   zoneLabel: {
     fontSize: 10,
@@ -1137,42 +1136,27 @@ function makeStyles(colors, fonts) {
   },
   zoneHeadline: {
     fontFamily: fonts.displayBold,
-    fontSize: 24,
+    fontSize: 23,
     color: colors.text,
     letterSpacing: -0.2,
-    lineHeight: 31,
-    marginBottom: 16,
+    lineHeight: 30,
+    marginBottom: 12,
   },
   pullQuoteWrap: {
-    paddingLeft: 12,
-    paddingRight: 4,
-    paddingVertical: 4,
-    marginBottom: 18,
-    position: 'relative',
-  },
-  pullQuoteMark: {
-    position: 'absolute',
-    left: -6,
-    top: -10,
-    fontFamily: fonts.accentBold,
-    fontSize: 48,
-    color: colors.gold,
-    opacity: 0.5,
-    lineHeight: 48,
+    paddingVertical: 2,
+    marginBottom: 12,
   },
   pullQuoteText: {
     fontFamily: fonts.italic,
-    fontSize: 17,
+    fontSize: 16,
     color: colors.text,
-    lineHeight: 26,
+    lineHeight: 24,
     letterSpacing: 0.1,
-    paddingLeft: 22,
   },
   pullQuoteAttribution: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    paddingLeft: 22,
-    marginTop: 6,
+    marginTop: 4,
     gap: 4,
   },
   pullQuoteDash: {
@@ -1193,12 +1177,12 @@ function makeStyles(colors, fonts) {
   zoneFooterDivider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: colors.line,
-    marginTop: 18,
+    marginTop: 12,
     marginHorizontal: -4,
   },
   zoneShowMore: {
     alignSelf: 'center',
-    paddingVertical: 14,
+    paddingVertical: 10,
     paddingHorizontal: 22,
   },
   zoneShowMoreText: {

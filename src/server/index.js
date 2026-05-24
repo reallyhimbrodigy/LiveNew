@@ -3374,6 +3374,10 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
   }
 
   if (pathname === "/v1/progress" && req.method === "GET") {
+    // OUTER guard — anything unexpected in this endpoint returns an empty
+    // 200 progress payload instead of a 500. Better UX: Progress shows the
+    // milestone card with no data than the "Iris is offline" empty state.
+    try {
     let checkIns = [];
     let moveEvents = [];
     let resetEvents = [];
@@ -3519,6 +3523,23 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
 
     sendJson(res, 200, { ok: true, progress }, auth.userId);
     return true;
+    } catch (err) {
+      console.error("[PROGRESS_HANDLER_ERROR]", err?.message, err?.stack?.slice(0, 600));
+      // Degrade gracefully — empty progress is better than a 500 that locks
+      // the user on "Iris is offline."
+      sendJson(res, 200, {
+        ok: true,
+        progress: {
+          stressTrend: [],
+          stressAvg7: null,
+          consistency: { checkinDays: 0, resetsCompleted: 0, movementCompleted: 0, winddownsCompleted: 0 },
+          reflections: [],
+          behaviorProfile: null,
+          insight: null,
+        },
+      }, auth.userId);
+      return true;
+    }
   }
 
   if (pathname === "/v1/progress") {
