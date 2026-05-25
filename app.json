@@ -62,7 +62,8 @@
           "NSHealthUpdateUsageDescription": "LiveNew does not write data back to Apple Health.",
           "background": true
         }
-      ]
+      ],
+      "@sentry/react-native"
     ],
     "extra": {
       "eas": {
