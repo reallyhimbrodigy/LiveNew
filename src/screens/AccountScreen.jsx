@@ -228,7 +228,7 @@ export default function AccountScreen({ navigation }) {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={s.editWrap}>
             <Text style={s.editTitle}>Update your routine</Text>
-            <Text style={s.editSub}>This shapes when and how LiveNew builds your plan.</Text>
+            <Text style={s.editSub}>This shapes when and how Iris builds your plan.</Text>
             <TextInput
               style={s.editInput}
               value={editValue}
