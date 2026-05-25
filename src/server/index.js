@@ -3383,8 +3383,13 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     let resetEvents = [];
     let winddownEvents = [];
     let reflectionEvents = [];
+    // userSupabase MUST be declared in the outer scope — computeBehaviorProfile
+    // (called below, after the inner try/catch) needs it. Previously this was
+    // a `const` inside the try block, which made it out-of-scope at line ~3470
+    // and threw ReferenceError on every request. That's the 500 the user has
+    // been seeing for weeks.
+    const userSupabase = supabaseForUser(auth.jwt);
     try {
-      const userSupabase = supabaseForUser(auth.jwt);
       const { data: checkInRows, error: checkInError } = await userSupabase
         .from("checkin")
         .select("date_key, stress, sleep_quality, energy, time_available_min, created_at")
