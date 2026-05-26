@@ -835,10 +835,13 @@ export default function TodayScreen({ navigation }) {
               {userName ? `Hi, ${userName}.` : 'Hi.'}
             </Text>
             <Text style={s.welcomeBody}>
-              This is your first day with me. I'll give you a read at each of the eight inflection points of your cortisol curve. Tap a zone to expand it. Tap the gold speaker to hear me read it. Tap share to send a moment.
+              This is your first day with me. I'll meet you at the eight inflection points of your cortisol curve — real protocols, specific doses, no fluff.
             </Text>
             <Text style={s.welcomeBody}>
-              I'll get sharper the longer you use me. Tonight, the evening reflection takes 3 taps and shapes tomorrow.
+              Tap "Show more" on any zone for the full protocol. Tap "I'm stressed" any time for an on-demand action. Tap "Ask Iris anything" to chat directly.
+            </Text>
+            <Text style={s.welcomeBody}>
+              The longer you show up, the sharper I get. Tonight's evening reflection is three taps — and shapes tomorrow.
             </Text>
             <Pressable
               style={({ pressed }) => [s.modalBtn, pressed && { opacity: 0.85 }]}
