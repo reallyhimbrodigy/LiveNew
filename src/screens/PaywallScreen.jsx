@@ -1,21 +1,26 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert,
+  View, Text, Pressable, StyleSheet, ActivityIndicator, Alert, ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
 import { getOfferings, purchasePackage, restorePurchases } from '../purchases';
 import { useAuthStore } from '../store/authStore';
-import { tapLight, tapSuccess } from '../haptics';
+import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import IrisSignature from '../components/IrisSignature';
 
-export default function PaywallScreen({ navigation, route }) {
+// Two-tier paywall: Annual (highlighted, default) and Monthly. The 14-day
+// free trial happens BEFORE this screen ever appears — by the time the
+// user lands here, they've already used Iris for 14 days. The copy
+// reflects that.
+export default function PaywallScreen({ navigation }) {
   const { colors, fonts } = useTheme();
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
 
   const [offering, setOffering] = useState(null);
   const [loading, setLoading] = useState(true);
   const [purchasing, setPurchasing] = useState(false);
+  const [selected, setSelected] = useState('annual'); // 'annual' | 'monthly'
   const setSubscribed = useAuthStore(z => z.setSubscribed);
 
   useEffect(() => {
@@ -26,25 +31,43 @@ export default function PaywallScreen({ navigation, route }) {
     })();
   }, []);
 
-  const handlePurchase = async () => {
-    if (!offering?.monthly) return;
+  const monthly = offering?.monthly || null;
+  const annual = offering?.annual || null;
+
+  // Display prices — fall back to defaults if RevenueCat hasn't returned
+  // offerings yet. These match what we configure in App Store Connect.
+  const monthlyPrice = monthly?.product?.priceString || '$9.99';
+  const annualPrice = annual?.product?.priceString || '$59.99';
+  const annualMonthlyEquivalent = annual?.product?.price
+    ? `$${(annual.product.price / 12).toFixed(2)}/mo`
+    : '$4.99/mo';
+  const annualSavingsPercent = monthly?.product?.price && annual?.product?.price
+    ? Math.round((1 - (annual.product.price / 12) / monthly.product.price) * 100)
+    : 50;
+
+  const handleSubscribe = async () => {
+    const pkg = selected === 'annual' ? annual : monthly;
+    if (!pkg) {
+      Alert.alert('Hmm', "We couldn't load the subscription right now. Try again in a moment.");
+      return;
+    }
     tapLight();
     setPurchasing(true);
     try {
-      const success = await purchasePackage(offering.monthly);
+      const success = await purchasePackage(pkg);
       if (success) {
         tapSuccess();
         await setSubscribed(true);
         navigation.goBack();
       }
     } catch (err) {
-      Alert.alert('Error', 'Purchase failed. Please try again.');
+      Alert.alert('Purchase failed', "Something went wrong. Try again, or use Restore if you've already subscribed.");
     }
     setPurchasing(false);
   };
 
   const handleRestore = async () => {
-    tapLight();
+    tapSelect();
     setPurchasing(true);
     try {
       const success = await restorePurchases();
@@ -53,52 +76,90 @@ export default function PaywallScreen({ navigation, route }) {
         await setSubscribed(true);
         navigation.goBack();
       } else {
-        Alert.alert('No subscription found', 'We couldn\'t find an active subscription for this account.');
+        Alert.alert('No subscription found', "We couldn't find an active subscription for this Apple ID.");
       }
     } catch {
-      Alert.alert('Error', 'Could not restore. Please try again.');
+      Alert.alert('Restore failed', 'Try again in a moment.');
     }
     setPurchasing(false);
   };
 
-  const price = offering?.monthly?.product?.priceString || '$9.99/month';
-  const trialText = offering?.monthly?.product?.introPrice
-    ? `${offering.monthly.product.introPrice.periodNumberOfUnits}-day free trial, then `
-    : '';
-
   return (
-    <SafeAreaView style={s.safe}>
-      <View style={s.container}>
+    <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
+      <Pressable
+        style={s.closeBtn}
+        onPress={() => navigation.goBack()}
+        hitSlop={{ top: 14, bottom: 14, left: 14, right: 14 }}
+      >
+        <Text style={s.closeText}>✕</Text>
+      </Pressable>
 
-        <TouchableOpacity style={s.closeBtn} onPress={() => navigation.goBack()} hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}>
-          <Text style={s.closeText}>✕</Text>
-        </TouchableOpacity>
+      <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
+        <View style={s.brandRow}>
+          <Text style={s.logo}>LiveNew</Text>
+          <IrisSignature size="header" />
+        </View>
 
-        <View style={s.content}>
-          <View style={s.brandRow}>
-            <Text style={s.logo}>LiveNew</Text>
-            <IrisSignature size="header" />
-          </View>
-          <Text style={s.title}>Keep going.</Text>
+        <Text style={s.title}>Two weeks with me.</Text>
+        <Text style={s.titleAccent}>Keep going.</Text>
 
-          <Text style={s.sub}>
-            You've spent a week with me. People who stick past this point feel measurably calmer in two.
-          </Text>
+        <Text style={s.sub}>
+          You felt what the curve looks like when it's actually tuned. People who stay past this point notice the difference in another two weeks.
+        </Text>
 
-          <View style={s.features}>
-            {[
-              'Unlimited daily plans tuned to your patterns',
-              'Iris references your real routine and biometrics',
-              'Evening reflections that shape tomorrow',
-              'Stress tracking that tells a story, not just numbers',
-              'A plan that gets sharper the longer you use it',
-            ].map((f, i) => (
-              <View key={i} style={s.featureRow}>
-                <Text style={s.featureCheck}>✓</Text>
-                <Text style={s.featureText}>{f}</Text>
+        <View style={s.features}>
+          {[
+            'Unlimited daily plans, sharpened by your patterns',
+            'Full chat with Iris — sleep, supplements, protocols',
+            'Behavior profile that gets smarter every day',
+            'Weekly outcome deltas — see what actually changed',
+            'Lock-screen + home-screen widgets',
+          ].map((f, i) => (
+            <View key={i} style={s.featureRow}>
+              <Text style={s.featureCheck}>✓</Text>
+              <Text style={s.featureText}>{f}</Text>
+            </View>
+          ))}
+        </View>
+
+        {/* Tier picker — annual highlighted as best value, monthly as alt */}
+        <View style={s.tiers}>
+          <Pressable
+            onPress={() => { tapSelect(); setSelected('annual'); }}
+            style={[
+              s.tierCard,
+              selected === 'annual' && s.tierCardSelected,
+            ]}
+          >
+            <View style={s.tierTopRow}>
+              <Text style={s.tierName}>Annual</Text>
+              <View style={s.bestBadge}>
+                <Text style={s.bestBadgeText}>BEST VALUE</Text>
               </View>
-            ))}
-          </View>
+            </View>
+            <Text style={s.tierPriceBig}>{annualPrice}<Text style={s.tierPriceUnit}>/year</Text></Text>
+            <Text style={s.tierSub}>{annualMonthlyEquivalent} · save {annualSavingsPercent}%</Text>
+            <View style={[s.radio, selected === 'annual' && s.radioSelected]}>
+              {selected === 'annual' ? <View style={s.radioDot} /> : null}
+            </View>
+          </Pressable>
+
+          <Pressable
+            onPress={() => { tapSelect(); setSelected('monthly'); }}
+            style={[
+              s.tierCard,
+              selected === 'monthly' && s.tierCardSelected,
+            ]}
+          >
+            <View style={s.tierTopRow}>
+              <Text style={s.tierName}>Monthly</Text>
+            </View>
+            <Text style={s.tierPriceBig}>{monthlyPrice}<Text style={s.tierPriceUnit}>/month</Text></Text>
+            <Text style={s.tierSub}>Cancel any time</Text>
+            <View style={[s.radio, selected === 'monthly' && s.radioSelected]}>
+              {selected === 'monthly' ? <View style={s.radioDot} /> : null}
+            </View>
+          </Pressable>
         </View>
 
         <View style={s.bottom}>
@@ -106,30 +167,33 @@ export default function PaywallScreen({ navigation, route }) {
             <ActivityIndicator color={colors.gold} />
           ) : (
             <>
-              <TouchableOpacity
-                style={s.purchaseBtn}
-                onPress={handlePurchase}
+              <Pressable
+                style={({ pressed }) => [
+                  s.purchaseBtn,
+                  pressed && { opacity: 0.88 },
+                  purchasing && { opacity: 0.6 },
+                ]}
+                onPress={handleSubscribe}
                 disabled={purchasing}
-                activeOpacity={0.8}
               >
                 {purchasing ? (
                   <ActivityIndicator color="#1a1612" size="small" />
                 ) : (
-                  <Text style={s.purchaseBtnText}>
-                    {trialText ? `Start free trial` : `Subscribe for ${price}`}
-                  </Text>
+                  <Text style={s.purchaseBtnText}>Continue with Iris</Text>
                 )}
-              </TouchableOpacity>
+              </Pressable>
 
-              <Text style={s.priceNote}>{trialText}{price}</Text>
+              <Text style={s.legal}>
+                Auto-renews until canceled. Manage in your Apple ID account settings.
+              </Text>
 
-              <TouchableOpacity style={s.restoreBtn} onPress={handleRestore} disabled={purchasing}>
+              <Pressable onPress={handleRestore} disabled={purchasing} style={s.restoreBtn} hitSlop={10}>
                 <Text style={s.restoreText}>Restore purchase</Text>
-              </TouchableOpacity>
+              </Pressable>
             </>
           )}
         </View>
-      </View>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -137,26 +201,24 @@ export default function PaywallScreen({ navigation, route }) {
 function makeStyles(colors, fonts) {
   return StyleSheet.create({
     safe: { flex: 1, backgroundColor: colors.bg },
-    container: { flex: 1 },
-
     closeBtn: {
       position: 'absolute',
       top: 16,
       right: 20,
       zIndex: 10,
-      width: 32,
-      height: 32,
-      borderRadius: 16,
+      width: 34,
+      height: 34,
+      borderRadius: 17,
       backgroundColor: colors.surface,
       alignItems: 'center',
       justifyContent: 'center',
     },
     closeText: { color: colors.muted, fontSize: 16 },
 
-    content: {
-      flex: 1,
-      padding: 24,
-      justifyContent: 'center',
+    scroll: {
+      paddingHorizontal: 24,
+      paddingTop: 56,
+      paddingBottom: 24,
     },
 
     brandRow: {
@@ -176,75 +238,144 @@ function makeStyles(colors, fonts) {
       fontFamily: fonts.displayBold,
       fontSize: 32,
       color: colors.text,
-      marginBottom: 20,
+      letterSpacing: -0.2,
+      lineHeight: 38,
+    },
+    titleAccent: {
+      fontFamily: fonts.italic,
+      fontSize: 32,
+      color: colors.gold,
       letterSpacing: 0.2,
+      marginBottom: 16,
+      lineHeight: 38,
     },
 
     sub: {
       fontFamily: fonts.body,
-      fontSize: 16,
+      fontSize: 15,
       color: colors.muted,
-      lineHeight: 25,
-      marginBottom: 24,
-      letterSpacing: 0.1,
+      lineHeight: 23,
+      marginBottom: 22,
     },
 
-    features: {
-      gap: 10,
-    },
-
-    featureRow: {
-      flexDirection: 'row',
-      alignItems: 'center',
-    },
-
+    features: { gap: 11, marginBottom: 24 },
+    featureRow: { flexDirection: 'row', alignItems: 'center' },
     featureCheck: {
       color: colors.gold,
       fontFamily: fonts.displayBold,
-      fontSize: 15,
+      fontSize: 14,
       marginRight: 10,
       width: 18,
     },
-
     featureText: {
       color: colors.text,
       fontFamily: fonts.body,
       fontSize: 14,
       flex: 1,
+      lineHeight: 20,
     },
 
-    bottom: {
-      padding: 24,
-      paddingBottom: 16,
+    // Tier picker
+    tiers: { gap: 10, marginBottom: 20 },
+    tierCard: {
+      borderWidth: 1.5,
+      borderColor: colors.line,
+      borderRadius: 14,
+      padding: 16,
+      backgroundColor: colors.surface,
+      position: 'relative',
+    },
+    tierCardSelected: {
+      borderColor: colors.gold,
+      backgroundColor: colors.goldSoft,
+    },
+    tierTopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 6,
+    },
+    tierName: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 14,
+      color: colors.text,
+      letterSpacing: 0.3,
+    },
+    bestBadge: {
+      backgroundColor: colors.gold,
+      borderRadius: 6,
+      paddingHorizontal: 8,
+      paddingVertical: 3,
+    },
+    bestBadgeText: {
+      fontFamily: fonts.displayBold,
+      fontSize: 9,
+      color: '#1a1612',
+      letterSpacing: 1.2,
+    },
+    tierPriceBig: {
+      fontFamily: fonts.displayBold,
+      fontSize: 26,
+      color: colors.text,
+      letterSpacing: -0.4,
+    },
+    tierPriceUnit: {
+      fontFamily: fonts.body,
+      fontSize: 14,
+      color: colors.muted,
+    },
+    tierSub: {
+      fontFamily: fonts.italic,
+      fontSize: 13,
+      color: colors.muted,
+      marginTop: 2,
+      letterSpacing: 0.2,
+    },
+    radio: {
+      position: 'absolute',
+      top: 16,
+      right: 16,
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      borderWidth: 1.5,
+      borderColor: colors.line,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: 'transparent',
+    },
+    radioSelected: {
+      borderColor: colors.gold,
+    },
+    radioDot: {
+      width: 10,
+      height: 10,
+      borderRadius: 5,
+      backgroundColor: colors.gold,
     },
 
+    bottom: { gap: 10 },
     purchaseBtn: {
       backgroundColor: colors.gold,
       borderRadius: 14,
-      paddingVertical: 16,
+      paddingVertical: 17,
       alignItems: 'center',
     },
-
     purchaseBtnText: {
       color: '#1a1612',
-      fontFamily: fonts.displaySemibold,
+      fontFamily: fonts.displayBold,
       fontSize: 17,
+      letterSpacing: 0.3,
     },
-
-    priceNote: {
+    legal: {
       color: colors.dim,
       fontFamily: fonts.body,
-      fontSize: 12,
+      fontSize: 11,
       textAlign: 'center',
-      marginTop: 8,
+      lineHeight: 16,
+      marginTop: 4,
     },
-
-    restoreBtn: {
-      alignItems: 'center',
-      marginTop: 12,
-      padding: 8,
-    },
-
+    restoreBtn: { alignItems: 'center', marginTop: 6, padding: 6 },
     restoreText: {
       color: colors.muted,
       fontFamily: fonts.body,

@@ -7,6 +7,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
+import { trialDaysRemaining, isWithinTrial } from '../store/authStore';
 import { tapLight, tapSelect, tapMedium } from '../haptics';
 import { Asset } from 'expo-asset';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
@@ -27,6 +28,9 @@ export default function AccountScreen({ navigation }) {
   const themeMode = useAuthStore(s => s.themeMode);
   const setThemeMode = useAuthStore(s => s.setThemeMode);
   const isSubscribed = useAuthStore(s => s.isSubscribed);
+  const trialStartISO = useAuthStore(s => s.trialStartISO);
+  const daysLeft = trialDaysRemaining(trialStartISO);
+  const inTrial = isWithinTrial(trialStartISO);
   const logout = useAuthStore(s => s.logout);
   const deleteAccount = useAuthStore(s => s.deleteAccount);
   const saveProfile = useAuthStore(s => s.saveProfile);
@@ -276,13 +280,23 @@ export default function AccountScreen({ navigation }) {
           >
             <View style={[s.statusBadge, isSubscribed && s.statusBadgeActive]}>
               <Text style={[s.statusBadgeText, isSubscribed && s.statusBadgeTextActive]}>
-                {isSubscribed ? 'PRO' : 'FREE'}
+                {isSubscribed ? 'PRO' : inTrial ? 'TRIAL' : 'FREE'}
               </Text>
             </View>
             <View style={s.statusContent}>
-              <Text style={s.statusTitle}>{isSubscribed ? 'LiveNew Pro' : 'Free plan'}</Text>
+              <Text style={s.statusTitle}>
+                {isSubscribed
+                  ? 'LiveNew Pro'
+                  : inTrial
+                  ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left in your trial`
+                  : 'Free plan'}
+              </Text>
               <Text style={s.statusSub}>
-                {isSubscribed ? 'Full access to all features' : 'Upgrade for unlimited plans'}
+                {isSubscribed
+                  ? 'Full access to all features'
+                  : inTrial
+                  ? 'Full access for now — subscribe before it ends.'
+                  : 'Subscribe to keep generating daily plans.'}
               </Text>
             </View>
             {!isSubscribed ? <Text style={s.settingArrow}>›</Text> : null}

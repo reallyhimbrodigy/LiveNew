@@ -23,6 +23,20 @@ const PLAN_KEY = 'livenew:plan';
 const SKIPPED_KEY = 'livenew:skipped_date';
 const NAME_KEY = 'livenew:user_name';
 
+// 14-day free trial helpers — used by both the gate (generatePlan) and the
+// UI (Paywall trigger, trial countdown on Account, feature gating elsewhere).
+export const TRIAL_DAYS = 14;
+export function trialDaysRemaining(trialStartISO) {
+  if (!trialStartISO) return TRIAL_DAYS;
+  const start = new Date(trialStartISO + 'T00:00:00').getTime();
+  if (!Number.isFinite(start)) return 0;
+  const elapsedDays = Math.floor((Date.now() - start) / 86400000);
+  return Math.max(0, TRIAL_DAYS - elapsedDays);
+}
+export function isWithinTrial(trialStartISO) {
+  return trialDaysRemaining(trialStartISO) > 0;
+}
+
 export const useAuthStore = create((set, get) => ({
   // State
   isLoading: true,
@@ -45,6 +59,7 @@ export const useAuthStore = create((set, get) => ({
   healthSnapshot: null,        // cached HealthKit summary, refreshed on app focus
   userName: null,              // first name (captured at signup, persisted locally)
   themeMode: 'system',         // 'system' | 'light' | 'dark' — overrides useColorScheme()
+  trialStartISO: null,         // ISO date YYYY-MM-DD when the 14-day free trial began
 
   // Hydrate from storage
   hydrate: async () => {
@@ -148,6 +163,9 @@ export const useAuthStore = create((set, get) => ({
           healthPermission,
         });
         get().loadStreak();
+        // Initialize trial start if missing — first hydrate after signup
+        // sets it to today, giving the user a fresh 14-day window.
+        get().ensureTrialStart().catch(() => {});
 
         // Reconcile notifications based on whether the user has a plan today.
         // No plan today → cancel any lingering zone notifications (defensive,
@@ -351,6 +369,24 @@ export const useAuthStore = create((set, get) => ({
     try { await AsyncStorage.setItem('livenew:theme_mode', valid); } catch {}
   },
 
+  // Initialize the 14-day free trial. Idempotent — safe to call on every
+  // hydrate / signup. Sets a date if one isn't already stored.
+  ensureTrialStart: async () => {
+    const existing = get().trialStartISO;
+    if (existing) return existing;
+    try {
+      const stored = await AsyncStorage.getItem('livenew:trial_start');
+      if (stored) {
+        set({ trialStartISO: stored });
+        return stored;
+      }
+    } catch {}
+    const today = getLocalDateISO();
+    set({ trialStartISO: today });
+    try { await AsyncStorage.setItem('livenew:trial_start', today); } catch {}
+    return today;
+  },
+
   // Save routine upgrade (after user has seen their first plan and wants personalization)
   saveRoutine: async (routine) => {
     const profile = { ...get().profile, routine };
@@ -362,22 +398,17 @@ export const useAuthStore = create((set, get) => ({
 
   // Generate day plan — called after the 3-step check-in (stress + sleep + energy)
   generatePlan: async ({ stress, sleepQuality, energy }) => {
-    // Paywall gate: 7 free plans (one per distinct day). After that, free
-    // users must subscribe before generating a new plan. We throw a typed
-    // error so the calling screen can route to the Paywall instead of
-    // showing a generic "something went wrong" message.
+    // Paywall gate: free 14-day trial of full access, then subscription
+    // required to keep generating daily plans. We throw a typed error so
+    // the calling screen can route to the Paywall instead of showing a
+    // generic "something went wrong" message.
     if (!get().isSubscribed) {
-      try {
-        const countRaw = await AsyncStorage.getItem('livenew:plan_count');
-        const count = countRaw ? parseInt(countRaw, 10) : 0;
-        if (count >= 7) {
-          const err = new Error('Free trial complete — subscribe to keep generating plans.');
-          err.code = 'PAYWALL_REQUIRED';
-          throw err;
-        }
-      } catch (err) {
-        if (err?.code === 'PAYWALL_REQUIRED') throw err;
-        // Other AsyncStorage errors — don't block the user.
+      const trialStart = await get().ensureTrialStart();
+      const inTrial = isWithinTrial(trialStart);
+      if (!inTrial) {
+        const err = new Error('Your 14-day trial is complete — subscribe to keep going.');
+        err.code = 'PAYWALL_REQUIRED';
+        throw err;
       }
     }
 
