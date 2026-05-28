@@ -151,13 +151,6 @@ export default function OnboardingScreen() {
     setConnectingHealth(false);
     animateTransition(() => setStep(1));
   };
-  const handleSkipHealth = () => {
-    tapMedium();
-    useAuthStore.setState({ healthPermission: 'denied' });
-    require('../healthkit').setHealthPermissionStatus('denied').catch(() => {});
-    animateTransition(() => setStep(1));
-  };
-
   // Step 1 — Schedule
   const handleScheduleNext = () => {
     if (!routine.trim()) return;
@@ -288,18 +281,24 @@ export default function OnboardingScreen() {
                     <Text style={s.healthBullet}>•  Read-only. Nothing is written back.</Text>
                   </View>
                   {error ? <Text style={s.error}>{error}</Text> : null}
+                  {/* Single CTA. The iOS permission sheet that follows is
+                      what handles the deny path — Apple rejects custom
+                      "Not now" screens that bypass the system dialog
+                      (guideline 5.1.1(iv)). Tapping Continue triggers the
+                      native sheet; if the user denies there, we still
+                      advance to the next step. */}
                   <Pressable
                     style={({ pressed }) => [s.healthPrimary, pressed && { opacity: 0.9 }, connectingHealth && { opacity: 0.6 }]}
                     onPress={handleConnectHealth}
                     disabled={connectingHealth}
                   >
                     <Text style={s.healthPrimaryText}>
-                      {connectingHealth ? 'Connecting…' : 'Connect Apple Health'}
+                      {connectingHealth ? 'Connecting…' : 'Continue'}
                     </Text>
                   </Pressable>
-                  <Pressable style={s.healthSecondary} onPress={handleSkipHealth} disabled={connectingHealth}>
-                    <Text style={s.healthSecondaryText}>Not now</Text>
-                  </Pressable>
+                  <Text style={s.healthFootnote}>
+                    You'll be asked which data types to share. You can change this any time in Settings → Privacy → Health.
+                  </Text>
                 </ScrollView>
               )}
 
@@ -593,15 +592,14 @@ function makeStyles(colors, fonts) {
       fontSize: 17,
       letterSpacing: 0.2,
     },
-    healthSecondary: {
-      paddingVertical: 12,
-      alignItems: 'center',
-    },
-    healthSecondaryText: {
+    healthFootnote: {
       fontFamily: fonts.body,
-      fontSize: 14,
+      fontSize: 12,
       color: colors.muted,
-      letterSpacing: 0.2,
+      lineHeight: 18,
+      textAlign: 'center',
+      marginTop: 14,
+      paddingHorizontal: 4,
     },
   });
 }

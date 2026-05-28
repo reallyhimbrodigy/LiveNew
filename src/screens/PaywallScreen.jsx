@@ -165,6 +165,22 @@ export default function PaywallScreen({ navigation }) {
         <View style={s.bottom}>
           {loading ? (
             <ActivityIndicator color={colors.gold} />
+          ) : !monthly && !annual ? (
+            // Offerings failed to load (RevenueCat couldn't fetch products,
+            // or App Store Connect products aren't configured yet). Make
+            // the failure VISIBLE — never let the CTA look enabled but be
+            // dead. Apple rejected the previous build for this exact issue.
+            <View>
+              <View style={s.errorCard}>
+                <Text style={s.errorTitle}>Pricing unavailable</Text>
+                <Text style={s.errorBody}>
+                  Subscription details couldn't be loaded right now. Check your connection or try again in a moment.
+                </Text>
+              </View>
+              <Pressable onPress={handleRestore} disabled={purchasing} style={s.restoreBtn} hitSlop={10}>
+                <Text style={s.restoreText}>Restore purchase</Text>
+              </Pressable>
+            </View>
           ) : (
             <>
               <Pressable
@@ -380,6 +396,30 @@ function makeStyles(colors, fonts) {
       color: colors.muted,
       fontFamily: fonts.body,
       fontSize: 13,
+    },
+
+    // Visible empty-state when subscription offerings fail to load. Tells
+    // the user explicitly so the button is never just sitting there
+    // looking enabled but doing nothing.
+    errorCard: {
+      borderWidth: 1,
+      borderColor: colors.errorBorder,
+      backgroundColor: colors.errorBg,
+      borderRadius: 14,
+      padding: 16,
+      marginBottom: 14,
+    },
+    errorTitle: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 14,
+      color: colors.error,
+      marginBottom: 6,
+    },
+    errorBody: {
+      fontFamily: fonts.body,
+      fontSize: 13,
+      color: colors.text,
+      lineHeight: 19,
     },
   });
 }

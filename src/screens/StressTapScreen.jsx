@@ -215,13 +215,6 @@ export default function StressTapScreen({ navigation }) {
     // won't re-ask within this session.
     animateTransition(() => setStep(1));
   };
-  const handleSkipHealth = () => {
-    tapMedium();
-    // Mark denied so we don't re-prompt next check-in. User can connect from Account.
-    useAuthStore.setState({ healthPermission: 'denied' });
-    require('../healthkit').setHealthPermissionStatus('denied').catch(() => {});
-    animateTransition(() => setStep(1));
-  };
 
   const stepHeading = {
     1: 'How are you feeling?',
@@ -264,18 +257,22 @@ export default function StressTapScreen({ navigation }) {
               <Text style={s.healthBullet}>•  Score reflects actual recovery, not a self-rating</Text>
               <Text style={s.healthBullet}>•  Read-only. Nothing is written back. Nothing leaves your phone.</Text>
             </View>
+            {/* Single CTA only — Apple rejects "Not now" buttons that bypass
+                the iOS permission dialog (guideline 5.1.1(iv)). The system
+                sheet that follows is the only path; if the user denies it
+                there, we still advance. */}
             <Pressable
               style={({ pressed }) => [s.healthPrimary, pressed && { opacity: 0.9 }, connectingHealth && { opacity: 0.6 }]}
               onPress={handleConnectHealth}
               disabled={connectingHealth}
             >
               <Text style={s.healthPrimaryText}>
-                {connectingHealth ? 'Connecting…' : 'Connect Apple Health'}
+                {connectingHealth ? 'Connecting…' : 'Continue'}
               </Text>
             </Pressable>
-            <Pressable style={s.healthSecondary} onPress={handleSkipHealth} disabled={connectingHealth}>
-              <Text style={s.healthSecondaryText}>Not now</Text>
-            </Pressable>
+            <Text style={s.healthFootnote}>
+              You'll be asked which data types to share. You can change this any time in Settings → Privacy → Health.
+            </Text>
           </Animated.View>
         ) : (
           <Animated.View style={[s.body, { opacity: fadeAnim }]}>
@@ -446,15 +443,14 @@ function makeStyles(colors, fonts) {
       fontSize: 16,
       letterSpacing: 0.3,
     },
-    healthSecondary: {
-      paddingVertical: 14,
-      alignItems: 'center',
-    },
-    healthSecondaryText: {
-      color: colors.muted,
+    healthFootnote: {
       fontFamily: fonts.body,
-      fontSize: 14,
-      letterSpacing: 0.2,
+      fontSize: 12,
+      color: colors.muted,
+      lineHeight: 18,
+      textAlign: 'center',
+      marginTop: 14,
+      paddingHorizontal: 4,
     },
   });
 }
