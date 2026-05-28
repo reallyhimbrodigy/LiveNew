@@ -288,11 +288,12 @@ export default function TodayScreen({ navigation }) {
 
   const { dayOfWeek, partOfDay } = getGreetingParts();
 
-  // Auto-route to the daily check-in on app open when there's no plan and
-  // no explicit skip. The user shouldn't have to tap "Start today" — opening
-  // the app IS the intent. Only runs once on initial mount; if the user
-  // skips (or backs out via the in-screen Skip link), they land back here
-  // and won't be re-routed.
+  // Auto-route on app open when there's no plan today. New flow:
+  //   - First open of a fresh day → Overnight screen (morning ritual)
+  //   - Already saw Overnight today → straight to StressTap (check-in)
+  //   - User skipped today → don't route
+  // The Overnight screen sets livenew:seen_overnight_date on its CTA so
+  // subsequent opens this day skip past it. Only fires once per mount.
   const autoRoutedRef = useRef(false);
   useEffect(() => {
     if (autoRoutedRef.current) return;
@@ -300,7 +301,15 @@ export default function TodayScreen({ navigation }) {
     const today = getLocalDateISO();
     if (skippedDate === today) return;
     autoRoutedRef.current = true;
-    navigation.replace('StressTap');
+    (async () => {
+      let seen = null;
+      try { seen = await AsyncStorage.getItem('livenew:seen_overnight_date'); } catch {}
+      if (seen === today) {
+        navigation.replace('StressTap');
+      } else {
+        navigation.replace('Overnight');
+      }
+    })();
   }, [todayPlan, skippedDate, navigation]);
 
   // Read yesterday's reflection — drives the visible payoff callout that
@@ -594,13 +603,17 @@ export default function TodayScreen({ navigation }) {
             <Text style={[s.scoreNum, band === 'high' && { color: colors.gold }]}>{score}</Text>
             <Text style={s.scoreLabel}>score</Text>
           </Pressable>
-          <Pressable
-            onPress={() => { tapSelect(); navigation.replace('StressTap'); }}
-            hitSlop={10}
-            style={s.redoBtn}
-          >
-            <Text style={s.redoIcon}>↻</Text>
-          </Pressable>
+          {/* Hide the "redo plan" button during sleep window — regenerating
+              a plan at 10pm makes no sense, the day is done. */}
+          {currentZoneId !== 'sleep' ? (
+            <Pressable
+              onPress={() => { tapSelect(); navigation.replace('StressTap'); }}
+              hitSlop={10}
+              style={s.redoBtn}
+            >
+              <Text style={s.redoIcon}>↻</Text>
+            </Pressable>
+          ) : null}
         </View>
 
         {/* Daily first read — single Iris-voiced sentence anchored in
@@ -629,6 +642,21 @@ export default function TodayScreen({ navigation }) {
               {yesterdayReflection === 'better' && "Yesterday felt better. Today builds on what worked."}
               {yesterdayReflection === 'same' && "Yesterday felt steady. Today holds the line."}
               {yesterdayReflection === 'harder' && "Yesterday felt harder. Today eases the load."}
+            </Text>
+          </View>
+        ) : null}
+
+        {/* Wind-down banner — appears only while the sleep zone is current
+            (after 9:30pm). The day's protocols are done, this is the close.
+            Iris voice signals it explicitly so the user knows the rhythm. */}
+        {currentZoneId === 'sleep' ? (
+          <View style={s.windDownCard}>
+            <Text style={s.windDownLabel}>WIND-DOWN</Text>
+            <Text style={s.windDownLine}>
+              That's today. I'm offline until morning.
+            </Text>
+            <Text style={s.windDownSub}>
+              Reflect below if you haven't yet — it shapes tomorrow.
             </Text>
           </View>
         ) : null}
@@ -1088,6 +1116,41 @@ function makeStyles(colors, fonts) {
   healthBannerSkipText: {
     color: colors.muted,
     fontSize: 13,
+  },
+
+  // Wind-down banner — shown during the sleep zone (after 9:30pm).
+  // Calmer styling than the zone hero: muted surface, no gold accent bar.
+  // Signals "the day is closing" without competing visually with the
+  // zone card or the reflection prompt below.
+  windDownCard: {
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    marginBottom: 16,
+  },
+  windDownLabel: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 10,
+    color: colors.muted,
+    letterSpacing: 1.8,
+    marginBottom: 8,
+  },
+  windDownLine: {
+    fontFamily: fonts.italic,
+    fontSize: 17,
+    color: colors.text,
+    lineHeight: 24,
+    letterSpacing: 0.1,
+    marginBottom: 6,
+  },
+  windDownSub: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.muted,
+    lineHeight: 19,
   },
 
   // Zone hero

@@ -25,6 +25,7 @@ import AccountScreen from '../screens/AccountScreen';
 import IntroScreen from '../screens/IntroScreen';
 import PaywallScreen from '../screens/PaywallScreen';
 import ChatScreen from '../screens/ChatScreen';
+import OvernightScreen from '../screens/OvernightScreen';
 
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -126,6 +127,7 @@ function TodayStack() {
   return (
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="TodayMain" component={TodayScreen} />
+      <Stack.Screen name="Overnight" component={OvernightScreen} />
       <Stack.Screen name="StressTap" component={StressTapScreen} />
       <Stack.Screen name="Paywall" component={PaywallScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'modal' }} />
