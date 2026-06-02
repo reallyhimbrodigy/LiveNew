@@ -4746,6 +4746,8 @@ function contentTypeForPath(filePath) {
   if (filePath.endsWith(".json")) return "application/json";
   if (filePath.endsWith(".ico")) return "image/x-icon";
   if (filePath.endsWith(".png")) return "image/png";
+  if (filePath.endsWith(".txt")) return "text/plain; charset=utf-8";
+  if (filePath.endsWith(".xml")) return "application/xml; charset=utf-8";
   return "application/octet-stream";
 }
 
@@ -6026,6 +6028,29 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === "GET" && pathname === "/manifest.json") {
     await serveFile(res, path.join(PUBLIC_DIR, "manifest.json"));
+    return;
+  }
+
+  // SEO / crawler discovery files. Each is a single fixed path so we serve
+  // explicitly rather than opening up the whole public dir.
+  if (req.method === "GET" && pathname === "/robots.txt") {
+    await serveFile(res, path.join(PUBLIC_DIR, "robots.txt"));
+    return;
+  }
+  if (req.method === "GET" && pathname === "/sitemap.xml") {
+    await serveFile(res, path.join(PUBLIC_DIR, "sitemap.xml"));
+    return;
+  }
+  if (req.method === "GET" && pathname === "/llms.txt") {
+    await serveFile(res, path.join(PUBLIC_DIR, "llms.txt"));
+    return;
+  }
+
+  // Google Search Console verification files. Pattern: /google<token>.html in
+  // the site root. We restrict to the exact filename shape Google issues to
+  // avoid opening a path-traversal surface.
+  if (req.method === "GET" && /^\/google[a-f0-9]{12,32}\.html$/.test(pathname)) {
+    await serveFile(res, path.join(PUBLIC_DIR, pathname.slice(1)));
     return;
   }
 
