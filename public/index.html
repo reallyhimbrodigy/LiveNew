@@ -11,7 +11,18 @@
 
   <!-- Apple Smart App Banner: shows native "View / Open in App" banner on iOS Safari -->
   <meta name="apple-itunes-app" content="app-id=6760437838">
-  <link rel="apple-touch-icon" href="/assets/icon-192.png">
+
+  <!-- Favicons / brand mark. The L logo lives in public/assets/icon-*.png
+       and icon.svg. Explicit link tags so PH, Slack, search crawlers, and
+       browsers all pick the same image (otherwise some fall back to a stale
+       /favicon.ico and grab the wrong one). -->
+  <link rel="icon" type="image/svg+xml" href="/assets/icon.svg">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="/assets/icon-192.png">
+  <link rel="icon" type="image/png" sizes="512x512" href="/assets/icon-512.png">
+  <link rel="apple-touch-icon" sizes="192x192" href="/assets/icon-192.png">
+  <link rel="apple-touch-icon" sizes="512x512" href="/assets/icon-512.png">
+  <link rel="shortcut icon" href="/favicon.ico">
 
   <!-- Open Graph (link previews on iMessage, Slack, Discord, LinkedIn, Facebook) -->
   <meta property="og:type" content="website">
