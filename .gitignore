@@ -48,3 +48,6 @@ android/
 targets/**/Assets.xcassets/
 targets/**/Info.plist
 targets/**/generated.entitlements
+
+# Local build IPAs (uploaded to ASC, not source)
+build-*.ipa

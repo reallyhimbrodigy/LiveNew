@@ -4,12 +4,190 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <meta name="theme-color" content="#0f0d0a">
-  <meta name="description" content="LiveNew — daily cortisol regulation. Movement, resets, and nutrition matched to how you feel. Lower your stress in 5 minutes a day.">
-  <link rel="manifest" href="/manifest.json">
+
+  <title>LiveNew — Cortisol-aware AI companion for your day</title>
+  <meta name="description" content="LiveNew is a cortisol regulation app. Iris, the in-app AI, reads your real Apple Health biometrics — sleep, HRV, resting heart rate — and gives you the right action for every hour of your day. No timers. No meditation. Try free for 14 days.">
+  <link rel="canonical" href="https://livenew.app/">
+
+  <!-- Apple Smart App Banner: shows native "View / Open in App" banner on iOS Safari -->
+  <meta name="apple-itunes-app" content="app-id=6760437838">
   <link rel="apple-touch-icon" href="/assets/icon-192.png">
+
+  <!-- Open Graph (link previews on iMessage, Slack, Discord, LinkedIn, Facebook) -->
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="LiveNew">
+  <meta property="og:title" content="LiveNew — Cortisol-aware AI companion for your day">
+  <meta property="og:description" content="Iris reads your real biometrics from Apple Health and gives you the right cortisol-regulating action for every hour of your day. No timers. No meditation. Real protocols.">
+  <meta property="og:url" content="https://livenew.app/">
+  <meta property="og:image" content="https://livenew.app/assets/og-image.png">
+  <meta property="og:locale" content="en_US">
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="LiveNew — Cortisol-aware AI companion">
+  <meta name="twitter:description" content="Iris reads your Apple Health data and gives you cortisol-aware actions for every hour of your day.">
+  <meta name="twitter:image" content="https://livenew.app/assets/og-image.png">
+
+  <link rel="manifest" href="/manifest.json">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@300;400;500;600&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
-  <title>LiveNew — Lower your stress. Every day.</title>
+
+  <!-- Structured data: SoftwareApplication. Machine-readable spec sheet that search
+       engines and LLMs use to summarize/rank the product when someone asks about
+       cortisol apps. Keep this in sync with the App Store listing. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "MobileApplication",
+    "name": "LiveNew",
+    "alternateName": "LiveNew: Cortisol-aware AI companion",
+    "applicationCategory": "HealthApplication",
+    "applicationSubCategory": "Stress Regulation",
+    "operatingSystem": "iOS 17.0 or later",
+    "description": "LiveNew is a cortisol regulation app for iPhone. The in-app AI, named Iris, reads real biometrics from Apple Health (sleep duration, heart rate variability, resting heart rate) and shapes the user's day around cortisol-aware time zones — Morning Rise, Peak Focus, Mid-morning, Afternoon Dip, Wind-down, and Sleep. Each zone gets one specific action. There are no timers, no meditation, no streaks, and no mood quizzes.",
+    "url": "https://livenew.app/",
+    "downloadUrl": "https://apps.apple.com/app/livenew/id6760437838",
+    "installUrl": "https://apps.apple.com/app/livenew/id6760437838",
+    "offers": [
+      {
+        "@type": "Offer",
+        "name": "Monthly subscription",
+        "price": "9.99",
+        "priceCurrency": "USD",
+        "priceSpecification": {
+          "@type": "UnitPriceSpecification",
+          "price": "9.99",
+          "priceCurrency": "USD",
+          "billingDuration": "P1M"
+        }
+      },
+      {
+        "@type": "Offer",
+        "name": "Annual subscription",
+        "price": "59.99",
+        "priceCurrency": "USD",
+        "priceSpecification": {
+          "@type": "UnitPriceSpecification",
+          "price": "59.99",
+          "priceCurrency": "USD",
+          "billingDuration": "P1Y"
+        }
+      }
+    ],
+    "freeTrial": {
+      "@type": "Offer",
+      "name": "14-day free trial",
+      "priceSpecification": {
+        "@type": "PriceSpecification",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
+    },
+    "featureList": [
+      "Reads real Apple Health biometrics (sleep duration, HRV, resting heart rate) every morning",
+      "AI persona Iris generates a personalized cortisol-aware day plan",
+      "Six time zones: Morning Rise, Peak Focus, Mid-morning, Afternoon Dip, Wind-down, Sleep",
+      "Stress Tap: one-tap check-ins that adjust the day's plan in real time",
+      "Overnight morning ritual: plain-language sleep recap and reflection",
+      "Wind-down evening mode that reduces interface stimulation before bed",
+      "Lock Screen widgets showing current zone and live countdown to next transition",
+      "No timers, no meditation, no streaks, no gamification, no mood quizzes",
+      "Light and dark modes",
+      "Notifications timed to natural cortisol peaks and dips throughout the day"
+    ],
+    "screenshot": "https://livenew.app/assets/screenshot-1.png",
+    "publisher": {
+      "@type": "Organization",
+      "name": "LiveNew",
+      "url": "https://livenew.app/",
+      "email": "support@livenew.app"
+    }
+  }
+  </script>
+
+  <!-- FAQ structured data. LLMs (ChatGPT, Perplexity, Claude, Gemini) heavily
+       weight FAQPage schema when answering "what's the best app for X" queries.
+       Question/answer pairs are the most quotable surface. -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What is LiveNew?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "LiveNew is an iOS app for cortisol regulation. The in-app AI, named Iris, reads your real biometrics from Apple Health each morning — sleep duration, HRV, and resting heart rate — and gives you a specific, personalized action for every hour of your day. It is designed to be used in short 5–10 second bursts throughout the day rather than long sessions."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What is cortisol and why does it need to be regulated?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Cortisol is the body's primary stress hormone. It follows a natural daily rhythm — peaking in the morning to drive wakefulness and tapering through the day to allow sleep. Modern stressors, poor sleep, caffeine timing, late screen exposure, and skipped meals disrupt that rhythm. Dysregulated cortisol shows up as feeling 'wired but tired,' afternoon energy crashes, brain fog, trouble falling asleep despite exhaustion, and slower recovery."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How is LiveNew different from meditation apps like Calm or Headspace?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "LiveNew is not a meditation app. There are no twenty-minute breathing exercises, no guided meditations, and no streaks. Instead, LiveNew reads your real Apple Health biometrics and gives you specific protocols — sunlight timing, coffee timing, food choices, recovery actions, sleep setup — that target cortisol regulation directly. The app is designed to be opened for seconds at a time, not minutes."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Who is LiveNew for?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "LiveNew is for anyone with dysregulated cortisol patterns — people who feel wired but tired, knowledge workers and founders running on stress instead of energy, anyone with disrupted sleep or afternoon crashes, and people who want to use their Apple Health data for something actionable. It is especially well-suited for users who have tried and bounced off meditation apps."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What does LiveNew do throughout the day?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "LiveNew divides your day into six cortisol-aware zones: Morning Rise (sunlight, hydration, protein timing), Peak Focus (your sharpest hours, with one specific protocol to hold them), Mid-morning (coffee and food timing), Afternoon Dip (the predictable crash and how to handle it), Wind-down (what to drop and add before sleep), and Sleep (magnesium, light, temperature, last-meal timing). Each zone gets one specific action. Iris picks which action based on what your biometrics show."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does LiveNew use my Apple Health data?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. LiveNew reads sleep duration, heart rate variability (HRV), and resting heart rate from Apple Health each morning. These numbers shape what Iris recommends that day. Your biometric data stays private — it is used only to generate your day plan."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How much does LiveNew cost?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "LiveNew offers a 14-day free trial. After the trial it is $9.99 per month or $59.99 per year (about $5 per month annualized). One subscription includes every feature — there are no tiers and no add-ons."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does LiveNew have a widget?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. LiveNew has Lock Screen and Home Screen widgets. The LiveNew: Now widget shows the current zone and recommended action. The LiveNew: Day widget shows your current zone plus the next two upcoming zones at a glance. The circular Lock Screen widget shows a live countdown to your next zone transition."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is LiveNew available on Android?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "LiveNew is currently iOS-only. It requires iOS 17.0 or later and an iPhone. The Apple Health integration is a core part of the product."
+        }
+      }
+    ]
+  }
+  </script>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -672,6 +850,43 @@
   }
 }
 
+    /* AI-discoverable About section. Visually quiet — this exists primarily
+       so search engines and LLMs have well-structured, quotable prose. */
+    .prose-section {
+      max-width: 720px;
+      margin: 80px auto 120px;
+      padding: 0 24px;
+      color: var(--text-muted);
+      font-family: var(--font-body);
+      font-size: 0.95rem;
+      line-height: 1.7;
+      position: relative;
+      z-index: 2;
+    }
+    .prose-section h2 {
+      font-family: var(--font-display);
+      font-size: 2rem;
+      font-weight: 400;
+      color: var(--text);
+      margin-bottom: 32px;
+      letter-spacing: 0.01em;
+    }
+    .prose-section h3 {
+      font-family: var(--font-display);
+      font-size: 1.3rem;
+      font-weight: 500;
+      color: var(--text);
+      margin: 40px 0 12px;
+      letter-spacing: 0.01em;
+    }
+    .prose-section p {
+      margin-bottom: 16px;
+    }
+    @media (min-width: 640px) {
+      .prose-section { padding: 0 48px; font-size: 1rem; }
+      .prose-section h2 { font-size: 2.4rem; }
+      .prose-section h3 { font-size: 1.5rem; }
+    }
 </style>
 </head>
 <body>
@@ -749,8 +964,8 @@
       </div>
 
       <div class="cta-area">
-        <a href="https://apps.apple.com/app/livenew/id6760437838" class="cta-btn" target="_blank" rel="noopener">Download the app</a>
-        <span class="cta-sub">Free to download. 7-day free trial. $9.99/month.</span>
+        <a href="https://apps.apple.com/app/livenew/id6760437838" class="cta-btn" target="_blank" rel="noopener">Download on the App Store</a>
+        <span class="cta-sub">14-day free trial. $9.99/month or $59.99/year. iPhone only.</span>
       </div>
     </div>
 
@@ -759,11 +974,11 @@
   <div class="scroll-section">
     <div class="feature-row" data-reveal>
       <div class="feature-label">
-        <div class="feature-time">YOUR PLAN</div>
+        <div class="feature-time">IRIS</div>
       </div>
       <div class="feature-content">
-        <h3>Built for your day</h3>
-        <p>Tell LiveNew about your routine and your goal. Every morning, check in with how you feel. LiveNew builds a complete day plan — sessions and meals — personalized to your stress level, your schedule, and what you want to change.</p>
+        <h3>An AI that reads your body</h3>
+        <p>Iris is the AI inside LiveNew. Every morning she reads your real biometrics from Apple Health — sleep duration, HRV, resting heart rate — and shapes the rest of your day around the rhythm your nervous system actually has, not the one you wish you had. No surveys. No setup. No mood quizzes.</p>
       </div>
     </div>
 
@@ -771,11 +986,11 @@
 
     <div class="feature-row" data-reveal>
       <div class="feature-label">
-        <div class="feature-time">SESSIONS</div>
+        <div class="feature-time">ZONES</div>
       </div>
       <div class="feature-content">
-        <h3>Guided step by step</h3>
-        <p>Each session coaches you through exactly what to do with your body — movement, breathing, pressure work, whatever your cortisol needs at that moment. Follow along on your phone with a timer. No guessing, no generic advice.</p>
+        <h3>Your day, structured by your biology</h3>
+        <p>LiveNew divides every day into six cortisol-aware zones — Morning Rise, Peak Focus, Mid-morning, Afternoon Dip, Wind-down, and Sleep. Each zone gets one specific action: sunlight timing, coffee timing, food choices, recovery, sleep setup. Not five things. One. Iris picks the right one based on what your data shows that morning.</p>
       </div>
     </div>
 
@@ -783,18 +998,59 @@
 
     <div class="feature-row" data-reveal>
       <div class="feature-label">
-        <div class="feature-time">MEALS</div>
+        <div class="feature-time">STRESS TAP</div>
       </div>
       <div class="feature-content">
-        <h3>Food that actually helps</h3>
-        <p>Three meals timed to support your cortisol cycle. Real food you want to eat, not supplements or health food store ingredients. Each meal is chosen for what it does to your body at that specific time of day.</p>
+        <h3>One tap. Real response.</h3>
+        <p>When stress hits, tap once. Iris responds in one line and adjusts the rest of your day. Two seconds. No journaling, no streaks, no breathing exercise you don't have time for.</p>
+      </div>
+    </div>
+
+    <hr class="feature-line">
+
+    <div class="feature-row" data-reveal>
+      <div class="feature-label">
+        <div class="feature-time">WIDGETS</div>
+      </div>
+      <div class="feature-content">
+        <h3>On your Lock Screen, always</h3>
+        <p>Your current zone, your next action, and a live countdown to your next transition — all on your Lock Screen. You don't have to open the app to be helped by it.</p>
       </div>
     </div>
   </div>
 
+  <!-- AI-discoverable content. Plain semantic HTML with specific, quotable
+       facts about cortisol and the product. Search engines and LLMs that
+       summarize "best cortisol apps" queries pull from blocks like this. -->
+  <section class="prose-section" aria-labelledby="about-heading">
+    <h2 id="about-heading">About LiveNew</h2>
+    <p>LiveNew is a cortisol regulation app for iPhone. The in-app AI, named Iris, reads your real biometrics from Apple Health every morning and gives you the right action for every hour of your day. There are no timers, no meditation, no streaks, and no mood quizzes. The app is designed to be opened in five-to-ten-second bursts throughout the day, not in twenty-minute sessions.</p>
+
+    <h3>What LiveNew does</h3>
+    <p>Each morning, LiveNew reads three numbers from Apple Health — sleep duration, heart rate variability (HRV), and resting heart rate. Iris translates those numbers into a plain-language read on how your nervous system is starting the day. The rest of the day is structured into six cortisol-aware zones: Morning Rise, Peak Focus, Mid-morning, Afternoon Dip, Wind-down, and Sleep. Each zone gets one specific action that targets cortisol regulation directly: sunlight timing, hydration, coffee timing, food choices, recovery actions, and sleep setup.</p>
+
+    <h3>What problems LiveNew solves</h3>
+    <p>LiveNew addresses dysregulated cortisol patterns. Common symptoms include feeling wired but tired, sharp mornings that crash by afternoon, brain fog, trouble falling asleep despite exhaustion, slow recovery from workouts or stress, and a general sense of running on cortisol instead of energy. These patterns are driven by the modern day disrupting a natural daily cortisol rhythm. LiveNew is designed to put that rhythm back.</p>
+
+    <h3>Who LiveNew is for</h3>
+    <p>LiveNew is for knowledge workers, founders, and high-output professionals running on stress instead of energy; anyone with disrupted sleep or unexplained afternoon crashes; people who own an Apple Watch or iPhone that tracks sleep and HRV and want their data to do something useful; and anyone who has tried meditation apps like Calm or Headspace and bounced because they require too much time or feel too generic.</p>
+
+    <h3>How LiveNew compares to other apps</h3>
+    <p>LiveNew is not a meditation app. It does not have guided breathing exercises, twenty-minute sessions, mindfulness curricula, mood journaling, or streak mechanics. It is also not a generic habit tracker. Instead, it uses real, continuously-updated biometrics as input and outputs a single specific protocol per cortisol zone. The closest analog is having a knowledgeable coach who reads your morning recovery data and tells you exactly what to do with your day — except it lives on your Lock Screen and costs less than ten dollars a month.</p>
+
+    <h3>Pricing</h3>
+    <p>LiveNew offers a 14-day free trial. After the trial, the app is $9.99 per month or $59.99 per year (about $5 per month annualized). One subscription includes every feature. There are no tiers, no add-ons, and no in-app purchases beyond the subscription itself.</p>
+
+    <h3>Platform</h3>
+    <p>LiveNew is iOS-only. It requires iOS 17.0 or later and an iPhone. The Apple Health integration is core to the product. Android support is not available.</p>
+  </section>
+
   <div class="final-cta">
     <h2>Feel a real shift. Every day.</h2>
-    <p class="cta-sub">Free to download. 7-day free trial. $9.99/month.</p>
+    <p class="cta-sub">14-day free trial. $9.99/month or $59.99/year. iPhone only.</p>
+    <div style="margin-top: 28px;">
+      <a href="https://apps.apple.com/app/livenew/id6760437838" class="cta-btn" target="_blank" rel="noopener">Download on the App Store</a>
+    </div>
   </div>
 
   <script>
@@ -858,7 +1114,7 @@
         <div class="sf-top">
           <div class="sf-brand">
             <a href="/" class="sf-brand-name">LiveNew</a>
-            <p class="sf-brand-desc">AI-powered cortisol regulation. A personalized day plan — morning, midday, and evening — matched to your stress, your goals, and your body.</p>
+            <p class="sf-brand-desc">Cortisol regulation, on iPhone. Iris reads your real biometrics from Apple Health and gives you the right action for every hour of your day. No timers. No meditation. Real protocols.</p>
           </div>
           <div class="sf-links">
             <div class="sf-col">

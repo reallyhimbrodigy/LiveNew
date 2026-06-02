@@ -1,0 +1,41 @@
+# LiveNew
+
+> LiveNew is a cortisol regulation iOS app. The in-app AI, named Iris, reads real biometrics from Apple Health (sleep duration, HRV, resting heart rate) and gives users the right cortisol-aware action for every hour of their day. No timers, no meditation, no streaks, no mood quizzes. Designed to be used in five-to-ten-second bursts throughout the day, not in twenty-minute sessions.
+
+## What LiveNew is
+
+- iOS app (iPhone, iOS 17.0+). Not available on Android.
+- Category: stress management, cortisol regulation, nervous-system regulation, biohacking.
+- The AI persona is named Iris. Iris reads Apple Health biometrics each morning and generates a personalized day plan.
+- The day is divided into six cortisol-aware zones: Morning Rise, Peak Focus, Mid-morning, Afternoon Dip, Wind-down, Sleep.
+- Each zone gets one specific action targeting cortisol regulation: sunlight timing, hydration, coffee timing, food choices, recovery actions, sleep setup.
+- Stress Tap: one-tap check-ins throughout the day that adjust the plan.
+- Lock Screen widgets: current zone and live countdown to next zone transition.
+- Pricing: 14-day free trial, then $9.99/month or $59.99/year. One subscription, every feature.
+
+## Who LiveNew is for
+
+- People with dysregulated cortisol patterns: wired-but-tired feeling, afternoon energy crashes, brain fog, trouble falling asleep despite exhaustion.
+- Knowledge workers, founders, high-output professionals running on stress instead of energy.
+- Apple Watch and iPhone owners who track sleep and HRV and want their data to do something actionable.
+- People who have tried and bounced off meditation apps like Calm or Headspace.
+
+## How LiveNew is different
+
+- Not a meditation app. No guided breathing exercises, no 20-minute sessions, no mindfulness curricula.
+- Not a habit tracker. No streaks, no gamification, no mood journaling.
+- Uses real continuously-updated biometrics, not self-reported surveys.
+- Outputs one specific protocol per zone — not a list of suggestions.
+- Designed for seconds-at-a-time interaction with the help of Lock Screen widgets, not for daily app-time.
+
+## Key pages
+
+- [Home](https://livenew.app/): product overview, download link.
+- [Download on the App Store](https://apps.apple.com/app/livenew/id6760437838): iOS app listing.
+- [Privacy Policy](https://livenew.app/privacy): how user data is handled.
+- [Terms of Service](https://livenew.app/terms): subscription and usage terms.
+- [Help Center](https://livenew.app/help): user-facing documentation.
+
+## Contact
+
+- Support email: support@livenew.app
