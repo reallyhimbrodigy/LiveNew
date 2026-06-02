@@ -9,7 +9,7 @@ import { useAuthStore } from '../store/authStore';
 import { api } from '../api';
 import IrisSignature from '../components/IrisSignature';
 
-export default function AuthScreen() {
+export default function AuthScreen({ navigation }) {
   const { colors, fonts } = useTheme();
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
 
@@ -53,11 +53,18 @@ export default function AuthScreen() {
     try {
       if (mode === 'signup') {
         const data = await signup(email.trim(), password, name.trim());
+        // After signup, Supabase sends a 6-digit OTP to the user's email.
+        // Push them onto the VerifyEmail screen to enter that code. The
+        // verifyOtp call returns a session, so the user lands logged in
+        // without a follow-up login round-trip.
         if (data?.needsEmailConfirm) {
-          setSuccess('Check your email to confirm your account.');
           setLoading(false);
+          navigation?.navigate('VerifyEmail', { email: email.trim() });
           return;
         }
+        // If for any reason Supabase returned an already-active session at
+        // signup time (e.g. email confirmation is off in dashboard), fall
+        // back to login.
         await login(email.trim(), password);
       } else {
         await login(email.trim(), password);
@@ -73,7 +80,11 @@ export default function AuthScreen() {
       } else if (err.code === 'INVALID_CREDENTIALS') {
         setError('Invalid email or password.');
       } else if (err.code === 'EMAIL_NOT_CONFIRMED') {
-        setInfo('Check your email to confirm your account before logging in.');
+        // Account exists but email never verified. Send them to the verify
+        // screen with a fresh code so they don't dead-end on login.
+        setLoading(false);
+        navigation?.navigate('VerifyEmail', { email: email.trim() });
+        return;
       } else if (err.code === 'NETWORK_ERROR') {
         setError('Check your internet connection.');
       } else {

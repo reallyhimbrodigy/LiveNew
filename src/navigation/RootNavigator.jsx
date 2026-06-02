@@ -17,6 +17,7 @@ import { initPurchases } from '../purchases';
 
 // Screens
 import AuthScreen from '../screens/AuthScreen';
+import VerifyEmailScreen from '../screens/VerifyEmailScreen';
 import OnboardingScreen from '../screens/OnboardingScreen';
 import StressTapScreen from '../screens/StressTapScreen';
 import TodayScreen from '../screens/TodayScreen';
@@ -144,6 +145,18 @@ function IntroStack() {
   );
 }
 
+// Pre-login stack so we can push the email-verification screen on top of Auth
+// after signup. Once verifyOtp succeeds and isLoggedIn flips, RootNavigator
+// swaps to Intro or Main and this stack unmounts cleanly.
+function AuthStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="AuthMain" component={AuthScreen} />
+      <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
+    </Stack.Navigator>
+  );
+}
+
 export default function RootNavigator() {
   const isLoading = useAuthStore((s) => s.isLoading);
   const isLoggedIn = useAuthStore((s) => s.isLoggedIn);
@@ -213,7 +226,7 @@ export default function RootNavigator() {
     >
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {!isLoggedIn ? (
-          <Stack.Screen name="Auth" component={AuthScreen} />
+          <Stack.Screen name="Auth" component={AuthStack} />
         ) : !hasProfile ? (
           <Stack.Screen name="Intro" component={IntroStack} />
         ) : (

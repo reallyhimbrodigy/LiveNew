@@ -128,6 +128,8 @@ export const api = {
   // Auth
   login: (email, password) => request('POST', '/v1/auth/login', { email, password }),
   signup: (email, password, name) => request('POST', '/v1/auth/signup', { email, password, name, consent: true }),
+  verifySignupOtp: (email, code) => request('POST', '/v1/auth/verify-signup-otp', { email, code }),
+  resendSignupOtp: (email) => request('POST', '/v1/auth/resend-signup-otp', { email }),
   resetPassword: (email) => request('POST', '/v1/auth/reset-password', { email }),
   logout: () => request('POST', '/v1/auth/logout', {}),
 

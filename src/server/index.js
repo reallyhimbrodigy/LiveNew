@@ -524,6 +524,8 @@ const PUBLIC_POST_ROUTES = new Set([
   "/v1/auth/reset-password",
   "/v1/auth/refresh-session",
   "/v1/auth/resend-signup",
+  "/v1/auth/verify-signup-otp",
+  "/v1/auth/resend-signup-otp",
   "/v1/auth/admin/generate-signup-link",
   "/v1/auth/logout",
   "/v1/csrf",
@@ -6563,6 +6565,104 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         console.error("[auth][login] unexpected error", { message: err?.message || String(err) });
         sendJson(res, 500, { ok: false, code: "LOGIN_FAILED", message: "Login failed. Please try again." });
+        return;
+      }
+    }
+
+    // Verify the 6-digit OTP code that Supabase sent in the signup email.
+    // Replaces the old click-the-link flow which was broken on iOS (Safari got
+    // the session, the app never received it). Now the user enters the code
+    // into the app directly. On success, Supabase returns a fully-confirmed
+    // session and we hand the tokens back to the client so they're logged in
+    // without a separate login call.
+    if (pathname === "/v1/auth/verify-signup-otp" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
+      const body = await parseJson(req);
+      const email = body?.email;
+      const code = body?.code;
+      if (!email || typeof email !== "string") {
+        sendError(res, 400, "email_required", "email is required", "email");
+        return;
+      }
+      if (!code || typeof code !== "string" || !/^\d{6}$/.test(code.trim())) {
+        sendError(res, 400, "code_required", "A 6-digit code is required", "code");
+        return;
+      }
+      const emailLower = email.trim().toLowerCase();
+      const codeTrim = code.trim();
+      try {
+        // type=email handles both signup confirmation and magic-link sign-in
+        // in modern Supabase. We previously called signUp() with password, so
+        // the OTP in the email is the signup confirmation token; verifying
+        // here marks the user confirmed and returns a session.
+        const { data, error } = await supabaseAnon().auth.verifyOtp({
+          email: emailLower,
+          token: codeTrim,
+          type: "email",
+        });
+        if (error) {
+          logDebug({ tag: "auth.verify_otp", phase: "supabase_error", email: emailLower, message: error.message, status: error.status });
+          // Map Supabase's "Token has expired or is invalid" into a code the
+          // client can act on (offer Resend, show a friendly message).
+          const msg = String(error.message || "");
+          let code = "OTP_INVALID";
+          let userMessage = "That code didn't work. Try again or send a new one.";
+          if (/expired/i.test(msg)) {
+            code = "OTP_EXPIRED";
+            userMessage = "That code expired. Send a new one.";
+          }
+          sendJson(res, 400, { ok: false, code, message: userMessage });
+          return;
+        }
+        const session = data?.session;
+        const user = data?.user;
+        if (!session) {
+          sendJson(res, 400, { ok: false, code: "OTP_NO_SESSION", message: "Verification didn't return a session." });
+          return;
+        }
+        logDebug({ tag: "auth.verify_otp", phase: "ok", email: emailLower, userId: user?.id });
+        sendJson(res, 200, {
+          ok: true,
+          userId: user?.id || null,
+          email: user?.email || emailLower,
+          accessToken: session.access_token,
+          refreshToken: session.refresh_token,
+        });
+        return;
+      } catch (err) {
+        console.error("[auth][verify_otp] unexpected error", { message: err?.message || String(err) });
+        sendJson(res, 500, { ok: false, code: "VERIFY_FAILED", message: "Verification failed. Please try again." });
+        return;
+      }
+    }
+
+    // Resend the signup OTP code. Calls Supabase's resend endpoint with
+    // type=signup so the user gets a fresh 6-digit code emailed to them.
+    if (pathname === "/v1/auth/resend-signup-otp" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
+      const body = await parseJson(req);
+      const email = body?.email;
+      if (!email || typeof email !== "string") {
+        sendError(res, 400, "email_required", "email is required", "email");
+        return;
+      }
+      const emailLower = email.trim().toLowerCase();
+      try {
+        const { data, error } = await supabaseAnon().auth.resend({
+          type: "signup",
+          email: emailLower,
+        });
+        if (error) {
+          logDebug({ tag: "auth.resend_otp", phase: "supabase_error", email: emailLower, message: error.message });
+          sendJson(res, 400, { ok: false, code: "RESEND_FAILED", message: error.message });
+          return;
+        }
+        logDebug({ tag: "auth.resend_otp", phase: "ok", email: emailLower, data: Boolean(data) });
+        sendJson(res, 200, { ok: true });
+        return;
+      } catch (err) {
+        console.error("[auth][resend_otp] error", { message: err?.message || String(err) });
+        sendJson(res, 500, { ok: false, code: "RESEND_FAILED", message: "Resend failed. Please try again." });
         return;
       }
     }

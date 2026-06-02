@@ -273,6 +273,46 @@ export const useAuthStore = create((set, get) => ({
     return data;
   },
 
+  // Verify the 6-digit signup code from the confirmation email. Returns the
+  // same shape as login on success: sets the access/refresh tokens, runs the
+  // bootstrap to load the profile, and flips isLoggedIn so the navigator
+  // moves the user past Auth. Throws on bad/expired code so the UI can show
+  // a targeted error and the Resend prompt.
+  verifySignupOtp: async (email, code) => {
+    const data = await api.verifySignupOtp(email, code);
+    const auth = {
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+      userId: data.userId,
+    };
+    setTokens(auth.accessToken, auth.refreshToken);
+    await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+
+    // Same bootstrap path as login so the navigator state is consistent.
+    try {
+      const bootstrap = await api.bootstrap();
+      const p = bootstrap?.profile || {};
+      const profile = {
+        routine: p.routine || null,
+        stressSource: p.stressSource || null,
+        wakeTime: p.wakeTime || null,
+        timeMin: p.timeMin || null,
+        injuries: p.injuries || [],
+      };
+      const hasProfile = !!profile.routine;
+      await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+      set({ isLoggedIn: true, hasProfile, profile });
+    } catch {
+      set({ isLoggedIn: true, hasProfile: false });
+    }
+    return data;
+  },
+
+  // Re-send the signup OTP. Returns void; throws if Supabase rejects.
+  resendSignupOtp: async (email) => {
+    await api.resendSignupOtp(email);
+  },
+
   // User chose to skip today's check-in. Persists for today only; cleared on day change.
   skipToday: async () => {
     const today = getLocalDateISO();
