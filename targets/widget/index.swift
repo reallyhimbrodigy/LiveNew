@@ -74,6 +74,67 @@ func currentSlot(in zones: [ZoneSlot], at date: Date) -> ZoneSlot? {
     return zones.first
 }
 
+// The next upcoming zone's actual fire Date — used by the countdown widget
+// so SwiftUI can render a live-relative timer ("in 47 min") without us
+// having to schedule timeline entries every minute.
+func nextSlotFireDate(after date: Date, in zones: [ZoneSlot]) -> (slot: ZoneSlot, fireAt: Date)? {
+    guard !zones.isEmpty else { return nil }
+    let cal = Calendar.current
+    let startOfDay = cal.startOfDay(for: date)
+    let sorted = zones.sorted { $0.startHour < $1.startHour }
+    for z in sorted {
+        let fireAt = startOfDay.addingTimeInterval(z.startHour * 3600)
+        if fireAt > date { return (z, fireAt) }
+    }
+    // Past every zone start today → first zone tomorrow.
+    if let first = sorted.first {
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: startOfDay)!
+        let fireAt = tomorrow.addingTimeInterval(first.startHour * 3600)
+        return (first, fireAt)
+    }
+    return nil
+}
+
+// Current zone + the next `count` upcoming slots, in display order. Used by
+// the day-strip lock screen widget.
+func currentAndUpcoming(_ count: Int, in zones: [ZoneSlot], at date: Date) -> [ZoneSlot] {
+    guard let current = currentSlot(in: zones, at: date) else { return [] }
+    let cal = Calendar.current
+    let comps = cal.dateComponents([.hour, .minute], from: date)
+    let hour = Double(comps.hour ?? 0) + Double(comps.minute ?? 0) / 60.0
+    let sorted = zones.sorted { $0.startHour < $1.startHour }
+    // "Upcoming" = anything whose start is strictly later than now, skipping
+    // the current zone itself.
+    let later = sorted.filter { $0.startHour > hour && $0.id != current.id }
+    var out: [ZoneSlot] = [current]
+    out.append(contentsOf: later.prefix(count))
+    // If we don't have enough upcoming today (e.g. we're in wind-down),
+    // wrap into tomorrow's morning by reusing the earliest-start zones we
+    // haven't shown yet.
+    if out.count < count + 1 {
+        let alreadyShown = Set(out.map { $0.id })
+        for z in sorted where !alreadyShown.contains(z.id) {
+            out.append(z)
+            if out.count >= count + 1 { break }
+        }
+    }
+    return out
+}
+
+// Decimal hour (e.g. 11.5) → locale-aware short time string (e.g. "11:30 AM"
+// or "11:30"). Used by the day-strip widget so the user sees their plan
+// anchored in real clock time.
+func formatHour(_ decimal: Double) -> String {
+    let cal = Calendar.current
+    let startOfDay = cal.startOfDay(for: Date())
+    let wrapped = decimal >= 24 ? decimal - 24 : decimal
+    let date = startOfDay.addingTimeInterval(wrapped * 3600)
+    let fmt = DateFormatter()
+    fmt.timeStyle = .short
+    fmt.dateStyle = .none
+    return fmt.string(from: date)
+}
+
 // MARK: - Timeline entry
 struct DayEntry: TimelineEntry {
     let date: Date
@@ -192,8 +253,10 @@ struct LockRectangularView: View {
 }
 
 // MARK: - LOCK SCREEN — accessoryCircular
-// The smallest lock screen surface. Shows the score number when a plan is
-// present; a dot otherwise.
+// Shows a live countdown to the next zone transition so the user can see at
+// a glance when the next phase of their day starts. Uses Text's relative
+// style so SwiftUI auto-updates the number without us needing minute-level
+// timeline entries. Empty state shows a dot.
 @available(iOSApplicationExtension 16.0, *)
 struct LockCircularView: View {
     let entry: DayEntry
@@ -201,16 +264,27 @@ struct LockCircularView: View {
     var body: some View {
         ZStack {
             AccessoryWidgetBackground()
-            if entry.isToday, let payload = entry.payload {
+            if entry.isToday,
+               let zones = entry.payload?.zones,
+               let next = nextSlotFireDate(after: entry.date, in: zones) {
                 VStack(spacing: 0) {
-                    Text("\(payload.score)")
-                        .font(.system(size: 22, weight: .bold))
+                    // .timer auto-ticks in SwiftUI without us scheduling
+                    // per-minute timeline entries. Renders as "MM:SS" under
+                    // an hour and "H:MM:SS" beyond — monospaced so the
+                    // width stays stable as digits change.
+                    Text(next.fireAt, style: .timer)
+                        .font(.system(size: 13, weight: .bold))
+                        .monospacedDigit()
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
+                        .multilineTextAlignment(.center)
                         .widgetAccentable()
-                    Text("SCORE")
+                    Text("NEXT")
                         .font(.system(size: 7, weight: .semibold))
                         .tracking(0.6)
                         .opacity(0.7)
                 }
+                .padding(.horizontal, 3)
             } else {
                 Image(systemName: "circle.dotted")
                     .font(.system(size: 22, weight: .light))
@@ -218,6 +292,66 @@ struct LockCircularView: View {
             }
         }
         .containerBackground(.clear, for: .widget)
+    }
+}
+
+// MARK: - LOCK SCREEN — accessoryRectangular (DAY STRIP)
+// Denser variant that shows the current zone plus the next two upcoming
+// zones with their start times. Lets the user see the shape of their day
+// from the lock screen without unlocking. Same physical slot as the "Now"
+// rectangular widget — the user picks which one to pin.
+@available(iOSApplicationExtension 16.0, *)
+struct LockRectangularDayView: View {
+    let entry: DayEntry
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            if entry.isToday, let zones = entry.payload?.zones {
+                let strip = currentAndUpcoming(2, in: zones, at: entry.date)
+                if strip.isEmpty {
+                    fallback
+                } else {
+                    ForEach(Array(strip.enumerated()), id: \.offset) { idx, slot in
+                        row(slot: slot, isCurrent: idx == 0)
+                    }
+                }
+            } else {
+                fallback
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .containerBackground(.clear, for: .widget)
+    }
+
+    @ViewBuilder
+    private func row(slot: ZoneSlot, isCurrent: Bool) -> some View {
+        HStack(spacing: 6) {
+            Text(isCurrent ? "NOW" : formatHour(slot.startHour).uppercased())
+                .font(.system(size: 9, weight: .bold))
+                .tracking(0.8)
+                .frame(width: 42, alignment: .leading)
+                .opacity(isCurrent ? 1.0 : 0.6)
+                .widgetAccentable()
+            Text(slot.label)
+                .font(.system(size: 12, weight: isCurrent ? .bold : .medium))
+                .opacity(isCurrent ? 1.0 : 0.75)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: 0)
+        }
+    }
+
+    @ViewBuilder
+    private var fallback: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("IRIS")
+                .font(.system(size: 10, weight: .semibold))
+                .tracking(1.5)
+                .widgetAccentable()
+            Text("Check in to start your day.")
+                .font(.system(size: 13, weight: .semibold))
+                .lineLimit(2)
+        }
     }
 }
 
@@ -357,8 +491,18 @@ struct LiveNewWidgetEntryView: View {
     }
 }
 
-// MARK: - Widget definition
-@main
+// MARK: - Widget definitions
+//
+// We ship TWO widgets so the user can pick which lock-screen experience they
+// want when they hit "+" in the widget gallery:
+//
+//   • "LiveNew: Now"  → current zone only (focused).
+//                       Also serves the home-screen sizes + circular/inline
+//                       lock-screen surfaces.
+//   • "LiveNew: Day"  → rectangular lock-screen only; shows current + next
+//                       two upcoming zones so the user can see the rhythm
+//                       of their day at a glance without unlocking.
+
 struct LiveNewWidget: Widget {
     let kind: String = "LiveNewWidget"
 
@@ -366,12 +510,12 @@ struct LiveNewWidget: Widget {
         StaticConfiguration(kind: kind, provider: Provider()) { entry in
             LiveNewWidgetEntryView(entry: entry)
         }
-        .configurationDisplayName("LiveNew")
-        .description("Current zone of your day, on your Lock Screen or Home Screen.")
-        .supportedFamilies(supportedFamilies)
+        .configurationDisplayName("LiveNew: Now")
+        .description("Your current zone, on your Lock Screen or Home Screen.")
+        .supportedFamilies(nowSupportedFamilies)
     }
 
-    private var supportedFamilies: [WidgetFamily] {
+    private var nowSupportedFamilies: [WidgetFamily] {
         if #available(iOSApplicationExtension 16.0, *) {
             return [
                 .accessoryRectangular,
@@ -382,6 +526,32 @@ struct LiveNewWidget: Widget {
             ]
         } else {
             return [.systemSmall, .systemMedium]
+        }
+    }
+}
+
+@available(iOSApplicationExtension 16.0, *)
+struct LiveNewDayWidget: Widget {
+    let kind: String = "LiveNewDayWidget"
+
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind: kind, provider: Provider()) { entry in
+            LockRectangularDayView(entry: entry)
+        }
+        .configurationDisplayName("LiveNew: Day")
+        .description("Your current and next two zones, on the Lock Screen.")
+        .supportedFamilies([.accessoryRectangular])
+    }
+}
+
+// MARK: - Widget bundle (extension entry point)
+@main
+struct LiveNewWidgetBundle: WidgetBundle {
+    @WidgetBundleBuilder
+    var body: some Widget {
+        LiveNewWidget()
+        if #available(iOSApplicationExtension 16.0, *) {
+            LiveNewDayWidget()
         }
     }
 }
