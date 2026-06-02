@@ -6054,6 +6054,13 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Interactive product demo (linked from the Product Hunt launch page).
+  // Same file at /demo and /demo.html so either shape works in the share link.
+  if (req.method === "GET" && (pathname === "/demo" || pathname === "/demo.html")) {
+    await serveFile(res, path.join(PUBLIC_DIR, "demo.html"));
+    return;
+  }
+
   if (req.method === "GET" && pathname.startsWith("/i18n/")) {
     await serveFile(res, path.join(PUBLIC_DIR, pathname.slice(1)));
     return;

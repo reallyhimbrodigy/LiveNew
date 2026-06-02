@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0f0d0a">
+  <title>LiveNew — Interactive Demo</title>
+  <meta name="description" content="Walk through LiveNew, the cortisol-aware AI companion. Tap through the actual app screens from your browser.">
+  <meta name="apple-itunes-app" content="app-id=6760437838">
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
+  <link rel="apple-touch-icon" href="/assets/icon-192.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500;600&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <!-- Open Graph: lets the demo link itself preview nicely if shared -->
+  <meta property="og:title" content="LiveNew — Interactive Demo">
+  <meta property="og:description" content="Walk through LiveNew, the cortisol-aware AI companion.">
+  <meta property="og:image" content="https://livenew.app/assets/og-image.png">
+  <meta property="og:url" content="https://livenew.app/demo">
+  <meta property="og:type" content="website">
+
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0f0d0a;
+      --bg-2: #141210;
+      --gold: #c4a86c;
+      --gold-dim: rgba(196, 168, 108, 0.18);
+      --gold-soft: rgba(196, 168, 108, 0.08);
+      --text: #e8e0d4;
+      --muted: #8a8070;
+      --line: rgba(196, 168, 108, 0.14);
+      --font-display: 'Cormorant Garamond', Georgia, serif;
+      --font-body: 'DM Sans', -apple-system, sans-serif;
+    }
+    html, body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--font-body);
+      min-height: 100vh;
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    /* Grid background, same vibe as the marketing site */
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(196, 168, 108, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(196, 168, 108, 0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      z-index: 0;
+    }
+
+    .top-bar {
+      position: relative;
+      z-index: 3;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 28px;
+      border-bottom: 1px solid var(--line);
+    }
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      color: var(--text);
+      text-decoration: none;
+      font-family: var(--font-body);
+      font-weight: 500;
+      font-size: 15px;
+      letter-spacing: 0.04em;
+    }
+    .brand-mark {
+      width: 28px;
+      height: 28px;
+      border-radius: 6px;
+      background: var(--bg-2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .brand-mark img { width: 100%; height: 100%; object-fit: contain; }
+    .brand-eyebrow {
+      font-size: 11px;
+      letter-spacing: 0.24em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-left: 8px;
+    }
+    .top-cta {
+      font-family: var(--font-body);
+      font-weight: 500;
+      font-size: 13px;
+      color: var(--bg);
+      background: var(--gold);
+      padding: 9px 16px;
+      border-radius: 6px;
+      text-decoration: none;
+      letter-spacing: 0.02em;
+      transition: opacity 0.2s ease;
+    }
+    .top-cta:hover { opacity: 0.85; }
+
+    /* Stage where the slides render */
+    .stage {
+      position: relative;
+      z-index: 2;
+      min-height: calc(100vh - 64px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .slide-wrap {
+      position: relative;
+      width: 100%;
+      max-width: 480px;
+    }
+
+    /* Each slide is a tall card whose aspect mirrors the source image (~9:19.5) */
+    .slide {
+      position: relative;
+      width: 100%;
+      border-radius: 18px;
+      overflow: hidden;
+      background: var(--bg-2);
+      box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5), 0 0 0 1px var(--line);
+      cursor: pointer;
+      user-select: none;
+    }
+    .slide img {
+      width: 100%;
+      height: auto;
+      display: block;
+    }
+    /* Fade between slides via stacking */
+    .slide.swap-out { animation: swap-out 280ms ease forwards; }
+    .slide.swap-in  { animation: swap-in 320ms ease forwards; }
+    @keyframes swap-out {
+      0%   { opacity: 1; transform: translateX(0); }
+      100% { opacity: 0; transform: translateX(-20px); }
+    }
+    @keyframes swap-in {
+      0%   { opacity: 0; transform: translateX(20px); }
+      100% { opacity: 1; transform: translateX(0); }
+    }
+
+    /* Prev/Next arrow controls — desktop friendly */
+    .arrow {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 44px;
+      height: 44px;
+      border-radius: 50%;
+      background: rgba(20, 18, 16, 0.85);
+      backdrop-filter: blur(6px);
+      border: 1px solid var(--line);
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: opacity 0.2s ease, transform 0.2s ease, background 0.2s ease;
+      z-index: 3;
+    }
+    .arrow:hover { background: rgba(196, 168, 108, 0.12); }
+    .arrow:disabled {
+      opacity: 0.25;
+      cursor: not-allowed;
+    }
+    .arrow.prev { left: -22px; }
+    .arrow.next { right: -22px; }
+    .arrow svg { width: 16px; height: 16px; stroke: currentColor; }
+
+    @media (max-width: 540px) {
+      .arrow { display: none; }
+      .slide-wrap { max-width: 340px; }
+    }
+
+    /* Tap-zones overlaid on the slide for mobile (invisible halves) */
+    .tap-zones {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      z-index: 2;
+    }
+    .tap-zones .zone {
+      flex: 1;
+      cursor: pointer;
+    }
+
+    /* Position dots */
+    .dots {
+      position: relative;
+      z-index: 2;
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      align-items: center;
+      margin-top: 22px;
+    }
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--gold-soft);
+      border: 1px solid var(--gold-dim);
+      cursor: pointer;
+      transition: background 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+    }
+    .dot.active {
+      background: var(--gold);
+      border-color: var(--gold);
+      transform: scale(1.15);
+    }
+
+    /* Step counter + hint */
+    .meta-row {
+      position: relative;
+      z-index: 2;
+      margin-top: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      font-family: var(--font-body);
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+    .meta-row .step {
+      font-weight: 500;
+      color: var(--text);
+    }
+    .meta-row .sep {
+      width: 3px;
+      height: 3px;
+      border-radius: 50%;
+      background: var(--gold);
+      opacity: 0.5;
+    }
+
+    /* Footer with the App Store CTA */
+    footer {
+      position: relative;
+      z-index: 2;
+      padding: 28px 24px 36px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 16px;
+    }
+    .footer-headline {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-style: italic;
+      font-size: 18px;
+      color: var(--muted);
+      text-align: center;
+      max-width: 480px;
+    }
+    .footer-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      font-family: var(--font-body);
+      font-weight: 500;
+      font-size: 14px;
+      letter-spacing: 0.04em;
+      color: var(--bg);
+      background: var(--gold);
+      padding: 13px 22px;
+      border-radius: 8px;
+      text-decoration: none;
+      transition: opacity 0.2s ease, transform 0.2s ease;
+    }
+    .footer-cta:hover { opacity: 0.9; }
+    .footer-sub {
+      font-family: var(--font-body);
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.04em;
+    }
+
+    /* End card (shown after final slide) */
+    .end-card {
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(180deg, rgba(15, 13, 10, 0.85), rgba(15, 13, 10, 0.98));
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 22px;
+      padding: 32px;
+      text-align: center;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.5s ease;
+      backdrop-filter: blur(8px);
+    }
+    .end-card.show { opacity: 1; pointer-events: auto; }
+    .end-mark {
+      width: 96px;
+      height: 96px;
+      border-radius: 22px;
+      background: var(--bg-2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+      box-shadow: 0 20px 50px rgba(0,0,0,0.4), 0 0 0 1px var(--gold-dim);
+    }
+    .end-mark img { width: 78%; height: 78%; object-fit: contain; }
+    .end-title {
+      font-family: var(--font-display);
+      font-weight: 500;
+      font-size: 30px;
+      color: var(--text);
+      letter-spacing: -0.01em;
+    }
+    .end-sub {
+      font-family: var(--font-display);
+      font-weight: 300;
+      font-style: italic;
+      font-size: 18px;
+      color: var(--gold);
+      max-width: 360px;
+      line-height: 1.4;
+    }
+    .end-actions {
+      display: flex;
+      gap: 12px;
+      margin-top: 4px;
+      flex-wrap: wrap;
+      justify-content: center;
+    }
+    .end-actions a {
+      font-family: var(--font-body);
+      font-weight: 500;
+      font-size: 13px;
+      letter-spacing: 0.04em;
+      padding: 11px 20px;
+      border-radius: 7px;
+      text-decoration: none;
+      transition: opacity 0.2s ease;
+    }
+    .end-actions a.primary {
+      color: var(--bg);
+      background: var(--gold);
+    }
+    .end-actions a.secondary {
+      color: var(--text);
+      background: transparent;
+      border: 1px solid var(--line);
+    }
+    .end-actions a:hover { opacity: 0.85; }
+  </style>
+</head>
+<body>
+
+  <div class="top-bar">
+    <a class="brand" href="/">
+      <span class="brand-mark"><img src="/assets/icon-192.png" alt="LiveNew"></span>
+      <span>LiveNew</span>
+      <span class="brand-eyebrow">Interactive Demo</span>
+    </a>
+    <a class="top-cta" href="https://apps.apple.com/app/livenew/id6760437838" target="_blank" rel="noopener">Download on App Store</a>
+  </div>
+
+  <main class="stage">
+    <div class="slide-wrap" id="slideWrap">
+      <button class="arrow prev" id="prev" aria-label="Previous">
+        <svg viewBox="0 0 16 16" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M10 2L4 8l6 6"/></svg>
+      </button>
+      <button class="arrow next" id="next" aria-label="Next">
+        <svg viewBox="0 0 16 16" fill="none" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2l6 6-6 6"/></svg>
+      </button>
+
+      <div class="slide" id="slide">
+        <img id="slideImg" src="/assets/demo/screen-1.png" alt="LiveNew app screen">
+        <!-- Invisible tap zones: left half = prev, right half = next.
+             Sit above the image so a tap on the slide advances naturally on mobile. -->
+        <div class="tap-zones">
+          <div class="zone" data-action="prev"></div>
+          <div class="zone" data-action="next"></div>
+        </div>
+
+        <!-- End card overlay — fades in after the last slide -->
+        <div class="end-card" id="endCard">
+          <div class="end-mark"><img src="/assets/icon-192.png" alt="LiveNew"></div>
+          <div class="end-title">Ready to try LiveNew?</div>
+          <div class="end-sub">14-day free trial. iPhone only. Cancel anytime.</div>
+          <div class="end-actions">
+            <a class="primary" href="https://apps.apple.com/app/livenew/id6760437838" target="_blank" rel="noopener">Download on App Store</a>
+            <a class="secondary" href="#" id="restart">Start over</a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <div class="dots" id="dots" aria-label="Slide navigation"></div>
+  <div class="meta-row">
+    <span class="step" id="step">1 / 5</span>
+    <span class="sep"></span>
+    <span>Tap the screen to advance · arrow keys work too</span>
+  </div>
+
+  <footer>
+    <div class="footer-headline">Cortisol regulation, on iPhone. Iris reads your real biometrics and gives you the right action for every hour.</div>
+    <a class="footer-cta" href="https://apps.apple.com/app/livenew/id6760437838" target="_blank" rel="noopener">
+      Download on the App Store
+    </a>
+    <div class="footer-sub">14-day free trial · $9.99/month or $59.99/year · iPhone only</div>
+  </footer>
+
+  <script>
+    // ---- Carousel state ----
+    const slides = [
+      '/assets/demo/screen-1.png',
+      '/assets/demo/screen-2.png',
+      '/assets/demo/screen-3.png',
+      '/assets/demo/screen-4.png',
+      '/assets/demo/screen-5.png',
+    ];
+    let idx = 0;
+
+    const slideEl = document.getElementById('slide');
+    const slideImg = document.getElementById('slideImg');
+    const dotsEl = document.getElementById('dots');
+    const stepEl = document.getElementById('step');
+    const prevBtn = document.getElementById('prev');
+    const nextBtn = document.getElementById('next');
+    const endCard = document.getElementById('endCard');
+    const restartBtn = document.getElementById('restart');
+
+    // Preload images so transitions don't flash white
+    slides.forEach(src => { const i = new Image(); i.src = src; });
+
+    // Build the dot indicator once
+    function buildDots() {
+      dotsEl.innerHTML = '';
+      slides.forEach((_, i) => {
+        const d = document.createElement('button');
+        d.className = 'dot' + (i === idx ? ' active' : '');
+        d.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+        d.addEventListener('click', (e) => { e.stopPropagation(); goTo(i); });
+        dotsEl.appendChild(d);
+      });
+    }
+    function refreshDots() {
+      [...dotsEl.children].forEach((d, i) => d.classList.toggle('active', i === idx));
+    }
+
+    // Render whichever slide is at `idx`. Applies a small enter animation.
+    function render() {
+      slideEl.classList.remove('swap-in');
+      void slideEl.offsetWidth; // restart animation
+      slideImg.src = slides[idx];
+      slideEl.classList.add('swap-in');
+      stepEl.textContent = (idx + 1) + ' / ' + slides.length;
+      refreshDots();
+      // End card only on the final slide
+      endCard.classList.toggle('show', idx === slides.length - 1);
+      prevBtn.disabled = idx === 0;
+      // Note: we don't disable next on the last slide — clicking next from
+      // there just loops back to the first, which feels natural in a demo.
+    }
+
+    function goTo(i) {
+      const wrap = ((i % slides.length) + slides.length) % slides.length;
+      if (wrap === idx) return;
+      idx = wrap;
+      render();
+    }
+    function next() { goTo(idx + 1); }
+    function prev() { goTo(idx - 1); }
+
+    // ---- Event wiring ----
+    nextBtn.addEventListener('click', (e) => { e.stopPropagation(); next(); });
+    prevBtn.addEventListener('click', (e) => { e.stopPropagation(); prev(); });
+
+    document.querySelectorAll('.tap-zones .zone').forEach(z => {
+      z.addEventListener('click', (e) => {
+        // If the end-card is visible, don't consume the tap — let the CTAs work
+        if (endCard.classList.contains('show')) return;
+        e.stopPropagation();
+        if (z.dataset.action === 'next') next(); else prev();
+      });
+    });
+
+    restartBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      goTo(0);
+    });
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowRight' || e.key === ' ') { e.preventDefault(); next(); }
+      else if (e.key === 'ArrowLeft') { e.preventDefault(); prev(); }
+      else if (e.key === 'Home') { goTo(0); }
+      else if (e.key === 'End') { goTo(slides.length - 1); }
+    });
+
+    // Touch swipe support — mobile users expect to be able to swipe through.
+    let touchStartX = null;
+    slideEl.addEventListener('touchstart', (e) => { touchStartX = e.touches[0].clientX; }, { passive: true });
+    slideEl.addEventListener('touchend', (e) => {
+      if (touchStartX == null) return;
+      const dx = e.changedTouches[0].clientX - touchStartX;
+      if (Math.abs(dx) > 40) { dx < 0 ? next() : prev(); }
+      touchStartX = null;
+    }, { passive: true });
+
+    buildDots();
+    render();
+  </script>
+</body>
+</html>
