@@ -526,6 +526,8 @@ const PUBLIC_POST_ROUTES = new Set([
   "/v1/auth/resend-signup",
   "/v1/auth/verify-signup-otp",
   "/v1/auth/resend-signup-otp",
+  "/v1/auth/send-otp",
+  "/v1/auth/verify-otp",
   "/v1/auth/admin/generate-signup-link",
   "/v1/auth/logout",
   "/v1/csrf",
@@ -6565,6 +6567,117 @@ const server = http.createServer(async (req, res) => {
       } catch (err) {
         console.error("[auth][login] unexpected error", { message: err?.message || String(err) });
         sendJson(res, 500, { ok: false, code: "LOGIN_FAILED", message: "Login failed. Please try again." });
+        return;
+      }
+    }
+
+    // Passwordless: request a one-time code be sent to `email`. Calls
+    // Supabase's signInWithOtp — Supabase will create the user automatically
+    // if they don't exist (shouldCreateUser defaults to true), so this single
+    // endpoint serves both new signups and returning sign-ins. The email
+    // template (Magic Link) renders the {{ .Token }} as a 6-digit code which
+    // the user types into the app's VerifyEmail screen.
+    if (pathname === "/v1/auth/send-otp" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
+      const body = await parseJson(req);
+      const email = body?.email;
+      if (!email || typeof email !== "string") {
+        sendError(res, 400, "email_required", "email is required", "email");
+        return;
+      }
+      const emailLower = email.trim().toLowerCase();
+      try {
+        const { data, error } = await supabaseAnon().auth.signInWithOtp({
+          email: emailLower,
+          options: {
+            // shouldCreateUser=true (default) lets new users sign up via the
+            // same flow as existing users sign in. Single passwordless path.
+            shouldCreateUser: true,
+          },
+        });
+        if (error) {
+          logDebug({ tag: "auth.send_otp", phase: "supabase_error", email: emailLower, message: error.message, status: error.status });
+          // Supabase returns generic errors for both invalid emails and rate
+          // limiting. Map the most common ones to friendlier codes.
+          const msg = String(error.message || "");
+          let codeOut = "OTP_SEND_FAILED";
+          let userMessage = "Could not send the code. Try again in a moment.";
+          if (/rate.*limit|too many/i.test(msg)) {
+            codeOut = "OTP_RATE_LIMITED";
+            userMessage = "Too many tries. Wait a minute, then try again.";
+          } else if (/invalid.*email/i.test(msg)) {
+            codeOut = "OTP_INVALID_EMAIL";
+            userMessage = "That doesn't look like a valid email.";
+          }
+          sendJson(res, 400, { ok: false, code: codeOut, message: userMessage });
+          return;
+        }
+        logDebug({ tag: "auth.send_otp", phase: "ok", email: emailLower, data: Boolean(data) });
+        sendJson(res, 200, { ok: true });
+        return;
+      } catch (err) {
+        console.error("[auth][send_otp] unexpected error", { message: err?.message || String(err) });
+        sendJson(res, 500, { ok: false, code: "OTP_SEND_FAILED", message: "Could not send the code. Try again in a moment." });
+        return;
+      }
+    }
+
+    // Passwordless: verify the 6-digit OTP and return a session. Identical
+    // implementation to /v1/auth/verify-signup-otp; this is the cleanly-named
+    // version that matches the passwordless model (signin, not "signup").
+    // We keep the old endpoint around so the 1.0.2 TestFlight build that
+    // still references it doesn't break.
+    if (pathname === "/v1/auth/verify-otp" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
+      const body = await parseJson(req);
+      const email = body?.email;
+      const code = body?.code;
+      if (!email || typeof email !== "string") {
+        sendError(res, 400, "email_required", "email is required", "email");
+        return;
+      }
+      if (!code || typeof code !== "string" || !/^\d{6}$/.test(code.trim())) {
+        sendError(res, 400, "code_required", "A 6-digit code is required", "code");
+        return;
+      }
+      const emailLower = email.trim().toLowerCase();
+      const codeTrim = code.trim();
+      try {
+        const { data, error } = await supabaseAnon().auth.verifyOtp({
+          email: emailLower,
+          token: codeTrim,
+          type: "email",
+        });
+        if (error) {
+          logDebug({ tag: "auth.verify_otp", phase: "supabase_error", email: emailLower, message: error.message });
+          const msg = String(error.message || "");
+          let codeOut = "OTP_INVALID";
+          let userMessage = "That code didn't work. Try again or send a new one.";
+          if (/expired/i.test(msg)) {
+            codeOut = "OTP_EXPIRED";
+            userMessage = "That code expired. Send a new one.";
+          }
+          sendJson(res, 400, { ok: false, code: codeOut, message: userMessage });
+          return;
+        }
+        const session = data?.session;
+        const user = data?.user;
+        if (!session) {
+          sendJson(res, 400, { ok: false, code: "OTP_NO_SESSION", message: "Verification didn't return a session." });
+          return;
+        }
+        logDebug({ tag: "auth.verify_otp", phase: "ok", email: emailLower, userId: user?.id });
+        sendJson(res, 200, {
+          ok: true,
+          userId: user?.id || null,
+          email: user?.email || emailLower,
+          accessToken: session.access_token,
+          refreshToken: session.refresh_token,
+        });
+        return;
+      } catch (err) {
+        console.error("[auth][verify_otp] unexpected error", { message: err?.message || String(err) });
+        sendJson(res, 500, { ok: false, code: "VERIFY_FAILED", message: "Verification failed. Please try again." });
         return;
       }
     }

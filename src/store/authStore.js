@@ -313,6 +313,47 @@ export const useAuthStore = create((set, get) => ({
     await api.resendSignupOtp(email);
   },
 
+  // ===== Passwordless flow (primary path) =====
+  //
+  // sendOtp: ask Supabase to email a 6-digit code. Works for both new and
+  // returning users because signInWithOtp creates the user if missing.
+  // Throws so the UI can show a rate-limit / invalid-email error.
+  sendOtp: async (email) => {
+    await api.sendOtp(email);
+  },
+
+  // verifyOtp: verify the code, store tokens, bootstrap profile, flip
+  // isLoggedIn so the navigator advances past Auth. Same end-state as the
+  // password-based login path — caller can treat this as "log the user in."
+  verifyOtp: async (email, code) => {
+    const data = await api.verifyOtp(email, code);
+    const auth = {
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+      userId: data.userId,
+    };
+    setTokens(auth.accessToken, auth.refreshToken);
+    await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+
+    try {
+      const bootstrap = await api.bootstrap();
+      const p = bootstrap?.profile || {};
+      const profile = {
+        routine: p.routine || null,
+        stressSource: p.stressSource || null,
+        wakeTime: p.wakeTime || null,
+        timeMin: p.timeMin || null,
+        injuries: p.injuries || [],
+      };
+      const hasProfile = !!profile.routine;
+      await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+      set({ isLoggedIn: true, hasProfile, profile });
+    } catch {
+      set({ isLoggedIn: true, hasProfile: false });
+    }
+    return data;
+  },
+
   // User chose to skip today's check-in. Persists for today only; cleared on day change.
   skipToday: async () => {
     const today = getLocalDateISO();

@@ -16,8 +16,12 @@ export default function VerifyEmailScreen({ route, navigation }) {
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
 
   const email = route?.params?.email || '';
-  const verifySignupOtp = useAuthStore((z) => z.verifySignupOtp);
-  const resendSignupOtp = useAuthStore((z) => z.resendSignupOtp);
+  // Passwordless flow: verifyOtp returns a session directly. We still keep a
+  // reference to resendSignupOtp for now as a fallback in case the back-compat
+  // path needs it, but the primary resend path is sendOtp (calls
+  // signInWithOtp again, which Supabase rate-limits naturally).
+  const verifyOtp = useAuthStore((z) => z.verifyOtp);
+  const sendOtp = useAuthStore((z) => z.sendOtp);
 
   const [code, setCode] = useState('');
   const [loading, setLoading] = useState(false);
@@ -61,7 +65,7 @@ export default function VerifyEmailScreen({ route, navigation }) {
     setInfo('');
     setLoading(true);
     try {
-      await verifySignupOtp(email, value);
+      await verifyOtp(email, value);
       // Success: authStore flips isLoggedIn, so RootNavigator will swap the
       // stack and unmount this screen. No explicit navigation needed.
     } catch (err) {
@@ -87,7 +91,9 @@ export default function VerifyEmailScreen({ route, navigation }) {
     setInfo('');
     setResending(true);
     try {
-      await resendSignupOtp(email);
+      // For passwordless we just call signInWithOtp again — Supabase invalidates
+      // the previous code and emails a fresh one. Same call as the initial send.
+      await sendOtp(email);
       setInfo('New code sent. Check your email.');
       setCooldown(RESEND_COOLDOWN_SECONDS);
     } catch (err) {
@@ -116,7 +122,7 @@ export default function VerifyEmailScreen({ route, navigation }) {
           showsVerticalScrollIndicator={false}
         >
           <View style={s.body}>
-            <Text style={s.eyebrow}>Verify your email</Text>
+            <Text style={s.eyebrow}>Sign in</Text>
             <Text style={s.headline}>Enter the 6-digit code.</Text>
             <Text style={s.sub}>
               We sent it to <Text style={s.subEmphasis}>{email || 'your email'}</Text>.

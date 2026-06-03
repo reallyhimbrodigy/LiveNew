@@ -126,6 +126,13 @@ async function request(method, path, body) {
 
 export const api = {
   // Auth
+  // Passwordless OTP — primary auth path going forward
+  sendOtp: (email) => request('POST', '/v1/auth/send-otp', { email }),
+  verifyOtp: (email, code) => request('POST', '/v1/auth/verify-otp', { email, code }),
+
+  // Legacy password-based endpoints — kept for backwards compatibility with
+  // the 1.0.2 TestFlight build that still has the password UI. New code
+  // should not call these.
   login: (email, password) => request('POST', '/v1/auth/login', { email, password }),
   signup: (email, password, name) => request('POST', '/v1/auth/signup', { email, password, name, consent: true }),
   verifySignupOtp: (email, code) => request('POST', '/v1/auth/verify-signup-otp', { email, code }),

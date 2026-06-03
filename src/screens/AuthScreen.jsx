@@ -1,262 +1,115 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Alert,
+  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
-import { api } from '../api';
 import IrisSignature from '../components/IrisSignature';
 
+// Passwordless OTP entry: ask for email, fire signInWithOtp on the server, hop
+// to the VerifyEmail screen where the user types the 6-digit code Supabase
+// just emailed them. No password, no signup/login toggle, no name capture
+// (name is collected during onboarding for new users). Single field, single
+// button — matches the modern mental model from Linear / Notion / Substack.
 export default function AuthScreen({ navigation }) {
   const { colors, fonts } = useTheme();
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
 
-  const [mode, setMode] = useState('login');
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
-  const [name, setName] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [success, setSuccess] = useState('');
-  const [info, setInfo] = useState(''); // soft warning (not error, not success)
-  const [showPassword, setShowPassword] = useState(false);
-  const [showForgot, setShowForgot] = useState(false);
-  const [resetEmail, setResetEmail] = useState('');
-  const [resetSent, setResetSent] = useState(false);
-  const [resetLoading, setResetLoading] = useState(false);
+  const inputRef = useRef(null);
 
-  const login = useAuthStore(z => z.login);
-  const signup = useAuthStore(z => z.signup);
-  const isSignUp = mode === 'signup';
+  const sendOtp = useAuthStore((z) => z.sendOtp);
+
+  // Focus the email field on mount — saves a tap and signals where to start.
+  useEffect(() => {
+    const t = setTimeout(() => inputRef.current?.focus(), 300);
+    return () => clearTimeout(t);
+  }, []);
 
   const handleSubmit = async () => {
     setError('');
-    setSuccess('');
-    setInfo('');
-
-    if (!email.trim()) { setError('Enter your email address.'); return; }
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+    const e = email.trim().toLowerCase();
+    if (!e) { setError('Enter your email address.'); return; }
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) {
       setError("That doesn't look like a valid email address.");
       return;
     }
-    if (!password) { setError('Enter your password.'); return; }
-    if (mode === 'signup' && password.length < 8) {
-      setError('Password must be at least 8 characters.');
-      return;
-    }
-    if (mode === 'signup' && !name.trim()) { setError('Enter your name.'); return; }
-
     setLoading(true);
-
     try {
-      if (mode === 'signup') {
-        const data = await signup(email.trim(), password, name.trim());
-        // After signup, Supabase sends a 6-digit OTP to the user's email.
-        // Push them onto the VerifyEmail screen to enter that code. The
-        // verifyOtp call returns a session, so the user lands logged in
-        // without a follow-up login round-trip.
-        if (data?.needsEmailConfirm) {
-          setLoading(false);
-          navigation?.navigate('VerifyEmail', { email: email.trim() });
-          return;
-        }
-        // If for any reason Supabase returned an already-active session at
-        // signup time (e.g. email confirmation is off in dashboard), fall
-        // back to login.
-        await login(email.trim(), password);
-      } else {
-        await login(email.trim(), password);
-      }
+      await sendOtp(e);
+      setLoading(false);
+      navigation?.navigate('VerifyEmail', { email: e });
     } catch (err) {
-      if (err.code === 'ACCOUNT_EXISTS') {
-        setError('Account already exists.');
-        setTimeout(() => {
-          setMode('login');
-          setPassword('');
-          setName('');
-        }, 1500);
-      } else if (err.code === 'INVALID_CREDENTIALS') {
-        setError('Invalid email or password.');
-      } else if (err.code === 'EMAIL_NOT_CONFIRMED') {
-        // Account exists but email never verified. Send them to the verify
-        // screen with a fresh code so they don't dead-end on login.
-        setLoading(false);
-        navigation?.navigate('VerifyEmail', { email: email.trim() });
-        return;
-      } else if (err.code === 'NETWORK_ERROR') {
-        setError('Check your internet connection.');
+      setLoading(false);
+      if (err?.code === 'OTP_RATE_LIMITED') {
+        setError('Too many tries. Wait a minute and try again.');
+      } else if (err?.code === 'OTP_INVALID_EMAIL') {
+        setError("That doesn't look like a valid email address.");
+      } else if (err?.code === 'NETWORK_ERROR') {
+        setError('Check your internet connection and try again.');
       } else {
-        setError(err.message || 'Something went wrong.');
+        setError(err?.message || 'Could not send the code. Try again in a moment.');
       }
     }
-
-    setLoading(false);
   };
-
-  const toggleMode = () => {
-    setMode(m => m === 'login' ? 'signup' : 'login');
-    setError('');
-    setSuccess('');
-    setPassword('');
-    setName('');
-  };
-
-  const handleResetPassword = async () => {
-    if (!resetEmail.trim()) return;
-    setResetLoading(true);
-    try {
-      await api.resetPassword(resetEmail.trim().toLowerCase());
-      setResetSent(true);
-    } catch {
-      Alert.alert('Error', 'Could not send reset email. Please try again.');
-    }
-    setResetLoading(false);
-  };
-
-  if (showForgot) {
-    return (
-      <SafeAreaView style={s.safe}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <View style={s.container}>
-            <TouchableOpacity onPress={() => { setShowForgot(false); setResetSent(false); }} style={{ paddingVertical: 12 }}>
-              <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 15 }}>← Back</Text>
-            </TouchableOpacity>
-
-            <View style={{ flex: 1, justifyContent: 'center' }}>
-              <Text style={s.title}>Reset password</Text>
-
-              {resetSent ? (
-                <>
-                  <Text style={{ color: colors.gold, fontFamily: fonts.body, fontSize: 16, textAlign: 'center', marginTop: 16, lineHeight: 24 }}>
-                    Check your email for a password reset link.
-                  </Text>
-                  <TouchableOpacity
-                    style={[s.btn, { marginTop: 24 }]}
-                    onPress={() => { setShowForgot(false); setResetSent(false); }}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={s.btnText}>Back to sign in</Text>
-                  </TouchableOpacity>
-                </>
-              ) : (
-                <>
-                  <Text style={{ color: colors.muted, fontFamily: fonts.body, fontSize: 14, textAlign: 'center', marginBottom: 24 }}>
-                    Enter your email. I'll send you a link to reset your password.
-                  </Text>
-                  <TextInput
-                    style={s.input}
-                    value={resetEmail}
-                    onChangeText={setResetEmail}
-                    placeholder="Email address"
-                    placeholderTextColor={colors.dim}
-                    keyboardType="email-address"
-                    autoCapitalize="none"
-                    autoFocus
-                  />
-                  <TouchableOpacity
-                    style={[s.btn, (!resetEmail.trim() || resetLoading) && { opacity: 0.4 }]}
-                    onPress={handleResetPassword}
-                    disabled={!resetEmail.trim() || resetLoading}
-                    activeOpacity={0.8}
-                  >
-                    <Text style={s.btnText}>{resetLoading ? 'Sending...' : 'Send reset link'}</Text>
-                  </TouchableOpacity>
-                </>
-              )}
-            </View>
-          </View>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={s.safe}>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={s.flex}>
-        <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled">
+        <ScrollView contentContainerStyle={s.scroll} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
 
           <View style={s.logoRow}>
             <Text style={s.logo}>LiveNew</Text>
             <IrisSignature />
           </View>
 
-          <Text style={s.heading}>
-            {isSignUp ? 'Create account' : 'Log in'}
+          <Text style={s.heading}>Sign in</Text>
+          <Text style={s.sub}>
+            Enter your email. We'll send a 6-digit code.{'\n'}
+            New here? An account will be created automatically.
           </Text>
 
           {error ? <View style={s.errorBox}><Text style={s.errorText}>{error}</Text></View> : null}
-          {success ? <View style={s.successBox}><Text style={s.successText}>{success}</Text></View> : null}
-          {info ? <View style={s.infoBox}><Text style={s.infoText}>{info}</Text></View> : null}
-
-          {isSignUp && (
-            <TextInput
-              style={s.input}
-              placeholder="Full name"
-              placeholderTextColor={colors.dim}
-              value={name}
-              onChangeText={setName}
-              autoCapitalize="words"
-              returnKeyType="next"
-            />
-          )}
 
           <TextInput
+            ref={inputRef}
             style={s.input}
             placeholder="Email address"
             placeholderTextColor={colors.dim}
             value={email}
             onChangeText={setEmail}
             autoCapitalize="none"
+            autoCorrect={false}
             keyboardType="email-address"
             textContentType="emailAddress"
-            returnKeyType="next"
+            returnKeyType="go"
+            onSubmitEditing={handleSubmit}
+            editable={!loading}
           />
 
-          <View style={s.passWrap}>
-            <TextInput
-              style={[s.input, { flex: 1, marginBottom: 0, borderWidth: 0, backgroundColor: 'transparent' }]}
-              placeholder="Password"
-              placeholderTextColor={colors.dim}
-              value={password}
-              onChangeText={setPassword}
-              secureTextEntry={!showPassword}
-              textContentType="password"
-              returnKeyType="done"
-              onSubmitEditing={handleSubmit}
-            />
-            <TouchableOpacity style={s.eyeBtn} onPress={() => setShowPassword(v => !v)}>
-              <Text style={s.eyeText}>{showPassword ? 'Hide' : 'Show'}</Text>
-            </TouchableOpacity>
-          </View>
-
-          {!isSignUp && (
-            <TouchableOpacity onPress={() => setShowForgot(true)} style={{ alignSelf: 'flex-end', marginBottom: 16, marginTop: -4 }}>
-              <Text style={{ color: colors.gold, fontFamily: fonts.displaySemibold, fontSize: 13 }}>Forgot password?</Text>
-            </TouchableOpacity>
-          )}
-
-          <TouchableOpacity style={s.submitBtn} onPress={handleSubmit} disabled={loading} activeOpacity={0.8}>
+          <TouchableOpacity
+            style={[s.submitBtn, (!email.trim() || loading) && s.submitBtnDisabled]}
+            onPress={handleSubmit}
+            disabled={!email.trim() || loading}
+            activeOpacity={0.85}
+          >
             {loading ? (
-              <ActivityIndicator color="#1a1612" size="small" />
+              <ActivityIndicator color={colors.bg} size="small" />
             ) : (
-              <Text style={s.submitText}>
-                {isSignUp ? 'Create Account' : 'Log in'}
-              </Text>
+              <Text style={s.submitText}>Continue</Text>
             )}
           </TouchableOpacity>
 
-          <View style={s.switchRow}>
-            <Text style={s.switchText}>
-              {isSignUp ? "Already have an account? " : "Don't have an account? "}
-            </Text>
-            <TouchableOpacity onPress={toggleMode}>
-              <Text style={s.switchLink}>
-                {isSignUp ? 'Log in' : 'Sign up'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+          <Text style={s.footnote}>
+            By continuing you agree to LiveNew's{' '}
+            <Text style={s.footnoteLink}>Terms</Text>
+            {' '}and{' '}
+            <Text style={s.footnoteLink}>Privacy Policy</Text>.
+          </Text>
 
         </ScrollView>
       </KeyboardAvoidingView>
@@ -268,27 +121,14 @@ function makeStyles(colors, fonts) {
   return StyleSheet.create({
     safe: { flex: 1, backgroundColor: colors.bg },
     flex: { flex: 1 },
-    scroll: { flexGrow: 1, justifyContent: 'center', padding: 24 },
-    container: { flex: 1, padding: 24 },
-    title: { fontFamily: fonts.displayBold, fontSize: 28, color: colors.text, textAlign: 'center' },
-    btn: {
-      backgroundColor: colors.gold,
-      borderRadius: 12,
-      paddingVertical: 16,
-      alignItems: 'center',
-    },
-    btnText: {
-      color: '#1a1612',
-      fontFamily: fonts.displaySemibold,
-      fontSize: 16,
-    },
+    scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 40 },
 
     logoRow: {
       flexDirection: 'row',
       alignItems: 'baseline',
       justifyContent: 'center',
       gap: 12,
-      marginBottom: 40,
+      marginBottom: 56,
     },
     logo: {
       fontFamily: fonts.displaySemibold,
@@ -298,11 +138,20 @@ function makeStyles(colors, fonts) {
     },
 
     heading: {
-      fontFamily: fonts.displaySemibold,
-      fontSize: 22,
+      fontFamily: fonts.serifBold || fonts.displayBold,
+      fontSize: 32,
       color: colors.text,
       textAlign: 'center',
-      marginBottom: 28,
+      letterSpacing: -0.5,
+      marginBottom: 14,
+    },
+    sub: {
+      fontFamily: fonts.displayRegular,
+      fontSize: 15,
+      color: colors.muted,
+      textAlign: 'center',
+      lineHeight: 22,
+      marginBottom: 32,
     },
 
     input: {
@@ -315,73 +164,48 @@ function makeStyles(colors, fonts) {
       fontFamily: fonts.body,
       fontSize: 16,
       color: colors.text,
-      marginBottom: 12,
+      marginBottom: 14,
     },
-
-    passWrap: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.line,
-      borderRadius: 12,
-      marginBottom: 12,
-      paddingRight: 12,
-    },
-
-    eyeBtn: { padding: 8 },
-    eyeText: { color: colors.dim, fontFamily: fonts.displaySemibold, fontSize: 14 },
 
     submitBtn: {
       backgroundColor: colors.gold,
       borderRadius: 12,
       paddingVertical: 16,
       alignItems: 'center',
-      marginTop: 8,
+      justifyContent: 'center',
+      marginTop: 4,
     },
-
+    submitBtnDisabled: { opacity: 0.45 },
     submitText: {
-      color: '#1a1612',
+      color: colors.bg,
       fontFamily: fonts.displaySemibold,
       fontSize: 16,
+      letterSpacing: 0.3,
     },
 
-    switchRow: {
-      flexDirection: 'row',
-      justifyContent: 'center',
-      marginTop: 24,
+    footnote: {
+      fontFamily: fonts.displayRegular,
+      fontSize: 12,
+      color: colors.dim,
+      textAlign: 'center',
+      marginTop: 28,
+      lineHeight: 18,
     },
-
-    switchText: { color: colors.muted, fontFamily: fonts.body, fontSize: 14 },
-    switchLink: { color: colors.gold, fontFamily: fonts.displaySemibold, fontSize: 14 },
+    footnoteLink: { color: colors.muted },
 
     errorBox: {
-      backgroundColor: colors.errorBg,
+      backgroundColor: colors.errorBg || 'rgba(204, 90, 74, 0.08)',
       borderWidth: 1,
-      borderColor: colors.errorBorder,
+      borderColor: colors.errorBorder || 'rgba(204, 90, 74, 0.25)',
       borderRadius: 10,
       padding: 12,
       marginBottom: 16,
     },
-    errorText: { color: colors.error, fontFamily: fonts.body, fontSize: 14 },
-
-    successBox: {
-      backgroundColor: colors.successBg,
-      borderWidth: 1,
-      borderColor: colors.success,
-      borderRadius: 10,
-      padding: 12,
-      marginBottom: 16,
+    errorText: {
+      color: colors.error || '#cc5a4a',
+      fontFamily: fonts.body,
+      fontSize: 14,
+      textAlign: 'center',
     },
-    successText: { color: colors.success, fontFamily: fonts.body, fontSize: 14 },
-    infoBox: {
-      backgroundColor: colors.goldDim,
-      borderWidth: 1,
-      borderColor: colors.goldBorder,
-      borderRadius: 10,
-      padding: 12,
-      marginBottom: 16,
-    },
-    infoText: { color: colors.gold, fontFamily: fonts.body, fontSize: 14 },
   });
 }
