@@ -31,8 +31,12 @@
         "com.apple.developer.healthkit.access": [],
         "com.apple.security.application-groups": [
           "group.app.livenew.mobile"
+        ],
+        "com.apple.developer.applesignin": [
+          "Default"
         ]
       },
+      "usesAppleSignIn": true,
       "appleTeamId": "8KT9332327",
       "config": {
         "usesNonExemptEncryption": false
@@ -63,7 +67,14 @@
           "background": true
         }
       ],
-      "@sentry/react-native"
+      "@sentry/react-native",
+      "expo-apple-authentication",
+      [
+        "@react-native-google-signin/google-signin",
+        {
+          "iosUrlScheme": "REPLACE_WITH_REVERSED_IOS_CLIENT_ID"
+        }
+      ]
     ],
     "extra": {
       "eas": {

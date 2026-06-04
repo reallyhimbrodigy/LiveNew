@@ -321,6 +321,83 @@ export const useAuthStore = create((set, get) => ({
     return data;
   },
 
+  // Sign in with Apple (iOS native). Returns the same shape as verifyOtp on
+  // success. Throws on cancel/error so the UI can show or swallow it.
+  //
+  // Flow: generate a nonce → hash it → ask Apple for an identityToken with
+  // that hash → Apple returns the token (containing the hash inside) →
+  // send the original nonce + token to our server → server hands both to
+  // Supabase which verifies the nonce matches and returns a session.
+  signInWithApple: async () => {
+    const AppleAuth = require('expo-apple-authentication');
+    const Crypto = require('expo-crypto');
+    // Generate a random nonce and its SHA-256 hash. Apple gets the hash,
+    // Supabase gets the raw nonce — both have to agree the token is fresh.
+    const rawNonce = Array.from({ length: 32 }, () =>
+      Math.floor(Math.random() * 36).toString(36)).join('');
+    const hashedNonce = await Crypto.digestStringAsync(
+      Crypto.CryptoDigestAlgorithm.SHA256,
+      rawNonce,
+    );
+    const credential = await AppleAuth.signInAsync({
+      requestedScopes: [
+        AppleAuth.AppleAuthenticationScope.EMAIL,
+        AppleAuth.AppleAuthenticationScope.FULL_NAME,
+      ],
+      nonce: hashedNonce,
+    });
+    if (!credential.identityToken) {
+      throw new Error('Apple sign-in did not return an identity token.');
+    }
+    const data = await api.socialSignIn('apple', credential.identityToken, rawNonce);
+    const auth = {
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+      userId: data.userId,
+    };
+    setTokens(auth.accessToken, auth.refreshToken);
+    await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+    // Apple only sends fullName on the very first sign-in. Persist locally
+    // so the greeting on Today shows their first name from then on.
+    const first = credential.fullName?.givenName?.trim();
+    if (first) {
+      try { await AsyncStorage.setItem(NAME_KEY, first); } catch {}
+      set({ userName: first });
+    }
+    await get().postSignInBootstrap();
+    return data;
+  },
+
+  // Sign in with Google. Same end-state as signInWithApple.
+  signInWithGoogle: async () => {
+    const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+    // hasPlayServices is a no-op on iOS but harmless; on Android it's required.
+    try { await GoogleSignin.hasPlayServices(); } catch {}
+    const result = await GoogleSignin.signIn();
+    // v16+ wraps the response in { type, data }; older returned a flat object.
+    // Handle both so a version bump doesn't silently break us.
+    const userInfo = result?.data || result;
+    const idToken = userInfo?.idToken || userInfo?.user?.idToken;
+    if (!idToken) {
+      throw new Error('Google sign-in did not return an idToken.');
+    }
+    const data = await api.socialSignIn('google', idToken, null);
+    const auth = {
+      accessToken: data.accessToken,
+      refreshToken: data.refreshToken,
+      userId: data.userId,
+    };
+    setTokens(auth.accessToken, auth.refreshToken);
+    await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+    const first = (userInfo?.user?.givenName || userInfo?.user?.name || '').trim().split(/\s+/)[0];
+    if (first) {
+      try { await AsyncStorage.setItem(NAME_KEY, first); } catch {}
+      set({ userName: first });
+    }
+    await get().postSignInBootstrap();
+    return data;
+  },
+
   // Shared sign-in tail. Bootstraps the user against the server with retries,
   // uses the AUTHORITATIVE server uiState (or onboardingCompletedAt) to decide
   // whether onboarding is needed. If the server is genuinely unreachable after

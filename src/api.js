@@ -130,6 +130,14 @@ export const api = {
   sendOtp: (email) => request('POST', '/v1/auth/send-otp', { email }),
   verifyOtp: (email, code) => request('POST', '/v1/auth/verify-otp', { email, code }),
 
+  // Social sign-in (Apple / Google). The client gets an identityToken from
+  // the native SDK, posts it here, server hands it to Supabase's
+  // signInWithIdToken which validates it against Apple/Google and returns
+  // a Supabase session in the same shape as verify-otp.
+  socialSignIn: (provider, idToken, nonce) => request('POST', '/v1/auth/social-signin', {
+    provider, idToken, nonce: nonce || null,
+  }),
+
   // Legacy password-based endpoints — kept for backwards compatibility with
   // the 1.0.2 TestFlight build that still has the password UI. New code
   // should not call these.

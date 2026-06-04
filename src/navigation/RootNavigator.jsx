@@ -14,6 +14,7 @@ import {
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../theme';
 import { initPurchases } from '../purchases';
+import { GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../socialAuthConfig';
 
 // Screens
 import AuthScreen from '../screens/AuthScreen';
@@ -176,6 +177,18 @@ export default function RootNavigator() {
 
   useEffect(() => {
     (async () => {
+      // Configure Google Sign-In once at app boot. Idempotent — overwrites
+      // config on every call, so re-running on Fast Refresh during dev is
+      // fine. The webClientId is the audience Supabase expects in the
+      // idToken; iosClientId is the iOS-native OAuth client.
+      try {
+        const { GoogleSignin } = require('@react-native-google-signin/google-signin');
+        GoogleSignin.configure({
+          webClientId: GOOGLE_WEB_CLIENT_ID,
+          iosClientId: GOOGLE_IOS_CLIENT_ID,
+        });
+      } catch {}
+
       // Initialize Purchases BEFORE hydrate so the subscription check inside
       // hydrate has a working RevenueCat session. Without this, the cold-boot
       // checkSubscription call silently fails and paying users get downgraded

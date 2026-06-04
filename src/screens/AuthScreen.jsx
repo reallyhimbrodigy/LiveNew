@@ -1,9 +1,10 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator,
+  KeyboardAvoidingView, Platform, ScrollView, ActivityIndicator, Pressable,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import * as AppleAuth from 'expo-apple-authentication';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import IrisSignature from '../components/IrisSignature';
@@ -19,16 +20,56 @@ export default function AuthScreen({ navigation }) {
 
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
+  const [socialLoading, setSocialLoading] = useState(null); // 'apple' | 'google' | null
   const [error, setError] = useState('');
+  const [appleAvailable, setAppleAvailable] = useState(false);
   const inputRef = useRef(null);
 
   const sendOtp = useAuthStore((z) => z.sendOtp);
+  const signInWithApple = useAuthStore((z) => z.signInWithApple);
+  const signInWithGoogle = useAuthStore((z) => z.signInWithGoogle);
 
-  // Focus the email field on mount — saves a tap and signals where to start.
+  // Apple Sign In is iOS-only and only on iOS 13+. Check availability so we
+  // don't render a button that errors when tapped.
   useEffect(() => {
-    const t = setTimeout(() => inputRef.current?.focus(), 300);
-    return () => clearTimeout(t);
+    if (Platform.OS !== 'ios') { setAppleAvailable(false); return; }
+    AppleAuth.isAvailableAsync().then(setAppleAvailable).catch(() => setAppleAvailable(false));
   }, []);
+
+  const handleApple = async () => {
+    setError('');
+    setSocialLoading('apple');
+    try {
+      await signInWithApple();
+      // Navigation handled by RootNavigator on isLoggedIn flip.
+    } catch (err) {
+      // ERR_REQUEST_CANCELED = user dismissed the sheet. Silent.
+      if (err?.code !== 'ERR_REQUEST_CANCELED' && err?.code !== 'ERR_CANCELED') {
+        setError(err?.message || "Couldn't sign in with Apple. Try email instead.");
+      }
+    } finally {
+      setSocialLoading(null);
+    }
+  };
+
+  const handleGoogle = async () => {
+    setError('');
+    setSocialLoading('google');
+    try {
+      await signInWithGoogle();
+    } catch (err) {
+      // SIGN_IN_CANCELLED = user dismissed. Silent.
+      if (err?.code !== 'SIGN_IN_CANCELLED' && err?.code !== '-5') {
+        setError(err?.message || "Couldn't sign in with Google. Try email instead.");
+      }
+    } finally {
+      setSocialLoading(null);
+    }
+  };
+
+  // Email field is no longer auto-focused — the social buttons above it would
+  // get hidden by the keyboard opening instantly on mount. Users who want
+  // email tap the field themselves.
 
   const handleSubmit = async () => {
     setError('');
@@ -75,6 +116,47 @@ export default function AuthScreen({ navigation }) {
 
           {error ? <View style={s.errorBox}><Text style={s.errorText}>{error}</Text></View> : null}
 
+          {/* Apple-first per HIG: when available, the Sign in with Apple
+              button leads the social options. Apple's button comes from
+              expo-apple-authentication so it matches system styling/locale. */}
+          {appleAvailable ? (
+            <AppleAuth.AppleAuthenticationButton
+              buttonType={AppleAuth.AppleAuthenticationButtonType.CONTINUE}
+              buttonStyle={
+                colors.bg === '#0f0d0a' || (colors.bg && colors.bg.startsWith('#0'))
+                  ? AppleAuth.AppleAuthenticationButtonStyle.WHITE
+                  : AppleAuth.AppleAuthenticationButtonStyle.BLACK
+              }
+              cornerRadius={12}
+              style={s.appleBtn}
+              onPress={handleApple}
+            />
+          ) : null}
+
+          <Pressable
+            onPress={handleGoogle}
+            disabled={socialLoading === 'google'}
+            style={({ pressed }) => [s.googleBtn, pressed && { opacity: 0.85 }, socialLoading === 'google' && { opacity: 0.5 }]}
+          >
+            {socialLoading === 'google' ? (
+              <ActivityIndicator color={colors.text} size="small" />
+            ) : (
+              <>
+                <View style={s.googleIcon}>
+                  <Text style={s.googleIconText}>G</Text>
+                </View>
+                <Text style={s.googleBtnText}>Continue with Google</Text>
+              </>
+            )}
+          </Pressable>
+
+          {/* "or" divider between social and email */}
+          <View style={s.divider}>
+            <View style={s.dividerLine} />
+            <Text style={s.dividerText}>or</Text>
+            <View style={s.dividerLine} />
+          </View>
+
           <TextInput
             ref={inputRef}
             style={s.input}
@@ -100,7 +182,7 @@ export default function AuthScreen({ navigation }) {
             {loading ? (
               <ActivityIndicator color={colors.bg} size="small" />
             ) : (
-              <Text style={s.submitText}>Continue</Text>
+              <Text style={s.submitText}>Continue with email</Text>
             )}
           </TouchableOpacity>
 
@@ -152,6 +234,63 @@ function makeStyles(colors, fonts) {
       textAlign: 'center',
       lineHeight: 22,
       marginBottom: 32,
+    },
+
+    appleBtn: {
+      width: '100%',
+      height: 52,
+      marginBottom: 10,
+    },
+    googleBtn: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 12,
+      paddingVertical: 14,
+      paddingHorizontal: 18,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 12,
+      marginBottom: 10,
+      minHeight: 52,
+    },
+    googleIcon: {
+      width: 22,
+      height: 22,
+      borderRadius: 11,
+      backgroundColor: '#fff',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    googleIconText: {
+      color: '#4285F4',
+      fontFamily: fonts.displayBold,
+      fontSize: 14,
+      lineHeight: 16,
+    },
+    googleBtnText: {
+      color: colors.text,
+      fontFamily: fonts.displaySemibold,
+      fontSize: 16,
+      letterSpacing: 0.2,
+    },
+    divider: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 12,
+      marginVertical: 18,
+    },
+    dividerLine: {
+      flex: 1,
+      height: StyleSheet.hairlineWidth,
+      backgroundColor: colors.line,
+    },
+    dividerText: {
+      fontFamily: fonts.italic,
+      fontSize: 13,
+      color: colors.dim,
+      letterSpacing: 0.3,
     },
 
     input: {

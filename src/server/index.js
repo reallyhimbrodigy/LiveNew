@@ -6656,6 +6656,75 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // Social sign-in: exchange a native Apple/Google identityToken for a
+    // Supabase session. The client (RN app) gets the identityToken from
+    // expo-apple-authentication or @react-native-google-signin/google-signin,
+    // posts it here, and we hand it to Supabase's signInWithIdToken which
+    // validates the JWT against the provider and either creates or signs
+    // in the user. Returns the same shape as /v1/auth/verify-otp so the
+    // client can treat it identically.
+    if (pathname === "/v1/auth/social-signin" && req.method === "POST") {
+      if (!requireCsrf(req, res)) return;
+      const body = await parseJson(req);
+      const provider = body?.provider;
+      const idToken = body?.idToken;
+      const nonce = body?.nonce || undefined;
+      if (provider !== "apple" && provider !== "google") {
+        sendError(res, 400, "provider_invalid", "provider must be 'apple' or 'google'", "provider");
+        return;
+      }
+      if (!idToken || typeof idToken !== "string") {
+        sendError(res, 400, "id_token_required", "idToken is required", "idToken");
+        return;
+      }
+      try {
+        const { data, error } = await supabaseAnon().auth.signInWithIdToken({
+          provider,
+          token: idToken,
+          nonce, // Apple supports nonce; Google ignores it. Safe to pass either way.
+        });
+        if (error) {
+          console.error("[auth][social_signin] supabase_error", {
+            provider, message: error.message, status: error.status,
+          });
+          // Supabase returns generic errors for token verification failures.
+          // Map the most common ones; otherwise surface a sanitized message
+          // (never leak raw provider strings — they read as broken-app bugs).
+          const msg = String(error.message || "");
+          let codeOut = "SOCIAL_SIGNIN_FAILED";
+          let userMessage = "Couldn't sign in with that account. Try again or use email.";
+          if (/audience|aud/i.test(msg)) {
+            codeOut = "SOCIAL_AUDIENCE_MISMATCH";
+            userMessage = "Sign-in setup issue. Try email for now — we're on it.";
+          } else if (/expired/i.test(msg)) {
+            codeOut = "SOCIAL_TOKEN_EXPIRED";
+            userMessage = "That sign-in expired. Try again.";
+          }
+          sendJson(res, 400, { ok: false, code: codeOut, message: userMessage });
+          return;
+        }
+        const session = data?.session;
+        const user = data?.user;
+        if (!session) {
+          sendJson(res, 400, { ok: false, code: "SOCIAL_NO_SESSION", message: "Sign-in didn't return a session." });
+          return;
+        }
+        logDebug({ tag: "auth.social_signin", phase: "ok", provider, userId: user?.id });
+        sendJson(res, 200, {
+          ok: true,
+          userId: user?.id || null,
+          email: user?.email || null,
+          accessToken: session.access_token,
+          refreshToken: session.refresh_token,
+        });
+        return;
+      } catch (err) {
+        console.error("[auth][social_signin] unexpected error", { provider, message: err?.message || String(err) });
+        sendJson(res, 500, { ok: false, code: "SOCIAL_SIGNIN_FAILED", message: "Sign-in failed. Please try again." });
+        return;
+      }
+    }
+
     // Passwordless: verify the 6-digit OTP and return a session. Identical
     // implementation to /v1/auth/verify-signup-otp; this is the cleanly-named
     // version that matches the passwordless model (signin, not "signup").
