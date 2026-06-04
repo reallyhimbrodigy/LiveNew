@@ -10,5 +10,5 @@
 // expects in the idToken. Without it, Supabase rejects the token with an
 // "audience mismatch" error.
 
-export const GOOGLE_WEB_CLIENT_ID = 'REPLACE_WITH_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com';
-export const GOOGLE_IOS_CLIENT_ID = 'REPLACE_WITH_GOOGLE_IOS_CLIENT_ID.apps.googleusercontent.com';
+export const GOOGLE_WEB_CLIENT_ID = '388820236554-0iept81t48453g2b667c7qpfb7jdp15h.apps.googleusercontent.com';
+export const GOOGLE_IOS_CLIENT_ID = '388820236554-nopaftj6tobedjd8fnl71rifth445a94.apps.googleusercontent.com';
