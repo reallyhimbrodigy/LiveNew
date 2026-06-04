@@ -40,6 +40,15 @@ function isEvening() {
   return new Date().getHours() >= 19;
 }
 
+// Sleep window: 10pm to 5am local. Used to keep late-night sign-ins out of
+// the check-in flow — a 1am plan that's already in its "sleep" zone reads
+// as a bug, not a feature. Inside the window we render a calm wind-down
+// empty state instead of routing to StressTap.
+function isSleepWindow() {
+  const h = new Date().getHours();
+  return h >= 22 || h < 5;
+}
+
 // Pulsing dot used for the "current zone" position on Today's Arc. A
 // fixed-size gold core with an expanding ring around it — the ring loops
 // scale + opacity so the dot reads as alive. The pulse animation is
@@ -177,11 +186,21 @@ export default function TodayScreen({ navigation }) {
     return () => clearInterval(interval);
   }, []);
 
-  // Hydrate plan on mount if needed (or land in empty state)
+  // Hydration + autoRoute gate. These USED to be two separate effects, which
+  // raced: autoRoute would fire synchronously (reading the still-null Zustand
+  // plan) and navigate away before the async AsyncStorage read could repopulate
+  // the store. Result: users with a cached plan would get bounced back to
+  // StressTap on every nav-to-Today/cold-boot. Now hydration finishes FIRST,
+  // and autoRoute (below, gated on `hydrated`) only runs after we've actually
+  // checked storage.
+  const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     const check = async () => {
       const today = getLocalDateISO();
-      if (todayPlan && todayDate === today) return;
+      if (todayPlan && todayDate === today) {
+        setHydrated(true);
+        return;
+      }
       try {
         const raw = await AsyncStorage.getItem('livenew:plan');
         if (raw) {
@@ -191,11 +210,13 @@ export default function TodayScreen({ navigation }) {
               todayPlan: cached.contract,
               todayDate: cached.date,
               todayStress: cached.stress,
+              todayStressLabel: cached.stressLabel || null,
               todaySleep: cached.sleepQuality,
               todayEnergy: cached.energy,
               completed: cached.completed || {},
               reflection: cached.reflection || null,
             });
+            setHydrated(true);
             return;
           }
         }
@@ -205,6 +226,7 @@ export default function TodayScreen({ navigation }) {
           todayPlan: null, todayDate: null, completed: {}, reflection: null,
         });
       }
+      setHydrated(true);
     };
     check();
   }, []);
@@ -292,14 +314,20 @@ export default function TodayScreen({ navigation }) {
   //   - First open of a fresh day → Overnight screen (morning ritual)
   //   - Already saw Overnight today → straight to StressTap (check-in)
   //   - User skipped today → don't route
-  // The Overnight screen sets livenew:seen_overnight_date on its CTA so
-  // subsequent opens this day skip past it. Only fires once per mount.
+  //   - Sleep window (22:00–05:00 local) → don't route; show calm sleep-mode
+  //     empty state instead. Pushing a 1am user into a check-in for a plan
+  //     that's already "ended" is the previous-build bug.
+  // Only fires once per mount AND only after hydration confirms there's
+  // genuinely no cached plan in storage. This kills the race where the
+  // autoRoute saw a null Zustand plan before AsyncStorage finished loading.
   const autoRoutedRef = useRef(false);
   useEffect(() => {
+    if (!hydrated) return;
     if (autoRoutedRef.current) return;
     if (todayPlan) return;
     const today = getLocalDateISO();
     if (skippedDate === today) return;
+    if (isSleepWindow()) return;
     autoRoutedRef.current = true;
     (async () => {
       let seen = null;
@@ -310,7 +338,7 @@ export default function TodayScreen({ navigation }) {
         navigation.replace('Overnight');
       }
     })();
-  }, [todayPlan, skippedDate, navigation]);
+  }, [hydrated, todayPlan, skippedDate, navigation]);
 
   // Read yesterday's reflection — drives the visible payoff callout that
   // shows the user Iris is actually using their evening reflection input.
@@ -495,6 +523,7 @@ export default function TodayScreen({ navigation }) {
     // (Earlier `if (skippedDate === today || true)` was load-bearing despite
     // looking like a bug; removing it stranded users on a forever-spinner.)
     const morning = new Date().getHours() < 12;
+    const sleepMode = isSleepWindow();
     return (
       <SafeAreaView style={s.safe} edges={['top']}>
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
@@ -506,8 +535,9 @@ export default function TodayScreen({ navigation }) {
           </View>
 
           {/* Streak-at-risk nudge — after 7pm with no plan today and a
-              streak worth saving. Quiet, not nagging. */}
-          {streak >= 1 && new Date().getHours() >= 19 ? (
+              streak worth saving. Quiet, not nagging. Suppressed inside the
+              sleep window — pushing a streak-save at 2am defeats the point. */}
+          {!sleepMode && streak >= 1 && new Date().getHours() >= 19 ? (
             <View style={s.streakRiskCard}>
               <View style={s.streakRiskHeader}>
                 <Text style={s.streakRiskFire}>🔥</Text>
@@ -520,24 +550,51 @@ export default function TodayScreen({ navigation }) {
             </View>
           ) : null}
 
-          <View style={s.emptyCard}>
-            <Text style={s.emptyLabel}>NO PLAN YET</Text>
-            <Text style={s.emptyTitle}>{morning ? 'A new day.' : 'Ready when you are.'}</Text>
-            <Text style={s.emptyBody}>
-              Three taps. I'll tune today around your sleep, your stress, and your energy.
-            </Text>
-            <Pressable
-              style={({ pressed }) => [s.emptyCta, pressed && { opacity: 0.85 }]}
-              onPress={async () => {
-                tapSelect();
-                await clearSkip();
-                navigation.replace('StressTap');
-              }}
-            >
-              <Text style={s.emptyCtaText}>Start today</Text>
-            </Pressable>
-            <Text style={s.emptyHint}>Or tap "I'm stressed" if you just need a moment.</Text>
-          </View>
+          {sleepMode ? (
+            // Sleep-window empty state. Calmer surface, no primary CTA — just
+            // a clear "I'm offline" message. The stress button is still
+            // available below for anyone awake at 2am who actually needs it.
+            <View style={s.sleepCard}>
+              <Text style={s.sleepLabel}>SLEEP WINDOW</Text>
+              <Text style={s.sleepTitle}>It's late.</Text>
+              <Text style={s.sleepBody}>
+                I'm offline until morning. The plan I build for you at sunrise will be sharper than anything I can put together right now — your overnight sleep and HRV shape every zone.
+              </Text>
+              <Text style={s.sleepBody}>
+                Try to rest. I'll meet you in the morning.
+              </Text>
+              <Pressable
+                style={({ pressed }) => [s.sleepSecondary, pressed && { opacity: 0.6 }]}
+                onPress={async () => {
+                  tapLight();
+                  await clearSkip();
+                  navigation.replace('StressTap');
+                }}
+                hitSlop={8}
+              >
+                <Text style={s.sleepSecondaryText}>Generate anyway →</Text>
+              </Pressable>
+            </View>
+          ) : (
+            <View style={s.emptyCard}>
+              <Text style={s.emptyLabel}>NO PLAN YET</Text>
+              <Text style={s.emptyTitle}>{morning ? 'A new day.' : 'Ready when you are.'}</Text>
+              <Text style={s.emptyBody}>
+                Three taps. I'll tune today around your sleep, your stress, and your energy.
+              </Text>
+              <Pressable
+                style={({ pressed }) => [s.emptyCta, pressed && { opacity: 0.85 }]}
+                onPress={async () => {
+                  tapSelect();
+                  await clearSkip();
+                  navigation.replace('StressTap');
+                }}
+              >
+                <Text style={s.emptyCtaText}>Start today</Text>
+              </Pressable>
+              <Text style={s.emptyHint}>Or tap "I'm stressed" if you just need a moment.</Text>
+            </View>
+          )}
         </ScrollView>
         {stressBtnAndModal}
       </SafeAreaView>
@@ -1732,6 +1789,53 @@ function makeStyles(colors, fonts) {
     fontSize: 13,
     color: colors.muted,
     letterSpacing: 0.5,
+  },
+
+  // Sleep-window empty state — calmer than the daytime variant. No primary
+  // CTA, muted text, gold-soft frame. Signals "the day is closed" without
+  // making the user feel like they hit a dead end.
+  sleepCard: {
+    marginTop: 32,
+    paddingVertical: 32,
+    paddingHorizontal: 24,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    backgroundColor: colors.goldSoft,
+    alignItems: 'flex-start',
+  },
+  sleepLabel: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 10,
+    color: colors.gold,
+    letterSpacing: 1.8,
+    marginBottom: 14,
+  },
+  sleepTitle: {
+    fontFamily: fonts.display,
+    fontSize: 28,
+    color: colors.text,
+    marginBottom: 14,
+    letterSpacing: 0.2,
+  },
+  sleepBody: {
+    fontFamily: fonts.italic,
+    fontSize: 15,
+    color: colors.text,
+    lineHeight: 23,
+    marginBottom: 14,
+    letterSpacing: 0.1,
+  },
+  sleepSecondary: {
+    marginTop: 8,
+    paddingVertical: 10,
+    alignSelf: 'flex-start',
+  },
+  sleepSecondaryText: {
+    fontFamily: fonts.italic,
+    fontSize: 13,
+    color: colors.muted,
+    letterSpacing: 0.3,
   },
 
   // Empty state

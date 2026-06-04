@@ -6439,10 +6439,30 @@ const server = http.createServer(async (req, res) => {
             status: error.status,
             name: error.name,
           });
+          // Map the raw Supabase error to a sanitized client message. Never
+          // leak strings like "Error sending confirmation email" — they read
+          // like a broken-app bug to users when the actual cause is SMTP
+          // misconfiguration on the project.
+          const msg = String(error.message || "");
+          let code = "SUPABASE_AUTH_ERROR";
+          let userMessage = "We couldn't create your account. Try again in a moment.";
+          if (/rate.*limit|too many/i.test(msg)) {
+            code = "AUTH_RATE_LIMITED";
+            userMessage = "Too many tries. Wait a minute, then try again.";
+          } else if (/invalid.*email|email.*invalid/i.test(msg)) {
+            code = "AUTH_INVALID_EMAIL";
+            userMessage = "That doesn't look like a valid email.";
+          } else if (/password/i.test(msg)) {
+            code = "AUTH_WEAK_PASSWORD";
+            userMessage = "Pick a longer password — at least 8 characters.";
+          } else if (/sending.*(confirmation|email)|smtp|mailer/i.test(msg)) {
+            code = "AUTH_EMAIL_UNAVAILABLE";
+            userMessage = "We're having trouble sending the confirmation email right now. Try again in a minute.";
+          }
           sendJson(res, 400, {
             ok: false,
-            code: "SUPABASE_AUTH_ERROR",
-            message: error.message,
+            code,
+            message: userMessage,
             status: error.status ?? null,
           });
           return;
@@ -6487,7 +6507,7 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, {
           ok: false,
           code: "SUPABASE_AUTH_ERROR",
-          message: err?.message || "Signup failed",
+          message: "We couldn't create your account. Try again in a moment.",
           status: null,
         });
         return;
@@ -6596,18 +6616,32 @@ const server = http.createServer(async (req, res) => {
           },
         });
         if (error) {
-          logDebug({ tag: "auth.send_otp", phase: "supabase_error", email: emailLower, message: error.message, status: error.status });
-          // Supabase returns generic errors for both invalid emails and rate
-          // limiting. Map the most common ones to friendlier codes.
+          // Always log the raw Supabase error server-side — SMTP failures
+          // ("Error sending confirmation email") look identical to other
+          // errors in the user-facing response, so the server log is the
+          // only place to diagnose them. Promote to console.error so it
+          // shows up in prod logs, not just debug.
+          console.error("[auth][send_otp] supabase_error", {
+            email: emailLower,
+            message: error.message,
+            status: error.status,
+          });
           const msg = String(error.message || "");
           let codeOut = "OTP_SEND_FAILED";
           let userMessage = "Could not send the code. Try again in a moment.";
           if (/rate.*limit|too many/i.test(msg)) {
             codeOut = "OTP_RATE_LIMITED";
             userMessage = "Too many tries. Wait a minute, then try again.";
-          } else if (/invalid.*email/i.test(msg)) {
+          } else if (/invalid.*email|email.*invalid/i.test(msg)) {
             codeOut = "OTP_INVALID_EMAIL";
             userMessage = "That doesn't look like a valid email.";
+          } else if (/sending.*(confirmation|email)|smtp|mailer/i.test(msg)) {
+            // Supabase SMTP failure — likely the project's mailer isn't set
+            // up (need scripts/setup-supabase-auth.mjs) or Resend is down.
+            // Surface a clear non-scary message; the raw error is in the
+            // server log above.
+            codeOut = "OTP_EMAIL_UNAVAILABLE";
+            userMessage = "We're having trouble sending the code right now. Try again in a minute.";
           }
           sendJson(res, 400, { ok: false, code: codeOut, message: userMessage });
           return;

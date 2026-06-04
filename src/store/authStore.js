@@ -186,10 +186,15 @@ export const useAuthStore = create((set, get) => ({
         // server response may not include every field (e.g. server only stores
         // goal + routine; the client may have stored extras like injuries
         // from an older session). Don't overwrite local fields with server
-        // null/undefined.
+        // null/undefined. AND don't downgrade hasProfile on bootstrap failure —
+        // a transient network error must NEVER re-onboard a returning user.
         try {
           const bootstrap = await api.bootstrap();
           const serverProfile = bootstrap?.profile || {};
+          const serverSaysOnboarded =
+            bootstrap?.uiState === 'home' ||
+            bootstrap?.profile?.isComplete === true ||
+            !!serverProfile.routine;
           if (serverProfile.routine) {
             const localProfile = profile || {};
             const pickServer = (key) => (
@@ -207,9 +212,20 @@ export const useAuthStore = create((set, get) => ({
               injuries: serverProfile.injuries || localProfile.injuries || [],
             };
             await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(merged));
-            set({ profile: merged, hasProfile: !!merged.routine });
+            set({ profile: merged, hasProfile: serverSaysOnboarded || !!merged.routine });
+          } else if (serverSaysOnboarded && !hasProfile) {
+            // Server flagged this user as onboarded but didn't return a
+            // routine in the response shape — still flip the gate so the
+            // user isn't trapped in onboarding. This handles older bootstrap
+            // responses that omit the field.
+            set({ hasProfile: true });
           }
-        } catch {}
+        } catch (err) {
+          // Bootstrap failed — keep whatever hasProfile we already set from
+          // the local cache above. Do NOT clear it. Returning users with
+          // a flaky connection still get into the app.
+          console.warn('[auth] hydrate bootstrap failed (keeping local state)', err?.message);
+        }
 
         // Verify subscription with RevenueCat
         try {
@@ -239,23 +255,7 @@ export const useAuthStore = create((set, get) => ({
     setTokens(auth.accessToken, auth.refreshToken);
     await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(auth));
 
-    // Fetch profile
-    try {
-      const bootstrap = await api.bootstrap();
-      const p = bootstrap?.profile || {};
-      const profile = {
-        routine: p.routine || null,
-        stressSource: p.stressSource || null,
-        wakeTime: p.wakeTime || null,
-        timeMin: p.timeMin || null,
-        injuries: p.injuries || [],
-      };
-      const hasProfile = !!profile.routine;
-      await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
-      set({ isLoggedIn: true, hasProfile, profile });
-    } catch {
-      set({ isLoggedIn: true, hasProfile: false });
-    }
+    await get().postSignInBootstrap();
   },
 
   // Signup
@@ -287,24 +287,7 @@ export const useAuthStore = create((set, get) => ({
     };
     setTokens(auth.accessToken, auth.refreshToken);
     await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(auth));
-
-    // Same bootstrap path as login so the navigator state is consistent.
-    try {
-      const bootstrap = await api.bootstrap();
-      const p = bootstrap?.profile || {};
-      const profile = {
-        routine: p.routine || null,
-        stressSource: p.stressSource || null,
-        wakeTime: p.wakeTime || null,
-        timeMin: p.timeMin || null,
-        injuries: p.injuries || [],
-      };
-      const hasProfile = !!profile.routine;
-      await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
-      set({ isLoggedIn: true, hasProfile, profile });
-    } catch {
-      set({ isLoggedIn: true, hasProfile: false });
-    }
+    await get().postSignInBootstrap();
     return data;
   },
 
@@ -334,9 +317,32 @@ export const useAuthStore = create((set, get) => ({
     };
     setTokens(auth.accessToken, auth.refreshToken);
     await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+    await get().postSignInBootstrap();
+    return data;
+  },
 
-    try {
-      const bootstrap = await api.bootstrap();
+  // Shared sign-in tail. Bootstraps the user against the server with retries,
+  // uses the AUTHORITATIVE server uiState (or onboardingCompletedAt) to decide
+  // whether onboarding is needed. If the server is genuinely unreachable after
+  // retries AND we have a previously-cached profile locally, trust the local
+  // cache and let the user into the app rather than dumping them back into
+  // onboarding (the prior bug — every transient network error re-onboarded
+  // returning users).
+  postSignInBootstrap: async () => {
+    let bootstrap = null;
+    let lastErr = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        bootstrap = await api.bootstrap();
+        break;
+      } catch (err) {
+        lastErr = err;
+        // Linear backoff: 300ms, 600ms.
+        if (attempt < 2) await new Promise(r => setTimeout(r, 300 * (attempt + 1)));
+      }
+    }
+
+    if (bootstrap) {
       const p = bootstrap?.profile || {};
       const profile = {
         routine: p.routine || null,
@@ -345,13 +351,38 @@ export const useAuthStore = create((set, get) => ({
         timeMin: p.timeMin || null,
         injuries: p.injuries || [],
       };
-      const hasProfile = !!profile.routine;
-      await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
-      set({ isLoggedIn: true, hasProfile, profile });
-    } catch {
-      set({ isLoggedIn: true, hasProfile: false });
+      // Source of truth: server's uiState. "home" means fully onboarded.
+      // Fall back to profile.isComplete or routine presence for older server
+      // versions. Crucially we DON'T require local routine to be non-null —
+      // the server is authoritative on this account's onboarding status.
+      const serverSaysOnboarded =
+        bootstrap?.uiState === 'home' ||
+        bootstrap?.profile?.isComplete === true ||
+        !!profile.routine;
+      try { await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile)); } catch {}
+      set({ isLoggedIn: true, hasProfile: serverSaysOnboarded, profile });
+      return;
     }
-    return data;
+
+    // Server unreachable after retries. Check for a locally-cached profile —
+    // if we have one, the user was onboarded on this device before; let them
+    // in. If we don't, we genuinely don't know, so default to letting them
+    // attempt the app (the empty Today screen handles no-plan gracefully and
+    // they can complete onboarding via Account if needed).
+    console.warn('[auth] postSignInBootstrap: bootstrap failed after retries', lastErr?.message);
+    try {
+      const profileJson = await AsyncStorage.getItem(PROFILE_KEY);
+      if (profileJson) {
+        const profile = JSON.parse(profileJson);
+        const hasProfile = !!(profile && profile.routine);
+        set({ isLoggedIn: true, hasProfile, profile });
+        return;
+      }
+    } catch {}
+    // No local cache either. Best-effort: log them in but with hasProfile
+    // false so they hit onboarding. This matches the pre-fix behavior only
+    // for the genuinely-no-data case, not for the transient-error case.
+    set({ isLoggedIn: true, hasProfile: false });
   },
 
   // User chose to skip today's check-in. Persists for today only; cleared on day change.
