@@ -431,6 +431,32 @@
     @media (min-width: 768px) { .subline { font-size: 1.8rem; } }
     @media (min-width: 1024px) { .subline { font-size: 2.1rem; } }
 
+    /* Hero product description — small, italic, muted. The hero headlines
+       above are marketing voice; this one line is the explicit "what is
+       this app?" anchor visible above the fold. Required for Google OAuth
+       branding verification (reviewers want a clear product description
+       without scrolling) and load-bearing for first-time visitors who
+       don't yet know what the brand is. Fades in at the tail of the
+       hero word-reveal cascade so it doesn't compete visually. */
+    .product-description {
+      font-family: var(--font-display);
+      font-style: italic;
+      font-weight: 300;
+      font-size: 0.95rem;
+      line-height: 1.65;
+      letter-spacing: 0.01em;
+      color: var(--text-dim);
+      max-width: 540px;
+      margin: 28px auto 0;
+      padding: 0 8px;
+      opacity: 0;
+      animation: simple-fade 1s ease-out forwards;
+      animation-delay: 3.5s;
+    }
+
+    @media (min-width: 640px) { .product-description { font-size: 1.05rem; margin-top: 36px; max-width: 620px; } }
+    @media (min-width: 768px) { .product-description { font-size: 1.1rem; } }
+
     .headline-wrap {
       position: relative;
       display: inline;
@@ -473,7 +499,10 @@
       gap: 16px;
       opacity: 0;
       animation: simple-fade 1s ease-out forwards;
-      animation-delay: 3.8s;
+      /* Pushed back from 3.8s to 4.6s so the product-description line
+         (which fades in at 3.5s) finishes before the CTA appears. Keeps
+         the cascade rhythm tight without rushing the new line. */
+      animation-delay: 4.6s;
     }
 
     .cta-btn {
@@ -1172,6 +1201,10 @@
         <span class="word" data-delay="3050">you</span>
         <span class="word" data-delay="3200">feel.</span>
       </div>
+
+      <p class="product-description">
+        LiveNew is a cortisol-regulation iPhone app. Iris, the in-app AI, reads your real biometrics from Apple Health and gives you the right action for every hour of your day &mdash; no timers, no meditation, no streaks.
+      </p>
 
       <div class="cta-area">
         <a href="https://apps.apple.com/app/livenew/id6760437838" class="cta-btn" target="_blank" rel="noopener">Download on the App Store</a>
