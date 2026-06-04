@@ -8,6 +8,7 @@ import * as AppleAuth from 'expo-apple-authentication';
 import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import IrisSignature from '../components/IrisSignature';
+import GoogleGLogo from '../components/GoogleGLogo';
 
 // Passwordless OTP entry: ask for email, fire signInWithOtp on the server, hop
 // to the VerifyEmail screen where the user types the 6-digit code Supabase
@@ -15,7 +16,7 @@ import IrisSignature from '../components/IrisSignature';
 // (name is collected during onboarding for new users). Single field, single
 // button — matches the modern mental model from Linear / Notion / Substack.
 export default function AuthScreen({ navigation }) {
-  const { colors, fonts } = useTheme();
+  const { colors, fonts, scheme } = useTheme();
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
 
   const [email, setEmail] = useState('');
@@ -110,20 +111,22 @@ export default function AuthScreen({ navigation }) {
 
           <Text style={s.heading}>Sign in</Text>
           <Text style={s.sub}>
-            Enter your email. We'll send a 6-digit code.{'\n'}
-            New here? An account will be created automatically.
+            New or returning — pick a way to continue.
           </Text>
 
           {error ? <View style={s.errorBox}><Text style={s.errorText}>{error}</Text></View> : null}
 
           {/* Apple-first per HIG: when available, the Sign in with Apple
               button leads the social options. Apple's button comes from
-              expo-apple-authentication so it matches system styling/locale. */}
+              expo-apple-authentication so it matches system styling/locale.
+              In dark mode use the WHITE button (white pill on dark bg),
+              in light mode the BLACK button (black pill on light bg) — this
+              matches Apple's HIG and reads as native, not bolted-on. */}
           {appleAvailable ? (
             <AppleAuth.AppleAuthenticationButton
               buttonType={AppleAuth.AppleAuthenticationButtonType.CONTINUE}
               buttonStyle={
-                colors.bg === '#0f0d0a' || (colors.bg && colors.bg.startsWith('#0'))
+                scheme === 'dark'
                   ? AppleAuth.AppleAuthenticationButtonStyle.WHITE
                   : AppleAuth.AppleAuthenticationButtonStyle.BLACK
               }
@@ -136,15 +139,17 @@ export default function AuthScreen({ navigation }) {
           <Pressable
             onPress={handleGoogle}
             disabled={socialLoading === 'google'}
-            style={({ pressed }) => [s.googleBtn, pressed && { opacity: 0.85 }, socialLoading === 'google' && { opacity: 0.5 }]}
+            style={({ pressed }) => [
+              s.googleBtn,
+              pressed && { transform: [{ scale: 0.99 }] },
+              socialLoading === 'google' && { opacity: 0.6 },
+            ]}
           >
             {socialLoading === 'google' ? (
               <ActivityIndicator color={colors.text} size="small" />
             ) : (
               <>
-                <View style={s.googleIcon}>
-                  <Text style={s.googleIconText}>G</Text>
-                </View>
+                <GoogleGLogo size={18} />
                 <Text style={s.googleBtnText}>Continue with Google</Text>
               </>
             )}
@@ -236,50 +241,43 @@ function makeStyles(colors, fonts) {
       marginBottom: 32,
     },
 
+    // Apple button: 50pt is Apple's recommended minimum tap height. We use
+    // 52 to match the Google button visually for a tidy stack.
     appleBtn: {
       width: '100%',
       height: 52,
-      marginBottom: 10,
+      marginBottom: 12,
     },
+    // Google button: matches the Apple button proportions exactly so the
+    // social block reads as one block, not two unrelated buttons. Uses the
+    // app's surface color so it blends with the brand rather than being a
+    // jarring white pill on dark bg (Google's brand guidelines allow either).
     googleBtn: {
+      width: '100%',
+      height: 52,
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.line,
       borderRadius: 12,
-      paddingVertical: 14,
       paddingHorizontal: 18,
       flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
       gap: 12,
-      marginBottom: 10,
-      minHeight: 52,
-    },
-    googleIcon: {
-      width: 22,
-      height: 22,
-      borderRadius: 11,
-      backgroundColor: '#fff',
-      alignItems: 'center',
-      justifyContent: 'center',
-    },
-    googleIconText: {
-      color: '#4285F4',
-      fontFamily: fonts.displayBold,
-      fontSize: 14,
-      lineHeight: 16,
+      marginBottom: 12,
     },
     googleBtnText: {
       color: colors.text,
       fontFamily: fonts.displaySemibold,
       fontSize: 16,
-      letterSpacing: 0.2,
+      letterSpacing: 0.1,
     },
     divider: {
       flexDirection: 'row',
       alignItems: 'center',
       gap: 12,
-      marginVertical: 18,
+      marginTop: 8,
+      marginBottom: 14,
     },
     dividerLine: {
       flex: 1,
@@ -288,9 +286,10 @@ function makeStyles(colors, fonts) {
     },
     dividerText: {
       fontFamily: fonts.italic,
-      fontSize: 13,
+      fontSize: 12,
       color: colors.dim,
-      letterSpacing: 0.3,
+      letterSpacing: 0.8,
+      textTransform: 'lowercase',
     },
 
     input: {

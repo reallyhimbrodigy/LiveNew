@@ -374,8 +374,15 @@ export const useAuthStore = create((set, get) => ({
     // hasPlayServices is a no-op on iOS but harmless; on Android it's required.
     try { await GoogleSignin.hasPlayServices(); } catch {}
     const result = await GoogleSignin.signIn();
-    // v16+ wraps the response in { type, data }; older returned a flat object.
-    // Handle both so a version bump doesn't silently break us.
+    // v16+ returns { type: 'success' | 'cancelled', data?: {...} } and
+    // does NOT throw on cancel. Older versions returned the data flat and
+    // threw on cancel. Handle both, and surface cancel as a typed error
+    // the UI can swallow silently.
+    if (result?.type === 'cancelled') {
+      const err = new Error('Sign-in cancelled');
+      err.code = 'SIGN_IN_CANCELLED';
+      throw err;
+    }
     const userInfo = result?.data || result;
     const idToken = userInfo?.idToken || userInfo?.user?.idToken;
     if (!idToken) {
