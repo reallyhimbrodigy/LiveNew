@@ -302,9 +302,16 @@ export default function OnboardingScreen() {
                 </ScrollView>
               )}
 
-              {/* Step 1 — Schedule (free text) */}
+              {/* Step 1 — Schedule (free text). This is the single
+                  load-bearing step of onboarding — the routine string is
+                  injected into every plan-generation prompt Iris runs, so
+                  the precision of the user's answer here directly drives
+                  the precision of every protocol they'll ever see. The
+                  eyebrow + Iris-voiced footer below exist to make that
+                  weight visible so users don't dash off two vague lines. */}
               {step === 1 && (
                 <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }}>
+                  <Text style={s.eyebrow}>THE MOST IMPORTANT STEP</Text>
                   <Text style={s.heading}>What does a typical day look like?</Text>
                   <Text style={s.sub}>
                     Wake time, work hours, gym, when you eat, when you sleep — and anything else that shapes your day. The more you tell Iris, the more precisely she can shape your plan. Don't hold back.
@@ -321,6 +328,9 @@ export default function OnboardingScreen() {
                     textAlignVertical="top"
                     maxLength={400}
                   />
+                  <Text style={s.irisHint}>
+                    Of every question I'll ask, this one shapes your plan the most. Take your time.
+                  </Text>
                   <Pressable
                     style={({ pressed }) => [s.primary, (!routine.trim()) && { opacity: 0.4 }, pressed && { opacity: 0.85 }]}
                     onPress={handleScheduleNext}
@@ -440,6 +450,17 @@ function makeStyles(colors, fonts) {
     backBtn: { alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 4, marginBottom: 12 },
     backText: { color: colors.muted, fontFamily: fonts.body, fontSize: 14, letterSpacing: 0.2 },
 
+    // Small gold eyebrow above headings on weight-bearing steps (currently
+    // just step 1 — schedule). Visually telegraphs "this matters more"
+    // without making the rest of onboarding feel less important.
+    eyebrow: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 11,
+      color: colors.gold,
+      letterSpacing: 2,
+      marginBottom: 12,
+      textTransform: 'uppercase',
+    },
     heading: {
       fontFamily: fonts.displayBold,
       fontSize: 28,
@@ -454,6 +475,22 @@ function makeStyles(colors, fonts) {
       color: colors.muted,
       marginBottom: 22,
       lineHeight: 22,
+    },
+    // Iris-voiced reinforcement after the routine input. Italic gold so it
+    // reads as Iris speaking directly, not generic helper text. The hint
+    // catches users right before they tap Continue, giving them one last
+    // nudge to add detail rather than dash off two lines.
+    irisHint: {
+      fontFamily: fonts.italic,
+      fontSize: 13,
+      color: colors.gold,
+      letterSpacing: 0.2,
+      lineHeight: 19,
+      marginTop: 14,
+      marginBottom: 16,
+      paddingLeft: 12,
+      borderLeftWidth: 2,
+      borderLeftColor: colors.gold,
     },
     healthSummary: {
       fontFamily: fonts.italic,
