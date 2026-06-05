@@ -9,6 +9,7 @@ import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
 import IrisSignature from '../components/IrisSignature';
 import { deriveFromHealth, canSkipSleepAndEnergy } from '../utils/healthInference';
+import { isSleepWindow } from '../utils/localDate';
 
 // Onboarding step machine:
 //   0 — Apple Health (always asked, FIRST)
@@ -229,6 +230,25 @@ export default function OnboardingScreen() {
     setError('');
     setLoading(true);
 
+    // Sleep-window short-circuit: a new user finishing onboarding at 2am
+    // shouldn't get a stale plan whose zones are 80% in the past — that
+    // first impression reads as broken. Save the profile, activate it
+    // (so RootNavigator routes to MainTabs), and skip plan generation
+    // entirely. TodayScreen will render the sleep card with the
+    // first-time welcome treatment, and the user's actual first plan
+    // gets built fresh when they open the app in the morning.
+    if (isSleepWindow()) {
+      try {
+        await saveProfileWithoutNav({ routine: routine.trim() });
+        activateProfile();
+      } catch (err) {
+        if (!mountedRef.current) return;
+        setError("Couldn't save your profile. Try again in a moment.");
+        setLoading(false);
+      }
+      return;
+    }
+
     let timeoutId;
     const timeout = new Promise((_, reject) => {
       timeoutId = setTimeout(() => reject(new Error('TIMEOUT')), 50000);
@@ -245,6 +265,13 @@ export default function OnboardingScreen() {
     } catch (err) {
       clearTimeout(timeoutId);
       if (err?.code === 'PAYWALL_REQUIRED') {
+        activateProfile();
+        return;
+      }
+      // Sleep-window error from authStore (defense in depth — UI already
+      // gated above, but if anything sneaks through, treat it as a clean
+      // "no plan, go to Today" exit rather than an error.
+      if (err?.code === 'SLEEP_WINDOW') {
         activateProfile();
         return;
       }

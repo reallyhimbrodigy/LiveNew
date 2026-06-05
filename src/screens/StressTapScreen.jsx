@@ -8,6 +8,7 @@ import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
 import IrisSignature from '../components/IrisSignature';
 import { deriveFromHealth, canSkipSleepAndEnergy } from '../utils/healthInference';
+import { isSleepWindow } from '../utils/localDate';
 
 const STRESS_OPTIONS = [
   { label: 'Good', value: 'good', sub: 'calm, steady' },
@@ -137,6 +138,15 @@ export default function StressTapScreen({ navigation }) {
 
   const runPlanGeneration = async (stressValue, sleepValue, energyValue) => {
     setError('');
+
+    // Sleep-window short-circuit: shouldn't be reachable given the Today
+    // screen blocks all paths to StressTap during 22:00-05:00, but kept as
+    // belt-and-suspenders. Bail to Today, where the sleep card will explain.
+    if (isSleepWindow()) {
+      navigation.replace('TodayMain');
+      return;
+    }
+
     setLoading(true);
 
     let timeoutId;
@@ -160,6 +170,14 @@ export default function StressTapScreen({ navigation }) {
       if (err.code === 'PAYWALL_REQUIRED') {
         if (mountedRef.current) setLoading(false);
         navigation.replace('Paywall');
+        return;
+      }
+      // Sleep-window error from authStore.generatePlan (the store has its
+      // own gate as last-line defense). Send the user to Today, which
+      // shows the sleep card explaining what's happening.
+      if (err.code === 'SLEEP_WINDOW') {
+        if (mountedRef.current) setLoading(false);
+        navigation.replace('TodayMain');
         return;
       }
       if (!mountedRef.current) return;

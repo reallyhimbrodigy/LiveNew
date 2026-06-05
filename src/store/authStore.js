@@ -8,7 +8,7 @@ import {
   clearStaleZoneNotificationsIfNoPlanToday,
   migrateLegacyZoneNotifications,
 } from '../notifications';
-import { getLocalDateISO, getYesterdayISO } from '../utils/localDate';
+import { getLocalDateISO, getYesterdayISO, getLogicalDateISO, isSleepWindow } from '../utils/localDate';
 import {
   isHealthAvailable,
   getHealthPermissionStatus,
@@ -103,7 +103,10 @@ export const useAuthStore = create((set, get) => ({
           hasProfile = !!(profile && profile.routine);
         }
 
-        // Check if we have a valid plan for today
+        // Check if we have a valid plan for the user's logical day. We use
+        // the LOGICAL date (rolls over at 5am, not midnight) so a plan
+        // generated at 11pm is still hydrated when the user checks at 3am —
+        // they haven't slept yet, the day isn't really over.
         let todayPlan = null;
         let todayStress = null;
         let todayStressLabel = null;
@@ -114,7 +117,7 @@ export const useAuthStore = create((set, get) => ({
         let reflection = null;
         if (planJson) {
           const plan = JSON.parse(planJson);
-          const today = getLocalDateISO();
+          const today = getLogicalDateISO();
           if (plan.date === today) {
             todayPlan = plan.contract;
             todayStress = plan.stress;
@@ -125,16 +128,18 @@ export const useAuthStore = create((set, get) => ({
             completed = plan.completed || {};
             reflection = plan.reflection || null;
           } else {
-            // Stale cached plan from a previous day — purge it so we don't
-            // hand stale data to the rest of the app on a slow day-roll.
+            // Stale cached plan from a previous logical day — purge it so we
+            // don't hand stale data to the rest of the app on a slow day-roll.
             try { await AsyncStorage.removeItem(PLAN_KEY); } catch {}
           }
         }
 
-        // Skip flag: only honor if it's for today's local date.
+        // Skip flag: only honor if it's for the user's current logical day.
+        // Same rationale as plan hydration above — skipping at 11pm shouldn't
+        // get cleared at midnight while the user is still up.
         let skippedDate = null;
         if (skippedJson) {
-          const today = getLocalDateISO();
+          const today = getLogicalDateISO();
           const stored = JSON.parse(skippedJson);
           if (stored === today) skippedDate = stored;
         }
@@ -167,12 +172,11 @@ export const useAuthStore = create((set, get) => ({
         // sets it to today, giving the user a fresh 14-day window.
         get().ensureTrialStart().catch(() => {});
 
-        // Reconcile notifications based on whether the user has a plan today.
-        // No plan today → cancel any lingering zone notifications (defensive,
-        // catches anything that survived past day rollover) AND schedule the
-        // check-in reminders so the user gets pulled back to the app.
-        // Has plan today → today's check-in reminders are suppressed.
-        const hasPlanToday = !!todayPlan && todayDate === getLocalDateISO();
+        // Reconcile notifications based on whether the user has a plan for
+        // their current logical day. No plan → cancel any lingering zone
+        // notifications AND schedule check-in reminders so the user gets
+        // pulled back to the app. Has plan → today's reminders are suppressed.
+        const hasPlanToday = !!todayPlan && todayDate === getLogicalDateISO();
         clearStaleZoneNotificationsIfNoPlanToday(hasPlanToday).catch(() => {});
         scheduleCheckInReminders({ hasPlanToday }).catch(() => {});
 
@@ -469,9 +473,11 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoggedIn: true, hasProfile: false });
   },
 
-  // User chose to skip today's check-in. Persists for today only; cleared on day change.
+  // User chose to skip today's check-in. Persists for the logical day only
+  // (so a skip at 11pm doesn't get cleared 1 hour later at midnight while
+  // the user is still up).
   skipToday: async () => {
-    const today = getLocalDateISO();
+    const today = getLogicalDateISO();
     set({ skippedDate: today });
     try { await AsyncStorage.setItem(SKIPPED_KEY, JSON.stringify(today)); } catch {}
   },
@@ -594,6 +600,17 @@ export const useAuthStore = create((set, get) => ({
 
   // Generate day plan — called after the 3-step check-in (stress + sleep + energy)
   generatePlan: async ({ stress, sleepQuality, energy }) => {
+    // Sleep-window gate (defense in depth). UI paths already block plan
+    // generation between 10pm-5am, but a typed error here ensures no future
+    // path can sneak past — generating a plan during the user's sleep
+    // window produces a plan that's mostly in the past and reads as broken.
+    // Caller can catch SLEEP_WINDOW and surface a sleep-mode UI instead.
+    if (isSleepWindow()) {
+      const err = new Error("It's sleep time — Iris is offline until morning.");
+      err.code = 'SLEEP_WINDOW';
+      throw err;
+    }
+
     // Paywall gate: free 14-day trial of full access, then subscription
     // required to keep generating daily plans. We throw a typed error so
     // the calling screen can route to the Paywall instead of showing a
@@ -627,6 +644,9 @@ export const useAuthStore = create((set, get) => ({
     }
 
     const data = await api.checkin({
+      // Server expects the calendar date (its day-boundary logic handles
+      // late-night sessions on its own). Don't send logical-date — that's
+      // for client-side persistence only.
       dateISO: getLocalDateISO(),
       stress: stressValue,
       stressLabel,
@@ -645,7 +665,11 @@ export const useAuthStore = create((set, get) => ({
       throw new Error('Plan generation failed. Please try again.');
     }
 
-    const today = getLocalDateISO();
+    // Use the LOGICAL date for the plan's persistence key so a plan
+    // generated at 9pm stays valid through the user's wake-up at 6am.
+    // (Without this, a plan generated at 11:55pm would expire 5 minutes
+    // later when the calendar day rolled over.)
+    const today = getLogicalDateISO();
     const plan = {
       date: today,
       contract: data,     // { zones, goalThread, stressRelief, eveningPrompt }

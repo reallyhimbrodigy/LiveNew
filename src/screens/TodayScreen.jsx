@@ -18,7 +18,7 @@ import { startOrUpdateLiveActivity } from '../liveActivityBridge';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
-import { getLocalDateISO, getYesterdayISO } from '../utils/localDate';
+import { getLocalDateISO, getYesterdayISO, getLogicalDateISO, isSleepWindow } from '../utils/localDate';
 import { computeScore, scoreBand, getCurrentZoneId, ZONE_ORDER, ZONE_LABELS } from '../utils/score';
 import { api } from '../api';
 
@@ -39,15 +39,9 @@ function getGreetingParts() {
 function isEvening() {
   return new Date().getHours() >= 19;
 }
-
-// Sleep window: 10pm to 5am local. Used to keep late-night sign-ins out of
-// the check-in flow — a 1am plan that's already in its "sleep" zone reads
-// as a bug, not a feature. Inside the window we render a calm wind-down
-// empty state instead of routing to StressTap.
-function isSleepWindow() {
-  const h = new Date().getHours();
-  return h >= 22 || h < 5;
-}
+// Sleep window helper lives in utils/localDate so the same boundary
+// (22:00-05:00 local) is enforced by the gate inside authStore.generatePlan
+// AND the UI here. Don't duplicate the literal — single source of truth.
 
 // Pulsing dot used for the "current zone" position on Today's Arc. A
 // fixed-size gold core with an expanding ring around it — the ring loops
@@ -196,7 +190,7 @@ export default function TodayScreen({ navigation }) {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => {
     const check = async () => {
-      const today = getLocalDateISO();
+      const today = getLogicalDateISO();
       if (todayPlan && todayDate === today) {
         setHydrated(true);
         return;
@@ -325,7 +319,7 @@ export default function TodayScreen({ navigation }) {
     if (!hydrated) return;
     if (autoRoutedRef.current) return;
     if (todayPlan) return;
-    const today = getLocalDateISO();
+    const today = getLogicalDateISO();
     if (skippedDate === today) return;
     if (isSleepWindow()) return;
     autoRoutedRef.current = true;
@@ -516,7 +510,7 @@ export default function TodayScreen({ navigation }) {
   );
 
   // Empty / loading / skipped states
-  const today = getLocalDateISO();
+  const today = getLogicalDateISO();
   if (!todayPlan) {
     // No plan loaded — show the "Start today" empty card. There's no
     // auto-generation; the user has to tap Start to begin a check-in.
@@ -551,32 +545,23 @@ export default function TodayScreen({ navigation }) {
           ) : null}
 
           {sleepMode ? (
-            // Sleep-window empty state. Calmer surface, no primary CTA — just
-            // a clear "I'm offline" message. The stress button is still
-            // available below for anyone awake at 2am who actually needs it.
+            // Sleep-window empty state. Hard block — NO escape hatch to plan
+            // generation. A plan generated at 2am is for a day that's mostly
+            // already over; it reads as broken. The stress button below is
+            // the only late-night interaction we offer: anxiety doesn't sleep
+            // and Iris should be there for it, but the daily plan can wait.
             <View style={s.sleepCard}>
               <Text style={s.sleepLabel}>SLEEP WINDOW</Text>
               <Text style={s.sleepTitle}>It's late.</Text>
               <Text style={s.sleepBody}>
-                I'm offline until morning. The plan I build for you at sunrise will be sharper than anything I can put together right now — your overnight sleep and HRV shape every zone.
+                Iris is offline until morning. The plan she'll build for you at sunrise will be sharper than anything she can put together right now — your overnight sleep and HRV shape every zone.
               </Text>
               <Text style={s.sleepBody}>
-                Try to rest. I'll meet you in the morning.
+                Try to rest. We'll meet in the morning.
               </Text>
-              <Pressable
-                style={({ pressed }) => [s.sleepSecondary, pressed && { opacity: 0.6 }]}
-                onPress={async () => {
-                  tapLight();
-                  // Wrapped: clearSkip can throw on AsyncStorage failure and
-                  // would otherwise leave the user stuck on this card with no
-                  // way forward. Navigate regardless — clearSkip is best-effort.
-                  try { await clearSkip(); } catch (err) { console.warn('[today] clearSkip failed', err?.message); }
-                  navigation.replace('StressTap');
-                }}
-                hitSlop={8}
-              >
-                <Text style={s.sleepSecondaryText}>Generate anyway →</Text>
-              </Pressable>
+              <Text style={s.sleepFootnote}>
+                Still stressed? Tap "I'm stressed" below. That part of Iris never sleeps.
+              </Text>
             </View>
           ) : (
             <View style={s.emptyCard}>
@@ -1829,16 +1814,16 @@ function makeStyles(colors, fonts) {
     marginBottom: 14,
     letterSpacing: 0.1,
   },
-  sleepSecondary: {
-    marginTop: 8,
-    paddingVertical: 10,
-    alignSelf: 'flex-start',
-  },
-  sleepSecondaryText: {
+  // Quiet footnote on the sleep card pointing users to the stress button.
+  // Italic, muted — informational, not a CTA. Lives directly under the
+  // sleep body copy so it reads as part of Iris's voice.
+  sleepFootnote: {
     fontFamily: fonts.italic,
     fontSize: 13,
     color: colors.muted,
-    letterSpacing: 0.3,
+    lineHeight: 20,
+    marginTop: 8,
+    letterSpacing: 0.1,
   },
 
   // Empty state
