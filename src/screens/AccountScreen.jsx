@@ -43,7 +43,18 @@ export default function AccountScreen({ navigation }) {
   const [saving, setSaving] = useState(false);
   const [sharing, setSharing] = useState(null);
   const shareCardRef = useRef(null);
+  const editInputRef = useRef(null);
   const todayPlan = useAuthStore(z => z.todayPlan);
+
+  // Deferred focus on the routine edit input — replaces autoFocus, which
+  // raced KeyboardAvoidingView layout on iOS and could leave the edit
+  // screen showing blank content above the keyboard. 350ms delay lets the
+  // KeyboardAvoidingView settle before the keyboard slides up.
+  useEffect(() => {
+    if (!editing) return;
+    const t = setTimeout(() => editInputRef.current?.focus(), 350);
+    return () => clearTimeout(t);
+  }, [editing]);
 
   // Notification state
   const [notifPerm, setNotifPerm] = useState('unknown');
@@ -234,12 +245,12 @@ export default function AccountScreen({ navigation }) {
             <Text style={s.editTitle}>Update your routine</Text>
             <Text style={s.editSub}>The more detail you give Iris, the more precisely she can shape your plan. Wake time, work hours, gym, meals, bedtime — anything that shapes your day helps.</Text>
             <TextInput
+              ref={editInputRef}
               style={s.editInput}
               value={editValue}
               onChangeText={setEditValue}
               multiline
               textAlignVertical="top"
-              autoFocus
               placeholderTextColor={colors.dim}
               placeholder="e.g. Wake 6:30am. Work from home 9–5. Gym at 6pm. Dinner 7. In bed by 11."
             />

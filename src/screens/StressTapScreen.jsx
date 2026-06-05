@@ -119,12 +119,21 @@ export default function StressTapScreen({ navigation }) {
   const totalSteps = (showHealthStep ? 1 : 0) + askedSteps;
   const currentStepIndex = showHealthStep ? step + 1 : step;
 
-  const animateTransition = (callback) => {
-    Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
-      callback();
-      Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+  // Bulletproof fade-in on step change. The PRIOR animateTransition pattern
+  // chained fade-out → setState → fade-in inside an Animated.timing
+  // completion callback, which left users stranded on a blank screen if
+  // anything interrupted the chain (re-render, async error, fast nav). This
+  // effect resets opacity to 0 and fades to 1 declaratively on step change.
+  useEffect(() => {
+    fadeAnim.setValue(0);
+    const anim = Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
     });
-  };
+    anim.start();
+    return () => anim.stop();
+  }, [step]);
 
   const runPlanGeneration = async (stressValue, sleepValue, energyValue) => {
     setError('');
@@ -171,13 +180,13 @@ export default function StressTapScreen({ navigation }) {
       await runPlanGeneration(option.value, healthDerived.sleepQuality, healthDerived.energy);
       return;
     }
-    animateTransition(() => setStep(2));
+    setStep(2);
   };
 
   const handleSleep = (option) => {
     tapMedium();
     setSleep(option.value);
-    animateTransition(() => setStep(3));
+    setStep(3);
   };
 
   const handleEnergy = async (option) => {
@@ -187,33 +196,38 @@ export default function StressTapScreen({ navigation }) {
 
   const handleBack = () => {
     tapMedium();
-    animateTransition(() => {
-      if (step === 3) setStep(2);
-      else if (step === 2) { setStep(1); setStress(null); }
-      else if (step === 1 && showHealthStep) setStep(0);
-    });
+    if (step === 3) setStep(2);
+    else if (step === 2) { setStep(1); setStress(null); }
+    else if (step === 1 && showHealthStep) setStep(0);
   };
 
   const handleSkip = async () => {
     tapMedium();
-    await skipToday();
+    try { await skipToday(); } catch (err) { console.warn('[stresstap] skipToday failed', err?.message); }
     navigation.replace('TodayMain');
   };
 
-  // Step 0 — Apple Health permission.
+  // Step 0 — Apple Health permission. Wrapped in try/catch — connectHealth
+  // throwing left users stranded on the spinner in earlier builds.
   const handleConnectHealth = async () => {
     if (connectingHealth) return;
     tapMedium();
     setConnectingHealth(true);
-    const result = await connectHealth();
-    setConnectingHealth(false);
+    let result = { ok: false, error: null };
+    try {
+      result = await connectHealth();
+    } catch (err) {
+      console.warn('[stresstap] connectHealth threw', err?.message);
+    } finally {
+      if (mountedRef.current) setConnectingHealth(false);
+    }
     if (!result.ok && result.error) {
       Alert.alert('Couldn\'t connect', result.error);
       return;
     }
     // Whether granted or not — proceed to the actual check-in. The screen
     // won't re-ask within this session.
-    animateTransition(() => setStep(1));
+    if (mountedRef.current) setStep(1);
   };
 
   const stepHeading = {

@@ -129,33 +129,68 @@ export default function OnboardingScreen() {
   const [error, setError] = useState('');
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const mountedRef = useRef(true);
+  const routineInputRef = useRef(null);
+
+  // Deferred focus on the routine input — replaces autoFocus, which raced
+  // with KeyboardAvoidingView's layout calculation on iOS and could leave
+  // step 1 rendered blank (content pushed off-screen by the keyboard before
+  // the view finished measuring). A 350ms delay lets the layout settle and
+  // the fade-in finish before the keyboard slides up.
+  useEffect(() => {
+    if (step !== 1) return;
+    const t = setTimeout(() => {
+      if (mountedRef.current) routineInputRef.current?.focus();
+    }, 350);
+    return () => clearTimeout(t);
+  }, [step]);
 
   useEffect(() => {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
 
-  const animateTransition = (callback) => {
-    Animated.timing(fadeAnim, { toValue: 0, duration: 150, useNativeDriver: true }).start(() => {
-      callback();
-      Animated.timing(fadeAnim, { toValue: 1, duration: 200, useNativeDriver: true }).start();
+  // Bulletproof fade-in on step change. The PRIOR implementation chained
+  // fade-out → setState → fade-in inside a single Animated.timing completion
+  // callback, which left users stranded on a permanently-invisible (opacity:0)
+  // screen if anything interrupted the chain mid-flight (re-render, async
+  // error, fast nav). This effect resets opacity to 0 and fades to 1
+  // declaratively on every step change — no callback chain to break.
+  useEffect(() => {
+    fadeAnim.setValue(0);
+    const anim = Animated.timing(fadeAnim, {
+      toValue: 1,
+      duration: 200,
+      useNativeDriver: true,
     });
-  };
+    anim.start();
+    return () => anim.stop();
+  }, [step]);
 
-  // Step 0 — Apple Health
+  // Step 0 — Apple Health. Wrapped in try/catch because connectHealth can
+  // throw (denied permission threw an unhandled error in earlier builds,
+  // stranding users on step 0 with the spinner stuck). Advancing to step 1
+  // regardless of the result matches the StressTap behavior — denial is
+  // not a dead-end, we just lose the auto-fill of sleep/energy questions.
   const handleConnectHealth = async () => {
     if (connectingHealth) return;
     tapMedium();
     setConnectingHealth(true);
-    await connectHealth();
-    setConnectingHealth(false);
-    animateTransition(() => setStep(1));
+    try {
+      await connectHealth();
+    } catch (err) {
+      console.warn('[onboarding] connectHealth failed', err?.message);
+    } finally {
+      if (mountedRef.current) {
+        setConnectingHealth(false);
+        setStep(1);
+      }
+    }
   };
   // Step 1 — Schedule
   const handleScheduleNext = () => {
     if (!routine.trim()) return;
     tapMedium();
-    animateTransition(() => setStep(2));
+    setStep(2);
   };
 
   // Step 2 — Stress
@@ -170,14 +205,14 @@ export default function OnboardingScreen() {
       });
       return;
     }
-    animateTransition(() => setStep(3));
+    setStep(3);
   };
 
   // Step 3 — Sleep
   const handleSleep = (option) => {
     tapMedium();
     setSleep(option.value);
-    animateTransition(() => setStep(4));
+    setStep(4);
   };
 
   // Step 4 — Energy → triggers plan generation
@@ -224,10 +259,10 @@ export default function OnboardingScreen() {
 
   const handleBack = () => {
     tapMedium();
-    if (step === 1) animateTransition(() => setStep(0));
-    else if (step === 2) animateTransition(() => setStep(1));
-    else if (step === 3) animateTransition(() => setStep(2));
-    else if (step === 4) animateTransition(() => setStep(3));
+    if (step === 1) setStep(0);
+    else if (step === 2) setStep(1);
+    else if (step === 3) setStep(2);
+    else if (step === 4) setStep(3);
   };
 
   // Progress bar math
@@ -270,7 +305,7 @@ export default function OnboardingScreen() {
 
               {/* Step 0 — Apple Health */}
               {step === 0 && (
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}>
                   <Text style={s.heading}>Connect Apple Health</Text>
                   <Text style={s.healthSub}>
                     I read your real sleep, resting heart rate, and HRV from Apple Health. The plan I give you back is calibrated to your actual biometrics — not guesses.
@@ -310,7 +345,7 @@ export default function OnboardingScreen() {
                   eyebrow + Iris-voiced footer below exist to make that
                   weight visible so users don't dash off two vague lines. */}
               {step === 1 && (
-                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }}>
+                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}>
                   <Text style={s.eyebrow}>THE MOST IMPORTANT STEP</Text>
                   <Text style={s.heading}>What does a typical day look like?</Text>
                   <Text style={s.sub}>
@@ -318,13 +353,13 @@ export default function OnboardingScreen() {
                   </Text>
                   {error ? <Text style={s.error}>{error}</Text> : null}
                   <TextInput
+                    ref={routineInputRef}
                     style={s.routineInput}
                     placeholder={"e.g. Wake 6:30am. Work from home 9–5. Gym at 6pm. Dinner 7. In bed by 11."}
                     placeholderTextColor={colors.dim}
                     value={routine}
                     onChangeText={setRoutine}
                     multiline
-                    autoFocus
                     textAlignVertical="top"
                     maxLength={400}
                   />
@@ -343,7 +378,7 @@ export default function OnboardingScreen() {
 
               {/* Step 2 — Stress (always) */}
               {step === 2 && (
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}>
                   <Text style={s.heading}>How are you feeling right now?</Text>
                   {skipSleepEnergy && healthDerived.summary ? (
                     <Text style={s.healthSummary}>
@@ -367,7 +402,7 @@ export default function OnboardingScreen() {
 
               {/* Step 3 — Sleep (only if HealthKit didn't cover it) */}
               {step === 3 && (
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}>
                   <Text style={s.heading}>How did you sleep?</Text>
                   {error ? <Text style={s.error}>{error}</Text> : null}
                   <View style={s.list}>
@@ -386,7 +421,7 @@ export default function OnboardingScreen() {
 
               {/* Step 4 — Energy (only if HealthKit didn't cover it) */}
               {step === 4 && (
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 24 }}>
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}>
                   <Text style={s.heading}>Your energy right now?</Text>
                   {error ? <Text style={s.error}>{error}</Text> : null}
                   <View style={s.list}>

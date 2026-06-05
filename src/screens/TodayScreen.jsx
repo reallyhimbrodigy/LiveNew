@@ -567,7 +567,10 @@ export default function TodayScreen({ navigation }) {
                 style={({ pressed }) => [s.sleepSecondary, pressed && { opacity: 0.6 }]}
                 onPress={async () => {
                   tapLight();
-                  await clearSkip();
+                  // Wrapped: clearSkip can throw on AsyncStorage failure and
+                  // would otherwise leave the user stuck on this card with no
+                  // way forward. Navigate regardless — clearSkip is best-effort.
+                  try { await clearSkip(); } catch (err) { console.warn('[today] clearSkip failed', err?.message); }
                   navigation.replace('StressTap');
                 }}
                 hitSlop={8}
@@ -586,7 +589,7 @@ export default function TodayScreen({ navigation }) {
                 style={({ pressed }) => [s.emptyCta, pressed && { opacity: 0.85 }]}
                 onPress={async () => {
                   tapSelect();
-                  await clearSkip();
+                  try { await clearSkip(); } catch (err) { console.warn('[today] clearSkip failed', err?.message); }
                   navigation.replace('StressTap');
                 }}
               >
