@@ -307,7 +307,7 @@ export default function OnboardingScreen() {
                 <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ paddingBottom: 24 }}>
                   <Text style={s.heading}>What does a typical day look like?</Text>
                   <Text style={s.sub}>
-                    Wake time, work hours, gym, when you eat, when you sleep. Two lines is plenty. The more specific you are, the better I can tune the plan around your day.
+                    Wake time, work hours, gym, when you eat, when you sleep — and anything else that shapes your day. The more you tell Iris, the more precisely she can shape your plan. Don't hold back.
                   </Text>
                   {error ? <Text style={s.error}>{error}</Text> : null}
                   <TextInput

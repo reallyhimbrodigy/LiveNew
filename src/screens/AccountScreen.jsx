@@ -232,7 +232,7 @@ export default function AccountScreen({ navigation }) {
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
           <View style={s.editWrap}>
             <Text style={s.editTitle}>Update your routine</Text>
-            <Text style={s.editSub}>This shapes when and how Iris builds your plan.</Text>
+            <Text style={s.editSub}>The more detail you give Iris, the more precisely she can shape your plan. Wake time, work hours, gym, meals, bedtime — anything that shapes your day helps.</Text>
             <TextInput
               style={s.editInput}
               value={editValue}
@@ -241,7 +241,7 @@ export default function AccountScreen({ navigation }) {
               textAlignVertical="top"
               autoFocus
               placeholderTextColor={colors.dim}
-              placeholder="Describe your daily routine..."
+              placeholder="e.g. Wake 6:30am. Work from home 9–5. Gym at 6pm. Dinner 7. In bed by 11."
             />
             <Pressable
               style={[s.saveBtn, (!editValue.trim() || saving) && { opacity: 0.4 }]}
