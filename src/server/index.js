@@ -6591,6 +6591,20 @@ const server = http.createServer(async (req, res) => {
       }
     }
 
+    // App Review bypass — Apple's review team can't receive OTP emails sent
+    // to the developer's inbox, so without this they can't sign in to test
+    // the app and the build gets rejected. For this one specific email, we
+    // accept a fixed code instead of going through real Supabase OTP. The
+    // bypass is documented in App Store Connect → App Review Information →
+    // Sign-In Information so reviewers know the credentials.
+    //
+    // To rotate or disable: change these constants and redeploy. Don't move
+    // to env vars — Apple needs the values to stay stable across review
+    // submissions and we don't want a missing env var to silently break
+    // review sign-in.
+    const REVIEW_BYPASS_EMAIL = "libmanzac@gmail.com";
+    const REVIEW_BYPASS_CODE = "123456";
+
     // Passwordless: request a one-time code be sent to `email`. Calls
     // Supabase's signInWithOtp — Supabase will create the user automatically
     // if they don't exist (shouldCreateUser defaults to true), so this single
@@ -6606,6 +6620,16 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const emailLower = email.trim().toLowerCase();
+
+      // App Review bypass: skip the real Supabase send and respond OK. The
+      // reviewer enters the fixed code on the next screen, which is handled
+      // by verify-otp below. No email is actually dispatched.
+      if (emailLower === REVIEW_BYPASS_EMAIL.toLowerCase()) {
+        console.log("[auth][send_otp] review_bypass_email_accepted", { email: emailLower });
+        sendJson(res, 200, { ok: true });
+        return;
+      }
+
       try {
         const { data, error } = await supabaseAnon().auth.signInWithOtp({
           email: emailLower,
@@ -6745,6 +6769,66 @@ const server = http.createServer(async (req, res) => {
       }
       const emailLower = email.trim().toLowerCase();
       const codeTrim = code.trim();
+
+      // App Review bypass: if email + code match the fixed credentials we
+      // documented in App Store Connect, mint a real Supabase session via
+      // admin → magic-link → verify dance. The resulting session is
+      // indistinguishable from any other Supabase session — same downstream
+      // behavior, same JWT structure, same RLS rules apply.
+      if (
+        emailLower === REVIEW_BYPASS_EMAIL.toLowerCase() &&
+        codeTrim === REVIEW_BYPASS_CODE
+      ) {
+        try {
+          const admin = supabaseAdmin();
+          // Ensure the account exists. createUser errors if it already
+          // exists — that's fine, we just continue.
+          try {
+            await admin.auth.admin.createUser({
+              email: emailLower,
+              email_confirm: true,
+            });
+          } catch {}
+          // Generate a magic-link verification token, then exchange it
+          // (server-side, via the anon client) for a real session. This is
+          // the cleanest way to mint a valid Supabase session for a known
+          // user without a password.
+          const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
+            type: "magiclink",
+            email: emailLower,
+          });
+          if (linkErr) throw linkErr;
+          const hashedToken = linkData?.properties?.hashed_token;
+          if (!hashedToken) throw new Error("no_hashed_token");
+          const { data: verifyData, error: verifyErr } = await supabaseAnon().auth.verifyOtp({
+            email: emailLower,
+            token_hash: hashedToken,
+            type: "magiclink",
+          });
+          if (verifyErr) throw verifyErr;
+          const session = verifyData?.session;
+          const user = verifyData?.user;
+          if (!session) throw new Error("no_session");
+          console.log("[auth][verify_otp] review_bypass_session_issued", { userId: user?.id });
+          sendJson(res, 200, {
+            ok: true,
+            userId: user?.id || null,
+            email: user?.email || emailLower,
+            accessToken: session.access_token,
+            refreshToken: session.refresh_token,
+          });
+          return;
+        } catch (bypassErr) {
+          console.error("[auth][verify_otp] review_bypass_failed", { message: bypassErr?.message });
+          sendJson(res, 500, {
+            ok: false,
+            code: "REVIEW_BYPASS_FAILED",
+            message: "Sign-in failed. Try again in a moment.",
+          });
+          return;
+        }
+      }
+
       try {
         const { data, error } = await supabaseAnon().auth.verifyOtp({
           email: emailLower,
