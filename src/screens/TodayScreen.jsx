@@ -9,10 +9,13 @@ import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { captureRef } from 'react-native-view-shot';
-import { useTheme } from '../theme';
+import { useTheme, shadows } from '../theme';
 import ShareCard from '../components/ShareCard';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import IrisSignature from '../components/IrisSignature';
+import StateRing from '../components/StateRing';
+import GradientScreen from '../components/GradientScreen';
+import FlameIcon from '../components/FlameIcon';
 import { writeWidgetPayload } from '../widgetBridge';
 import { startOrUpdateLiveActivity } from '../liveActivityBridge';
 import { useAuthStore } from '../store/authStore';
@@ -108,6 +111,7 @@ export default function TodayScreen({ navigation }) {
   const reflection = useAuthStore(s => s.reflection);
   const profile = useAuthStore(s => s.profile);
   const userName = useAuthStore(s => s.userName);
+  const userId = useAuthStore(s => s.userId);
   const skippedDate = useAuthStore(s => s.skippedDate);
   const submitReflection = useAuthStore(s => s.submitReflection);
   const clearSkip = useAuthStore(s => s.clearSkip);
@@ -348,19 +352,33 @@ export default function TodayScreen({ navigation }) {
 
   // First-plan welcome — one-time modal when the user lands on Today with
   // a plan loaded for the first time. Marks the arrival moment.
+  //
+  // The "seen" flag is keyed by userId so it survives logout (logout wipes
+  // the legacy unscoped key, but not this per-account one). Without this, a
+  // returning user re-saw the "it's your first time" welcome every sign-in.
+  // We migrate the legacy unscoped flag → scoped on first read so existing
+  // onboarded users don't get the modal one extra time.
+  const welcomeKey = userId ? `livenew:seen_first_plan_welcome:${userId}` : 'livenew:seen_first_plan_welcome';
   useEffect(() => {
     if (!todayPlan) return;
     (async () => {
       try {
-        const seen = await AsyncStorage.getItem('livenew:seen_first_plan_welcome');
+        let seen = await AsyncStorage.getItem(welcomeKey);
+        if (!seen && userId) {
+          const legacy = await AsyncStorage.getItem('livenew:seen_first_plan_welcome');
+          if (legacy) {
+            seen = legacy;
+            try { await AsyncStorage.setItem(welcomeKey, '1'); } catch {}
+          }
+        }
         if (!seen) setShowWelcome(true);
       } catch {}
     })();
-  }, [todayPlan]);
+  }, [todayPlan, welcomeKey, userId]);
 
   const dismissWelcome = async () => {
     setShowWelcome(false);
-    try { await AsyncStorage.setItem('livenew:seen_first_plan_welcome', '1'); } catch {}
+    try { await AsyncStorage.setItem(welcomeKey, '1'); } catch {}
   };
 
   // Push the FULL day's plan into the App Group UserDefaults whenever a new
@@ -519,7 +537,7 @@ export default function TodayScreen({ navigation }) {
     const morning = new Date().getHours() < 12;
     const sleepMode = isSleepWindow();
     return (
-      <SafeAreaView style={s.safe} edges={['top']}>
+      <GradientScreen edges={['top']}>
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
           <View style={s.headerRow}>
             <View style={{ flex: 1 }}>
@@ -534,7 +552,7 @@ export default function TodayScreen({ navigation }) {
           {!sleepMode && streak >= 1 && new Date().getHours() >= 19 ? (
             <View style={s.streakRiskCard}>
               <View style={s.streakRiskHeader}>
-                <Text style={s.streakRiskFire}>🔥</Text>
+                <View style={s.streakRiskFire}><FlameIcon size={17} color={colors.gold} /></View>
                 <Text style={s.streakRiskNum}>{streak}</Text>
                 <Text style={s.streakRiskLabel}>day{streak === 1 ? '' : 's'} at risk</Text>
               </View>
@@ -585,13 +603,13 @@ export default function TodayScreen({ navigation }) {
           )}
         </ScrollView>
         {stressBtnAndModal}
-      </SafeAreaView>
+      </GradientScreen>
     );
   }
 
   if (zones.length === 0) {
     return (
-      <SafeAreaView style={s.safe} edges={['top']}>
+      <GradientScreen edges={['top']}>
         <View style={[s.centered, { padding: 24 }]}>
           <Text style={s.greeting}>Something went wrong</Text>
           <Text style={s.errorBody}>Today's zones didn't generate properly.</Text>
@@ -602,14 +620,14 @@ export default function TodayScreen({ navigation }) {
             <Text style={s.goldBtnText}>Try again</Text>
           </Pressable>
         </View>
-      </SafeAreaView>
+      </GradientScreen>
     );
   }
 
   const currentZoneIndex = ZONE_ORDER.indexOf(currentZoneId);
 
   return (
-    <SafeAreaView style={s.safe} edges={['top']}>
+    <GradientScreen edges={['top']}>
       <ScrollView
         contentContainerStyle={[s.scroll, { paddingBottom: showStressBtn ? 140 : 80 }]}
         showsVerticalScrollIndicator={false}
@@ -639,15 +657,6 @@ export default function TodayScreen({ navigation }) {
               <Text style={s.streakLabel}>days</Text>
             </Pressable>
           ) : null}
-          <Pressable
-            onPress={() => { tapLight(); setShowScoreInfo(true); }}
-            hitSlop={6}
-            style={s.scoreChip}
-            accessibilityLabel="Show what this score means"
-          >
-            <Text style={[s.scoreNum, band === 'high' && { color: colors.gold }]}>{score}</Text>
-            <Text style={s.scoreLabel}>score</Text>
-          </Pressable>
           {/* Hide the "redo plan" button during sleep window — regenerating
               a plan at 10pm makes no sense, the day is done. */}
           {currentZoneId !== 'sleep' ? (
@@ -659,6 +668,17 @@ export default function TodayScreen({ navigation }) {
               <Text style={s.redoIcon}>↻</Text>
             </Pressable>
           ) : null}
+        </View>
+
+        {/* Hero state ring — today's regulation read, promoted from a buried
+            chip to the centerpiece of Today (the Opal "Focus Score" move).
+            Tapping it opens the same plain-English breakdown the chip did. */}
+        <View style={s.heroRing}>
+          <StateRing
+            score={score}
+            onPress={() => { tapLight(); setShowScoreInfo(true); }}
+          />
+          <Text style={s.heroBand}>{scoreBandLabel}</Text>
         </View>
 
         {/* Daily first read — single Iris-voiced sentence anchored in
@@ -1003,11 +1023,12 @@ export default function TodayScreen({ navigation }) {
           </Pressable>
         </Pressable>
       </Modal>
-    </SafeAreaView>
+    </GradientScreen>
   );
 }
 
 function makeStyles(colors, fonts) {
+  const elev = shadows[colors.scheme === 'light' ? 'light' : 'dark'];
   return StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.bg },
   scroll: { paddingHorizontal: 22, paddingTop: 8, paddingBottom: 80 },
@@ -1035,16 +1056,21 @@ function makeStyles(colors, fonts) {
     color: colors.muted,
     letterSpacing: 0.2,
   },
-  scoreChip: {
+  // Hero state ring — centered centerpiece below the header.
+  heroRing: {
     alignItems: 'center',
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.goldBorder,
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    marginRight: 8,
-    minWidth: 64,
+    marginTop: 2,
+    marginBottom: 22,
+  },
+  heroBand: {
+    fontFamily: fonts.display,
+    fontSize: 14,
+    color: colors.muted,
+    letterSpacing: 0.2,
+    textAlign: 'center',
+    marginTop: 14,
+    paddingHorizontal: 24,
+    lineHeight: 20,
   },
   askIris: {
     marginTop: 8,
@@ -1621,6 +1647,7 @@ function makeStyles(colors, fonts) {
     borderRadius: 14,
     padding: 16,
     marginBottom: 16,
+    ...elev,
   },
   streakRiskHeader: {
     flexDirection: 'row',
@@ -1628,7 +1655,7 @@ function makeStyles(colors, fonts) {
     gap: 6,
     marginBottom: 6,
   },
-  streakRiskFire: { fontSize: 18 },
+  streakRiskFire: { marginRight: 6 },
   streakRiskNum: {
     fontFamily: fonts.accentBold,
     fontSize: 22,
@@ -1791,6 +1818,7 @@ function makeStyles(colors, fonts) {
     borderColor: colors.goldBorder,
     backgroundColor: colors.goldSoft,
     alignItems: 'flex-start',
+    ...elev,
   },
   sleepLabel: {
     fontFamily: fonts.displaySemibold,
@@ -1836,6 +1864,7 @@ function makeStyles(colors, fonts) {
     borderColor: colors.line,
     backgroundColor: colors.surface,
     alignItems: 'flex-start',
+    ...elev,
   },
   emptyLabel: {
     fontSize: 10, fontWeight: '700', color: colors.gold,

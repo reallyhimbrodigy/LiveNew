@@ -23,6 +23,26 @@ const PLAN_KEY = 'livenew:plan';
 const SKIPPED_KEY = 'livenew:skipped_date';
 const NAME_KEY = 'livenew:user_name';
 
+// Account-scoped "this user has finished onboarding on this device" marker.
+// CRITICAL: this is keyed by userId and is deliberately NOT cleared on logout.
+// It lets us recognize a returning user as already-onboarded even when the
+// bootstrap call fails (offline / server hiccup) right after they sign back
+// in — without it, the only offline signal was PROFILE_KEY, which logout
+// wipes, so a flaky network on re-login dumped returning users back into
+// onboarding. A bare boolean keyed by userId leaks nothing to a different
+// account that later signs in on the same device (their userId differs).
+const onboardedMarkerKey = (userId) => (userId ? `livenew:onboarded:${userId}` : null);
+const writeOnboardedMarker = async (userId) => {
+  const key = onboardedMarkerKey(userId);
+  if (!key) return;
+  try { await AsyncStorage.setItem(key, '1'); } catch {}
+};
+const readOnboardedMarker = async (userId) => {
+  const key = onboardedMarkerKey(userId);
+  if (!key) return false;
+  try { return (await AsyncStorage.getItem(key)) === '1'; } catch { return false; }
+};
+
 // 14-day free trial helpers — used by both the gate (generatePlan) and the
 // UI (Paywall trigger, trial countdown on Account, feature gating elsewhere).
 export const TRIAL_DAYS = 14;
@@ -58,6 +78,7 @@ export const useAuthStore = create((set, get) => ({
   healthPermission: 'unknown', // "granted" | "denied" | "unknown"
   healthSnapshot: null,        // cached HealthKit summary, refreshed on app focus
   userName: null,              // first name (captured at signup, persisted locally)
+  userId: null,                // current account id — scopes per-account device markers
   themeMode: 'system',         // 'system' | 'light' | 'dark' — overrides useColorScheme()
   trialStartISO: null,         // ISO date YYYY-MM-DD when the 14-day free trial began
 
@@ -155,6 +176,7 @@ export const useAuthStore = create((set, get) => ({
           isSubscribed,
           hasProfile,
           profile,
+          userId: auth.userId || null,
           userName: nameJson || null,
           todayPlan,
           todayStress,
@@ -199,6 +221,9 @@ export const useAuthStore = create((set, get) => ({
             bootstrap?.uiState === 'home' ||
             bootstrap?.profile?.isComplete === true ||
             !!serverProfile.routine;
+          // Persist the account-scoped onboarded marker so a later
+          // logout→login with a flaky connection still recognizes this user.
+          if (serverSaysOnboarded) await writeOnboardedMarker(auth.userId);
           if (serverProfile.routine) {
             const localProfile = profile || {};
             const pickServer = (key) => (
@@ -417,6 +442,17 @@ export const useAuthStore = create((set, get) => ({
   // onboarding (the prior bug — every transient network error re-onboarded
   // returning users).
   postSignInBootstrap: async () => {
+    // Recover the current account id (written to AUTH_KEY by every sign-in
+    // path before this runs). Used to scope the durable onboarded marker.
+    let userId = get().userId;
+    if (!userId) {
+      try {
+        const authJson = await AsyncStorage.getItem(AUTH_KEY);
+        if (authJson) userId = JSON.parse(authJson)?.userId || null;
+      } catch {}
+    }
+    if (userId) set({ userId });
+
     let bootstrap = null;
     let lastErr = null;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -448,6 +484,9 @@ export const useAuthStore = create((set, get) => ({
         bootstrap?.profile?.isComplete === true ||
         !!profile.routine;
       try { await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile)); } catch {}
+      // Durable, account-scoped record that this user is onboarded — survives
+      // logout so a future flaky-network re-login doesn't re-onboard them.
+      if (serverSaysOnboarded) await writeOnboardedMarker(userId);
       set({ isLoggedIn: true, hasProfile: serverSaysOnboarded, profile });
       return;
     }
@@ -458,6 +497,18 @@ export const useAuthStore = create((set, get) => ({
     // attempt the app (the empty Today screen handles no-plan gracefully and
     // they can complete onboarding via Account if needed).
     console.warn('[auth] postSignInBootstrap: bootstrap failed after retries', lastErr?.message);
+    // Durable account-scoped marker is the primary offline signal. Unlike
+    // PROFILE_KEY (wiped on logout), this survives sign-out, so a returning
+    // user who onboarded on this device is recognized even with no network.
+    if (await readOnboardedMarker(userId)) {
+      let profile = null;
+      try {
+        const profileJson = await AsyncStorage.getItem(PROFILE_KEY);
+        if (profileJson) profile = JSON.parse(profileJson);
+      } catch {}
+      set({ isLoggedIn: true, hasProfile: true, profile });
+      return;
+    }
     try {
       const profileJson = await AsyncStorage.getItem(PROFILE_KEY);
       if (profileJson) {
@@ -467,9 +518,9 @@ export const useAuthStore = create((set, get) => ({
         return;
       }
     } catch {}
-    // No local cache either. Best-effort: log them in but with hasProfile
-    // false so they hit onboarding. This matches the pre-fix behavior only
-    // for the genuinely-no-data case, not for the transient-error case.
+    // No durable marker and no local cache — genuinely a new/unknown account
+    // on this device. Log them in but route to onboarding. This is the only
+    // case that should ever land here post-fix.
     set({ isLoggedIn: true, hasProfile: false });
   },
 
@@ -545,6 +596,7 @@ export const useAuthStore = create((set, get) => ({
     await api.onboardComplete(profile);
     await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
     await AsyncStorage.removeItem(PLAN_KEY);
+    await writeOnboardedMarker(get().userId);
     set({ hasProfile: true, profile, todayPlan: null, todayDate: null, completed: {}, reflection: null });
   },
 
@@ -556,6 +608,7 @@ export const useAuthStore = create((set, get) => ({
     await api.onboardComplete(profile);
     await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
     await AsyncStorage.removeItem(PLAN_KEY);
+    await writeOnboardedMarker(get().userId);
     set({ profile, todayPlan: null, todayDate: null, completed: {}, reflection: null });
   },
 
@@ -843,7 +896,7 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
-      userName: null,
+      userName: null, userId: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
       todaySleep: null, todayEnergy: null, isSubscribed: false,
       completed: {}, reflection: null, streak: 0,
@@ -853,6 +906,10 @@ export const useAuthStore = create((set, get) => ({
 
   // Delete account — same cleanup as logout, plus server-side delete.
   deleteAccount: async () => {
+    // Capture the account id before teardown so we can purge its durable,
+    // account-scoped markers (onboarded + seen-welcome) — the account is gone,
+    // so unlike logout these SHOULD be removed.
+    const deletedUserId = get().userId;
     await api.deleteAccount();
     clearTokens();
     await AsyncStorage.multiRemove([
@@ -866,6 +923,10 @@ export const useAuthStore = create((set, get) => ({
       'livenew:health_permission_status', 'livenew:review_prompted',
       'livenew:streak_risk_dismissed', 'livenew:live_activity_id',
       'livenew:seen_first_plan_welcome', 'livenew:seen_tts_hint',
+      ...(deletedUserId ? [
+        `livenew:onboarded:${deletedUserId}`,
+        `livenew:seen_first_plan_welcome:${deletedUserId}`,
+      ] : []),
     ]);
     try {
       const { clearWidgetPayload } = require('../widgetBridge');

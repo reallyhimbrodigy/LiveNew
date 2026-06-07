@@ -277,7 +277,7 @@ export default function ChatScreen({ navigation }) {
 
 function makeStyles(colors, fonts, insets) {
   return StyleSheet.create({
-    safe: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1, backgroundColor: 'transparent' },
 
     header: {
       flexDirection: 'row',

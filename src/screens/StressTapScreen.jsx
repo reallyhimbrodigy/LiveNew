@@ -350,7 +350,7 @@ export default function StressTapScreen({ navigation }) {
 
 function makeStyles(colors, fonts) {
   return StyleSheet.create({
-    safe: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1, backgroundColor: 'transparent' },
     container: { flex: 1, paddingHorizontal: 24, paddingTop: 32 },
 
     brandRow: {

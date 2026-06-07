@@ -623,7 +623,7 @@ function buildStoryText({ daysActive, streak, stressChange, stressAvg, recentAvg
 
 function makeStyles(colors, fonts) {
   return StyleSheet.create({
-    safe: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1, backgroundColor: 'transparent' },
     loadingWrap: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.bg },
     scroll: { padding: 20, paddingBottom: 100 },
 

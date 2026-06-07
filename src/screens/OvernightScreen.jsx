@@ -182,7 +182,7 @@ export default function OvernightScreen({ navigation }) {
 
 function makeStyles(colors, fonts) {
   return StyleSheet.create({
-    safe: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1, backgroundColor: 'transparent' },
     scroll: {
       flexGrow: 1,
       padding: 24,

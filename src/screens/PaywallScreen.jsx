@@ -216,7 +216,7 @@ export default function PaywallScreen({ navigation }) {
 
 function makeStyles(colors, fonts) {
   return StyleSheet.create({
-    safe: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1, backgroundColor: 'transparent' },
     closeBtn: {
       position: 'absolute',
       top: 16,

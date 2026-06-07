@@ -42,7 +42,7 @@ export default function IntroScreen({ navigation }) {
 
 function makeStyles(colors, fonts) {
   return StyleSheet.create({
-    safe: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1, backgroundColor: 'transparent' },
     container: { flex: 1, padding: 24, justifyContent: 'space-between' },
 
     top: { paddingTop: 20 },

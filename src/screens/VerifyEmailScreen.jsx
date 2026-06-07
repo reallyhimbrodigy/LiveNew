@@ -194,7 +194,7 @@ export default function VerifyEmailScreen({ route, navigation }) {
 
 function makeStyles(colors, fonts) {
   return StyleSheet.create({
-    safe: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1, backgroundColor: 'transparent' },
     flex: { flex: 1 },
     scroll: { flexGrow: 1, justifyContent: 'center', paddingHorizontal: 24, paddingVertical: 32 },
     body: { width: '100%', maxWidth: 420, alignSelf: 'center' },

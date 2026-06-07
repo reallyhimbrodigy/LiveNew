@@ -13,6 +13,7 @@ import {
 } from '@expo-google-fonts/manrope';
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../theme';
+import AppBackground from '../components/AppBackground';
 import { initPurchases } from '../purchases';
 import { GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../socialAuthConfig';
 
@@ -94,6 +95,7 @@ function MainTabs() {
   const { colors, fonts } = useTheme();
   return (
     <Tab.Navigator
+      sceneContainerStyle={{ backgroundColor: 'transparent' }}
       screenOptions={({ route }) => ({
         headerShown: false,
         lazy: false,
@@ -127,7 +129,7 @@ function MainTabs() {
 
 function TodayStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}>
       <Stack.Screen name="TodayMain" component={TodayScreen} />
       <Stack.Screen name="Overnight" component={OvernightScreen} />
       <Stack.Screen name="StressTap" component={StressTapScreen} />
@@ -139,7 +141,7 @@ function TodayStack() {
 
 function IntroStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}>
       <Stack.Screen name="IntroMain" component={IntroScreen} />
       <Stack.Screen name="OnboardingFlow" component={OnboardingScreen} />
     </Stack.Navigator>
@@ -151,7 +153,7 @@ function IntroStack() {
 // swaps to Intro or Main and this stack unmounts cleanly.
 function AuthStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}>
       <Stack.Screen name="AuthMain" component={AuthScreen} />
       <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
     </Stack.Navigator>
@@ -216,15 +218,18 @@ export default function RootNavigator() {
   }
 
   return (
-    <>
+    <View style={{ flex: 1, backgroundColor: colors.bg }}>
+      <AppBackground />
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
     <NavigationContainer
       theme={{
         dark: scheme === 'dark',
         colors: {
           primary: colors.gold,
-          background: colors.bg,
-          card: colors.bg,
+          // Transparent so the global circadian gradient shows through every
+          // scene. Screen surfaces are transparent too (see each screen's safe).
+          background: 'transparent',
+          card: 'transparent',
           text: colors.text,
           border: colors.line,
           notification: colors.gold,
@@ -237,7 +242,7 @@ export default function RootNavigator() {
         },
       }}
     >
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
+      <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}>
         {!isLoggedIn ? (
           <Stack.Screen name="Auth" component={AuthStack} />
         ) : !hasProfile ? (
@@ -247,7 +252,7 @@ export default function RootNavigator() {
         )}
       </Stack.Navigator>
     </NavigationContainer>
-    </>
+    </View>
   );
 }
 

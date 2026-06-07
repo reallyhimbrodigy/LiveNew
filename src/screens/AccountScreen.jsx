@@ -11,6 +11,7 @@ import { trialDaysRemaining, isWithinTrial } from '../store/authStore';
 import { tapLight, tapSelect, tapMedium } from '../haptics';
 import { Asset } from 'expo-asset';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
+import FlameIcon from '../components/FlameIcon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   getNotificationPermission, requestPermissions,
@@ -314,7 +315,10 @@ export default function AccountScreen({ navigation }) {
           </Pressable>
           {streak > 0 && (
             <Pressable style={s.streakRow} onPress={handleShareStreak}>
-              <Text style={s.streakText}>{streak} day streak 🔥</Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Text style={s.streakText}>{streak} day streak</Text>
+                <View style={{ marginLeft: 6 }}><FlameIcon size={15} color={colors.gold} /></View>
+              </View>
               <Text style={s.streakShareHint}>Tap to share</Text>
             </Pressable>
           )}
@@ -361,27 +365,6 @@ export default function AccountScreen({ navigation }) {
             </View>
             <Text style={s.settingArrow}>›</Text>
           </Pressable>
-        </View>
-
-        {/* Appearance — manual light/dark override. */}
-        <Text style={s.sectionTitle}>Appearance</Text>
-
-        <View style={s.card}>
-          <View style={s.settingRow}>
-            <View style={s.settingContent}>
-              <Text style={s.settingTitle}>Dark mode</Text>
-              <Text style={s.settingValue}>
-                {themeMode === 'system' ? 'Following system' : (themeMode === 'dark' ? 'Always dark' : 'Always light')}
-              </Text>
-            </View>
-            <Switch
-              value={themeMode === 'dark' || (themeMode === 'system' && scheme === 'dark')}
-              onValueChange={(v) => { tapLight(); setThemeMode(v ? 'dark' : 'light'); }}
-              trackColor={{ false: colors.line, true: colors.gold }}
-              thumbColor={'#fff'}
-              ios_backgroundColor={colors.line}
-            />
-          </View>
         </View>
 
         {/* Notifications section */}
@@ -547,7 +530,7 @@ export default function AccountScreen({ navigation }) {
 
 function makeStyles(colors, fonts) {
   return StyleSheet.create({
-    safe: { flex: 1, backgroundColor: colors.bg },
+    safe: { flex: 1, backgroundColor: 'transparent' },
     scroll: { padding: 20, paddingBottom: 100 },
 
     headerRow: {
