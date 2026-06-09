@@ -25,6 +25,17 @@ const n = normalizeSchedule({
 assert.equal(n.blocks.length, 1, "drops malformed block");
 assert.equal(n.meals.lunch, "13:00", "keeps provided meal");
 assert.equal(n.meals.breakfast, DEFAULT_MEALS.breakfast, "fills missing meal");
+
+// empty days array is dropped (vacuous .every guard)
+assert.equal(
+  normalizeSchedule({ blocks: [{ id: "z", label: "Empty", start: "09:00", days: [] }] }).blocks.length,
+  0,
+  "drops block with empty days"
+);
+// invalid meal times fall back to defaults
+const badMeals = normalizeSchedule({ meals: { breakfast: "garbage", lunch: null } });
+assert.equal(badMeals.meals.breakfast, DEFAULT_MEALS.breakfast, "garbage meal -> default");
+assert.equal(badMeals.meals.lunch, DEFAULT_MEALS.lunch, "null meal -> default");
 console.log("normalizeSchedule OK");
 
 // ── Task 3: resolveDaySchedule ────────────────────────────────────────────────

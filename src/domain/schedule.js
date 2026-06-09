@@ -33,8 +33,7 @@ const isValidBlock = (b) =>
   typeof b.label === "string" && b.label.trim().length > 0 &&
   isHHMM(b.start) &&
   (b.end == null || isHHMM(b.end)) &&
-  Array.isArray(b.days) &&
-  b.days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6);
+  Array.isArray(b.days) && b.days.length > 0 && b.days.every((d) => Number.isInteger(d) && d >= 0 && d <= 6);
 
 const cleanTime = (t) => {
   if (!t || typeof t !== "object") return null;
@@ -52,10 +51,12 @@ const cleanTime = (t) => {
 export function normalizeSchedule(raw) {
   const src = raw && typeof raw === "object" ? raw : {};
   const blocks = Array.isArray(src.blocks) ? src.blocks.filter(isValidBlock) : [];
-  const meals = {
-    ...DEFAULT_MEALS,
-    ...(src.meals && typeof src.meals === "object" ? src.meals : {}),
-  };
+  const meals = Object.fromEntries(
+    ["breakfast", "lunch", "dinner"].map((k) => {
+      const v = src.meals?.[k];
+      return [k, isHHMM(v) ? v : DEFAULT_MEALS[k]];
+    })
+  );
   return {
     version: 1,
     blocks,
@@ -121,6 +122,7 @@ export function deriveRoutineSummary(schedule) {
     const time = b.end ? `${b.start}-${b.end}` : b.start;
     return `${b.label} ${time} (${formatDays(b.days)})`;
   });
+  // weekday times only; weekend variation is handled by resolveDaySchedule
   const wake = schedule.wake?.weekday ? `wake ${schedule.wake.weekday}` : null;
   const sleep = schedule.sleep?.weekday ? `sleep ${schedule.sleep.weekday}` : null;
   return [wake, ...parts, sleep].filter(Boolean).join(", ");
