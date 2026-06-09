@@ -50,7 +50,12 @@ const readOnboardedMarker = async (userId) => {
 function prepareProfileForSave(profile) {
   if (!profile.schedule) return profile;
   const schedule = normalizeSchedule(profile.schedule);
-  return { ...profile, schedule, routine: profile.routine || deriveRoutineSummary(schedule) };
+  // Always set a non-empty routine so the hasProfile gate (!!profile.routine)
+  // passes even when the user skipped (empty schedule). The AI prompt uses the
+  // structured schedule (daySchedule) as the primary signal; this string is
+  // only the legacy fallback, so a benign sentinel is honest and safe.
+  const routine = profile.routine || deriveRoutineSummary(schedule) || 'No fixed schedule.';
+  return { ...profile, schedule, routine };
 }
 
 // 14-day free trial helpers — used by both the gate (generatePlan) and the

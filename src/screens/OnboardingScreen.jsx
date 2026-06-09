@@ -14,7 +14,7 @@ import ScheduleBuilder from './onboarding/ScheduleBuilder';
 
 // Onboarding step machine:
 //   0 — Apple Health (always asked, FIRST)
-//   1 — Schedule (free-text typed input — needed for real personalization)
+//   1 — Schedule (guided builder — see onboarding/ScheduleBuilder.jsx)
 //   2 — Stress (always asked, subjective)
 //   3 — Sleep  (SKIPPED if HealthKit granted with data)
 //   4 — Energy (SKIPPED if HealthKit granted with data)
@@ -242,7 +242,7 @@ export default function OnboardingScreen() {
     });
 
     try {
-      await saveProfileWithoutNav({ routine: routine.trim(), schedule });
+      await saveProfileWithoutNav({ routine: '', schedule });
       await Promise.race([
         generatePlan({ stress: stressValue, sleepQuality: sleepValue, energy: energyValue }),
         timeout,

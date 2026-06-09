@@ -26,6 +26,7 @@
     "test:constraints": "node scripts/constraints.coverage.test.js",
     "test:safeguards": "node scripts/safeguards.test.js",
     "test:smoke": "node scripts/smoke.loop.js",
+    "test:schedule": "node scripts/schedule.test.js",
     "test": "npm run test:mvp && npm run test:integration && npm run test:golden && npm run test:migrations && npm run test:constraints && npm run test:safeguards",
     "simulate": "node scripts/simulate.js",
     "db:profile": "node scripts/db-profile.js",
