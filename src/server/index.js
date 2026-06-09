@@ -2236,6 +2236,7 @@ async function buildSupabaseBootstrapPayload({ userId, userProfile, flags }) {
       wakeTime: constraints.wakeTime || null,
       timeMin: Number.isFinite(Number(constraints.timeMin)) ? Number(constraints.timeMin) : null,
       injuries,
+      schedule: constraints.schedule || null,
     },
     baseline: baseline
       ? {
@@ -2584,6 +2585,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         back: injuriesInput.includes("back"),
         neck: injuriesInput.includes("neck"),
       };
+      const incomingSchedule = profileInput?.schedule ? normalizeSchedule(profileInput.schedule) : undefined;
       const mergedConstraints = {
         ...existingConstraints,
         routine: profileData.routine,
@@ -2593,6 +2595,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         timeMin: profileData.timeMin,
         injuries: injuryFlags,
         injuriesList: injuriesInput,
+        ...(incomingSchedule ? { schedule: incomingSchedule } : {}),
       };
       const updatedProfile = await persist.updateOnboarding(auth.userId, {
         timezone: existingProfile?.timezone || DEFAULT_TIMEZONE,
@@ -2644,10 +2647,15 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     const dayBoundaryMinute = minuteOverride != null ? minuteOverride : baseline.dayBoundaryHour * 60;
     const requiredVersion = await getRequiredConsentVersion();
     await persist.updateConsent(auth.userId, { version: requiredVersion, acceptedAt: new Date().toISOString() });
+    const incomingScheduleBaseline = body?.profile?.schedule ? normalizeSchedule(body.profile.schedule) : undefined;
+    const baselineConstraintsMerged = {
+      ...(baseline.constraints && typeof baseline.constraints === "object" ? baseline.constraints : {}),
+      ...(incomingScheduleBaseline ? { schedule: incomingScheduleBaseline } : {}),
+    };
     const updatedProfile = await persist.updateOnboarding(auth.userId, {
       timezone: baseline.timezone,
       dayBoundaryMinute,
-      constraintsJson: baseline.constraints || null,
+      constraintsJson: Object.keys(baselineConstraintsMerged).length ? baselineConstraintsMerged : null,
       completedAt: new Date().toISOString(),
     });
 
