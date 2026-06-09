@@ -15,6 +15,7 @@ import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import GemUnlockModal from '../components/GemUnlockModal';
 import IrisSignature from '../components/IrisSignature';
 import CortisolFact from '../components/CortisolFact';
+import RecommendationCard from '../components/RecommendationCard';
 import StateRing from '../components/StateRing';
 import GradientScreen from '../components/GradientScreen';
 import FlameIcon from '../components/FlameIcon';
@@ -873,6 +874,10 @@ export default function TodayScreen({ navigation }) {
             <Text style={s.stressNotedText}>Noted. Tomorrow's plan accounts for this.</Text>
           </View>
         )}
+
+        {/* One more thing for today — a time-of-day-aware action Iris surfaces
+            beyond the plan. Day-stable; changes once per calendar day. */}
+        <RecommendationCard style={s.recCard} />
       </ScrollView>
 
       {/* Sticky stress button + relief modal — defined once above, reused
@@ -1443,6 +1448,11 @@ function makeStyles(colors, fonts) {
   },
   stressNotedCard: { paddingVertical: 12, alignItems: 'center', marginTop: 12 },
   stressNotedText: { color: colors.muted, fontSize: 13, fontStyle: 'italic' },
+
+  // Recommendation card — "one more thing for today", after plan content
+  recCard: {
+    marginTop: 20,
+  },
 
   // Sticky stress button — pill-shaped, centered, gold-soft fill, breathing dot
   stressBtnSticky: {
