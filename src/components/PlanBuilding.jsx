@@ -15,7 +15,7 @@
  *   style     ViewStyle Optional. Applied to the outermost container.
  */
 
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useRef, useState, useCallback, useMemo } from 'react';
 import {
   View, Text, Image, Animated, Easing,
   AccessibilityInfo, StyleSheet,
@@ -53,6 +53,28 @@ const DEFAULT_MESSAGES = [
 ];
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Build a per-dot opacity interpolation with strictly-increasing inputRanges.
+ * Dots at the loop boundary (i===0) and the last dot (i===n-1) use 4-point
+ * ranges so the animation wraps cleanly without a non-monotonic [0,0,...].
+ */
+function buildDotInterp(i, n, ringProgress, OFF, ON) {
+  const peak = i / n;
+  const w = 1 / n;
+  let inputRange, outputRange;
+  if (i === 0) {
+    inputRange  = [0, w, 1 - w, 1];      // lit at the loop boundary (0 and 1)
+    outputRange = [ON, OFF, OFF, ON];
+  } else if (i === n - 1) {
+    inputRange  = [0, peak - w, peak, 1];
+    outputRange = [OFF, OFF, ON, OFF];
+  } else {
+    inputRange  = [peak - w, peak, peak + w];
+    outputRange = [OFF, ON, OFF];
+  }
+  return { opacity: ringProgress.interpolate({ inputRange, outputRange }) };
+}
+
 export default function PlanBuilding({ messages, style }) {
   const { colors, fonts } = useTheme();
   const msgList = messages && messages.length ? messages : DEFAULT_MESSAGES;
@@ -78,6 +100,7 @@ export default function PlanBuilding({ messages, style }) {
   const breatheLoopRef = useRef(null);
   const ringLoopRef    = useRef(null);
   const msgTimerRef    = useRef(null);
+  const msgFadeRef     = useRef(null);
   const mountedRef     = useRef(true);
 
   // ── Message state ────────────────────────────────────────────────────────
@@ -140,12 +163,14 @@ export default function PlanBuilding({ messages, style }) {
   const startMessages = useCallback(() => {
     const rotate = () => {
       if (!mountedRef.current) return;
-      // Fade out
-      Animated.timing(msgOpacity, {
+      // Fade out — store ref so unmount can stop it mid-flight.
+      const fadeOut = Animated.timing(msgOpacity, {
         toValue: 0,
         duration: MESSAGE_FADE_OUT,
         useNativeDriver: true,
-      }).start(() => {
+      });
+      msgFadeRef.current = fadeOut;
+      fadeOut.start(() => {
         if (!mountedRef.current) return;
         setMsgIndex(i => (i + 1) % msgList.length);
         // Fade in
@@ -176,39 +201,26 @@ export default function PlanBuilding({ messages, style }) {
       breatheLoopRef.current?.stop();
       ringLoopRef.current?.stop();
       if (msgTimerRef.current) clearInterval(msgTimerRef.current);
+      msgFadeRef.current?.stop();
     };
   }, [reduceMotion, startBreathe, startRing, startMessages]);
 
   // ── Per-dot opacity (derived from ringProgress) ────────────────────────────
   // Each dot has a "peak" when ringProgress passes through i/DOT_COUNT.
-  // We use interpolation with a narrow active window so only ~1 dot is bright
-  // at a time, giving a clean sequential chase effect.
-  const dotAnims = Array.from({ length: DOT_COUNT }, (_, i) => {
-    if (reduceMotion) {
-      // Static medium opacity — no motion, still visually present.
-      return { opacity: 0.45 };
-    }
-    // The active phase is [i/N – 0.5/N, i/N + 0.5/N], wrapped.
-    // We model this with a triangular pulse centered on i/N.
-    const peak  = i / DOT_COUNT;
-    const width = 1 / DOT_COUNT;  // full width of one dot's window
-
-    // Build interpolation input range that wraps 0→1 smoothly.
-    // Triangle: zero at ±width/2 away, full at peak.
-    const inputRange  = [
-      Math.max(0, peak - width),
-      peak,
-      Math.min(1, peak + width),
-    ];
-    const outputRange = [DOT_OFF_OPACITY, DOT_ON_OPACITY, DOT_OFF_OPACITY];
-
-    return {
-      opacity: ringProgress.interpolate({ inputRange, outputRange }),
-    };
-  });
+  // buildDotInterp uses strictly-increasing inputRanges with 4-point boundary
+  // ranges for dots 0 and n-1 so the loop wraps without non-monotonic ranges.
+  // Memoized so interpolate nodes aren't orphaned on every render.
+  const dotAnims = useMemo(
+    () => Array.from({ length: DOT_COUNT }, (_, i) =>
+      reduceMotion
+        ? { opacity: 0.45 }
+        : buildDotInterp(i, DOT_COUNT, ringProgress, DOT_OFF_OPACITY, DOT_ON_OPACITY)
+    ),
+    [reduceMotion, ringProgress],
+  );
 
   // ── Layout ────────────────────────────────────────────────────────────────
-  // The ring "canvas" is a square whose side is 2*(RING_RADIUS + DOT_SIZE/2)
+  // The ring "canvas" is a square whose side is 2*(RING_RADIUS + DOT_SIZE)
   // so dots don't clip. The image is absolutely centered inside it.
   const canvasSize = (RING_RADIUS + DOT_SIZE) * 2;
 
