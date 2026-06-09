@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../theme';
 import IrisSignature from '../components/IrisSignature';
 import Halo from '../components/Halo';
+import StandingCard from '../components/StandingCard';
 import { api } from '../api';
 import { useAuthStore } from '../store/authStore';
 import {
@@ -249,6 +250,9 @@ export default function ProgressScreen() {
           <Text style={s.heading}>Progress</Text>
           <IrisSignature />
         </View>
+
+        {/* Your Standing — competitive top-X% flex, derived from highest earned halo */}
+        <StandingCard />
 
         {/* Your Halos — streak collection, replaces milestone/unlock cards */}
         <View style={s.gemsCard}>

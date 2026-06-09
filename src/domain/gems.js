@@ -114,6 +114,21 @@ export function formatRarity(pct) {
 }
 
 /**
+ * The user's competitive standing = rarity of their highest EARNED halo.
+ * Returns { gem, pct } or null if no halo earned yet.
+ *
+ * @param {number} maxStreak
+ * @param {object|null} liveStats - { [day]: pct } from /v1/halo-stats, or null
+ * @returns {{ gem: object, pct: number }|null}
+ */
+export function standing(maxStreak, liveStats) {
+  const earned = earnedGems(maxStreak);
+  if (!earned.length) return null;
+  const gem = earned[earned.length - 1];
+  return { gem, pct: rarityPctFor(gem, liveStats) };
+}
+
+/**
  * Display color for a tier.
  */
 export function tierColor(tier) {

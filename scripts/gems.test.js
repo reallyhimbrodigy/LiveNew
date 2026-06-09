@@ -10,6 +10,7 @@ import {
   tierColor,
   rarityPctFor,
   formatRarity,
+  standing,
 } from "../src/domain/gems.js";
 
 // ── GEMS array shape ──────────────────────────────────────────────────────────
@@ -167,5 +168,29 @@ assert.strictEqual(formatRarity(0.8), "0.8", "formatRarity(0.8) should be '0.8'"
 assert.strictEqual(formatRarity(33), "33", "formatRarity(33) should be '33'");
 assert.strictEqual(formatRarity(0.15), "0.1", "formatRarity(0.15) should be '0.1' (toFixed(1) rounds down due to float repr)");
 assert.strictEqual(formatRarity(76), "76", "formatRarity(76) should be '76'");
+
+// ── standing ──────────────────────────────────────────────────────────────────
+
+assert.strictEqual(standing(0, null), null, "standing(0, null) should be null");
+assert.strictEqual(standing(-1, null), null, "standing(-1, null) should be null");
+assert.strictEqual(standing("foo", null), null, "standing('foo', null) should be null");
+
+{
+  const st = standing(7, null);
+  assert.strictEqual(st.gem.id, "the_week", "standing(7, null).gem.id should be 'the_week'");
+  assert.strictEqual(st.pct, 33, "standing(7, null).pct should be 33 (designed fallback)");
+}
+
+{
+  const st = standing(7, { 7: 25 });
+  assert.strictEqual(st.pct, 25, "standing(7, {7:25}).pct should be 25 (live stat)");
+}
+
+{
+  // maxStreak=30 → highest earned is the_month (day=30, rarityPct=7)
+  const st = standing(30, null);
+  assert.strictEqual(st.gem.id, "the_month", "standing(30, null).gem.id should be 'the_month'");
+  assert.strictEqual(st.pct, 7, "standing(30, null).pct should be 7");
+}
 
 console.log("gems OK");
