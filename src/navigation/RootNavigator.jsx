@@ -101,6 +101,7 @@ function MainTabs() {
         headerShown: false,
         lazy: false,
         freezeOnBlur: false,
+        animation: 'fade',
         tabBarStyle: {
           backgroundColor: colors.tabBar,
           borderTopColor: colors.line,
