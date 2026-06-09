@@ -19,6 +19,7 @@ import { hashJSON, sanitizeContentItem, sanitizePack } from "../domain/content/s
 import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
 import { generateDayPlan } from "../domain/aiDayPlan.js";
+import { resolveDaySchedule, normalizeSchedule } from "../domain/schedule.js";
 import { generateInsight } from "../domain/aiInsight.js";
 import { generateStressRelief } from "../domain/aiStressRelief.js";
 import { generateChatReply } from "../domain/aiChat.js";
@@ -3142,6 +3143,8 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           : null;
 
       // AI-powered personalized plan
+      const rawSchedule = baselineResolved?.constraints?.schedule;
+      const daySchedule = rawSchedule ? resolveDaySchedule(normalizeSchedule(rawSchedule), new Date()) : null;
       let dayPlan = null;
       try {
         dayPlan = await generateDayPlan({
@@ -3151,6 +3154,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           routine: checkIn.routine || "",
           history: aiHistory,
           healthSnapshot,
+          daySchedule,
         });
       } catch (err) {
         console.error("[DAYPLAN_FAILED]", err?.message);
