@@ -123,7 +123,6 @@ export default function OnboardingScreen() {
   const skipSleepEnergy = canSkipSleepAndEnergy(healthSnapshot);
 
   const [step, setStep] = useState(0); // 0=Health, 1=Schedule, 2=Stress, 3=Sleep, 4=Energy
-  const [routine, setRoutine] = useState('');
   const [schedule, setSchedule] = useState(null);
   const [stress, setStress] = useState(null);
   const [sleep, setSleep] = useState(null);
@@ -227,7 +226,7 @@ export default function OnboardingScreen() {
     // gets built fresh when they open the app in the morning.
     if (isSleepWindow()) {
       try {
-        await saveProfileWithoutNav({ routine: routine.trim(), schedule });
+        await saveProfileWithoutNav({ routine: '', schedule });
         activateProfile();
       } catch (err) {
         if (!mountedRef.current) return;
@@ -469,17 +468,6 @@ function makeStyles(colors, fonts) {
     backBtn: { alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 4, marginBottom: 12 },
     backText: { color: colors.muted, fontFamily: fonts.body, fontSize: 14, letterSpacing: 0.2 },
 
-    // Small gold eyebrow above headings on weight-bearing steps (currently
-    // just step 1 — schedule). Visually telegraphs "this matters more"
-    // without making the rest of onboarding feel less important.
-    eyebrow: {
-      fontFamily: fonts.displaySemibold,
-      fontSize: 11,
-      color: colors.gold,
-      letterSpacing: 2,
-      marginBottom: 12,
-      textTransform: 'uppercase',
-    },
     heading: {
       fontFamily: fonts.displayBold,
       fontSize: 28,
@@ -494,22 +482,6 @@ function makeStyles(colors, fonts) {
       color: colors.muted,
       marginBottom: 22,
       lineHeight: 22,
-    },
-    // Iris-voiced reinforcement after the routine input. Italic gold so it
-    // reads as Iris speaking directly, not generic helper text. The hint
-    // catches users right before they tap Continue, giving them one last
-    // nudge to add detail rather than dash off two lines.
-    irisHint: {
-      fontFamily: fonts.italic,
-      fontSize: 13,
-      color: colors.gold,
-      letterSpacing: 0.2,
-      lineHeight: 19,
-      marginTop: 14,
-      marginBottom: 16,
-      paddingLeft: 12,
-      borderLeftWidth: 2,
-      borderLeftColor: colors.gold,
     },
     healthSummary: {
       fontFamily: fonts.italic,
@@ -561,44 +533,6 @@ function makeStyles(colors, fonts) {
       color: colors.gold,
       marginLeft: 8,
       lineHeight: 22,
-    },
-
-    // Goal chip grid
-    chipGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 10,
-      marginTop: 8,
-    },
-    chip: {
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.goldBorder,
-      borderRadius: 999,
-      paddingVertical: 14,
-      paddingHorizontal: 20,
-    },
-    chipText: {
-      fontFamily: fonts.displaySemibold,
-      fontSize: 15,
-      color: colors.text,
-      letterSpacing: 0.1,
-    },
-
-    // Routine text input
-    routineInput: {
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.line,
-      borderRadius: 14,
-      paddingHorizontal: 18,
-      paddingVertical: 16,
-      fontFamily: fonts.body,
-      fontSize: 16,
-      color: colors.text,
-      lineHeight: 24,
-      minHeight: 140,
-      marginBottom: 16,
     },
 
     // Primary CTA
