@@ -25,6 +25,7 @@
     "test:mvp": "node scripts/mvp.unit.test.js",
     "test:constraints": "node scripts/constraints.coverage.test.js",
     "test:safeguards": "node scripts/safeguards.test.js",
+    "test:gems": "node scripts/gems.test.js",
     "test:smoke": "node scripts/smoke.loop.js",
     "test": "npm run test:mvp && npm run test:integration && npm run test:golden && npm run test:migrations && npm run test:constraints && npm run test:safeguards",
     "simulate": "node scripts/simulate.js",
