@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TextInput, StyleSheet } from 'react-native';
+import { View, Text, TextInput, Pressable, StyleSheet } from 'react-native';
 import { useTheme } from '../../theme';
 import TimeField from './TimeField';
 import DayToggle from './DayToggle';
@@ -25,7 +25,13 @@ export default function ActivityCard({ block, editableLabel = false, onChange })
       <View style={s.timesRow}>
         <TimeField value={block.start} onChange={(v) => set({ start: v })} />
         <Text style={s.dash}>–</Text>
-        <TimeField value={block.end || block.start} onChange={(v) => set({ end: v })} />
+        {block.end ? (
+          <TimeField value={block.end} onChange={(v) => set({ end: v })} />
+        ) : (
+          <Pressable style={s.endAdd} onPress={() => set({ end: block.start })} hitSlop={6}>
+            <Text style={s.endAddText}>+ end</Text>
+          </Pressable>
+        )}
       </View>
       <Text style={s.caption}>Which days?</Text>
       <DayToggle value={block.days} onChange={(days) => set({ days })} />
@@ -48,5 +54,7 @@ function makeStyles(colors, fonts) {
     timesRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
     dash: { color: colors.muted, fontSize: 18 },
     caption: { fontFamily: fonts.display, fontSize: 13, color: colors.muted, letterSpacing: 0.3 },
+    endAdd: { minWidth: 84, height: 44, paddingHorizontal: 14, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderStyle: 'dashed', borderColor: colors.line, backgroundColor: 'transparent' },
+    endAddText: { fontFamily: fonts.displaySemibold, fontSize: 15, color: colors.muted },
   });
 }

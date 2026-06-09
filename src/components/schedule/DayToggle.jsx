@@ -16,7 +16,7 @@ export default function DayToggle({ value = [], onChange }) {
         const on = value.includes(i);
         return (
           <Pressable
-            key={i}
+            key={FULL[i]}
             onPress={() => toggle(i)}
             hitSlop={6}
             accessibilityRole="button"
@@ -36,7 +36,7 @@ function makeStyles(colors, fonts) {
   return StyleSheet.create({
     row: { flexDirection: 'row', justifyContent: 'space-between', gap: 6 },
     pill: {
-      width: 40,
+      width: 44,
       height: 44,
       borderRadius: 12,
       alignItems: 'center',
