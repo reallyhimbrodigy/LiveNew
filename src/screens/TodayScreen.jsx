@@ -16,6 +16,7 @@ import GemUnlockModal from '../components/GemUnlockModal';
 import IrisSignature from '../components/IrisSignature';
 import CortisolFact from '../components/CortisolFact';
 import RecommendationCard from '../components/RecommendationCard';
+import SoundscapePlayer from '../components/SoundscapePlayer';
 import StateRing from '../components/StateRing';
 import GradientScreen from '../components/GradientScreen';
 import FlameIcon from '../components/FlameIcon';
@@ -878,6 +879,11 @@ export default function TodayScreen({ navigation }) {
         {/* One more thing for today — a time-of-day-aware action Iris surfaces
             beyond the plan. Day-stable; changes once per calendar day. */}
         <RecommendationCard style={s.recCard} />
+
+        {/* Soundscape player — ambient audio to settle the nervous system.
+            Sits at the bottom of the populated plan as a "settle the system"
+            moment; looping brown noise, rain, pink noise, or stillness. */}
+        <SoundscapePlayer style={s.soundscapeCard} />
       </ScrollView>
 
       {/* Sticky stress button + relief modal — defined once above, reused
@@ -1452,6 +1458,11 @@ function makeStyles(colors, fonts) {
   // Recommendation card — "one more thing for today", after plan content
   recCard: {
     marginTop: 20,
+  },
+
+  // Soundscape player — ambient audio card below the recommendation card.
+  soundscapeCard: {
+    marginTop: 16,
   },
 
   // Sticky stress button — pill-shaped, centered, gold-soft fill, breathing dot
