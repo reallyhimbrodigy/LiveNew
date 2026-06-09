@@ -27,7 +27,7 @@ import { useTheme } from '../theme';
 // ─── Tunable constants ──────────────────────────────────────────────────────
 
 /** Asset path — one-line swap when iris-figure.png lands */
-const IRIS_ASSET = require('../../assets/brand/iris-mark.png');
+const IRIS_ASSET = require('../../assets/brand/iris-figure.png');
 
 /** Source image dimensions (1024 × 710) */
 const IMG_NATIVE_W = 1024;
@@ -38,7 +38,7 @@ const IMG_NATIVE_H = 710;
  * x=0.50 (horizontal center), y=0.36 (36% from top).
  */
 const FACE_X = 0.50;
-const FACE_Y = 0.36;
+const FACE_Y = 0.30;
 
 // Breathing animation
 const BREATHE_SCALE_MIN = 1.0;

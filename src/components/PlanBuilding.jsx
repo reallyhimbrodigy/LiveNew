@@ -23,7 +23,7 @@ import {
 import { useTheme } from '../theme';
 
 // ─── Tunable constants ────────────────────────────────────────────────────────
-const IRIS_ASSET      = require('../../assets/brand/iris-mark.png');
+const IRIS_ASSET      = require('../../assets/brand/iris-figure.png');
 const IRIS_SIZE       = 108;          // image width / height px
 const RING_RADIUS     = 84;           // centre of image → centre of dot, px
 const DOT_COUNT       = 8;            // must match cortisol zones
