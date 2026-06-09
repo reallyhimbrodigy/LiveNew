@@ -65,7 +65,8 @@ async function computeHaloStats() {
   // service-role client (bypasses RLS; returns all users' data).
   const { data, error } = await supabaseAdmin()
     .from("checkin")
-    .select("user_id, date_key");
+    .select("user_id, date_key")
+    .limit(1000000); // raise PostgREST default 1000-row cap so the aggregate counts all checkins
 
   if (error) throw new Error(`halo-stats checkin query failed: ${error.message}`);
   if (!Array.isArray(data) || data.length === 0) return {};
