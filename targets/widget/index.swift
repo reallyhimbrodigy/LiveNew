@@ -410,7 +410,19 @@ struct HomeSmallView: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 4)
-        .containerBackground(for: .widget) { Color("widgetBackground") }
+        .containerBackground(for: .widget) {
+            // Warm gold-on-dark gradient "wave" — matches the app's modernized
+            // look (deep warm charcoal → near-black, diagonal). Replaces the
+            // prior flat fill so the home widgets read as premium, not plain.
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 0.105, green: 0.086, blue: 0.052),
+                    Color(red: 0.059, green: 0.051, blue: 0.039),
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
     }
 }
 
@@ -457,7 +469,19 @@ struct HomeMediumView: View {
         }
         .padding(.horizontal, 4)
         .padding(.vertical, 4)
-        .containerBackground(for: .widget) { Color("widgetBackground") }
+        .containerBackground(for: .widget) {
+            // Warm gold-on-dark gradient "wave" — matches the app's modernized
+            // look (deep warm charcoal → near-black, diagonal). Replaces the
+            // prior flat fill so the home widgets read as premium, not plain.
+            LinearGradient(
+                gradient: Gradient(colors: [
+                    Color(red: 0.105, green: 0.086, blue: 0.052),
+                    Color(red: 0.059, green: 0.051, blue: 0.039),
+                ]),
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        }
     }
 }
 
