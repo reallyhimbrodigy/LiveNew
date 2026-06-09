@@ -138,6 +138,9 @@ Generate exactly 8 zones for today. The IDs are fixed: morning, peak, midmorning
 - pullQuote: ONE sentence pulled from the body, 8–14 words. The single most quotable line — what someone would screenshot and post. Must read alone, without setup. Often the most counter-intuitive or specific line in the body. Do NOT invent something new — extract from your body verbatim or near-verbatim.
 - body: 50–100 words. One of the three content types above.
 
+[SCANNABILITY — non-negotiable]
+Keep every zone headline tight and skimmable — one punchy line, ideally under 12 words. No walls of text. The user's attention is short; lead with the single most important action. If a zone's body runs past 100 words, cut until only the mechanism and the protocol remain.
+
 Across the 8 zones:
 - No more than 3 zones of the same type (vary the mix).
 - If yesterday's zones are in context, vary the angle today — don't repeat the exact protocol or data callout. Same fact, different angle is fine.

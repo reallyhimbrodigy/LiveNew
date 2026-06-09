@@ -14,6 +14,7 @@ import ShareCard from '../components/ShareCard';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import GemUnlockModal from '../components/GemUnlockModal';
 import IrisSignature from '../components/IrisSignature';
+import DailyQuote from '../components/DailyQuote';
 import CortisolFact from '../components/CortisolFact';
 import RecommendationCard from '../components/RecommendationCard';
 import SoundscapePlayer from '../components/SoundscapePlayer';
@@ -682,6 +683,9 @@ export default function TodayScreen({ navigation }) {
           </View>
         ) : null}
 
+        {/* Daily quote — a calming anchor. Rotates each calendar day. */}
+        <DailyQuote style={s.dailyQuoteCard} />
+
         {/* Yesterday's reflection payoff — show that Iris listened. */}
         {yesterdayReflection ? (
           <View style={s.reflectionPayoff}>
@@ -1091,6 +1095,11 @@ function makeStyles(colors, fonts) {
     alignItems: 'center', justifyContent: 'center',
   },
   redoIcon: { color: colors.muted, fontSize: 18, lineHeight: 22 },
+
+  // Daily quote — calm anchor placed just under the first-read block.
+  dailyQuoteCard: {
+    marginBottom: 8,
+  },
 
   // Connect Apple Health banner
   healthBanner: {
