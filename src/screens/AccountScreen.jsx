@@ -27,6 +27,7 @@ export default function AccountScreen({ navigation }) {
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
 
   const profile = useAuthStore(s => s.profile);
+  const hasProfile = useAuthStore((s) => s.hasProfile);
   const themeMode = useAuthStore(s => s.themeMode);
   const setThemeMode = useAuthStore(s => s.setThemeMode);
   const isSubscribed = useAuthStore(s => s.isSubscribed);
@@ -46,6 +47,7 @@ export default function AccountScreen({ navigation }) {
   const [saving, setSaving] = useState(false);
   const [sharing, setSharing] = useState(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduleKey, setScheduleKey] = useState(0);
   const [nudgeDismissed, setNudgeDismissed] = useState(true); // default hidden until we check
   const shareCardRef = useRef(null);
   const editInputRef = useRef(null);
@@ -80,6 +82,7 @@ export default function AccountScreen({ navigation }) {
     let cancelled = false;
     (async () => {
       if (!userId) return;
+      if (!hasProfile) { if (!cancelled) setNudgeDismissed(true); return; }
       if (profile?.schedule?.blocks?.length) { if (!cancelled) setNudgeDismissed(true); return; }
       try {
         const v = await AsyncStorage.getItem(`livenew:sched_nudge_dismissed:${userId}`);
@@ -87,12 +90,15 @@ export default function AccountScreen({ navigation }) {
       } catch { if (!cancelled) setNudgeDismissed(false); }
     })();
     return () => { cancelled = true; };
-  }, [userId, profile?.schedule]);
+  }, [userId, hasProfile, profile?.schedule]);
 
   const dismissNudge = async () => {
     setNudgeDismissed(true);
+    if (!userId) return;
     try { await AsyncStorage.setItem(`livenew:sched_nudge_dismissed:${userId}`, '1'); } catch {}
   };
+
+  const openScheduleEditor = () => { setScheduleKey((k) => k + 1); setScheduleOpen(true); };
 
   const handleEnableNotifications = async () => {
     tapSelect();
@@ -303,16 +309,16 @@ export default function AccountScreen({ navigation }) {
         </View>
 
         {/* One-time nudge for users with no schedule */}
-        {!nudgeDismissed && !(profile?.schedule?.blocks?.length) ? (
+        {hasProfile && !nudgeDismissed && !(profile?.schedule?.blocks?.length) ? (
           <View style={s.card}>
             <View style={{ padding: 18 }}>
               <Text style={s.settingTitle}>Make your plans fit your week</Text>
               <Text style={[s.settingValue, { marginTop: 6 }]}>Tell Iris what your days actually look like — it takes under a minute.</Text>
               <View style={{ flexDirection: 'row', gap: 16, marginTop: 12 }}>
-                <Pressable onPress={() => setScheduleOpen(true)}>
+                <Pressable hitSlop={8} onPress={openScheduleEditor}>
                   <Text style={{ color: colors.gold, fontFamily: fonts.displaySemibold }}>Set up my week</Text>
                 </Pressable>
-                <Pressable onPress={dismissNudge}>
+                <Pressable hitSlop={8} onPress={dismissNudge}>
                   <Text style={{ color: colors.muted, fontFamily: fonts.displaySemibold }}>Not now</Text>
                 </Pressable>
               </View>
@@ -394,7 +400,7 @@ export default function AccountScreen({ navigation }) {
 
           <View style={s.settingDivider} />
 
-          <Pressable style={s.settingRow} onPress={() => setScheduleOpen(true)}>
+          <Pressable style={s.settingRow} onPress={openScheduleEditor}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Schedule</Text>
               <Text style={s.settingValue}>
@@ -584,9 +590,14 @@ export default function AccountScreen({ navigation }) {
             <Text style={{ color: colors.muted, fontFamily: fonts.displaySemibold, fontSize: 16 }}>Close</Text>
           </Pressable>
           <ScheduleBuilder
+            key={scheduleKey}
             onComplete={async (schedule) => {
+              try {
+                await saveProfile({ ...(profile || {}), schedule });
+              } catch (e) {
+                console.warn('[account] saveProfile schedule failed', e?.message);
+              }
               setScheduleOpen(false);
-              try { await saveProfile({ ...(profile || {}), schedule }); } catch (e) { console.warn('[account] saveProfile schedule failed', e?.message); }
             }}
           />
         </SafeAreaView>
