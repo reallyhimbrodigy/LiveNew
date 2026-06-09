@@ -1,6 +1,6 @@
 import React, { useState, useRef, useMemo, useEffect } from 'react';
 import {
-  View, Text, Pressable, StyleSheet, Animated, TextInput,
+  View, Text, Pressable, StyleSheet, Animated,
   KeyboardAvoidingView, Platform, ScrollView, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -11,10 +11,11 @@ import IrisSignature from '../components/IrisSignature';
 import PlanBuilding from '../components/PlanBuilding';
 import { deriveFromHealth, canSkipSleepAndEnergy } from '../utils/healthInference';
 import { isSleepWindow } from '../utils/localDate';
+import ScheduleBuilder from './onboarding/ScheduleBuilder';
 
 // Onboarding step machine:
 //   0 — Apple Health (always asked, FIRST)
-//   1 — Schedule (free-text typed input — needed for real personalization)
+//   1 — Schedule (guided builder — see onboarding/ScheduleBuilder.jsx)
 //   2 — Stress (always asked, subjective)
 //   3 — Sleep  (SKIPPED if HealthKit granted with data)
 //   4 — Energy (SKIPPED if HealthKit granted with data)
@@ -101,7 +102,7 @@ export default function OnboardingScreen() {
   const skipSleepEnergy = canSkipSleepAndEnergy(healthSnapshot);
 
   const [step, setStep] = useState(0); // 0=Health, 1=Schedule, 2=Stress, 3=Sleep, 4=Energy
-  const [routine, setRoutine] = useState('');
+  const [schedule, setSchedule] = useState(null);
   const [stress, setStress] = useState(null);
   const [sleep, setSleep] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -109,20 +110,6 @@ export default function OnboardingScreen() {
   const [error, setError] = useState('');
   const fadeAnim = useRef(new Animated.Value(1)).current;
   const mountedRef = useRef(true);
-  const routineInputRef = useRef(null);
-
-  // Deferred focus on the routine input — replaces autoFocus, which raced
-  // with KeyboardAvoidingView's layout calculation on iOS and could leave
-  // step 1 rendered blank (content pushed off-screen by the keyboard before
-  // the view finished measuring). A 350ms delay lets the layout settle and
-  // the fade-in finish before the keyboard slides up.
-  useEffect(() => {
-    if (step !== 1) return;
-    const t = setTimeout(() => {
-      if (mountedRef.current) routineInputRef.current?.focus();
-    }, 350);
-    return () => clearTimeout(t);
-  }, [step]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -167,8 +154,8 @@ export default function OnboardingScreen() {
     }
   };
   // Step 1 — Schedule
-  const handleScheduleNext = () => {
-    if (!routine.trim()) return;
+  const handleScheduleNext = (sched) => {
+    setSchedule(sched);
     tapMedium();
     setStep(2);
   };
@@ -218,7 +205,7 @@ export default function OnboardingScreen() {
     // gets built fresh when they open the app in the morning.
     if (isSleepWindow()) {
       try {
-        await saveProfileWithoutNav({ routine: routine.trim() });
+        await saveProfileWithoutNav({ routine: '', schedule });
         activateProfile();
       } catch (err) {
         if (!mountedRef.current) return;
@@ -234,7 +221,7 @@ export default function OnboardingScreen() {
     });
 
     try {
-      await saveProfileWithoutNav({ routine: routine.trim() });
+      await saveProfileWithoutNav({ routine: '', schedule });
       await Promise.race([
         generatePlan({ stress: stressValue, sleepQuality: sleepValue, energy: energyValue }),
         timeout,
@@ -343,43 +330,12 @@ export default function OnboardingScreen() {
                 </ScrollView>
               )}
 
-              {/* Step 1 — Schedule (free text). This is the single
-                  load-bearing step of onboarding — the routine string is
-                  injected into every plan-generation prompt Iris runs, so
-                  the precision of the user's answer here directly drives
-                  the precision of every protocol they'll ever see. The
-                  eyebrow + Iris-voiced footer below exist to make that
-                  weight visible so users don't dash off two vague lines. */}
+              {/* Step 1 — Schedule (guided builder). Replaces the free-text
+                  routine essay. ScheduleBuilder calls onComplete(schedule)
+                  which sets the schedule state and advances to step 2 via
+                  handleScheduleNext — same advancement as before. */}
               {step === 1 && (
-                <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled" contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}>
-                  <Text style={s.eyebrow}>THE MOST IMPORTANT STEP</Text>
-                  <Text style={s.heading}>What does a typical day look like?</Text>
-                  <Text style={s.sub}>
-                    Wake time, work hours, gym, when you eat, when you sleep — and anything else that shapes your day. The more you tell Iris, the more precisely she can shape your plan. Don't hold back.
-                  </Text>
-                  {error ? <Text style={s.error}>{error}</Text> : null}
-                  <TextInput
-                    ref={routineInputRef}
-                    style={s.routineInput}
-                    placeholder={"e.g. Wake 6:30am. Work from home 9–5. Gym at 6pm. Dinner 7. In bed by 11."}
-                    placeholderTextColor={colors.dim}
-                    value={routine}
-                    onChangeText={setRoutine}
-                    multiline
-                    textAlignVertical="top"
-                    maxLength={400}
-                  />
-                  <Text style={s.irisHint}>
-                    Of every question I'll ask, this one shapes your plan the most. Take your time.
-                  </Text>
-                  <Pressable
-                    style={({ pressed }) => [s.primary, (!routine.trim()) && { opacity: 0.4 }, pressed && { opacity: 0.85 }]}
-                    onPress={handleScheduleNext}
-                    disabled={!routine.trim()}
-                  >
-                    <Text style={s.primaryText}>Continue</Text>
-                  </Pressable>
-                </ScrollView>
+                <ScheduleBuilder onComplete={handleScheduleNext} />
               )}
 
               {/* Step 2 — Stress (always) */}
@@ -491,17 +447,6 @@ function makeStyles(colors, fonts) {
     backBtn: { alignSelf: 'flex-start', paddingVertical: 8, paddingHorizontal: 4, marginBottom: 12 },
     backText: { color: colors.muted, fontFamily: fonts.body, fontSize: 14, letterSpacing: 0.2 },
 
-    // Small gold eyebrow above headings on weight-bearing steps (currently
-    // just step 1 — schedule). Visually telegraphs "this matters more"
-    // without making the rest of onboarding feel less important.
-    eyebrow: {
-      fontFamily: fonts.displaySemibold,
-      fontSize: 11,
-      color: colors.gold,
-      letterSpacing: 2,
-      marginBottom: 12,
-      textTransform: 'uppercase',
-    },
     heading: {
       fontFamily: fonts.displayBold,
       fontSize: 28,
@@ -516,22 +461,6 @@ function makeStyles(colors, fonts) {
       color: colors.muted,
       marginBottom: 22,
       lineHeight: 22,
-    },
-    // Iris-voiced reinforcement after the routine input. Italic gold so it
-    // reads as Iris speaking directly, not generic helper text. The hint
-    // catches users right before they tap Continue, giving them one last
-    // nudge to add detail rather than dash off two lines.
-    irisHint: {
-      fontFamily: fonts.italic,
-      fontSize: 13,
-      color: colors.gold,
-      letterSpacing: 0.2,
-      lineHeight: 19,
-      marginTop: 14,
-      marginBottom: 16,
-      paddingLeft: 12,
-      borderLeftWidth: 2,
-      borderLeftColor: colors.gold,
     },
     healthSummary: {
       fontFamily: fonts.italic,
@@ -583,44 +512,6 @@ function makeStyles(colors, fonts) {
       color: colors.gold,
       marginLeft: 8,
       lineHeight: 22,
-    },
-
-    // Goal chip grid
-    chipGrid: {
-      flexDirection: 'row',
-      flexWrap: 'wrap',
-      gap: 10,
-      marginTop: 8,
-    },
-    chip: {
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.goldBorder,
-      borderRadius: 999,
-      paddingVertical: 14,
-      paddingHorizontal: 20,
-    },
-    chipText: {
-      fontFamily: fonts.displaySemibold,
-      fontSize: 15,
-      color: colors.text,
-      letterSpacing: 0.1,
-    },
-
-    // Routine text input
-    routineInput: {
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.line,
-      borderRadius: 14,
-      paddingHorizontal: 18,
-      paddingVertical: 16,
-      fontFamily: fonts.body,
-      fontSize: 16,
-      color: colors.text,
-      lineHeight: 24,
-      minHeight: 140,
-      marginBottom: 16,
     },
 
     // Primary CTA

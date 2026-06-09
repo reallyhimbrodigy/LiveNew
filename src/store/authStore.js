@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, setTokens, clearTokens, setAuthExpiredHandler } from '../api';
+import { normalizeSchedule, deriveRoutineSummary } from '../domain/schedule.js';
 import {
   requestPermissions,
   scheduleSessionReminders,
@@ -47,6 +48,20 @@ const readOnboardedMarker = async (userId) => {
   if (!key) return false;
   try { return (await AsyncStorage.getItem(key)) === '1'; } catch { return false; }
 };
+
+// Normalize schedule and derive a back-compat routine summary when a schedule
+// is present (keeps the hasProfile gate satisfied). Returns the profile
+// unchanged when no schedule is set. Used by both save paths.
+function prepareProfileForSave(profile) {
+  if (!profile.schedule) return profile;
+  const schedule = normalizeSchedule(profile.schedule);
+  // Always set a non-empty routine so the hasProfile gate (!!profile.routine)
+  // passes even when the user skipped (empty schedule). The AI prompt uses the
+  // structured schedule (daySchedule) as the primary signal; this string is
+  // only the legacy fallback, so a benign sentinel is honest and safe.
+  const routine = profile.routine || deriveRoutineSummary(schedule) || 'No fixed schedule.';
+  return { ...profile, schedule, routine };
+}
 
 // 14-day free trial helpers — used by both the gate (generatePlan) and the
 // UI (Paywall trigger, trial countdown on Account, feature gating elsewhere).
@@ -248,6 +263,7 @@ export const useAuthStore = create((set, get) => ({
               wakeTime: pickServer('wakeTime'),
               timeMin: pickServer('timeMin'),
               injuries: serverProfile.injuries || localProfile.injuries || [],
+              schedule: serverProfile.schedule || localProfile.schedule || null,
             };
             await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(merged));
             set({ profile: merged, hasProfile: serverSaysOnboarded || !!merged.routine });
@@ -483,6 +499,7 @@ export const useAuthStore = create((set, get) => ({
         wakeTime: p.wakeTime || null,
         timeMin: p.timeMin || null,
         injuries: p.injuries || [],
+        schedule: p.schedule || null,
       };
       // Source of truth: server's uiState. "home" means fully onboarded.
       // Fall back to profile.isComplete or routine presence for older server
@@ -602,11 +619,12 @@ export const useAuthStore = create((set, get) => ({
 
   // Save onboarding profile (sets hasProfile, triggers navigation to MainTabs)
   saveProfile: async (profile) => {
-    await api.onboardComplete(profile);
-    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    const prepared = prepareProfileForSave(profile);
+    await api.onboardComplete(prepared);
+    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(prepared));
     await AsyncStorage.removeItem(PLAN_KEY);
     await writeOnboardedMarker(get().userId);
-    set({ hasProfile: true, profile, todayPlan: null, todayDate: null, completed: {}, reflection: null });
+    set({ hasProfile: true, profile: prepared, todayPlan: null, todayDate: null, completed: {}, reflection: null });
   },
 
   // Save profile WITHOUT triggering navigation — used during onboarding
@@ -614,11 +632,13 @@ export const useAuthStore = create((set, get) => ({
   saveProfileWithoutNav: async (profile) => {
     // Accept consent first (required before any other server calls work)
     await api.acceptConsent();
-    await api.onboardComplete(profile);
-    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    const prepared = prepareProfileForSave(profile);
+    await api.onboardComplete(prepared);
+    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(prepared));
     await AsyncStorage.removeItem(PLAN_KEY);
     await writeOnboardedMarker(get().userId);
-    set({ profile, todayPlan: null, todayDate: null, completed: {}, reflection: null });
+    // hasProfile intentionally not set here; onboarding calls activateProfile() after the plan generates.
+    set({ profile: prepared, todayPlan: null, todayDate: null, completed: {}, reflection: null });
   },
 
   // Flip hasProfile to trigger navigation to MainTabs

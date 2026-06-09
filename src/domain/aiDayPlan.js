@@ -203,7 +203,7 @@ NEVER write generic "good morning" / "let's begin" / "here's your day" — usele
 
 The test for every zone: would a researcher who actually knows this person say this? If no, rewrite. The user is paying for substance — give it to them.`;
 
-export async function generateDayPlan({ stressLabel, sleepQuality, energy, routine, history, healthSnapshot }) {
+export async function generateDayPlan({ stressLabel, sleepQuality, energy, routine, history, healthSnapshot, daySchedule = null }) {
   const stressPhrase = stressLabel === "overwhelmed" ? "overwhelmed"
     : stressLabel === "stressed" ? "stressed"
     : stressLabel === "good" ? "calm"
@@ -244,8 +244,21 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
   lines.push(`Today: I'm feeling ${stressPhrase}. ${sleepPhrase}. My ${energyPhrase}.`);
   lines.push("");
 
-  // 3. Routine — typical reference shape.
-  lines.push(`My typical routine (a reference, not a constraint): ${routineText}`);
+  // 3. Today's actual schedule (preferred) or legacy routine fallback.
+  if (daySchedule) {
+    const items = daySchedule.commitments.length
+      ? daySchedule.commitments
+          .map((c) => (c.end ? `${c.label} ${c.start}-${c.end}` : `${c.label} ${c.start}`))
+          .join(", ")
+      : "nothing scheduled";
+    const wake = daySchedule.wake ? `wake ~${daySchedule.wake}` : "";
+    const sleep = daySchedule.sleep ? `sleep ~${daySchedule.sleep}` : "";
+    const timing = [wake, sleep].filter(Boolean).join(", ");
+    lines.push(`Today is ${daySchedule.weekdayName}. On my schedule today: ${items}${timing ? ` (${timing})` : ""}.`);
+    lines.push("Build the plan around today's real commitments and timing.");
+  } else {
+    lines.push(`My typical routine (a reference, not a constraint): ${routineText}`);
+  }
   lines.push("");
 
   // 4. Weekly focus continuity.

@@ -19,6 +19,7 @@ import { hashJSON, sanitizeContentItem, sanitizePack } from "../domain/content/s
 import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
 import { generateDayPlan } from "../domain/aiDayPlan.js";
+import { resolveDaySchedule, normalizeSchedule } from "../domain/schedule.js";
 import { generateInsight } from "../domain/aiInsight.js";
 import { generateStressRelief } from "../domain/aiStressRelief.js";
 import { generateChatReply } from "../domain/aiChat.js";
@@ -2235,6 +2236,7 @@ async function buildSupabaseBootstrapPayload({ userId, userProfile, flags }) {
       wakeTime: constraints.wakeTime || null,
       timeMin: Number.isFinite(Number(constraints.timeMin)) ? Number(constraints.timeMin) : null,
       injuries,
+      schedule: constraints.schedule || null,
     },
     baseline: baseline
       ? {
@@ -2583,6 +2585,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         back: injuriesInput.includes("back"),
         neck: injuriesInput.includes("neck"),
       };
+      const incomingSchedule = profileInput?.schedule ? normalizeSchedule(profileInput.schedule) : undefined;
       const mergedConstraints = {
         ...existingConstraints,
         routine: profileData.routine,
@@ -2592,6 +2595,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         timeMin: profileData.timeMin,
         injuries: injuryFlags,
         injuriesList: injuriesInput,
+        ...(incomingSchedule ? { schedule: incomingSchedule } : {}),
       };
       const updatedProfile = await persist.updateOnboarding(auth.userId, {
         timezone: existingProfile?.timezone || DEFAULT_TIMEZONE,
@@ -2643,10 +2647,18 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     const dayBoundaryMinute = minuteOverride != null ? minuteOverride : baseline.dayBoundaryHour * 60;
     const requiredVersion = await getRequiredConsentVersion();
     await persist.updateConsent(auth.userId, { version: requiredVersion, acceptedAt: new Date().toISOString() });
+    // schedule travels on the profile object regardless of which key carries the
+    // baseline fields, so read it from the same fallback chain normalizeBaselineInput uses.
+    const scheduleSource = body?.baseline || body?.userProfile || body?.profile;
+    const incomingScheduleBaseline = scheduleSource?.schedule ? normalizeSchedule(scheduleSource.schedule) : undefined;
+    const baselineConstraintsMerged = {
+      ...(baseline.constraints && typeof baseline.constraints === "object" ? baseline.constraints : {}),
+      ...(incomingScheduleBaseline ? { schedule: incomingScheduleBaseline } : {}),
+    };
     const updatedProfile = await persist.updateOnboarding(auth.userId, {
       timezone: baseline.timezone,
       dayBoundaryMinute,
-      constraintsJson: baseline.constraints || null,
+      constraintsJson: Object.keys(baselineConstraintsMerged).length ? baselineConstraintsMerged : null,
       completedAt: new Date().toISOString(),
     });
 
@@ -3142,6 +3154,10 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           : null;
 
       // AI-powered personalized plan
+      const rawSchedule = baselineResolved?.constraints?.schedule;
+      const daySchedule = rawSchedule
+        ? resolveDaySchedule(normalizeSchedule(rawSchedule), now, { timezone: baselineResolved?.timezone })
+        : null;
       let dayPlan = null;
       try {
         dayPlan = await generateDayPlan({
@@ -3151,6 +3167,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           routine: checkIn.routine || "",
           history: aiHistory,
           healthSnapshot,
+          daySchedule,
         });
       } catch (err) {
         console.error("[DAYPLAN_FAILED]", err?.message);
