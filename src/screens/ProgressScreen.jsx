@@ -5,7 +5,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../theme';
 import IrisSignature from '../components/IrisSignature';
-import Gem from '../components/Gem';
+import Halo from '../components/Halo';
 import { api } from '../api';
 import { useAuthStore } from '../store/authStore';
 import {
@@ -247,11 +247,11 @@ export default function ProgressScreen() {
           <IrisSignature />
         </View>
 
-        {/* Your Gems — streak collection, replaces milestone/unlock cards */}
+        {/* Your Halos — streak collection, replaces milestone/unlock cards */}
         <View style={s.gemsCard}>
           {/* Header row */}
           <View style={s.gemsHeaderRow}>
-            <Text style={s.gemsTitle}>Your gems</Text>
+            <Text style={s.gemsTitle}>Your halos</Text>
             <Text style={s.gemsCount}>{earnedCount}/{GEMS.length}</Text>
           </View>
 
@@ -266,7 +266,7 @@ export default function ProgressScreen() {
               </View>
             </View>
           ) : (
-            <Text style={s.gemsAllDone}>All gems collected.</Text>
+            <Text style={s.gemsAllDone}>All halos earned.</Text>
           )}
 
           {/* Gem grid */}
@@ -275,7 +275,7 @@ export default function ProgressScreen() {
               const earned = isEarned(g.id, maxStreak);
               return (
                 <View key={g.id} style={s.gemCell}>
-                  <Gem
+                  <Halo
                     gem={g}
                     earned={earned}
                     size={56}
@@ -303,9 +303,9 @@ export default function ProgressScreen() {
               onPress={() => setSelectedGem(null)}
             >
               <Pressable style={s.gemModalCard} onPress={() => {}}>
-                {/* Large gem */}
+                {/* Large halo */}
                 <View style={s.gemModalGemWrap}>
-                  <Gem
+                  <Halo
                     gem={selectedGem}
                     earned={isEarned(selectedGem.id, maxStreak)}
                     size={120}
@@ -320,7 +320,7 @@ export default function ProgressScreen() {
 
                 {/* Rarity */}
                 <Text style={s.gemModalRarity}>
-                  Reached by ~{selectedGem.rarityPct}% of members
+                  Held by ~{selectedGem.rarityPct}% of members
                 </Text>
 
                 {/* Earned / locked status */}
@@ -332,7 +332,7 @@ export default function ProgressScreen() {
                   </Text>
                 ) : (
                   <Text style={s.gemModalStatus}>
-                    Reach a {selectedGem.day}-day streak to unlock.
+                    Reach a {selectedGem.day}-day streak to earn this halo.
                   </Text>
                 )}
 
@@ -573,7 +573,7 @@ export default function ProgressScreen() {
         {trend.length === 0 && error && (
           <View style={s.emptyCard}>
             <Text style={s.emptySub}>
-              Iris is offline for a moment. Keep showing up — your gems are tracked locally.
+              Iris is offline for a moment. Keep showing up — your halos are tracked locally.
             </Text>
             {/* Show the actual failure reason so we can diagnose instead of
                 guessing. Muted, small, screenshot-able. */}

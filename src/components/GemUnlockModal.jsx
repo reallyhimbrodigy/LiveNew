@@ -4,7 +4,7 @@ import {
 } from 'react-native';
 import { useTheme } from '../theme';
 import { gemById, tierColor } from '../domain/gems';
-import Gem from './Gem';
+import Halo from './Halo';
 
 /**
  * GemUnlockModal — gem-unlock reveal celebration.
@@ -63,7 +63,7 @@ export default function GemUnlockModal({ gemId, onClose }) {
     if (!gem) return;
     try {
       await Share.share({
-        message: `I just unlocked the "${gem.name}" gem on LiveNew — reached by only ~${gem.rarityPct}% of members.`,
+        message: `I just earned the "${gem.name}" halo on LiveNew — held by only ~${gem.rarityPct}% of members.`,
       });
     } catch {}
     onClose();
@@ -86,11 +86,11 @@ export default function GemUnlockModal({ gemId, onClose }) {
         <Pressable style={s.card} onPress={() => {}}>
 
           {/* Eyebrow */}
-          <Text style={s.eyebrow}>GEM UNLOCKED</Text>
+          <Text style={s.eyebrow}>HALO UNLOCKED</Text>
 
-          {/* Animated gem with glow pulse */}
+          {/* Animated halo with glow pulse */}
           <View style={s.gemWrap}>
-            {/* Glow ring behind the gem */}
+            {/* Glow ring behind the halo */}
             {gem ? (
               <Animated.View
                 style={[
@@ -101,7 +101,7 @@ export default function GemUnlockModal({ gemId, onClose }) {
             ) : null}
 
             <Animated.View style={{ transform: [{ scale }], opacity }}>
-              {gem ? <Gem gem={gem} earned size={140} /> : null}
+              {gem ? <Halo gem={gem} earned size={140} /> : null}
             </Animated.View>
           </View>
 
@@ -115,7 +115,7 @@ export default function GemUnlockModal({ gemId, onClose }) {
 
           {/* Rarity */}
           <Text style={s.rarity}>
-            {gem ? `Reached by ~${gem.rarityPct}% of members` : ''}
+            {gem ? `Held by ~${gem.rarityPct}% of members` : ''}
           </Text>
 
           {/* Flavor */}
