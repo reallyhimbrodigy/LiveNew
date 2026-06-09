@@ -8,6 +8,7 @@ import { getOfferings, purchasePackage, restorePurchases } from '../purchases';
 import { useAuthStore } from '../store/authStore';
 import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import IrisSignature from '../components/IrisSignature';
+import CortisolFact from '../components/CortisolFact';
 
 // Two-tier paywall: Annual (highlighted, default) and Monthly. The 14-day
 // free trial happens BEFORE this screen ever appears — by the time the
@@ -106,6 +107,8 @@ export default function PaywallScreen({ navigation }) {
         <Text style={s.sub}>
           You felt what the curve looks like when it's actually tuned. People who stay past this point notice the difference in another two weeks.
         </Text>
+
+        <CortisolFact style={s.paywallFact} />
 
         <View style={s.features}>
           {[
@@ -274,6 +277,10 @@ function makeStyles(colors, fonts) {
       marginBottom: 22,
     },
 
+    // Cortisol fact card — adds motivational weight before the features list.
+    paywallFact: {
+      marginBottom: 20,
+    },
     features: { gap: 11, marginBottom: 24 },
     featureRow: { flexDirection: 'row', alignItems: 'center' },
     featureCheck: {

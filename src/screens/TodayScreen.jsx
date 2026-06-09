@@ -14,6 +14,7 @@ import ShareCard from '../components/ShareCard';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import GemUnlockModal from '../components/GemUnlockModal';
 import IrisSignature from '../components/IrisSignature';
+import CortisolFact from '../components/CortisolFact';
 import StateRing from '../components/StateRing';
 import GradientScreen from '../components/GradientScreen';
 import FlameIcon from '../components/FlameIcon';
@@ -584,6 +585,7 @@ export default function TodayScreen({ navigation }) {
                 <Text style={s.emptyCtaText}>Start today</Text>
               </Pressable>
               <Text style={s.emptyHint}>Or tap "I'm stressed" if you just need a moment.</Text>
+              <CortisolFact style={s.emptyFactCard} />
             </View>
           )}
         </ScrollView>
@@ -1837,6 +1839,12 @@ function makeStyles(colors, fonts) {
   emptyHint: {
     fontFamily: fonts.displayItalic,
     fontSize: 13, color: colors.dim, alignSelf: 'center',
+  },
+  // Cortisol fact card in the empty/no-plan state — sits below the hint,
+  // gives the user a reason to come back and start today.
+  emptyFactCard: {
+    marginTop: 20,
+    alignSelf: 'stretch',
   },
 
   // Shared
