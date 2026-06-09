@@ -4,17 +4,13 @@
 //
 // 1. CHECK-IN REMINDERS (tag = livenew:checkin)
 //    Cortisol-aware "tap to check in" prompts that fire at the natural
-//    inflection points of the day. Scheduled as one-shot notifications
-//    for the next 7 days. Re-reconciled every time the user opens the
-//    app and every time a plan generates:
-//      - If the user HAS a plan for today → today's remaining slots are
-//        cancelled. They've already engaged today, no need to nag.
-//      - If the user does NOT have a plan for today → today's remaining
-//        slots are scheduled, so they get pulled back into the app at
-//        the next natural moment.
-//    Tomorrow + the next 6 days are always scheduled — they'll be
-//    re-reconciled when the user opens the app each morning. Worst case
-//    a stale one fires after a check-in; we accept that vs. silent days.
+//    inflection points of the day (morning / midday / afternoon / evening).
+//    Scheduled as RECURRING DAILY triggers — they fire every day at their set
+//    time with NO app-open required. (The prior model used one-shot dates
+//    re-built on each app open, which meant missing an app-open meant missing
+//    that day's notifications — users saw "one morning ping, then nothing.")
+//    The copy is time-of-day based, not plan-specific, so a daily repeat never
+//    goes stale. Always on while notifications are permitted.
 //
 // 2. ZONE NOTIFICATIONS (tag = livenew:zone)
 //    One-shot, today-only notifications scheduled when a plan generates.
@@ -71,7 +67,6 @@ const CHECKIN_SLOTS = [
   { id: 'evening',  hour: 18, minute: 30, body: "Evening begins. Tap to set tonight up." },
 ];
 
-const SCHEDULE_DAYS_AHEAD = 7;
 
 // Permission status — persisted so we can render the right CTA in settings
 // without having to call into the native layer on every render.
@@ -202,44 +197,41 @@ export async function scheduleSessionReminders(zones) {
   }
 }
 
-// Reconcile check-in reminders based on whether the user has a plan today.
-// Cancels all existing check-in reminders and re-schedules:
-//   - Today's remaining slots: ONLY if hasPlanToday is false
-//   - Each of the next 6 days: ALL slots (will be re-reconciled when the
-//     user opens the app on those days)
-// Caller passes `hasPlanToday: true` after a successful plan generation,
-// which suppresses any further nags for today.
-export async function scheduleCheckInReminders({ hasPlanToday = false } = {}) {
+// Schedule the day's check-in nudges as RECURRING DAILY notifications.
+//
+// Why daily-repeating (not one-shot dates): the previous model scheduled
+// one-shot `date` triggers a few days ahead and re-built them on every app
+// open. That meant the throughout-the-day cadence depended on the user opening
+// the app — miss a day's open and you'd miss that day's notifications, and
+// generating a plan suppressed the rest of the day entirely. Users got "one
+// morning ping, then nothing." A repeating DAILY trigger fires every day at
+// the set time with NO app-open required, so the cadence is reliable. The copy
+// is time-of-day based (not plan-specific), so a daily repeat never goes stale.
+//
+// This is idempotent: it cancels existing check-in reminders and re-creates
+// the four daily triggers. Safe to call on every app open / plan generation.
+// `opts` is accepted for backward-compat with existing callers but ignored —
+// the nudges are always on (the user explicitly wants throughout-the-day pings).
+export async function scheduleCheckInReminders(_opts = {}) {
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') return;
   const perm = await getNotificationPermission();
   if (perm !== 'granted') return;
 
   await cancelCheckInNotifications();
 
-  const now = new Date();
-
-  for (let dayOffset = 0; dayOffset < SCHEDULE_DAYS_AHEAD; dayOffset++) {
-    const isToday = dayOffset === 0;
-    if (isToday && hasPlanToday) continue;
-
-    for (const slot of CHECKIN_SLOTS) {
-      const fireAt = new Date(now);
-      fireAt.setDate(fireAt.getDate() + dayOffset);
-      fireAt.setHours(slot.hour, slot.minute, 0, 0);
-      if (fireAt.getTime() <= now.getTime()) continue;
-
-      try {
-        await Notifications.scheduleNotificationAsync({
-          content: {
-            title: 'Iris',
-            body: slot.body,
-            sound: 'default',
-            data: { tag: CHECKIN_TAG, slot: slot.id, dayOffset },
-          },
-          trigger: { type: 'date', date: fireAt },
-        });
-      } catch {}
-    }
+  for (const slot of CHECKIN_SLOTS) {
+    try {
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Iris',
+          body: slot.body,
+          sound: 'default',
+          data: { tag: CHECKIN_TAG, slot: slot.id },
+        },
+        // Repeating daily calendar trigger — fires every day at hour:minute.
+        trigger: { type: 'daily', hour: slot.hour, minute: slot.minute },
+      });
+    } catch {}
   }
 }
 
