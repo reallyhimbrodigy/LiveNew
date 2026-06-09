@@ -79,6 +79,7 @@ export default function BootLoader({ ready, onFinish }) {
 
   const breatheScale = useRef(new Animated.Value(1)).current;
   const breatheOpacity = useRef(new Animated.Value(1)).current;
+  const breatheAnim = useRef(null);
 
   // One Animated.Value per bar (0 = empty, 1 = filled)
   const barValues = useRef(
@@ -119,70 +120,89 @@ export default function BootLoader({ ready, onFinish }) {
     return () => cancelAnimationFrame(raf);
   }, []);
 
-  // ── Start animations on mount ─────────────────────────────────────────────
+  // ── Start bar animations + min-timer on mount (run once) ────────────────
+
+  const barsStarted = useRef(false);
 
   useEffect(() => {
-    // ── Breathing loop (skipped in reduce-motion mode) ──────────────────
-    if (!reduceMotion) {
-      Animated.loop(
-        Animated.sequence([
-          Animated.parallel([
-            Animated.timing(breatheScale, {
-              toValue: BREATHE_SCALE_MAX,
-              duration: BREATHE_DURATION_MS / 2,
-              easing: Easing.inOut(Easing.ease),
-              useNativeDriver: true,
-            }),
-            Animated.timing(breatheOpacity, {
-              toValue: BREATHE_OPACITY_MAX,
-              duration: BREATHE_DURATION_MS / 2,
-              easing: Easing.inOut(Easing.ease),
-              useNativeDriver: true,
-            }),
-          ]),
-          Animated.parallel([
-            Animated.timing(breatheScale, {
-              toValue: BREATHE_SCALE_MIN,
-              duration: BREATHE_DURATION_MS / 2,
-              easing: Easing.inOut(Easing.ease),
-              useNativeDriver: true,
-            }),
-            Animated.timing(breatheOpacity, {
-              toValue: BREATHE_OPACITY_MIN,
-              duration: BREATHE_DURATION_MS / 2,
-              easing: Easing.inOut(Easing.ease),
-              useNativeDriver: true,
-            }),
-          ]),
-        ])
-      ).start();
-    }
+    if (barsStarted.current) return;
+    barsStarted.current = true;
 
-    // ── Bar fill sequence ────────────────────────────────────────────────
-    const barAnimations = barValues.map((val, i) =>
-      Animated.timing(val, {
-        toValue: 1,
-        duration: BAR_FILL_DURATION_MS,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: false, // scaleX on width needs false
-        delay: i * BAR_FILL_DURATION_MS,
-      })
-    );
-
-    Animated.sequence(barAnimations).start(() => {
+    // ── Bar fill stagger ─────────────────────────────────────────────────
+    Animated.stagger(
+      BAR_FILL_DURATION_MS,
+      barValues.map((val) =>
+        Animated.timing(val, {
+          toValue: 1,
+          duration: BAR_FILL_DURATION_MS,
+          easing: Easing.out(Easing.quad),
+          useNativeDriver: false, // width animation needs false
+        })
+      )
+    ).start(() => {
       setBarsDone(true);
     });
 
     // ── Minimum display time ─────────────────────────────────────────────
     const minTimer = setTimeout(() => setMinTimeDone(true), MIN_SHOW_MS);
     return () => clearTimeout(minTimer);
-  }, [reduceMotion]); // re-run if reduceMotion changes on mount (rare edge case)
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps — intentionally mount-only
+
+  // ── Breathing loop — restarts only when reduceMotion changes ─────────────
+
+  useEffect(() => {
+    if (reduceMotion) {
+      breatheAnim.current?.stop();
+      return;
+    }
+
+    breatheAnim.current = Animated.loop(
+      Animated.sequence([
+        Animated.parallel([
+          Animated.timing(breatheScale, {
+            toValue: BREATHE_SCALE_MAX,
+            duration: BREATHE_DURATION_MS / 2,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(breatheOpacity, {
+            toValue: BREATHE_OPACITY_MAX,
+            duration: BREATHE_DURATION_MS / 2,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.parallel([
+          Animated.timing(breatheScale, {
+            toValue: BREATHE_SCALE_MIN,
+            duration: BREATHE_DURATION_MS / 2,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+          Animated.timing(breatheOpacity, {
+            toValue: BREATHE_OPACITY_MIN,
+            duration: BREATHE_DURATION_MS / 2,
+            easing: Easing.inOut(Easing.ease),
+            useNativeDriver: true,
+          }),
+        ]),
+      ])
+    );
+    breatheAnim.current.start();
+
+    return () => {
+      breatheAnim.current?.stop();
+    };
+  }, [reduceMotion]);
 
   // ── Outro: fires when ready + bars done + min time ───────────────────────
 
   const fireOutro = useCallback(() => {
     if (outroFired.current) return;
     outroFired.current = true;
+
+    // Stop the breathing loop before the outro sequence
+    breatheAnim.current?.stop();
 
     if (reduceMotion) {
       // No motion — just call finish directly
@@ -297,58 +317,55 @@ export default function BootLoader({ ready, onFinish }) {
           />
         </Animated.View>
 
-        {/* Loading bars */}
-        <View style={styles.barsRow}>
-          {barValues.map((val, i) => (
-            <View
-              key={i}
-              style={[
-                styles.barTrack,
-                {
-                  backgroundColor: colors.goldSoft,
-                  borderColor: colors.line,
-                  width: BAR_WIDTH,
-                  height: BAR_HEIGHT,
-                  borderRadius: BAR_BORDER_RADIUS,
-                  marginHorizontal: BAR_GAP / 2,
-                  overflow: 'hidden',
-                },
-              ]}
-            >
-              <Animated.View
+        {/* Loading bars + bling overlay — wrapped in a relative container */}
+        <View style={{ marginTop: 28 }}>
+          <View style={styles.barsRow}>
+            {barValues.map((val, i) => (
+              <View
+                key={i}
                 style={[
-                  styles.barFill,
+                  styles.barTrack,
                   {
-                    backgroundColor: colors.gold,
-                    borderRadius: BAR_BORDER_RADIUS,
+                    backgroundColor: colors.goldSoft,
+                    borderColor: colors.line,
+                    width: BAR_WIDTH,
                     height: BAR_HEIGHT,
-                    // Animate width from 0 to BAR_WIDTH
-                    width: val.interpolate({
-                      inputRange: [0, 1],
-                      outputRange: [0, BAR_WIDTH],
-                    }),
+                    borderRadius: BAR_BORDER_RADIUS,
+                    marginHorizontal: BAR_GAP / 2,
+                    overflow: 'hidden',
                   },
                 ]}
-              />
-            </View>
-          ))}
-        </View>
+              >
+                <Animated.View
+                  style={[
+                    styles.barFill,
+                    {
+                      backgroundColor: colors.gold,
+                      borderRadius: BAR_BORDER_RADIUS,
+                      height: BAR_HEIGHT,
+                      // Animate width from 0 to BAR_WIDTH
+                      width: val.interpolate({
+                        inputRange: [0, 1],
+                        outputRange: [0, BAR_WIDTH],
+                      }),
+                    },
+                  ]}
+                />
+              </View>
+            ))}
+          </View>
 
-        {/* Bling overlay — a quick gold flash behind/over bars */}
-        <Animated.View
-          style={[
-            styles.blingOverlay,
-            {
+          {/* Bling overlay — absolute over the bar row */}
+          <Animated.View
+            pointerEvents="none"
+            style={{
+              ...StyleSheet.absoluteFillObject,
               opacity: blingOpacity,
-              // Span the bar row width
-              width: BAR_COUNT * BAR_WIDTH + BAR_COUNT * BAR_GAP,
-              height: BAR_HEIGHT + 12,
               backgroundColor: colors.gold,
               borderRadius: BAR_BORDER_RADIUS + 2,
-            },
-          ]}
-          pointerEvents="none"
-        />
+            }}
+          />
+        </View>
       </View>
     </Animated.View>
   );
@@ -366,7 +383,6 @@ const styles = StyleSheet.create({
   },
   barsRow: {
     flexDirection: 'row',
-    marginTop: 28,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -377,12 +393,5 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     top: 0,
-  },
-  blingOverlay: {
-    position: 'absolute',
-    // Positioned to overlap the bar row: center + barRow marginTop
-    // Using top/left offsets is tricky without measure; instead we use
-    // marginTop to roughly align it (tunable).
-    marginTop: 28 + BAR_HEIGHT / 2 - 6,
   },
 });

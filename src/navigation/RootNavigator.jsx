@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -212,12 +212,13 @@ export default function RootNavigator() {
   // It hides the native splash itself, breathes while hydrate runs, then
   // zooms out on handoff. Once bootAnimDone flips, we never re-show it.
   const [bootAnimDone, setBootAnimDone] = useState(false);
+  const handleBootFinish = useCallback(() => setBootAnimDone(true), []);
 
   if (!bootAnimDone) {
     return (
       <BootLoader
         ready={!isLoading}
-        onFinish={() => setBootAnimDone(true)}
+        onFinish={handleBootFinish}
       />
     );
   }
