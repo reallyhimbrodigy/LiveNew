@@ -44,6 +44,15 @@ const readOnboardedMarker = async (userId) => {
   try { return (await AsyncStorage.getItem(key)) === '1'; } catch { return false; }
 };
 
+// Normalize schedule and derive a back-compat routine summary when a schedule
+// is present (keeps the hasProfile gate satisfied). Returns the profile
+// unchanged when no schedule is set. Used by both save paths.
+function prepareProfileForSave(profile) {
+  if (!profile.schedule) return profile;
+  const schedule = normalizeSchedule(profile.schedule);
+  return { ...profile, schedule, routine: profile.routine || deriveRoutineSummary(schedule) };
+}
+
 // 14-day free trial helpers — used by both the gate (generatePlan) and the
 // UI (Paywall trigger, trial countdown on Account, feature gating elsewhere).
 export const TRIAL_DAYS = 14;
@@ -596,12 +605,7 @@ export const useAuthStore = create((set, get) => ({
 
   // Save onboarding profile (sets hasProfile, triggers navigation to MainTabs)
   saveProfile: async (profile) => {
-    const prepared = profile.schedule
-      ? (() => {
-          const schedule = normalizeSchedule(profile.schedule);
-          return { ...profile, schedule, routine: profile.routine || deriveRoutineSummary(schedule) };
-        })()
-      : profile;
+    const prepared = prepareProfileForSave(profile);
     await api.onboardComplete(prepared);
     await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(prepared));
     await AsyncStorage.removeItem(PLAN_KEY);
@@ -614,16 +618,12 @@ export const useAuthStore = create((set, get) => ({
   saveProfileWithoutNav: async (profile) => {
     // Accept consent first (required before any other server calls work)
     await api.acceptConsent();
-    const prepared = profile.schedule
-      ? (() => {
-          const schedule = normalizeSchedule(profile.schedule);
-          return { ...profile, schedule, routine: profile.routine || deriveRoutineSummary(schedule) };
-        })()
-      : profile;
+    const prepared = prepareProfileForSave(profile);
     await api.onboardComplete(prepared);
     await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(prepared));
     await AsyncStorage.removeItem(PLAN_KEY);
     await writeOnboardedMarker(get().userId);
+    // hasProfile intentionally not set here; onboarding calls activateProfile() after the plan generates.
     set({ profile: prepared, todayPlan: null, todayDate: null, completed: {}, reflection: null });
   },
 
