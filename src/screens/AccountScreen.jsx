@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, ScrollView, Pressable, TextInput, Switch,
-  StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking, Share,
+  StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking, Share, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
@@ -13,6 +13,7 @@ import { Asset } from 'expo-asset';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import FlameIcon from '../components/FlameIcon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import ScheduleBuilder from './onboarding/ScheduleBuilder';
 import {
   getNotificationPermission, requestPermissions,
   getNotificationPrefs, setNotificationPrefs,
@@ -35,6 +36,7 @@ export default function AccountScreen({ navigation }) {
   const logout = useAuthStore(s => s.logout);
   const deleteAccount = useAuthStore(s => s.deleteAccount);
   const saveProfile = useAuthStore(s => s.saveProfile);
+  const userId = useAuthStore(s => s.userId);
   const streak = useAuthStore(s => s.streak);
   const healthPermission = useAuthStore(s => s.healthPermission);
   const connectHealth = useAuthStore(s => s.connectHealth);
@@ -43,6 +45,8 @@ export default function AccountScreen({ navigation }) {
   const [editValue, setEditValue] = useState('');
   const [saving, setSaving] = useState(false);
   const [sharing, setSharing] = useState(null);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [nudgeDismissed, setNudgeDismissed] = useState(true); // default hidden until we check
   const shareCardRef = useRef(null);
   const editInputRef = useRef(null);
   const todayPlan = useAuthStore(z => z.todayPlan);
@@ -70,6 +74,25 @@ export default function AccountScreen({ navigation }) {
       setNotifPrefs(prefs);
     })();
   }, []);
+
+  // One-time nudge: show only for users with no schedule who haven't dismissed it yet
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!userId) return;
+      if (profile?.schedule?.blocks?.length) { if (!cancelled) setNudgeDismissed(true); return; }
+      try {
+        const v = await AsyncStorage.getItem(`livenew:sched_nudge_dismissed:${userId}`);
+        if (!cancelled) setNudgeDismissed(v === '1');
+      } catch { if (!cancelled) setNudgeDismissed(false); }
+    })();
+    return () => { cancelled = true; };
+  }, [userId, profile?.schedule]);
+
+  const dismissNudge = async () => {
+    setNudgeDismissed(true);
+    try { await AsyncStorage.setItem(`livenew:sched_nudge_dismissed:${userId}`, '1'); } catch {}
+  };
 
   const handleEnableNotifications = async () => {
     tapSelect();
@@ -279,6 +302,24 @@ export default function AccountScreen({ navigation }) {
           <Text style={s.heading}>Account</Text>
         </View>
 
+        {/* One-time nudge for users with no schedule */}
+        {!nudgeDismissed && !(profile?.schedule?.blocks?.length) ? (
+          <View style={s.card}>
+            <View style={{ padding: 18 }}>
+              <Text style={s.settingTitle}>Make your plans fit your week</Text>
+              <Text style={[s.settingValue, { marginTop: 6 }]}>Tell Iris what your days actually look like — it takes under a minute.</Text>
+              <View style={{ flexDirection: 'row', gap: 16, marginTop: 12 }}>
+                <Pressable onPress={() => setScheduleOpen(true)}>
+                  <Text style={{ color: colors.gold, fontFamily: fonts.displaySemibold }}>Set up my week</Text>
+                </Pressable>
+                <Pressable onPress={dismissNudge}>
+                  <Text style={{ color: colors.muted, fontFamily: fonts.displaySemibold }}>Not now</Text>
+                </Pressable>
+              </View>
+            </View>
+          </View>
+        ) : null}
+
         {/* Subscription status */}
         <View style={s.card}>
           <Pressable
@@ -347,6 +388,18 @@ export default function AccountScreen({ navigation }) {
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>My routine</Text>
               <Text style={s.settingValue} numberOfLines={2}>{profile?.routine || 'Not set'}</Text>
+            </View>
+            <Text style={s.settingArrow}>›</Text>
+          </Pressable>
+
+          <View style={s.settingDivider} />
+
+          <Pressable style={s.settingRow} onPress={() => setScheduleOpen(true)}>
+            <View style={s.settingContent}>
+              <Text style={s.settingTitle}>Schedule</Text>
+              <Text style={s.settingValue}>
+                {profile?.schedule?.blocks?.length ? `${profile.schedule.blocks.length} blocks set` : 'Set up your week'}
+              </Text>
             </View>
             <Text style={s.settingArrow}>›</Text>
           </Pressable>
@@ -524,6 +577,20 @@ export default function AccountScreen({ navigation }) {
           <StreakShareCard innerRef={shareCardRef} days={sharing.payload.days} />
         </View>
       ) : null}
+
+      <Modal visible={scheduleOpen} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setScheduleOpen(false)}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
+          <Pressable onPress={() => setScheduleOpen(false)} hitSlop={8} style={{ alignSelf: 'flex-end', padding: 16 }}>
+            <Text style={{ color: colors.muted, fontFamily: fonts.displaySemibold, fontSize: 16 }}>Close</Text>
+          </Pressable>
+          <ScheduleBuilder
+            onComplete={async (schedule) => {
+              setScheduleOpen(false);
+              try { await saveProfile({ ...(profile || {}), schedule }); } catch (e) { console.warn('[account] saveProfile schedule failed', e?.message); }
+            }}
+          />
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
