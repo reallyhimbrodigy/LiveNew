@@ -89,6 +89,31 @@ export function gemProgress(currentStreak, maxStreak) {
 }
 
 /**
+ * Returns the live rarity percentage for a gem from server stats, falling
+ * back to the gem's designed rarityPct when live data is unavailable.
+ *
+ * @param {object} gem        - A GEMS entry ({ day, rarityPct, ... })
+ * @param {object|null} liveStats - { [day]: pct } from /v1/halo-stats, or null
+ * @returns {number}
+ */
+export function rarityPctFor(gem, liveStats) {
+  const v = liveStats && liveStats[gem.day];
+  return (typeof v === 'number' && isFinite(v)) ? v : gem.rarityPct;
+}
+
+/**
+ * Formats a rarity percentage for display.
+ * Values < 1 get one decimal place (e.g. 0.8 → "0.8").
+ * Values >= 1 are rounded to the nearest integer (e.g. 33.4 → "33").
+ *
+ * @param {number} pct
+ * @returns {string}
+ */
+export function formatRarity(pct) {
+  return pct < 1 ? pct.toFixed(1) : String(Math.round(pct));
+}
+
+/**
  * Display color for a tier.
  */
 export function tierColor(tier) {

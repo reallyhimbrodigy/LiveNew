@@ -173,6 +173,9 @@ export const api = {
   // Progress
   progress: () => request('GET', '/v1/progress'),
 
+  // Halo rarity stats — live cross-user aggregate (% of members at each streak threshold)
+  haloStats: () => request('GET', '/v1/halo-stats'),
+
   // Consent
   acceptConsent: () => request('POST', '/v1/consents/accept', {
     consent: { terms: true, privacy: true, alpha_processing: true },

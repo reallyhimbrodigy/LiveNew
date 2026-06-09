@@ -45,6 +45,108 @@ async function getCachedOrGenerateInsight({ userId, dateKey, checkIns, doneCount
   }
   return insight;
 }
+// ── Halo-stats aggregate cache ─────────────────────────────────────────────
+// Recomputed at most once every 60 minutes to avoid a full table scan on every
+// request. Cleared on server restart (acceptable — just re-aggregates).
+const HALO_STATS_TTL_MS = 60 * 60 * 1000; // 60 minutes
+let haloStatsCache = { stats: null, computedAt: 0 };
+
+/**
+ * Computes, for each GEMS threshold day, the % of all users whose longest
+ * consecutive-day check-in streak meets or exceeds that threshold.
+ *
+ * Uses the service-role (admin) Supabase client so it can read across all
+ * users regardless of RLS policies.
+ *
+ * @returns {Promise<Object>} { [day]: pct }  — e.g. { 1: 76.0, 7: 33.4, ... }
+ */
+async function computeHaloStats() {
+  // Fetch every (user_id, date_key) row from the checkin table via the
+  // service-role client (bypasses RLS; returns all users' data).
+  const { data, error } = await supabaseAdmin()
+    .from("checkin")
+    .select("user_id, date_key");
+
+  if (error) throw new Error(`halo-stats checkin query failed: ${error.message}`);
+  if (!Array.isArray(data) || data.length === 0) return {};
+
+  // Group date_keys by user_id.
+  const byUser = new Map();
+  for (const row of data) {
+    const uid = row.user_id;
+    if (!uid) continue;
+    if (!byUser.has(uid)) byUser.set(uid, []);
+    byUser.get(uid).push(row.date_key); // 'YYYY-MM-DD'
+  }
+
+  const totalUsers = byUser.size;
+  if (totalUsers === 0) return {};
+
+  // For each user, compute their longest consecutive-day streak.
+  // We parse dates as UTC day-numbers (ms-since-epoch / 86400000) and count
+  // runs where consecutive sorted dates differ by exactly 1 day.
+  const MS_PER_DAY = 86400000;
+  const thresholds = GEMS.map((g) => g.day);
+  const reachedCounts = {}; // { [threshold]: count }
+  for (const t of thresholds) reachedCounts[t] = 0;
+
+  for (const [, dateKeys] of byUser) {
+    // Parse 'YYYY-MM-DD' as UTC day numbers and deduplicate.
+    const dayNums = [...new Set(
+      dateKeys.map((dk) => {
+        const [y, mo, d] = dk.split("-").map(Number);
+        return Date.UTC(y, mo - 1, d) / MS_PER_DAY;
+      }).filter((n) => Number.isFinite(n))
+    )].sort((a, b) => a - b);
+
+    if (dayNums.length === 0) continue;
+
+    let longestStreak = 1;
+    let currentStreak = 1;
+    for (let i = 1; i < dayNums.length; i++) {
+      if (dayNums[i] - dayNums[i - 1] === 1) {
+        currentStreak += 1;
+        if (currentStreak > longestStreak) longestStreak = currentStreak;
+      } else {
+        currentStreak = 1;
+      }
+    }
+
+    for (const t of thresholds) {
+      if (longestStreak >= t) reachedCounts[t] += 1;
+    }
+  }
+
+  // Convert counts to percentages (one decimal of precision).
+  const stats = {};
+  for (const t of thresholds) {
+    const raw = (reachedCounts[t] / totalUsers) * 100;
+    // Round to one decimal; the client formats from there.
+    stats[t] = Math.round(raw * 10) / 10;
+  }
+  return stats;
+}
+
+/**
+ * Returns cached halo stats (recomputes if stale / missing).
+ * Never throws — returns {} on any error so the UI falls back to designed values.
+ */
+async function getHaloStats() {
+  const now = Date.now();
+  if (haloStatsCache.stats !== null && now - haloStatsCache.computedAt < HALO_STATS_TTL_MS) {
+    return haloStatsCache.stats;
+  }
+  try {
+    const stats = await computeHaloStats();
+    haloStatsCache = { stats, computedAt: now };
+    return stats;
+  } catch (err) {
+    logWarn("[halo-stats] aggregate failed, returning empty:", err?.message);
+    return {};
+  }
+}
+// ─────────────────────────────────────────────────────────────────────────────
+
 import { buildWeekSkeleton } from "../domain/weekPlanner.js";
 import { computeContinuityMeta } from "../domain/continuity.js";
 import { applyQuickSignal } from "../domain/swap.js";
@@ -58,6 +160,7 @@ import { unwrapTodayEnvelope } from "../contracts/protocol.js";
 import { createMonitoringCounters } from "./monitoring/counters.js";
 import { supabaseForUser } from "./supabase/client.js";
 import { getUserFromRequest } from "./auth/getUserFromRequest.js";
+import { GEMS } from "../domain/gems.js";
 import { createPersist } from "./persist/index.js";
 import { getDateKey as getDateKeyWithMinute } from "./time/dateKey.js";
 import {
@@ -3583,6 +3686,19 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       sendJson(res, 200, { ok: true, todayCount: count || 0 }, auth.userId);
     } catch {
       sendJson(res, 200, { ok: true, todayCount: 0 }, auth.userId);
+    }
+    return true;
+  }
+
+  if (pathname === "/v1/halo-stats" && req.method === "GET") {
+    // Return live cross-user rarity percentages for each GEMS threshold.
+    // Cached for 60 minutes (see getHaloStats). On any error, returns an
+    // empty stats object so the client falls back to designed rarityPct values.
+    try {
+      const stats = await getHaloStats();
+      sendJson(res, 200, { ok: true, stats }, auth.userId);
+    } catch {
+      sendJson(res, 200, { ok: true, stats: {} }, auth.userId);
     }
     return true;
   }

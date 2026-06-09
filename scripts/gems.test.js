@@ -8,6 +8,8 @@ import {
   gemById,
   gemProgress,
   tierColor,
+  rarityPctFor,
+  formatRarity,
 } from "../src/domain/gems.js";
 
 // ── GEMS array shape ──────────────────────────────────────────────────────────
@@ -135,5 +137,35 @@ for (const tier of knownTiers) {
   );
 }
 assert.strictEqual(tierColor("Unknown"), "#c4a86c", "unknown tier should return fallback color");
+
+// ── rarityPctFor ──────────────────────────────────────────────────────────────
+
+assert.strictEqual(
+  rarityPctFor({ day: 7, rarityPct: 33 }, { 7: 25 }),
+  25,
+  "rarityPctFor should return live stat when present"
+);
+assert.strictEqual(
+  rarityPctFor({ day: 7, rarityPct: 33 }, null),
+  33,
+  "rarityPctFor should fall back to gem.rarityPct when liveStats is null"
+);
+assert.strictEqual(
+  rarityPctFor({ day: 7, rarityPct: 33 }, {}),
+  33,
+  "rarityPctFor should fall back to gem.rarityPct when day key is missing"
+);
+assert.strictEqual(
+  rarityPctFor({ day: 7, rarityPct: 33 }, { 7: NaN }),
+  33,
+  "rarityPctFor should fall back when live value is NaN"
+);
+
+// ── formatRarity ──────────────────────────────────────────────────────────────
+
+assert.strictEqual(formatRarity(0.8), "0.8", "formatRarity(0.8) should be '0.8'");
+assert.strictEqual(formatRarity(33), "33", "formatRarity(33) should be '33'");
+assert.strictEqual(formatRarity(0.15), "0.1", "formatRarity(0.15) should be '0.1' (toFixed(1) rounds down due to float repr)");
+assert.strictEqual(formatRarity(76), "76", "formatRarity(76) should be '76'");
 
 console.log("gems OK");

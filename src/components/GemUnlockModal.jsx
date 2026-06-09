@@ -3,7 +3,8 @@ import {
   Modal, View, Text, Pressable, Animated, StyleSheet, Share,
 } from 'react-native';
 import { useTheme } from '../theme';
-import { gemById, tierColor } from '../domain/gems';
+import { gemById, tierColor, rarityPctFor, formatRarity } from '../domain/gems';
+import { useAuthStore } from '../store/authStore';
 import Halo from './Halo';
 
 /**
@@ -16,6 +17,7 @@ import Halo from './Halo';
 export default function GemUnlockModal({ gemId, onClose }) {
   const { colors, fonts } = useTheme();
   const s = makeStyles(colors, fonts);
+  const haloStats = useAuthStore(s => s.haloStats);
 
   const scale = useRef(new Animated.Value(0.6)).current;
   const opacity = useRef(new Animated.Value(0)).current;
@@ -63,7 +65,7 @@ export default function GemUnlockModal({ gemId, onClose }) {
     if (!gem) return;
     try {
       await Share.share({
-        message: `I just earned the "${gem.name}" halo on LiveNew — held by only ~${gem.rarityPct}% of members.`,
+        message: `I just earned the "${gem.name}" halo on LiveNew — held by only ~${formatRarity(rarityPctFor(gem, haloStats))}% of members.`,
       });
     } catch {}
     onClose();
@@ -115,7 +117,7 @@ export default function GemUnlockModal({ gemId, onClose }) {
 
           {/* Rarity */}
           <Text style={s.rarity}>
-            {gem ? `Held by ~${gem.rarityPct}% of members` : ''}
+            {gem ? `Held by ~${formatRarity(rarityPctFor(gem, haloStats))}% of members` : ''}
           </Text>
 
           {/* Flavor */}

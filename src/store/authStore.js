@@ -104,6 +104,7 @@ export const useAuthStore = create((set, get) => ({
   maxStreak: 0,        // highest streak ever reached — gates permanent gems
   gemEarnedAt: {},     // { [gemId]: 'YYYY-MM-DD' } first-earned dates
   pendingGemUnlock: null, // gemId just crossed this session (for the celebration), else null
+  haloStats: null,     // { [day]: pct } live cross-user rarity from /v1/halo-stats, or null
 
   // Hydrate from storage
   hydrate: async () => {
@@ -214,6 +215,10 @@ export const useAuthStore = create((set, get) => ({
         });
         get().loadStreak();
         get().loadGems();
+        // Fire-and-forget: fetch live cross-user halo rarity stats.
+        // Client falls back to designed rarityPct values if this fails or hasn't
+        // resolved yet — never blocks hydrate.
+        get().fetchHaloStats().catch(() => {});
         // Initialize trial start if missing — first hydrate after signup
         // sets it to today, giving the user a fresh 14-day window.
         get().ensureTrialStart().catch(() => {});
@@ -892,6 +897,15 @@ export const useAuthStore = create((set, get) => ({
         try { await AsyncStorage.setItem(gemsKey(userId), JSON.stringify({ maxStreak, gemEarnedAt })); } catch {}
       }
       set({ maxStreak, gemEarnedAt });
+    } catch {}
+  },
+
+  fetchHaloStats: async () => {
+    try {
+      const r = await api.haloStats();
+      if (r && r.stats && typeof r.stats === 'object') {
+        set({ haloStats: r.stats });
+      }
     } catch {}
   },
 

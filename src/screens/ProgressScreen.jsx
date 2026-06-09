@@ -15,6 +15,8 @@ import {
   nextGem,
   gemProgress,
   tierColor,
+  rarityPctFor,
+  formatRarity,
 } from '../domain/gems';
 
 const PROGRESS_CACHE_KEY = 'livenew:progress_cache_v1';
@@ -43,6 +45,7 @@ export default function ProgressScreen() {
   const streak = useAuthStore(s => s.streak);
   const maxStreak = useAuthStore(s => s.maxStreak);
   const gemEarnedAt = useAuthStore(s => s.gemEarnedAt);
+  const haloStats = useAuthStore(s => s.haloStats);
 
   // Stale-while-revalidate: render last-cached payload instantly, refresh in background.
   // Eliminates the multi-second spinner on every Progress tab open.
@@ -320,7 +323,7 @@ export default function ProgressScreen() {
 
                 {/* Rarity */}
                 <Text style={s.gemModalRarity}>
-                  Held by ~{selectedGem.rarityPct}% of members
+                  Held by ~{formatRarity(rarityPctFor(selectedGem, haloStats))}% of members
                 </Text>
 
                 {/* Earned / locked status */}
