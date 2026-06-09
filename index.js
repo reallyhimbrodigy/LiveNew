@@ -1,6 +1,10 @@
 import { registerRootComponent } from 'expo';
-
+import * as SplashScreen from 'expo-splash-screen';
 import App from './App';
+
+// Keep the native splash up until BootLoader explicitly hides it.
+// Must run at module scope so it fires before any frame is rendered.
+SplashScreen.preventAutoHideAsync().catch(() => {});
 
 // registerRootComponent calls AppRegistry.registerComponent('main', () => App);
 // It also ensures that whether you load the app in Expo Go or in a native build,

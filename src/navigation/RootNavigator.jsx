@@ -1,8 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts, Lora_400Regular_Italic, Lora_500Medium, Lora_700Bold } from '@expo-google-fonts/lora';
 import {
@@ -14,6 +14,7 @@ import {
 import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../theme';
 import AppBackground from '../components/AppBackground';
+import BootLoader from '../components/BootLoader';
 import { initPurchases } from '../purchases';
 import { GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../socialAuthConfig';
 
@@ -207,13 +208,17 @@ export default function RootNavigator() {
     })();
   }, []);
 
-  // Don't gate render on fontsLoaded — system fallback shows for first frame,
-  // Manrope/Lora swap in when ready. Saves 0.5–2s on cold boot.
-  if (isLoading) {
+  // BootLoader gate: shown until the boot animation completes.
+  // It hides the native splash itself, breathes while hydrate runs, then
+  // zooms out on handoff. Once bootAnimDone flips, we never re-show it.
+  const [bootAnimDone, setBootAnimDone] = useState(false);
+
+  if (!bootAnimDone) {
     return (
-      <View style={[styles.loading, { backgroundColor: colors.bg }]}>
-        <ActivityIndicator size="large" color={colors.gold} />
-      </View>
+      <BootLoader
+        ready={!isLoading}
+        onFinish={() => setBootAnimDone(true)}
+      />
     );
   }
 
@@ -257,9 +262,5 @@ export default function RootNavigator() {
 }
 
 const styles = StyleSheet.create({
-  loading: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
+  // (reserved for future additions)
 });
