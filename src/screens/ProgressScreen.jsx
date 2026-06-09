@@ -1,84 +1,34 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
-import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../theme';
 import IrisSignature from '../components/IrisSignature';
+import Gem from '../components/Gem';
 import { api } from '../api';
 import { useAuthStore } from '../store/authStore';
+import {
+  GEMS,
+  earnedGems,
+  isEarned,
+  nextGem,
+  gemProgress,
+  tierColor,
+} from '../domain/gems';
 
 const PROGRESS_CACHE_KEY = 'livenew:progress_cache_v1';
 
-// Universal milestone tiers — same for everyone, because the cortisol-
-// regulation lever is universal (see product_no_user_goal memory). Each tier
-// promises a real product behavior that unlocks at the threshold, not a
-// fake badge. Foundation -> Calibration -> Pattern -> Rhythm -> Maintenance.
-//
-// MILESTONE_PEEKS = a sequenced look at what's coming next. Renders below
-// the current-milestone card during the Foundation phase so day-1 users have
-// something to anticipate, not just an empty page.
-const MILESTONE_PEEKS = [
-  { phase: 'Calibration',  at: 'Day 7',  promise: "A full week of trend data. Iris starts naming the patterns specific to you." },
-  { phase: 'Pattern',      at: 'Day 14', promise: "Your behavior profile fully calibrates. Recommendations sharpen visibly." },
-  { phase: 'Rhythm',       at: 'Day 30', promise: "Weekly outcome deltas appear. You see what actually changed in numbers." },
-  { phase: 'Maintenance',  at: 'Day 31+', promise: "Sustained regulation. Compounding starts here." },
-];
-
-function getMilestone(daysActive, weeklyDays) {
-  const d = Math.max(0, daysActive | 0);
-  if (d < 3) {
-    return {
-      phase: 'Foundation',
-      current: d,
-      target: 3,
-      narrative: d === 0
-        ? "Day one. The count starts when you check in."
-        : d === 1
-        ? "One down. Two more and the baseline locks."
-        : "Two days in. One more to lock the foundation.",
-      payoff: "Three check-ins teach Iris your baseline.",
-    };
+// Format a 'YYYY-MM-DD' string to e.g. "Jun 9, 2026"
+function formatGemDate(iso) {
+  if (!iso) return null;
+  try {
+    const [y, m, d] = iso.split('-').map(Number);
+    const date = new Date(y, m - 1, d);
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  } catch {
+    return null;
   }
-  if (d < 7) {
-    return {
-      phase: 'Calibration',
-      current: d,
-      target: 7,
-      narrative: `Day ${d} of 7. The trend is starting to show.`,
-      payoff: "Day 7: a full week of trend data — Iris starts naming patterns specific to you.",
-    };
-  }
-  if (d < 14) {
-    return {
-      phase: 'Pattern phase',
-      current: d,
-      target: 14,
-      narrative: `Day ${d} of 14. Patterns are emerging.`,
-      payoff: "Day 14: behavior profile fully calibrated. Recommendations sharpen.",
-    };
-  }
-  if (d < 30) {
-    return {
-      phase: 'Rhythm phase',
-      current: d,
-      target: 30,
-      narrative: `Day ${d} of 30. The rhythm is taking hold.`,
-      payoff: "Day 30: weekly outcome deltas become visible. You'll see what actually changed.",
-    };
-  }
-  // Maintenance — ongoing. Progress shown as this-week's days active.
-  const w = Math.max(0, Math.min(7, weeklyDays | 0));
-  return {
-    phase: 'Maintenance',
-    current: w,
-    target: 7,
-    isWeekly: true,
-    narrative: `${d} days in. Week-by-week from here.`,
-    payoff: w >= 5
-      ? "You're hitting the weekly target. Compounding."
-      : "Hit 5 of 7 days this week to keep the curve regulated. That's the compounding window.",
-  };
 }
 
 export default function ProgressScreen() {
@@ -89,7 +39,10 @@ export default function ProgressScreen() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [errorDetail, setErrorDetail] = useState('');
+  const [selectedGem, setSelectedGem] = useState(null);
   const streak = useAuthStore(s => s.streak);
+  const maxStreak = useAuthStore(s => s.maxStreak);
+  const gemEarnedAt = useAuthStore(s => s.gemEarnedAt);
   const profile = useAuthStore(s => s.profile);
 
   // Stale-while-revalidate: render last-cached payload instantly, refresh in background.
@@ -211,18 +164,10 @@ export default function ProgressScreen() {
   const dayInitials = ['Su', 'M', 'Tu', 'W', 'Th', 'F', 'Sa'];
   const daysActive = consistency.checkinDays || 0;
 
-  // Milestone — always computed, always rendered. Falls back to streak from
-  // the auth store when /v1/progress fails, so day-1 users with a transient
-  // network error still see forward motion instead of "could not load."
-  const milestoneDays = daysActive > 0 ? daysActive : (streak || 0);
-  // Weekly days active (for the Maintenance phase progress) — derived from
-  // the trend dates, last 7 unique dates.
-  const weeklyDays = (() => {
-    if (trend.length === 0) return 0;
-    const last7 = trend.slice(-7).map((t) => t.date).filter(Boolean);
-    return new Set(last7).size;
-  })();
-  const milestone = getMilestone(milestoneDays, weeklyDays);
+  // Gems — derived from maxStreak (historical best)
+  const earnedCount = earnedGems(maxStreak).length;
+  const gemNext = nextGem(maxStreak);
+  const { daysToGo, fraction } = gemProgress(streak, maxStreak);
 
   // Week-over-week outcomes — REAL deltas the user can screenshot.
   // Without this, the user has to trust on faith that the app is working.
@@ -303,55 +248,108 @@ export default function ProgressScreen() {
           <IrisSignature />
         </View>
 
-        {/* Milestone — always rendered, even on error / day 1. This IS the
-            forward-motion anchor of Progress. Every user is in some tier of
-            the universal cortisol-regulation curve, and each tier's payoff is
-            a real product behavior that unlocks. */}
-        {milestone.phase === 'Foundation' && (
-          <Text style={s.heroLead}>
-            Each tier here unlocks something real — pattern recognition, behavior calibration, weekly outcome deltas. Not badges. The app gets sharper the longer you show up.
-          </Text>
-        )}
-        <View style={s.milestoneCard}>
-          <Text style={s.milestoneLabel}>{milestone.phase.toUpperCase()}</Text>
-          <View style={s.milestoneRow}>
-            <Text style={s.milestoneCurrent}>
-              {milestone.isWeekly ? `${milestone.current}` : `Day ${milestone.current}`}
-            </Text>
-            <Text style={s.milestoneTarget}>
-              {milestone.isWeekly ? ` / ${milestone.target} this week` : ` / ${milestone.target}`}
-            </Text>
+        {/* Your Gems — streak collection, replaces milestone/unlock cards */}
+        <View style={s.gemsCard}>
+          {/* Header row */}
+          <View style={s.gemsHeaderRow}>
+            <Text style={s.gemsTitle}>Your gems</Text>
+            <Text style={s.gemsCount}>{earnedCount}/{GEMS.length}</Text>
           </View>
-          <View style={s.milestoneTrack}>
-            <View
-              style={[
-                s.milestoneFill,
-                { width: `${Math.min(100, (milestone.current / milestone.target) * 100)}%` },
-              ]}
-            />
+
+          {/* Next-gem progress */}
+          {gemNext !== null ? (
+            <View style={s.gemsNextWrap}>
+              <Text style={s.gemsNextLabel}>
+                Next: {gemNext.name} · {daysToGo} {daysToGo === 1 ? 'day' : 'days'} to go
+              </Text>
+              <View style={s.gemsTrack}>
+                <View style={[s.gemsFill, { width: `${Math.round(fraction * 100)}%` }]} />
+              </View>
+            </View>
+          ) : (
+            <Text style={s.gemsAllDone}>All gems collected.</Text>
+          )}
+
+          {/* Gem grid */}
+          <View style={s.gemsGrid}>
+            {GEMS.map((g) => {
+              const earned = isEarned(g.id, maxStreak);
+              return (
+                <View key={g.id} style={s.gemCell}>
+                  <Gem
+                    gem={g}
+                    earned={earned}
+                    size={56}
+                    onPress={() => setSelectedGem(g)}
+                  />
+                  <Text style={[s.gemCellName, !earned && { color: colors.dim }]}>
+                    {g.name}
+                  </Text>
+                </View>
+              );
+            })}
           </View>
-          <Text style={s.milestoneNarrative}>{milestone.narrative}</Text>
-          <Text style={s.milestonePayoff}>{milestone.payoff}</Text>
         </View>
 
-        {/* Milestone peek — the road ahead. Only during Foundation, to give
-            day-1 users something to anticipate instead of an empty page. */}
-        {milestone.phase === 'Foundation' && (
-          <View style={s.peekCard}>
-            <Text style={s.peekLabel}>WHAT UNLOCKS NEXT</Text>
-            {MILESTONE_PEEKS.map((p, i) => (
-              <View
-                key={p.phase}
-                style={[s.peekRow, i < MILESTONE_PEEKS.length - 1 && s.peekRowDivider]}
-              >
-                <View style={s.peekRowHead}>
-                  <Text style={s.peekPhase}>{p.phase}</Text>
-                  <Text style={s.peekAt}>{p.at}</Text>
+        {/* Gem detail modal */}
+        {selectedGem !== null && (
+          <Modal
+            visible={selectedGem !== null}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setSelectedGem(null)}
+          >
+            <Pressable
+              style={s.gemModalOverlay}
+              onPress={() => setSelectedGem(null)}
+            >
+              <Pressable style={s.gemModalCard} onPress={() => {}}>
+                {/* Large gem */}
+                <View style={s.gemModalGemWrap}>
+                  <Gem
+                    gem={selectedGem}
+                    earned={isEarned(selectedGem.id, maxStreak)}
+                    size={120}
+                  />
                 </View>
-                <Text style={s.peekPromise}>{p.promise}</Text>
-              </View>
-            ))}
-          </View>
+
+                {/* Name + tier */}
+                <Text style={s.gemModalName}>{selectedGem.name}</Text>
+                <Text style={[s.gemModalTier, { color: tierColor(selectedGem.tier) }]}>
+                  {selectedGem.tier}
+                </Text>
+
+                {/* Rarity */}
+                <Text style={s.gemModalRarity}>
+                  Reached by ~{selectedGem.rarityPct}% of members
+                </Text>
+
+                {/* Earned / locked status */}
+                {isEarned(selectedGem.id, maxStreak) ? (
+                  gemEarnedAt && gemEarnedAt[selectedGem.id] ? (
+                    <Text style={s.gemModalStatus}>
+                      Earned {formatGemDate(gemEarnedAt[selectedGem.id])}
+                    </Text>
+                  ) : null
+                ) : (
+                  <Text style={s.gemModalStatus}>
+                    Reach a {selectedGem.day}-day streak to unlock.
+                  </Text>
+                )}
+
+                {/* Flavor */}
+                <Text style={s.gemModalFlavor}>{selectedGem.flavor}</Text>
+
+                {/* Close */}
+                <Pressable
+                  style={({ pressed }) => [s.gemModalClose, pressed && { opacity: 0.85 }]}
+                  onPress={() => setSelectedGem(null)}
+                >
+                  <Text style={s.gemModalCloseText}>Close</Text>
+                </Pressable>
+              </Pressable>
+            </Pressable>
+          </Modal>
         )}
 
         {/* Stale-cache warning when refresh failed but we're rendering
@@ -564,10 +562,8 @@ export default function ProgressScreen() {
           </View>
         )}
 
-        {/* Day-1 / pre-trend state. The milestone above is now the hero,
-            so this is a small contextual nudge — not the alarming "could
-            not load" that day-1 users hit before. Refresh failure shows a
-            quiet link, not a takeover. */}
+        {/* Day-1 / pre-trend state. Gems section above anchors day one;
+            this is a small contextual nudge for the chart area. */}
         {trend.length === 0 && !error && (
           <View style={s.emptyCard}>
             <Text style={s.emptySub}>
@@ -578,7 +574,7 @@ export default function ProgressScreen() {
         {trend.length === 0 && error && (
           <View style={s.emptyCard}>
             <Text style={s.emptySub}>
-              Iris is offline for a moment. Your milestone above is still current — try again in a few seconds.
+              Iris is offline for a moment. Keep showing up — your gems are tracked locally.
             </Text>
             {/* Show the actual failure reason so we can diagnose instead of
                 guessing. Muted, small, screenshot-able. */}
@@ -640,8 +636,8 @@ function makeStyles(colors, fonts) {
       letterSpacing: 0.2,
     },
 
-    // Milestone card — the forward-motion anchor at the top of Progress.
-    milestoneCard: {
+    // Your Gems card
+    gemsCard: {
       backgroundColor: colors.goldSoft,
       borderWidth: 1,
       borderColor: colors.goldBorder,
@@ -649,114 +645,141 @@ function makeStyles(colors, fonts) {
       padding: 18,
       marginBottom: 16,
     },
-    milestoneLabel: {
-      fontFamily: fonts.displaySemibold,
-      fontSize: 11,
-      color: colors.gold,
-      letterSpacing: 1.6,
-      marginBottom: 8,
-    },
-    milestoneRow: {
-      flexDirection: 'row',
-      alignItems: 'baseline',
-      marginBottom: 12,
-    },
-    milestoneCurrent: {
-      fontFamily: fonts.displayBold,
-      fontSize: 34,
-      color: colors.text,
-      letterSpacing: -0.4,
-    },
-    milestoneTarget: {
-      fontFamily: fonts.body,
-      fontSize: 15,
-      color: colors.muted,
-      marginLeft: 2,
-    },
-    milestoneTrack: {
-      height: 4,
-      backgroundColor: colors.line,
-      borderRadius: 2,
-      overflow: 'hidden',
-      marginBottom: 12,
-    },
-    milestoneFill: {
-      height: 4,
-      backgroundColor: colors.gold,
-      borderRadius: 2,
-    },
-    milestoneNarrative: {
-      fontFamily: fonts.italic,
-      fontSize: 14,
-      color: colors.text,
-      lineHeight: 20,
-      letterSpacing: 0.1,
-      marginBottom: 6,
-    },
-    milestonePayoff: {
-      fontFamily: fonts.body,
-      fontSize: 13,
-      color: colors.muted,
-      lineHeight: 19,
-    },
-
-    // Hero lead — single italic line introducing the milestone concept on
-    // day 1 so the user knows the tiers aren't gamification fluff.
-    heroLead: {
-      fontFamily: fonts.italic,
-      fontSize: 14,
-      color: colors.muted,
-      lineHeight: 21,
-      marginBottom: 16,
-      paddingHorizontal: 2,
-    },
-
-    // What unlocks next — peek into upcoming tiers, only during Foundation
-    peekCard: {
-      backgroundColor: colors.surface,
-      borderRadius: 16,
-      paddingVertical: 4,
-      paddingHorizontal: 18,
-      marginBottom: 16,
-    },
-    peekLabel: {
-      fontFamily: fonts.displaySemibold,
-      fontSize: 11,
-      color: colors.muted,
-      letterSpacing: 1.6,
-      paddingTop: 16,
-      paddingBottom: 10,
-    },
-    peekRow: {
-      paddingVertical: 12,
-    },
-    peekRowDivider: {
-      borderBottomWidth: 1,
-      borderBottomColor: colors.line,
-    },
-    peekRowHead: {
+    gemsHeaderRow: {
       flexDirection: 'row',
       alignItems: 'baseline',
       justifyContent: 'space-between',
-      marginBottom: 4,
+      marginBottom: 12,
     },
-    peekPhase: {
+    gemsTitle: {
       fontFamily: fonts.displaySemibold,
-      fontSize: 15,
+      fontSize: 16,
       color: colors.text,
       letterSpacing: 0.1,
     },
-    peekAt: {
-      fontFamily: fonts.italic,
-      fontSize: 12,
-      color: colors.gold,
-      letterSpacing: 0.4,
-    },
-    peekPromise: {
+    gemsCount: {
       fontFamily: fonts.body,
       fontSize: 13,
       color: colors.muted,
-      lineHeight: 19,
+    },
+    gemsNextWrap: {
+      marginBottom: 18,
+    },
+    gemsNextLabel: {
+      fontFamily: fonts.display,
+      fontSize: 13,
+      color: colors.muted,
+      marginBottom: 8,
+      letterSpacing: 0.1,
+    },
+    gemsTrack: {
+      height: 3,
+      backgroundColor: colors.line,
+      borderRadius: 2,
+      overflow: 'hidden',
+    },
+    gemsFill: {
+      height: 3,
+      backgroundColor: colors.gold,
+      borderRadius: 2,
+    },
+    gemsAllDone: {
+      fontFamily: fonts.italic,
+      fontSize: 14,
+      color: colors.gold,
+      marginBottom: 18,
+      letterSpacing: 0.1,
+    },
+    gemsGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      marginHorizontal: -6,
+    },
+    gemCell: {
+      width: '25%',
+      alignItems: 'center',
+      paddingHorizontal: 4,
+      paddingVertical: 8,
+    },
+    gemCellName: {
+      fontFamily: fonts.body,
+      fontSize: 9,
+      color: colors.text,
+      textAlign: 'center',
+      marginTop: 5,
+      letterSpacing: 0.2,
+    },
+
+    // Gem detail modal
+    gemModalOverlay: {
+      flex: 1,
+      backgroundColor: colors.modalOverlay,
+      justifyContent: 'center',
+      alignItems: 'center',
+      padding: 28,
+    },
+    gemModalCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 20,
+      padding: 28,
+      width: '100%',
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      alignItems: 'center',
+    },
+    gemModalGemWrap: {
+      marginBottom: 16,
+    },
+    gemModalName: {
+      fontFamily: fonts.displayBold,
+      fontSize: 22,
+      color: colors.text,
+      letterSpacing: 0.2,
+      textAlign: 'center',
+      marginBottom: 4,
+    },
+    gemModalTier: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 12,
+      letterSpacing: 1.4,
+      textTransform: 'uppercase',
+      marginBottom: 12,
+    },
+    gemModalRarity: {
+      fontFamily: fonts.body,
+      fontSize: 13,
+      color: colors.muted,
+      textAlign: 'center',
+      marginBottom: 8,
+    },
+    gemModalStatus: {
+      fontFamily: fonts.display,
+      fontSize: 14,
+      color: colors.text,
+      textAlign: 'center',
+      marginBottom: 12,
+      lineHeight: 20,
+    },
+    gemModalFlavor: {
+      fontFamily: fonts.italic,
+      fontSize: 14,
+      color: colors.muted,
+      textAlign: 'center',
+      lineHeight: 21,
+      marginBottom: 22,
+      paddingHorizontal: 4,
+    },
+    gemModalClose: {
+      backgroundColor: colors.gold,
+      borderRadius: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 36,
+    },
+    gemModalCloseText: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 14,
+      color: '#1a1612',
+      letterSpacing: 0.4,
     },
 
     outcomesCard: {
