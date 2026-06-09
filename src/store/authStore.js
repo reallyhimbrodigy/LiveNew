@@ -9,6 +9,7 @@ import {
   migrateLegacyZoneNotifications,
 } from '../notifications';
 import { getLocalDateISO, getYesterdayISO, getLogicalDateISO, isSleepWindow } from '../utils/localDate';
+import { earnedGems } from '../domain/gems.js';
 import {
   isHealthAvailable,
   getHealthPermissionStatus,
@@ -32,6 +33,10 @@ const NAME_KEY = 'livenew:user_name';
 // onboarding. A bare boolean keyed by userId leaks nothing to a different
 // account that later signs in on the same device (their userId differs).
 const onboardedMarkerKey = (userId) => (userId ? `livenew:onboarded:${userId}` : null);
+
+// Account-scoped, survives logout (the collection is permanent). Stores the
+// highest streak ever reached + the date each gem was first earned.
+const gemsKey = (userId) => (userId ? `livenew:gems:${userId}` : 'livenew:gems');
 const writeOnboardedMarker = async (userId) => {
   const key = onboardedMarkerKey(userId);
   if (!key) return;
@@ -81,6 +86,9 @@ export const useAuthStore = create((set, get) => ({
   userId: null,                // current account id — scopes per-account device markers
   themeMode: 'system',         // 'system' | 'light' | 'dark' — overrides useColorScheme()
   trialStartISO: null,         // ISO date YYYY-MM-DD when the 14-day free trial began
+  maxStreak: 0,        // highest streak ever reached — gates permanent gems
+  gemEarnedAt: {},     // { [gemId]: 'YYYY-MM-DD' } first-earned dates
+  pendingGemUnlock: null, // gemId just crossed this session (for the celebration), else null
 
   // Hydrate from storage
   hydrate: async () => {
@@ -190,6 +198,7 @@ export const useAuthStore = create((set, get) => ({
           healthPermission,
         });
         get().loadStreak();
+        get().loadGems();
         // Initialize trial start if missing — first hydrate after signup
         // sets it to today, giving the user a fresh 14-day window.
         get().ensureTrialStart().catch(() => {});
@@ -848,6 +857,24 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
   },
 
+  loadGems: async () => {
+    const userId = get().userId;
+    try {
+      const raw = await AsyncStorage.getItem(gemsKey(userId));
+      let maxStreak = 0; let gemEarnedAt = {};
+      if (raw) { const d = JSON.parse(raw); maxStreak = d.maxStreak || 0; gemEarnedAt = d.gemEarnedAt || {}; }
+      // Seed from current streak for existing users with no gem record yet.
+      const cur = get().streak || 0;
+      if (cur > maxStreak) {
+        maxStreak = cur;
+        const today = getLocalDateISO();
+        for (const g of earnedGems(maxStreak)) if (!gemEarnedAt[g.id]) gemEarnedAt[g.id] = today;
+        try { await AsyncStorage.setItem(gemsKey(userId), JSON.stringify({ maxStreak, gemEarnedAt })); } catch {}
+      }
+      set({ maxStreak, gemEarnedAt });
+    } catch {}
+  },
+
   incrementStreak: async () => {
     try {
       const raw = await AsyncStorage.getItem('livenew:streak');
@@ -861,8 +888,26 @@ export const useAuthStore = create((set, get) => ({
 
       await AsyncStorage.setItem('livenew:streak', JSON.stringify({ count: newCount, lastDate: today }));
       set({ streak: newCount });
+
+      // Gems: update permanent max + record any newly-crossed gem.
+      const userId = get().userId;
+      const prevMax = get().maxStreak || 0;
+      if (newCount > prevMax) {
+        const today2 = getLocalDateISO();
+        const before = new Set(earnedGems(prevMax).map((g) => g.id));
+        const nowEarned = earnedGems(newCount);
+        const gemEarnedAt = { ...get().gemEarnedAt };
+        let justUnlocked = null;
+        for (const g of nowEarned) {
+          if (!before.has(g.id)) { gemEarnedAt[g.id] = today2; justUnlocked = g.id; }
+        }
+        set({ maxStreak: newCount, gemEarnedAt, ...(justUnlocked ? { pendingGemUnlock: justUnlocked } : {}) });
+        try { await AsyncStorage.setItem(gemsKey(userId), JSON.stringify({ maxStreak: newCount, gemEarnedAt })); } catch {}
+      }
     } catch {}
   },
+
+  clearPendingGemUnlock: () => set({ pendingGemUnlock: null }),
 
   // Logout — clears EVERY per-user AsyncStorage key plus the widget payload.
   // Missing any one of these means the next user inherits state from the
@@ -901,6 +946,7 @@ export const useAuthStore = create((set, get) => ({
       todaySleep: null, todayEnergy: null, isSubscribed: false,
       completed: {}, reflection: null, streak: 0,
       healthPermission: 'unknown', healthSnapshot: null,
+      maxStreak: 0, gemEarnedAt: {}, pendingGemUnlock: null,
     });
   },
 
@@ -926,6 +972,7 @@ export const useAuthStore = create((set, get) => ({
       ...(deletedUserId ? [
         `livenew:onboarded:${deletedUserId}`,
         `livenew:seen_first_plan_welcome:${deletedUserId}`,
+        gemsKey(deletedUserId),
       ] : []),
     ]);
     try {
@@ -947,6 +994,7 @@ export const useAuthStore = create((set, get) => ({
       todaySleep: null, todayEnergy: null, isSubscribed: false,
       completed: {}, reflection: null, streak: 0,
       healthPermission: 'unknown', healthSnapshot: null,
+      maxStreak: 0, gemEarnedAt: {}, pendingGemUnlock: null,
     });
   },
 }));
