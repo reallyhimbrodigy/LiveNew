@@ -2647,7 +2647,10 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     const dayBoundaryMinute = minuteOverride != null ? minuteOverride : baseline.dayBoundaryHour * 60;
     const requiredVersion = await getRequiredConsentVersion();
     await persist.updateConsent(auth.userId, { version: requiredVersion, acceptedAt: new Date().toISOString() });
-    const incomingScheduleBaseline = body?.profile?.schedule ? normalizeSchedule(body.profile.schedule) : undefined;
+    // schedule travels on the profile object regardless of which key carries the
+    // baseline fields, so read it from the same fallback chain normalizeBaselineInput uses.
+    const scheduleSource = body?.baseline || body?.userProfile || body?.profile;
+    const incomingScheduleBaseline = scheduleSource?.schedule ? normalizeSchedule(scheduleSource.schedule) : undefined;
     const baselineConstraintsMerged = {
       ...(baseline.constraints && typeof baseline.constraints === "object" ? baseline.constraints : {}),
       ...(incomingScheduleBaseline ? { schedule: incomingScheduleBaseline } : {}),
