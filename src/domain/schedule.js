@@ -68,29 +68,30 @@ export function normalizeSchedule(raw) {
 
 // ── resolveDaySchedule ────────────────────────────────────────────────────────
 
-/**
- * Return today's facts: which commitments fall on this day, wake/sleep times, etc.
- * Returns null if schedule is missing/invalid.
- */
-export function resolveDaySchedule(schedule, date = new Date()) {
+const WEEKDAY_TO_INDEX = { Monday: 0, Tuesday: 1, Wednesday: 2, Thursday: 3, Friday: 4, Saturday: 5, Sunday: 6 };
+
+// Resolve a schedule to the concrete facts for a given calendar day.
+// `timezone` (IANA, e.g. "America/Los_Angeles") makes the weekday reflect the
+// USER's local date, not the server's. Falls back to the runtime's local zone.
+export function resolveDaySchedule(schedule, date = new Date(), { timezone } = {}) {
   if (!schedule || typeof schedule !== "object" || !Array.isArray(schedule.blocks)) return null;
-
-  const di = dayIndex(date);
+  const weekdayName = date.toLocaleDateString("en-US", {
+    weekday: "long",
+    ...(timezone ? { timeZone: timezone } : {}),
+  });
+  const di = WEEKDAY_TO_INDEX[weekdayName];
   const isWeekend = di >= 5;
-
   const commitments = schedule.blocks
     .filter((b) => Array.isArray(b.days) && b.days.includes(di))
     .map((b) => ({ label: b.label, start: b.start, end: b.end || null }))
     .sort((a, b) => String(a.start).localeCompare(String(b.start)));
-
   const pick = (field) => {
     const f = schedule[field];
     if (!f) return null;
     return isWeekend && f.weekend ? f.weekend : f.weekday || null;
   };
-
   return {
-    weekdayName: date.toLocaleDateString("en-US", { weekday: "long" }),
+    weekdayName,
     isWeekend,
     commitments,
     wake: pick("wake"),

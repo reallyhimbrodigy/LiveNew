@@ -61,6 +61,19 @@ assert.deepEqual(mon.commitments.map((c) => c.label), ["Work"], "Mon: only work"
 assert.equal(mon.wake, "06:40", "Mon uses weekday wake");
 
 assert.equal(resolveDaySchedule(null), null, "null -> null");
+
+// timezone option resolves the weekday in the USER's local zone
+const tzSched = normalizeSchedule({
+  blocks: [{ id: "f", type: "work", label: "Work", start: "09:00", end: "17:00", days: [4] }], // Fri only
+});
+const m = new Date("2026-06-13T04:00:00Z"); // Sat 04:00 UTC == Fri 21:00 in America/Los_Angeles
+assert.equal(resolveDaySchedule(tzSched, m, { timezone: "UTC" }).weekdayName, "Saturday", "UTC -> Saturday");
+assert.equal(resolveDaySchedule(tzSched, m, { timezone: "America/Los_Angeles" }).weekdayName, "Friday", "LA -> Friday");
+assert.deepEqual(
+  resolveDaySchedule(tzSched, m, { timezone: "America/Los_Angeles" }).commitments.map((c) => c.label),
+  ["Work"],
+  "LA Friday includes the Friday-only Work block"
+);
 console.log("resolveDaySchedule OK");
 
 // ── Task 4: deriveRoutineSummary ──────────────────────────────────────────────

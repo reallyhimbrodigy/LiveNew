@@ -254,7 +254,7 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
     const wake = daySchedule.wake ? `wake ~${daySchedule.wake}` : "";
     const sleep = daySchedule.sleep ? `sleep ~${daySchedule.sleep}` : "";
     const timing = [wake, sleep].filter(Boolean).join(", ");
-    lines.push(`Today is ${daySchedule.weekdayName}. On my schedule today: ${items}.${timing ? ` (${timing}.)` : ""}`);
+    lines.push(`Today is ${daySchedule.weekdayName}. On my schedule today: ${items}${timing ? ` (${timing})` : ""}.`);
     lines.push("Build the plan around today's real commitments and timing.");
   } else {
     lines.push(`My typical routine (a reference, not a constraint): ${routineText}`);

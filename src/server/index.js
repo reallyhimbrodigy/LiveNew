@@ -3144,7 +3144,9 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
 
       // AI-powered personalized plan
       const rawSchedule = baselineResolved?.constraints?.schedule;
-      const daySchedule = rawSchedule ? resolveDaySchedule(normalizeSchedule(rawSchedule), new Date()) : null;
+      const daySchedule = rawSchedule
+        ? resolveDaySchedule(normalizeSchedule(rawSchedule), now, { timezone: baselineResolved?.timezone })
+        : null;
       let dayPlan = null;
       try {
         dayPlan = await generateDayPlan({
