@@ -43,7 +43,6 @@ export default function ProgressScreen() {
   const streak = useAuthStore(s => s.streak);
   const maxStreak = useAuthStore(s => s.maxStreak);
   const gemEarnedAt = useAuthStore(s => s.gemEarnedAt);
-  const profile = useAuthStore(s => s.profile);
 
   // Stale-while-revalidate: render last-cached payload instantly, refresh in background.
   // Eliminates the multi-second spinner on every Progress tab open.
@@ -326,11 +325,11 @@ export default function ProgressScreen() {
 
                 {/* Earned / locked status */}
                 {isEarned(selectedGem.id, maxStreak) ? (
-                  gemEarnedAt && gemEarnedAt[selectedGem.id] ? (
-                    <Text style={s.gemModalStatus}>
-                      Earned {formatGemDate(gemEarnedAt[selectedGem.id])}
-                    </Text>
-                  ) : null
+                  <Text style={s.gemModalStatus}>
+                    {gemEarnedAt && gemEarnedAt[selectedGem.id]
+                      ? `Earned ${formatGemDate(gemEarnedAt[selectedGem.id])}`
+                      : 'Earned'}
+                  </Text>
                 ) : (
                   <Text style={s.gemModalStatus}>
                     Reach a {selectedGem.day}-day streak to unlock.

@@ -44,7 +44,7 @@ export default function Gem({ gem, earned, size = 56, onPress }) {
   const tableHalf = 0.27 * size;  // half-width of the flat top facet
   const girdleHalf = 0.44 * size; // half-width at equator
 
-  // Outer gem silhouette — 7 points
+  // Outer gem silhouette — 5 points
   const outline = [
     [cx - tableHalf, crown],     // table-left (TL)
     [cx + tableHalf, crown],     // table-right (TR)
@@ -56,7 +56,6 @@ export default function Gem({ gem, earned, size = 56, onPress }) {
   // Crown internal facet lines (star / main crown facets)
   // Table edge (already defined by top two outer points — implicit)
   // Two "main crown facets" from girdle corners up to near-center-top
-  const topCenter = [cx, crown + 0.02 * size]; // just inside table
   const crownFacetLines = [
     // left girdle corner → table-left
     [[cx - girdleHalf, girdle], [cx - tableHalf, crown]],
@@ -70,7 +69,8 @@ export default function Gem({ gem, earned, size = 56, onPress }) {
     [[cx, crown], [cx, girdle]],
   ];
 
-  const gradId = `gem-grad-${gem.id}`;
+  const uid = React.useId();
+  const gradId = `gem-grad-${gem.id}-${uid}`;
 
   // ── Colors ──────────────────────────────────────────────────────────────────
   const hue = gem.hue;
@@ -90,8 +90,17 @@ export default function Gem({ gem, earned, size = 56, onPress }) {
   const glowR = size * 0.52;
 
   // ── Component ───────────────────────────────────────────────────────────────
+  const label = earned
+    ? `${gem.name} gem, earned`
+    : `${gem.name} gem, locked`;
+
   const svgContent = (
-    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+    <Svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      accessibilityLabel={label}
+    >
       <Defs>
         <SvgGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
           <Stop offset="0" stopColor={lightenHex(hue, 0.35)} stopOpacity="1" />
@@ -136,10 +145,6 @@ export default function Gem({ gem, earned, size = 56, onPress }) {
     </Svg>
   );
 
-  const label = earned
-    ? `${gem.name} gem, earned`
-    : `${gem.name} gem, locked`;
-
   if (onPress) {
     return (
       <Pressable
@@ -153,53 +158,7 @@ export default function Gem({ gem, earned, size = 56, onPress }) {
     );
   }
 
-  return (
-    <Svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      accessibilityLabel={label}
-    >
-      <Defs>
-        <SvgGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <Stop offset="0" stopColor={lightenHex(hue, 0.35)} stopOpacity="1" />
-          <Stop offset="1" stopColor={hue} stopOpacity="1" />
-        </SvgGradient>
-      </Defs>
-
-      {earned && (
-        <Circle
-          cx={cx}
-          cy={cy}
-          r={glowR}
-          fill={hue}
-          fillOpacity={0.18}
-        />
-      )}
-
-      <Polygon
-        points={outline}
-        fill={fillUrl}
-        fillOpacity={earned ? 1 : 0.12}
-        stroke={strokeColor}
-        strokeWidth={earned ? 1.2 : 1}
-        strokeOpacity={strokeOpacity}
-        opacity={gemOpacity}
-      />
-
-      {crownFacetLines.map(([[x1, y1], [x2, y2]], i) => (
-        <Polyline
-          key={i}
-          points={`${x1},${y1} ${x2},${y2}`}
-          fill="none"
-          stroke={facetStroke}
-          strokeWidth={earned ? 0.7 : 0.5}
-          strokeOpacity={earned ? 0.55 : 0.3}
-          opacity={gemOpacity}
-        />
-      ))}
-    </Svg>
-  );
+  return svgContent;
 }
 
 // ── Utility ──────────────────────────────────────────────────────────────────
