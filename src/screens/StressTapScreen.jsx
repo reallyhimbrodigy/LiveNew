@@ -7,6 +7,7 @@ import { useTheme } from '../theme';
 import { useAuthStore } from '../store/authStore';
 import { tapMedium } from '../haptics';
 import IrisSignature from '../components/IrisSignature';
+import PlanBuilding from '../components/PlanBuilding';
 import { deriveFromHealth, canSkipSleepAndEnergy } from '../utils/healthInference';
 import { isSleepWindow } from '../utils/localDate';
 
@@ -54,31 +55,9 @@ const LOADING_MESSAGES = [
   'Iris is being thorough…',
 ];
 
-function LoadingAnimation({ loadingStyles }) {
-  const [tick, setTick] = useState(0);
-
-  React.useEffect(() => {
-    const interval = setInterval(() => setTick(t => t + 1), 3000);
-    return () => clearInterval(interval);
-  }, []);
-
-  const message = LOADING_MESSAGES[tick % LOADING_MESSAGES.length];
-  return (
-    <View style={loadingStyles.wrap}>
-      <View style={loadingStyles.dotsRow}>
-        {[0, 1, 2].map(i => (
-          <View key={i} style={[loadingStyles.dot, { opacity: tick % 3 === i ? 1 : 0.2 }]} />
-        ))}
-      </View>
-      <Text style={loadingStyles.message}>{message}</Text>
-    </View>
-  );
-}
-
 export default function StressTapScreen({ navigation }) {
   const { colors, fonts } = useTheme();
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
-  const loadingStyles = useMemo(() => makeLoadingStyles(colors, fonts), [colors, fonts]);
 
   const healthPermission = useAuthStore(s => s.healthPermission);
   const connectHealth = useAuthStore(s => s.connectHealth);
@@ -276,7 +255,7 @@ export default function StressTapScreen({ navigation }) {
         )}
 
         {loading ? (
-          <LoadingAnimation loadingStyles={loadingStyles} />
+          <PlanBuilding messages={LOADING_MESSAGES} />
         ) : step === 0 ? (
           // STEP 0 — Apple Health permission. Pre-plan, system-style.
           <Animated.View style={[s.body, { opacity: fadeAnim }]}>
@@ -487,15 +466,3 @@ function makeStyles(colors, fonts) {
   });
 }
 
-function makeLoadingStyles(colors, fonts) {
-  return StyleSheet.create({
-    wrap: { alignItems: 'center', justifyContent: 'center', flex: 1, gap: 24, paddingBottom: 80 },
-    dotsRow: { flexDirection: 'row', gap: 8 },
-    dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: colors.gold },
-    message: {
-      fontFamily: fonts.displayItalic,
-      color: colors.muted,
-      fontSize: 16,
-    },
-  });
-}
