@@ -65,7 +65,7 @@ function prepareProfileForSave(profile) {
 
 // 14-day free trial helpers — used by both the gate (generatePlan) and the
 // UI (Paywall trigger, trial countdown on Account, feature gating elsewhere).
-export const TRIAL_DAYS = 14;
+export const TRIAL_DAYS = 7;
 export function trialDaysRemaining(trialStartISO) {
   if (!trialStartISO) return TRIAL_DAYS;
   const start = new Date(trialStartISO + 'T00:00:00').getTime();
