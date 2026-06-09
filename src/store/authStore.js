@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api, setTokens, clearTokens, setAuthExpiredHandler } from '../api';
+import { normalizeSchedule, deriveRoutineSummary } from '../domain/schedule.js';
 import {
   requestPermissions,
   scheduleSessionReminders,
@@ -239,6 +240,7 @@ export const useAuthStore = create((set, get) => ({
               wakeTime: pickServer('wakeTime'),
               timeMin: pickServer('timeMin'),
               injuries: serverProfile.injuries || localProfile.injuries || [],
+              schedule: serverProfile.schedule || localProfile.schedule || null,
             };
             await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(merged));
             set({ profile: merged, hasProfile: serverSaysOnboarded || !!merged.routine });
@@ -474,6 +476,7 @@ export const useAuthStore = create((set, get) => ({
         wakeTime: p.wakeTime || null,
         timeMin: p.timeMin || null,
         injuries: p.injuries || [],
+        schedule: p.schedule || null,
       };
       // Source of truth: server's uiState. "home" means fully onboarded.
       // Fall back to profile.isComplete or routine presence for older server
@@ -593,11 +596,17 @@ export const useAuthStore = create((set, get) => ({
 
   // Save onboarding profile (sets hasProfile, triggers navigation to MainTabs)
   saveProfile: async (profile) => {
-    await api.onboardComplete(profile);
-    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    const prepared = profile.schedule
+      ? (() => {
+          const schedule = normalizeSchedule(profile.schedule);
+          return { ...profile, schedule, routine: profile.routine || deriveRoutineSummary(schedule) };
+        })()
+      : profile;
+    await api.onboardComplete(prepared);
+    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(prepared));
     await AsyncStorage.removeItem(PLAN_KEY);
     await writeOnboardedMarker(get().userId);
-    set({ hasProfile: true, profile, todayPlan: null, todayDate: null, completed: {}, reflection: null });
+    set({ hasProfile: true, profile: prepared, todayPlan: null, todayDate: null, completed: {}, reflection: null });
   },
 
   // Save profile WITHOUT triggering navigation — used during onboarding
@@ -605,11 +614,17 @@ export const useAuthStore = create((set, get) => ({
   saveProfileWithoutNav: async (profile) => {
     // Accept consent first (required before any other server calls work)
     await api.acceptConsent();
-    await api.onboardComplete(profile);
-    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(profile));
+    const prepared = profile.schedule
+      ? (() => {
+          const schedule = normalizeSchedule(profile.schedule);
+          return { ...profile, schedule, routine: profile.routine || deriveRoutineSummary(schedule) };
+        })()
+      : profile;
+    await api.onboardComplete(prepared);
+    await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(prepared));
     await AsyncStorage.removeItem(PLAN_KEY);
     await writeOnboardedMarker(get().userId);
-    set({ profile, todayPlan: null, todayDate: null, completed: {}, reflection: null });
+    set({ profile: prepared, todayPlan: null, todayDate: null, completed: {}, reflection: null });
   },
 
   // Flip hasProfile to trigger navigation to MainTabs
