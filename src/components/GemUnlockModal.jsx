@@ -73,7 +73,7 @@ export default function GemUnlockModal({ gemId, onClose }) {
     onClose();
   };
 
-  if (!gem && !visible) return null;
+  if (!visible || !gem) return null;
 
   return (
     <Modal
