@@ -12,6 +12,7 @@ import { captureRef } from 'react-native-view-shot';
 import { useTheme, shadows } from '../theme';
 import ShareCard from '../components/ShareCard';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
+import GemUnlockModal from '../components/GemUnlockModal';
 import IrisSignature from '../components/IrisSignature';
 import StateRing from '../components/StateRing';
 import GradientScreen from '../components/GradientScreen';
@@ -119,6 +120,8 @@ export default function TodayScreen({ navigation }) {
   const healthPermission = useAuthStore(s => s.healthPermission);
   const healthSnapshot = useAuthStore(s => s.healthSnapshot);
   const refreshHealthSnapshot = useAuthStore(s => s.refreshHealthSnapshot);
+  const pendingGemUnlock = useAuthStore(s => s.pendingGemUnlock);
+  const clearPendingGemUnlock = useAuthStore(s => s.clearPendingGemUnlock);
 
   const [currentZoneId, setCurrentZoneId] = useState(getCurrentZoneId());
   const [showStressRelief, setShowStressRelief] = useState(false);
@@ -126,7 +129,6 @@ export default function TodayScreen({ navigation }) {
   const [showAllZones, setShowAllZones] = useState(false);
   const [zoneExpanded, setZoneExpanded] = useState(false);
   const [sharing, setSharing] = useState(null); // { type: 'zone'|'streak', payload }
-  const [showMilestone, setShowMilestone] = useState(null); // milestone days int
   const [showScoreInfo, setShowScoreInfo] = useState(false);
   const [yesterdayReflection, setYesterdayReflection] = useState(null);
   const [showWelcome, setShowWelcome] = useState(false);
@@ -435,23 +437,6 @@ export default function TodayScreen({ navigation }) {
     const tier = milestoneTier(streak);
     shareAs('streak', { days: streak }, `${streak} day${streak === 1 ? '' : 's'} on LiveNew — ${tier.subtitle}`);
   };
-
-  // Milestone celebration — fire once per milestone crossed.
-  useEffect(() => {
-    if (!streak) return;
-    const milestones = [3, 7, 14, 30, 100];
-    if (!milestones.includes(streak)) return;
-    (async () => {
-      const key = 'livenew:lastCelebratedStreak';
-      try {
-        const lastRaw = await AsyncStorage.getItem(key);
-        const last = lastRaw ? parseInt(lastRaw, 10) : 0;
-        if (streak <= last) return;
-        await AsyncStorage.setItem(key, String(streak));
-        setShowMilestone(streak);
-      } catch {}
-    })();
-  }, [streak]);
 
   // Stress button + modal — reused across the with-plan and empty-state
   // renders so it's available from the very first app open.
@@ -984,45 +969,8 @@ export default function TodayScreen({ navigation }) {
         </Pressable>
       </Modal>
 
-      {/* Milestone celebration modal */}
-      <Modal
-        visible={showMilestone != null}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowMilestone(null)}
-      >
-        <Pressable style={s.modalOverlay} onPress={() => setShowMilestone(null)}>
-          <Pressable style={s.milestoneContent} onPress={() => {}}>
-            <View style={s.milestoneSignatureRow}>
-              <IrisSignature />
-              <Text style={s.milestoneSignatureSuffix}>noticed this</Text>
-            </View>
-            <Text style={s.milestoneTier}>
-              {showMilestone != null ? milestoneTier(showMilestone).label : ''}
-            </Text>
-            <Text style={s.milestoneNum}>{showMilestone}</Text>
-            <Text style={s.milestoneSub}>
-              {showMilestone != null ? milestoneTier(showMilestone).subtitle : ''}
-            </Text>
-            <View style={{ height: 8 }} />
-            <Pressable
-              style={({ pressed }) => [s.modalBtn, pressed && { opacity: 0.85 }]}
-              onPress={() => {
-                setShowMilestone(null);
-                handleShareStreak();
-              }}
-            >
-              <Text style={s.modalBtnText}>Share this</Text>
-            </Pressable>
-            <Pressable
-              style={s.milestoneSecondary}
-              onPress={() => setShowMilestone(null)}
-            >
-              <Text style={s.milestoneSecondaryText}>Keep going</Text>
-            </Pressable>
-          </Pressable>
-        </Pressable>
-      </Modal>
+      {/* Gem-unlock celebration — driven by pendingGemUnlock from the store */}
+      <GemUnlockModal gemId={pendingGemUnlock} onClose={clearPendingGemUnlock} />
     </GradientScreen>
   );
 }
