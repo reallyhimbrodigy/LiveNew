@@ -887,7 +887,7 @@ export default function TodayScreen({ navigation }) {
         {/* Soundscape player — ambient audio to settle the nervous system.
             Sits at the bottom of the populated plan as a "settle the system"
             moment; looping brown noise, rain, pink noise, or stillness. */}
-        <SoundscapePlayer style={s.soundscapeCard} />
+        <SoundscapePlayer style={s.soundscapeCard} onUpgrade={() => navigation.navigate('Paywall')} />
       </ScrollView>
 
       {/* Sticky stress button + relief modal — defined once above, reused

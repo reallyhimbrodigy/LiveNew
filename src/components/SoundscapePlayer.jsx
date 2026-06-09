@@ -3,6 +3,7 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { createAudioPlayer, setAudioModeAsync } from 'expo-audio';
 import { useTheme } from '../theme';
 import { SOUNDSCAPES } from '../domain/soundscapes';
+import { useIsPremium } from '../store/authStore';
 
 // View-drawn play triangle (▶). A right-pointing triangle built from a
 // zero-width/height box with a left border acting as the visible fill.
@@ -33,9 +34,13 @@ function PauseIcon({ color }) {
   );
 }
 
-export default function SoundscapePlayer() {
+// Brown noise (first soundscape) is always free. The rest require premium.
+const FREE_SOUNDSCAPE_ID = 'brown';
+
+export default function SoundscapePlayer({ onUpgrade }) {
   const { colors, fonts } = useTheme();
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
+  const isPremium = useIsPremium();
 
   const [playingId, setPlayingId] = useState(null);
   const playerRef = useRef(null);
@@ -70,6 +75,13 @@ export default function SoundscapePlayer() {
   const handlePress = (soundscape) => {
     if (!mountedRef.current) return;
 
+    // Premium gate: non-free soundscapes require a subscription or active trial.
+    const isFree = soundscape.id === FREE_SOUNDSCAPE_ID;
+    if (!isFree && !isPremium) {
+      if (onUpgrade) onUpgrade();
+      return;
+    }
+
     // Tapping the currently-playing track stops it.
     if (playingId === soundscape.id) {
       stopCurrent();
@@ -100,6 +112,8 @@ export default function SoundscapePlayer() {
       <Text style={s.eyebrow}>SOUNDSCAPES</Text>
       {SOUNDSCAPES.map((sc) => {
         const active = sc.id === playingId;
+        const isFree = sc.id === FREE_SOUNDSCAPE_ID;
+        const locked = !isFree && !isPremium;
         return (
           <Pressable
             key={sc.id}
@@ -108,22 +122,30 @@ export default function SoundscapePlayer() {
               s.row,
               active && s.rowActive,
               pressed && s.rowPressed,
+              locked && s.rowLocked,
             ]}
             accessibilityRole="button"
-            accessibilityLabel={`${sc.name}${active ? ', playing' : ''}`}
+            accessibilityLabel={`${sc.name}${locked ? ', premium' : active ? ', playing' : ''}`}
             accessibilityState={{ selected: active }}
           >
-            {/* Play / pause indicator — 20×20 container keeps alignment stable */}
+            {/* Play / pause / lock indicator — 20×20 container keeps alignment stable */}
             <View style={s.iconWrap}>
-              {active
-                ? <PauseIcon color={colors.gold} />
-                : <PlayIcon color={colors.muted} />
+              {locked
+                ? <Text style={s.lockIcon}>⚿</Text>
+                : active
+                  ? <PauseIcon color={colors.gold} />
+                  : <PlayIcon color={colors.muted} />
               }
             </View>
             <View style={s.textWrap}>
-              <Text style={[s.name, active && s.nameActive]}>{sc.name}</Text>
-              <Text style={[s.desc, active && s.descActive]}>{sc.desc}</Text>
+              <Text style={[s.name, active && s.nameActive, locked && s.nameLocked]}>{sc.name}</Text>
+              <Text style={[s.desc, active && s.descActive, locked && s.descLocked]}>{sc.desc}</Text>
             </View>
+            {locked ? (
+              <View style={s.premiumBadge}>
+                <Text style={s.premiumBadgeText}>PREMIUM</Text>
+              </View>
+            ) : null}
           </Pressable>
         );
       })}
@@ -193,6 +215,33 @@ function makeStyles(colors, fonts) {
     descActive: {
       color: colors.gold,
       opacity: 0.75,
+    },
+    rowLocked: {
+      opacity: 0.55,
+    },
+    lockIcon: {
+      fontSize: 14,
+      color: colors.muted,
+    },
+    nameLocked: {
+      color: colors.dim,
+    },
+    descLocked: {
+      color: colors.dim,
+    },
+    premiumBadge: {
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      borderRadius: 4,
+      paddingHorizontal: 6,
+      paddingVertical: 2,
+      marginLeft: 8,
+    },
+    premiumBadgeText: {
+      fontFamily: fonts.displayBold,
+      fontSize: 8,
+      color: colors.gold,
+      letterSpacing: 1.2,
     },
   });
 }

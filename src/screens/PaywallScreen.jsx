@@ -101,26 +101,28 @@ export default function PaywallScreen({ navigation }) {
           <IrisSignature size="header" />
         </View>
 
-        <Text style={s.title}>Two weeks with me.</Text>
-        <Text style={s.titleAccent}>Keep going.</Text>
+        <Text style={s.title}>Your plan, streak,</Text>
+        <Text style={s.titleAccent}>always free.</Text>
 
         <Text style={s.sub}>
-          You felt what the curve looks like when it's actually tuned. People who stay past this point notice the difference in another two weeks.
+          The habit loop never stops. Go premium for the depth — richer data, fuller access to Iris, and every tool we build.
         </Text>
 
         <CortisolFact style={s.paywallFact} />
 
         <View style={s.features}>
           {[
-            'Unlimited daily plans, sharpened by your patterns',
-            'Full chat with Iris — sleep, supplements, protocols',
-            'Behavior profile that gets smarter every day',
-            'Weekly outcome deltas — see what actually changed',
-            'Lock-screen + home-screen widgets',
+            { text: 'All soundscapes — rain, pink noise, stillness', coming: false },
+            { text: 'Deep progress insights — weekly outcome deltas', coming: false },
+            { text: 'Unlimited Iris — sleep, supplements, protocols', coming: false },
+            { text: 'Exclusive Aura halos', coming: true },
+            { text: 'Personalized recommendations, sharpened over time', coming: false },
           ].map((f, i) => (
             <View key={i} style={s.featureRow}>
               <Text style={s.featureCheck}>✓</Text>
-              <Text style={s.featureText}>{f}</Text>
+              <Text style={s.featureText}>
+                {f.text}{f.coming ? <Text style={s.featureComing}> · coming</Text> : null}
+              </Text>
             </View>
           ))}
         </View>
@@ -198,7 +200,7 @@ export default function PaywallScreen({ navigation }) {
                 {purchasing ? (
                   <ActivityIndicator color="#1a1612" size="small" />
                 ) : (
-                  <Text style={s.purchaseBtnText}>Continue with Iris</Text>
+                  <Text style={s.purchaseBtnText}>Go Premium</Text>
                 )}
               </Pressable>
 
@@ -296,6 +298,11 @@ function makeStyles(colors, fonts) {
       fontSize: 14,
       flex: 1,
       lineHeight: 20,
+    },
+    featureComing: {
+      color: colors.dim,
+      fontFamily: fonts.italic,
+      fontSize: 13,
     },
 
     // Tier picker

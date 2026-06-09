@@ -14,6 +14,7 @@ import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import FlameIcon from '../components/FlameIcon';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import ScheduleBuilder from './onboarding/ScheduleBuilder';
+import PremiumUpsell from '../components/PremiumUpsell';
 import {
   getNotificationPermission, requestPermissions,
   getNotificationPrefs, setNotificationPrefs,
@@ -352,10 +353,10 @@ export default function AccountScreen({ navigation }) {
               </Text>
               <Text style={s.statusSub}>
                 {isSubscribed
-                  ? 'Full access to all features'
+                  ? 'Full access to all premium features'
                   : inTrial
-                  ? 'Full access for now — subscribe before it ends.'
-                  : 'Subscribe to keep generating daily plans.'}
+                  ? 'Premium features unlocked — trial ends in ' + daysLeft + ' day' + (daysLeft === 1 ? '' : 's') + '.'
+                  : 'Plans, streaks, and halos are always free.'}
               </Text>
             </View>
             {!isSubscribed ? <Text style={s.settingArrow}>›</Text> : null}
@@ -385,6 +386,9 @@ export default function AccountScreen({ navigation }) {
             </>
           )}
         </View>
+
+        {/* Premium upsell — only shown to non-premium users */}
+        <PremiumUpsell onPress={() => { tapSelect(); navigation.navigate('Paywall'); }} />
 
         {/* Profile section */}
         <Text style={s.sectionTitle}>Your profile</Text>

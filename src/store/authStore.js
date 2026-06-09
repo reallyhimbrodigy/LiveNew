@@ -77,6 +77,14 @@ export function isWithinTrial(trialStartISO) {
   return trialDaysRemaining(trialStartISO) > 0;
 }
 
+// Premium = paying subscriber OR still within the 7-day trial taste.
+// Free users keep the core loop forever; this gate covers depth features only.
+export function useIsPremium() {
+  const isSubscribed = useAuthStore((s) => s.isSubscribed);
+  const trialStartISO = useAuthStore((s) => s.trialStartISO);
+  return isSubscribed || isWithinTrial(trialStartISO);
+}
+
 export const useAuthStore = create((set, get) => ({
   // State
   isLoading: true,
@@ -698,19 +706,10 @@ export const useAuthStore = create((set, get) => ({
       throw err;
     }
 
-    // Paywall gate: free 14-day trial of full access, then subscription
-    // required to keep generating daily plans. We throw a typed error so
-    // the calling screen can route to the Paywall instead of showing a
-    // generic "something went wrong" message.
-    if (!get().isSubscribed) {
-      const trialStart = await get().ensureTrialStart();
-      const inTrial = isWithinTrial(trialStart);
-      if (!inTrial) {
-        const err = new Error('Your 14-day trial is complete — subscribe to keep going.');
-        err.code = 'PAYWALL_REQUIRED';
-        throw err;
-      }
-    }
+    // Trial tracking: ensure a trial-start date is set for this user.
+    // No paywall gate here — the daily plan is free forever (basics always on).
+    // Premium gates live at the feature level (soundscapes, analytics, etc.).
+    await get().ensureTrialStart();
 
     const profile = get().profile || {};
     const stressMap = { good: 2, okay: 5, stressed: 8, overwhelmed: 10 };
