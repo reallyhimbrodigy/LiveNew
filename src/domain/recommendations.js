@@ -104,6 +104,40 @@ export function recById(id) {
 }
 
 /**
+ * Return a short intro label referencing today's most relevant schedule block,
+ * or null if no useful block is found.
+ *
+ * A "relevant" block is one whose label maps to a recognisable activity
+ * (gym, work, run, yoga, walk, school, etc.). We pick the first match for
+ * today's day-of-week (0 = Sun … 6 = Sat). Returns null when the schedule
+ * has no blocks, the day has no blocks, or no block matches the known labels.
+ *
+ * @param {object|null|undefined} schedule - The user's schedule object from
+ *   their profile (shape: { blocks: [{ days: number[], label: string, ... }] }).
+ * @param {Date} date - Defaults to now. Pass a specific Date for testing.
+ * @returns {string|null} e.g. "Around your gym session today —" or null.
+ */
+export function todaysScheduleHint(schedule, date = new Date()) {
+  if (!schedule || !Array.isArray(schedule.blocks) || schedule.blocks.length === 0) {
+    return null;
+  }
+  const dow = date.getDay(); // 0 Sun … 6 Sat
+  const KNOWN = ['gym', 'work', 'run', 'yoga', 'walk', 'school', 'class', 'swim', 'lift', 'training'];
+  for (const block of schedule.blocks) {
+    if (!Array.isArray(block.days) || !block.days.includes(dow)) continue;
+    const label = (block.label || '').trim().toLowerCase();
+    if (!label) continue;
+    if (KNOWN.some((k) => label.includes(k))) {
+      // Capitalise first letter for display
+      const display = block.label.trim();
+      const cap = display.charAt(0).toUpperCase() + display.slice(1);
+      return `Around your ${cap} today —`;
+    }
+  }
+  return null;
+}
+
+/**
  * Pick a day-stable recommendation, optionally biased to the current time
  * of day. Prefers recs matching the time-of-day bucket or tagged 'any',
  * then falls back to the full list. The selection is stable within a

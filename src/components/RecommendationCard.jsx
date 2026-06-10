@@ -1,15 +1,16 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useTheme } from '../theme';
-import { recForToday } from '../domain/recommendations.js';
+import { useAuthStore, useIsPremium } from '../store/authStore';
+import { recForToday, todaysScheduleHint } from '../domain/recommendations.js';
 
 /**
  * RecommendationCard — displays one actionable cortisol-lowering suggestion
  * as a calm, premium card. Iris-voiced, positive, and time-of-day aware.
  *
- * Reads nothing from the store. The recommendation is day-stable and
- * time-biased: it changes once per calendar day and favors recs appropriate
- * to the current part of the day. No flickering on re-render.
+ * Free users: generic time-of-day rec, no tagging.
+ * Premium users with schedule blocks: same rec but with a tailored intro
+ *   line referencing a relevant block from today's schedule.
  *
  * Props:
  *   style — additional container style (optional).
@@ -20,13 +21,26 @@ import { recForToday } from '../domain/recommendations.js';
  */
 export default function RecommendationCard({ style }) {
   const { colors, fonts } = useTheme();
+  const isPremium = useIsPremium();
+  const profile = useAuthStore((s) => s.profile);
   const rec = recForToday();
 
+  // Premium + schedule: derive a tailored intro line if today has a known block.
+  const hint = (isPremium && profile?.schedule?.blocks?.length)
+    ? todaysScheduleHint(profile.schedule)
+    : null;
+
+  const s = styles(colors, fonts);
+
   return (
-    <View style={[styles(colors, fonts).card, style]}>
-      <Text style={styles(colors, fonts).eyebrow}>IRIS RECOMMENDS</Text>
-      <Text style={styles(colors, fonts).title}>{rec.title}</Text>
-      <Text style={styles(colors, fonts).why}>{rec.why}</Text>
+    <View style={[s.card, style]}>
+      <View style={s.eyebrowRow}>
+        <Text style={s.eyebrow}>IRIS RECOMMENDS</Text>
+        {hint ? <Text style={s.tailoredBadge}>TAILORED</Text> : null}
+      </View>
+      {hint ? <Text style={s.hint}>{hint}</Text> : null}
+      <Text style={s.title}>{rec.title}</Text>
+      <Text style={s.why}>{rec.why}</Text>
     </View>
   );
 }
@@ -41,13 +55,38 @@ function styles(colors, fonts) {
       paddingVertical: 16,
       paddingHorizontal: 18,
     },
+    eyebrowRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 8,
+    },
     eyebrow: {
       fontFamily: fonts.displaySemibold,
       fontSize: 9,
       color: colors.gold,
       letterSpacing: 2.2,
       textTransform: 'uppercase',
-      marginBottom: 8,
+    },
+    tailoredBadge: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 8,
+      color: colors.gold,
+      letterSpacing: 1.4,
+      textTransform: 'uppercase',
+      borderWidth: 0.8,
+      borderColor: colors.goldBorder,
+      borderRadius: 4,
+      paddingHorizontal: 5,
+      paddingVertical: 1,
+      overflow: 'hidden',
+    },
+    hint: {
+      fontFamily: fonts.italic,
+      fontSize: 12,
+      color: colors.muted,
+      letterSpacing: 0.1,
+      marginBottom: 4,
     },
     title: {
       fontFamily: fonts.displaySemibold,

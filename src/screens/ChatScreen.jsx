@@ -4,11 +4,16 @@ import {
   KeyboardAvoidingView, Platform, ScrollView, Animated, Easing, Keyboard,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../theme';
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore, useIsPremium } from '../store/authStore';
 import { api } from '../api';
 import { tapLight, tapSelect } from '../haptics';
 import IrisSignature from '../components/IrisSignature';
+import { getLocalDateISO } from '../utils/localDate';
+
+// Free-tier daily Iris message limit. Premium users have no limit.
+const FREE_DAILY_IRIS = 5;
 
 // Free-form chat with Iris. Modal-presented from TodayStack. The input bar
 // is anchored to just above the keyboard; messages auto-scroll; loading
@@ -99,12 +104,16 @@ export default function ChatScreen({ navigation }) {
   const s = useMemo(() => makeStyles(colors, fonts, insets), [colors, fonts, insets]);
   const userName = useAuthStore(z => z.userName);
   const healthSnapshot = useAuthStore(z => z.healthSnapshot);
+  const userId = useAuthStore(z => z.userId);
+  const isPremium = useIsPremium();
 
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState('');
   const [inputFocused, setInputFocused] = useState(false);
+  // Daily free-chat count (hydrated from AsyncStorage on mount)
+  const [dailyCount, setDailyCount] = useState(0);
   const scrollRef = useRef(null);
   const mountedRef = useRef(true);
   const sendScale = useRef(new Animated.Value(1)).current;
@@ -113,6 +122,20 @@ export default function ChatScreen({ navigation }) {
     mountedRef.current = true;
     return () => { mountedRef.current = false; };
   }, []);
+
+  // Hydrate today's free-chat count from AsyncStorage on mount.
+  useEffect(() => {
+    if (isPremium) return; // premium: no counter needed
+    (async () => {
+      try {
+        const today = getLocalDateISO();
+        const key = `livenew:iris_count:${userId || 'anon'}:${today}`;
+        const raw = await AsyncStorage.getItem(key);
+        const count = raw ? parseInt(raw, 10) : 0;
+        if (mountedRef.current) setDailyCount(Number.isFinite(count) ? count : 0);
+      } catch {}
+    })();
+  }, [isPremium, userId]);
 
   // Auto-scroll to bottom on new message or while typing dots are showing.
   useEffect(() => {
@@ -130,6 +153,10 @@ export default function ChatScreen({ navigation }) {
   const send = useCallback(async (text) => {
     const trimmed = (text || '').trim();
     if (!trimmed || sending) return;
+
+    // Free-tier daily limit check — block before any state changes.
+    if (!isPremium && dailyCount >= FREE_DAILY_IRIS) return;
+
     setError('');
     setInput('');
     tapSelect();
@@ -138,6 +165,16 @@ export default function ChatScreen({ navigation }) {
       Animated.timing(sendScale, { toValue: 0.88, duration: 80, useNativeDriver: true }),
       Animated.timing(sendScale, { toValue: 1,    duration: 120, useNativeDriver: true }),
     ]).start();
+
+    // Increment the free-tier counter BEFORE the API call so even a
+    // cancelled/failed request counts (prevents spamming retries).
+    if (!isPremium) {
+      const today = getLocalDateISO();
+      const key = `livenew:iris_count:${userId || 'anon'}:${today}`;
+      const next = dailyCount + 1;
+      setDailyCount(next);
+      try { await AsyncStorage.setItem(key, String(next)); } catch {}
+    }
 
     const newMessages = [...messages, { role: 'user', content: trimmed }];
     setMessages(newMessages);
@@ -159,9 +196,10 @@ export default function ChatScreen({ navigation }) {
     } finally {
       if (mountedRef.current) setSending(false);
     }
-  }, [messages, sending, healthSnapshot, sendScale]);
+  }, [messages, sending, healthSnapshot, sendScale, isPremium, dailyCount, userId]);
 
-  const canSend = !!input.trim() && !sending;
+  const atFreeLimit = !isPremium && dailyCount >= FREE_DAILY_IRIS;
+  const canSend = !!input.trim() && !sending && !atFreeLimit;
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -230,6 +268,21 @@ export default function ChatScreen({ navigation }) {
               </View>
             </View>
           ) : null}
+
+          {/* Free-tier daily limit upgrade prompt */}
+          {atFreeLimit && (
+            <View style={s.limitCard}>
+              <Text style={s.limitText}>
+                You've used your free chats with Iris today. Go Premium for unlimited.
+              </Text>
+              <Pressable
+                style={({ pressed }) => [s.limitBtn, pressed && { opacity: 0.85 }]}
+                onPress={() => navigation.navigate('Paywall')}
+              >
+                <Text style={s.limitBtnText}>Go Premium</Text>
+              </Pressable>
+            </View>
+          )}
 
           {error ? <Text style={s.error}>{error}</Text> : null}
         </ScrollView>
@@ -392,6 +445,37 @@ function makeStyles(colors, fonts, insets) {
       color: colors.error,
       textAlign: 'center',
       marginTop: 12,
+    },
+
+    // Free-tier daily limit card
+    limitCard: {
+      backgroundColor: colors.goldSoft,
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      borderRadius: 14,
+      padding: 16,
+      marginTop: 12,
+      alignItems: 'center',
+    },
+    limitText: {
+      fontFamily: fonts.body,
+      fontSize: 14,
+      color: colors.text,
+      lineHeight: 21,
+      textAlign: 'center',
+      marginBottom: 12,
+    },
+    limitBtn: {
+      backgroundColor: colors.gold,
+      borderRadius: 10,
+      paddingVertical: 11,
+      paddingHorizontal: 28,
+    },
+    limitBtnText: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 13,
+      color: '#1a1612',
+      letterSpacing: 0.4,
     },
 
     // Input bar — pill input + circular gold send button

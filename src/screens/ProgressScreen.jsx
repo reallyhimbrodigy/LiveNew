@@ -506,53 +506,75 @@ export default function ProgressScreen() {
           </View>
         )}
 
-        {/* Weekly outcomes — REAL deltas so the user can feel the app working. */}
-        {outcomes && outcomesSummary ? (
-          <View style={s.outcomesCard}>
-            <View style={s.outcomesHeader}>
-              <IrisSignature />
-              <Text style={s.outcomesHeaderSuffix}>this week vs last</Text>
-            </View>
-            <Text style={s.outcomesSummary}>{outcomesSummary}</Text>
-            <View style={s.outcomesGrid}>
-              {outcomes.stressDelta != null && Math.abs(outcomes.stressDelta) >= 0.3 ? (
-                <View style={s.outcomeStat}>
-                  <Text style={[s.outcomeStatNum, { color: outcomes.stressDelta > 0 ? colors.success : colors.error }]}>
-                    {outcomes.stressDelta > 0 ? `−${outcomes.stressDelta.toFixed(1)}` : `+${Math.abs(outcomes.stressDelta).toFixed(1)}`}
-                  </Text>
-                  <Text style={s.outcomeStatLabel}>stress avg</Text>
+        {/* ── Deep Insights — premium gate ─────────────────────────────────── */}
+        {isPremium ? (
+          <>
+            {/* Weekly outcomes — REAL deltas so the user can feel the app working. */}
+            {outcomes && outcomesSummary ? (
+              <View style={s.outcomesCard}>
+                <View style={s.outcomesHeader}>
+                  <IrisSignature />
+                  <Text style={s.outcomesHeaderSuffix}>this week vs last</Text>
                 </View>
-              ) : null}
-              {outcomes.hasReflectionData ? (
-                <View style={s.outcomeStat}>
-                  <Text style={s.outcomeStatNum}>
-                    {outcomes.recentBetter}<Text style={s.outcomeStatNumDim}>/{outcomes.recentBetter + outcomes.recentHarder || '0'}</Text>
-                  </Text>
-                  <Text style={s.outcomeStatLabel}>"better" days</Text>
+                <Text style={s.outcomesSummary}>{outcomesSummary}</Text>
+                <View style={s.outcomesGrid}>
+                  {outcomes.stressDelta != null && Math.abs(outcomes.stressDelta) >= 0.3 ? (
+                    <View style={s.outcomeStat}>
+                      <Text style={[s.outcomeStatNum, { color: outcomes.stressDelta > 0 ? colors.success : colors.error }]}>
+                        {outcomes.stressDelta > 0 ? `−${outcomes.stressDelta.toFixed(1)}` : `+${Math.abs(outcomes.stressDelta).toFixed(1)}`}
+                      </Text>
+                      <Text style={s.outcomeStatLabel}>stress avg</Text>
+                    </View>
+                  ) : null}
+                  {outcomes.hasReflectionData ? (
+                    <View style={s.outcomeStat}>
+                      <Text style={s.outcomeStatNum}>
+                        {outcomes.recentBetter}<Text style={s.outcomeStatNumDim}>/{outcomes.recentBetter + outcomes.recentHarder || '0'}</Text>
+                      </Text>
+                      <Text style={s.outcomeStatLabel}>"better" days</Text>
+                    </View>
+                  ) : null}
+                  <View style={s.outcomeStat}>
+                    <Text style={s.outcomeStatNum}>{outcomes.daysThisWeek}<Text style={s.outcomeStatNumDim}>/7</Text></Text>
+                    <Text style={s.outcomeStatLabel}>days active</Text>
+                  </View>
                 </View>
-              ) : null}
-              <View style={s.outcomeStat}>
-                <Text style={s.outcomeStatNum}>{outcomes.daysThisWeek}<Text style={s.outcomeStatNumDim}>/7</Text></Text>
-                <Text style={s.outcomeStatLabel}>days active</Text>
               </View>
-            </View>
-          </View>
-        ) : null}
+            ) : null}
 
-        {/* What Iris has noticed — pattern callouts derived from behavior profile */}
-        {patternCallouts.length > 0 && (
-          <View style={s.noticedCard}>
-            <View style={s.noticedHeader}>
-              <IrisSignature />
-              <Text style={s.noticedHeaderSuffix}>noticed</Text>
-            </View>
-            {patternCallouts.map((line, i) => (
-              <View key={i} style={[s.noticedRow, i > 0 && { borderTopWidth: 1, borderTopColor: colors.line, marginTop: 10, paddingTop: 10 }]}>
-                <View style={s.noticedDot} />
-                <Text style={s.noticedText}>{line}</Text>
+            {/* What Iris has noticed — pattern callouts derived from behavior profile */}
+            {patternCallouts.length > 0 && (
+              <View style={s.noticedCard}>
+                <View style={s.noticedHeader}>
+                  <IrisSignature />
+                  <Text style={s.noticedHeaderSuffix}>noticed</Text>
+                </View>
+                {patternCallouts.map((line, i) => (
+                  <View key={i} style={[s.noticedRow, i > 0 && { borderTopWidth: 1, borderTopColor: colors.line, marginTop: 10, paddingTop: 10 }]}>
+                    <View style={s.noticedDot} />
+                    <Text style={s.noticedText}>{line}</Text>
+                  </View>
+                ))}
               </View>
-            ))}
-          </View>
+            )}
+          </>
+        ) : (
+          /* Free users: single locked "Deep insights" card */
+          <Pressable
+            style={({ pressed }) => [s.deepInsightsLockedCard, pressed && { opacity: 0.85 }]}
+            onPress={() => navigation.navigate('Paywall')}
+          >
+            <View style={s.deepInsightsLockRow}>
+              <Text style={s.deepInsightsLockIcon}>🔒</Text>
+              <Text style={s.deepInsightsLockTitle}>Deep insights</Text>
+            </View>
+            <Text style={s.deepInsightsLockBody}>
+              See your weekly trends, patterns Iris spotted, and your stress curve.
+            </Text>
+            <View style={s.deepInsightsUnlockBtn}>
+              <Text style={s.deepInsightsUnlockText}>Unlock with Premium</Text>
+            </View>
+          </Pressable>
         )}
 
         {/* Story card — the main narrative */}
@@ -678,8 +700,8 @@ export default function ProgressScreen() {
           </View>
         )}
 
-        {/* Stress trend chart */}
-        {chartTrend.length > 0 && (
+        {/* Stress trend chart — premium only */}
+        {isPremium && chartTrend.length > 0 && (
           <View style={s.card}>
             <Text style={s.cardTitle}>Stress trend</Text>
             <Text style={s.cardSub}>Last {chartTrend.length} days</Text>
@@ -1337,6 +1359,50 @@ function makeStyles(colors, fonts) {
     chartBar: { width: '80%', borderRadius: 3, minHeight: 6 },
     chartNum: { fontFamily: fonts.body, fontSize: 9, color: colors.dim, marginTop: 4 },
     chartDay: { fontFamily: fonts.body, fontSize: 9, color: colors.dim, marginTop: 1 },
+
+    // Deep Insights locked card (free users)
+    deepInsightsLockedCard: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      borderRadius: 14,
+      padding: 18,
+      marginBottom: 16,
+    },
+    deepInsightsLockRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      marginBottom: 8,
+    },
+    deepInsightsLockIcon: {
+      fontSize: 16,
+    },
+    deepInsightsLockTitle: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 16,
+      color: colors.text,
+      letterSpacing: 0.1,
+    },
+    deepInsightsLockBody: {
+      fontFamily: fonts.body,
+      fontSize: 14,
+      color: colors.muted,
+      lineHeight: 21,
+      marginBottom: 14,
+    },
+    deepInsightsUnlockBtn: {
+      backgroundColor: colors.gold,
+      borderRadius: 10,
+      paddingVertical: 11,
+      alignItems: 'center',
+    },
+    deepInsightsUnlockText: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 13,
+      color: '#1a1612',
+      letterSpacing: 0.4,
+    },
 
     // Empty
     emptyCard: {

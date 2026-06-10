@@ -3,6 +3,7 @@ import {
   RECOMMENDATIONS,
   recById,
   recForToday,
+  todaysScheduleHint,
 } from "../src/domain/recommendations.js";
 
 // ── RECOMMENDATIONS array shape ───────────────────────────────────────────────
@@ -78,5 +79,52 @@ assert.strictEqual(sameDay1.id, sameDay2.id, "recForToday should be stable withi
 const defaultResult = recForToday();
 assert(defaultResult !== undefined, "recForToday() with no args should return a rec");
 assert(typeof defaultResult.id === "string", "recForToday() default result should have an id");
+
+// ── todaysScheduleHint ────────────────────────────────────────────────────────
+
+// Tuesday = day-of-week 2
+const tuesday = new Date("2025-06-10T09:00:00"); // 2025-06-10 is a Tuesday
+
+// No schedule → null
+assert.strictEqual(todaysScheduleHint(null), null, "null schedule returns null");
+assert.strictEqual(todaysScheduleHint(undefined), null, "undefined schedule returns null");
+assert.strictEqual(todaysScheduleHint({}), null, "empty object returns null");
+assert.strictEqual(todaysScheduleHint({ blocks: [] }), null, "empty blocks returns null");
+
+// Block on a different day → null
+const fridayOnlySchedule = { blocks: [{ days: [5], label: "gym" }] };
+assert.strictEqual(todaysScheduleHint(fridayOnlySchedule, tuesday), null, "block on different day returns null");
+
+// Block on Tuesday with known label → hint string
+const gymSchedule = { blocks: [{ days: [2], label: "gym" }] };
+const gymHint = todaysScheduleHint(gymSchedule, tuesday);
+assert.strictEqual(typeof gymHint, "string", "known block returns a string");
+assert(gymHint.length > 0, "hint string is non-empty");
+assert(gymHint.toLowerCase().includes("gym"), "hint includes block label");
+
+// Block on Tuesday with unknown label → null
+const unknownSchedule = { blocks: [{ days: [2], label: "dentist" }] };
+assert.strictEqual(todaysScheduleHint(unknownSchedule, tuesday), null, "unknown block label returns null");
+
+// Block with no label → null
+const noLabelSchedule = { blocks: [{ days: [2], label: "" }] };
+assert.strictEqual(todaysScheduleHint(noLabelSchedule, tuesday), null, "block with empty label returns null");
+
+// Multiple blocks — only one matches → returns hint for matching block
+const mixedSchedule = {
+  blocks: [
+    { days: [5], label: "yoga" },   // Friday
+    { days: [2], label: "work" },   // Tuesday (matches)
+    { days: [2], label: "dentist" }, // Tuesday (unknown)
+  ],
+};
+const mixedHint = todaysScheduleHint(mixedSchedule, tuesday);
+assert(typeof mixedHint === "string" && mixedHint.length > 0, "mixed schedule returns hint for first match");
+assert(mixedHint.toLowerCase().includes("work"), "mixed schedule hint references work block");
+
+// Case-insensitive match: label "GYM" should still match
+const upperSchedule = { blocks: [{ days: [2], label: "GYM" }] };
+const upperHint = todaysScheduleHint(upperSchedule, tuesday);
+assert(typeof upperHint === "string" && upperHint.length > 0, "case-insensitive label match works");
 
 console.log("recs OK");
