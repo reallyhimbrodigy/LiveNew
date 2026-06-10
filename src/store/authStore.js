@@ -802,9 +802,10 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
 
     // Schedule notifications.
-    //   - scheduleCheckInReminders({ hasPlanToday: true }) cancels TODAY's
-    //     remaining check-in nags (user just engaged, no need to nag) and
-    //     reschedules the next 6 days' worth of slots.
+    //   - scheduleCheckInReminders ignores its opts: the daily check-in
+    //     nudges are always-on by design (product decision). Generating a plan
+    //     does NOT suppress today's nudges — we still call it to (re)establish
+    //     the recurring all-day check-in schedule.
     //   - scheduleSessionReminders schedules today's zone notifications
     //     as one-shots — each fires once at its zone time with that
     //     zone's headline, then gone.

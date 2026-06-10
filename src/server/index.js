@@ -63,13 +63,29 @@ let haloStatsCache = { stats: null, computedAt: 0 };
 async function computeHaloStats() {
   // Fetch every (user_id, date_key) row from the checkin table via the
   // service-role client (bypasses RLS; returns all users' data).
-  const { data, error } = await supabaseAdmin()
-    .from("checkin")
-    .select("user_id, date_key")
-    .limit(1000000); // raise PostgREST default 1000-row cap so the aggregate counts all checkins
+  //
+  // PostgREST silently caps result sets at its server `max_rows` (default
+  // 1000) regardless of any `.limit()` we pass, so a single query would
+  // compute rarity from at most 1000 rows. Page through with `.range()` until
+  // a page returns fewer than PAGE rows — correct regardless of max_rows.
+  //
+  // CAVEAT: this counts consecutive `checkin` date_keys per user, which
+  // approximates the client's streak definition but may not exactly equal it
+  // (e.g. the client's logical-day / freeze rules can diverge slightly).
+  const PAGE = 1000;
+  const data = [];
+  for (let offset = 0; ; offset += PAGE) {
+    const { data: page, error } = await supabaseAdmin()
+      .from("checkin")
+      .select("user_id, date_key")
+      .range(offset, offset + PAGE - 1);
+    if (error) throw new Error(`halo-stats checkin query failed: ${error.message}`);
+    if (!Array.isArray(page) || page.length === 0) break;
+    data.push(...page);
+    if (page.length < PAGE) break; // last page
+  }
 
-  if (error) throw new Error(`halo-stats checkin query failed: ${error.message}`);
-  if (!Array.isArray(data) || data.length === 0) return {};
+  if (data.length === 0) return {};
 
   // Group date_keys by user_id.
   const byUser = new Map();
