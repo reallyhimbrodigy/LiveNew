@@ -1175,30 +1175,6 @@ function makeStyles(colors, fonts) {
       letterSpacing: 0.2,
     },
 
-    // Goal
-    goalCard: {
-      backgroundColor: colors.goldSoft,
-      borderWidth: 1,
-      borderColor: colors.goldBorder,
-      borderRadius: 14,
-      padding: 16,
-      marginBottom: 16,
-    },
-    goalLabel: {
-      fontFamily: fonts.displayBold,
-      fontSize: 10,
-      color: colors.gold,
-      letterSpacing: 2,
-      marginBottom: 8,
-    },
-    goalText: {
-      fontFamily: fonts.display,
-      fontSize: 16,
-      color: colors.text,
-      lineHeight: 24,
-      letterSpacing: 0.1,
-    },
-
     // What we've noticed — pattern callouts
     noticedCard: {
       backgroundColor: colors.surface,

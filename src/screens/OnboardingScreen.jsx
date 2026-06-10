@@ -230,10 +230,6 @@ export default function OnboardingScreen() {
       activateProfile();
     } catch (err) {
       clearTimeout(timeoutId);
-      if (err?.code === 'PAYWALL_REQUIRED') {
-        activateProfile();
-        return;
-      }
       // Sleep-window error from authStore (defense in depth — UI already
       // gated above, but if anything sneaks through, treat it as a clean
       // "no plan, go to Today" exit rather than an error.

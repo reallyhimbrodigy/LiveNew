@@ -146,11 +146,6 @@ export default function StressTapScreen({ navigation }) {
         await logout();
         return;
       }
-      if (err.code === 'PAYWALL_REQUIRED') {
-        if (mountedRef.current) setLoading(false);
-        navigation.replace('Paywall');
-        return;
-      }
       // Sleep-window error from authStore.generatePlan (the store has its
       // own gate as last-line defense). Send the user to Today, which
       // shows the sleep card explaining what's happening.

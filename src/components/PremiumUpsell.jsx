@@ -3,6 +3,40 @@ import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useTheme } from '../theme';
 import { useIsPremium } from '../store/authStore';
 
+// View-drawn checkmark — two rotated line Views forming a check, in the gold
+// accent. No emoji, no SVG dependency. Sits in a 16px-wide gutter to match the
+// perk text baseline.
+function CheckIcon({ color }) {
+  return (
+    <View style={{ width: 16, height: 19, marginRight: 8, alignItems: 'center', justifyContent: 'center' }}>
+      <View style={{ width: 11, height: 8, alignItems: 'center', justifyContent: 'center' }}>
+        {/* Short stroke (lower-left) */}
+        <View style={{
+          position: 'absolute',
+          left: 0,
+          bottom: 1,
+          width: 5,
+          height: 2,
+          borderRadius: 1,
+          backgroundColor: color,
+          transform: [{ rotate: '45deg' }],
+        }} />
+        {/* Long stroke (upper-right) */}
+        <View style={{
+          position: 'absolute',
+          right: 0,
+          bottom: 2,
+          width: 9,
+          height: 2,
+          borderRadius: 1,
+          backgroundColor: color,
+          transform: [{ rotate: '-45deg' }],
+        }} />
+      </View>
+    </View>
+  );
+}
+
 // Tasteful gold-accented upsell card shown only to non-premium users.
 // Props:
 //   onPress — navigate to the Paywall (or any upgrade flow)
@@ -30,7 +64,7 @@ export default function PremiumUpsell({ onPress }) {
           'Exclusive Aura halos (coming)',
         ].map((perk, i) => (
           <View key={i} style={s.perkRow}>
-            <Text style={s.perkCheck}>✓</Text>
+            <CheckIcon color={colors.gold} />
             <Text style={s.perkText}>{perk}</Text>
           </View>
         ))}
@@ -60,7 +94,7 @@ function makeStyles(colors, fonts) {
       fontFamily: fonts.displaySemibold,
       fontSize: 10,
       color: colors.gold,
-      letterSpacing: 1.8,
+      letterSpacing: 2.2,
       marginBottom: 8,
     },
     title: {
@@ -84,13 +118,6 @@ function makeStyles(colors, fonts) {
     perkRow: {
       flexDirection: 'row',
       alignItems: 'flex-start',
-    },
-    perkCheck: {
-      color: colors.gold,
-      fontFamily: fonts.displayBold,
-      fontSize: 13,
-      marginRight: 8,
-      width: 16,
     },
     perkText: {
       fontFamily: fonts.body,

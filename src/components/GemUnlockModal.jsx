@@ -163,7 +163,7 @@ function makeStyles(colors, fonts) {
       fontFamily: fonts.displaySemibold,
       fontSize: 10,
       color: colors.gold,
-      letterSpacing: 3,
+      letterSpacing: 2.2,
       marginBottom: 24,
     },
     gemWrap: {

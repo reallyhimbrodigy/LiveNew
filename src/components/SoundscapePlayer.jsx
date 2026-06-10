@@ -34,6 +34,33 @@ function PauseIcon({ color }) {
   );
 }
 
+// View-drawn padlock. A rounded-rect body with a thin arc/shackle above it,
+// the shackle being the top half of a bordered circle clipped by overflow.
+// No emoji, no SVG dependency — matches PlayIcon/PauseIcon.
+function LockIcon({ color }) {
+  return (
+    <View style={{ alignItems: 'center', justifyContent: 'flex-end', width: 12, height: 14 }}>
+      {/* Shackle — top half of a thin ring sitting on the body */}
+      <View style={{ width: 7, height: 4, overflow: 'hidden', alignItems: 'center' }}>
+        <View style={{
+          width: 7,
+          height: 7,
+          borderWidth: 1.2,
+          borderColor: color,
+          borderRadius: 3.5,
+        }} />
+      </View>
+      {/* Body */}
+      <View style={{
+        width: 11,
+        height: 8,
+        borderRadius: 2,
+        backgroundColor: color,
+      }} />
+    </View>
+  );
+}
+
 // Brown noise (first soundscape) is always free. The rest require premium.
 const FREE_SOUNDSCAPE_ID = 'brown';
 
@@ -131,7 +158,7 @@ export default function SoundscapePlayer({ onUpgrade }) {
             {/* Play / pause / lock indicator — 20×20 container keeps alignment stable */}
             <View style={s.iconWrap}>
               {locked
-                ? <Text style={s.lockIcon}>⚿</Text>
+                ? <LockIcon color={colors.muted} />
                 : active
                   ? <PauseIcon color={colors.gold} />
                   : <PlayIcon color={colors.muted} />
@@ -167,7 +194,7 @@ function makeStyles(colors, fonts) {
       fontFamily: fonts.displaySemibold,
       fontSize: 10,
       color: colors.gold,
-      letterSpacing: 1.8,
+      letterSpacing: 2.2,
       marginBottom: 12,
     },
     row: {
@@ -218,10 +245,6 @@ function makeStyles(colors, fonts) {
     },
     rowLocked: {
       opacity: 0.55,
-    },
-    lockIcon: {
-      fontSize: 14,
-      color: colors.muted,
     },
     nameLocked: {
       color: colors.dim,

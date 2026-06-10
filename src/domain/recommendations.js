@@ -93,8 +93,6 @@ export const RECOMMENDATIONS = [
   },
 ];
 
-const _length = RECOMMENDATIONS.length;
-
 /**
  * Look up a recommendation by its id. Returns undefined if not found.
  * @param {string} id

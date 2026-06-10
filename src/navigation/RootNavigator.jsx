@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { View, StyleSheet } from 'react-native';
+import { View } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { useFonts, Lora_400Regular_Italic, Lora_500Medium, Lora_700Bold } from '@expo-google-fonts/lora';
 import {
@@ -133,7 +133,7 @@ function MainTabs() {
 
 function TodayStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: 'transparent' } }}>
       <Stack.Screen name="TodayMain" component={TodayScreen} />
       <Stack.Screen name="Overnight" component={OvernightScreen} />
       <Stack.Screen name="StressTap" component={StressTapScreen} />
@@ -147,7 +147,7 @@ function TodayStack() {
 
 function IntroStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: 'transparent' } }}>
       <Stack.Screen name="IntroMain" component={IntroScreen} />
       <Stack.Screen name="OnboardingFlow" component={OnboardingScreen} />
     </Stack.Navigator>
@@ -159,7 +159,7 @@ function IntroStack() {
 // swaps to Intro or Main and this stack unmounts cleanly.
 function AuthStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false, contentStyle: { backgroundColor: 'transparent' } }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: 'transparent' } }}>
       <Stack.Screen name="AuthMain" component={AuthScreen} />
       <Stack.Screen name="VerifyEmail" component={VerifyEmailScreen} />
     </Stack.Navigator>
@@ -222,7 +222,7 @@ export default function RootNavigator() {
   if (!bootAnimDone) {
     return (
       <BootLoader
-        ready={!isLoading}
+        ready={!isLoading && fontsLoaded}
         onFinish={handleBootFinish}
       />
     );
@@ -266,7 +266,3 @@ export default function RootNavigator() {
     </View>
   );
 }
-
-const styles = StyleSheet.create({
-  // (reserved for future additions)
-});

@@ -71,7 +71,7 @@ function styles(colors, fonts) {
       backgroundColor: colors.surface,
       borderWidth: 1,
       borderColor: colors.goldBorder,
-      borderRadius: 14,
+      borderRadius: 16,
       paddingVertical: 16,
       paddingHorizontal: 18,
     },
@@ -83,7 +83,7 @@ function styles(colors, fonts) {
     },
     eyebrow: {
       fontFamily: fonts.displaySemibold,
-      fontSize: 9,
+      fontSize: 10,
       color: colors.gold,
       letterSpacing: 2.2,
       textTransform: 'uppercase',

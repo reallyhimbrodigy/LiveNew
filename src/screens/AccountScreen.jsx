@@ -880,21 +880,5 @@ function makeStyles(colors, fonts) {
     saveBtnText: { color: '#1a1612', fontFamily: fonts.displaySemibold, fontSize: 16 },
     cancelBtn: { alignItems: 'center', marginTop: 12, padding: 8 },
     cancelText: { color: colors.muted, fontFamily: fonts.body, fontSize: 14 },
-
-    // Goal preset grid
-    goalGrid: { gap: 10 },
-    goalOption: {
-      flexDirection: 'row',
-      alignItems: 'center',
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.line,
-      borderRadius: 14,
-      paddingVertical: 16,
-      paddingHorizontal: 18,
-      gap: 14,
-    },
-    goalEmoji: { fontSize: 22 },
-    goalLabel: { fontFamily: fonts.displaySemibold, fontSize: 16, color: colors.text },
   });
 }
