@@ -126,6 +126,8 @@ export default function TodayScreen({ navigation }) {
   const refreshHealthSnapshot = useAuthStore(s => s.refreshHealthSnapshot);
   const pendingGemUnlock = useAuthStore(s => s.pendingGemUnlock);
   const clearPendingGemUnlock = useAuthStore(s => s.clearPendingGemUnlock);
+  const streakSavedByFreeze = useAuthStore(s => s.streakSavedByFreeze);
+  const clearStreakSavedFlag = useAuthStore(s => s.clearStreakSavedFlag);
 
   const [currentZoneId, setCurrentZoneId] = useState(getCurrentZoneId());
   const [showStressRelief, setShowStressRelief] = useState(false);
@@ -686,6 +688,17 @@ export default function TodayScreen({ navigation }) {
         {/* Daily quote — a calming anchor. Rotates each calendar day. */}
         <DailyQuote style={s.dailyQuoteCard} />
 
+        {/* Streak Freeze saved banner — one-time, gentle, dismissed on tap. */}
+        {streakSavedByFreeze ? (
+          <Pressable
+            style={s.freezeSavedBanner}
+            onPress={() => { tapLight(); clearStreakSavedFlag(); }}
+          >
+            <Text style={s.freezeSavedText}>A Streak Freeze saved your streak.</Text>
+            <Text style={s.freezeSavedDismiss}>Got it</Text>
+          </Pressable>
+        ) : null}
+
         {/* Yesterday's reflection payoff — show that Iris listened. */}
         {yesterdayReflection ? (
           <View style={s.reflectionPayoff}>
@@ -1099,6 +1112,34 @@ function makeStyles(colors, fonts) {
   // Daily quote — calm anchor placed just under the first-read block.
   dailyQuoteCard: {
     marginBottom: 8,
+  },
+
+  // Streak Freeze saved — gentle one-time banner, tappable to dismiss.
+  freezeSavedBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(196,168,108,0.10)',
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    borderRadius: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 12,
+  },
+  freezeSavedText: {
+    fontFamily: fonts.display,
+    fontSize: 14,
+    color: colors.text,
+    flex: 1,
+    letterSpacing: 0.1,
+  },
+  freezeSavedDismiss: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 13,
+    color: colors.gold,
+    marginLeft: 12,
+    letterSpacing: 0.3,
   },
 
   // Connect Apple Health banner

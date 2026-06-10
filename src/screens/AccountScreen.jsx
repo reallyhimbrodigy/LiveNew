@@ -6,7 +6,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore, useIsPremium } from '../store/authStore';
 import { trialDaysRemaining, isWithinTrial } from '../store/authStore';
 import { tapLight, tapSelect, tapMedium } from '../haptics';
 import { Asset } from 'expo-asset';
@@ -40,6 +40,8 @@ export default function AccountScreen({ navigation }) {
   const saveProfile = useAuthStore(s => s.saveProfile);
   const userId = useAuthStore(s => s.userId);
   const streak = useAuthStore(s => s.streak);
+  const streakFreezeReady = useAuthStore(s => s.streakFreezeReady);
+  const isPremium = useIsPremium();
   const healthPermission = useAuthStore(s => s.healthPermission);
   const connectHealth = useAuthStore(s => s.connectHealth);
   const [deleting, setDeleting] = useState(false);
@@ -369,6 +371,30 @@ export default function AccountScreen({ navigation }) {
               </View>
               <Text style={s.streakShareHint}>Tap to share</Text>
             </Pressable>
+          )}
+          {/* Streak Freeze status row — shown for premium users inside the subscription card */}
+          {isPremium ? (
+            <>
+              <View style={s.settingDivider} />
+              <View style={s.freezeRow}>
+                <Text style={s.freezeLabel}>Streak Freeze</Text>
+                <Text style={[s.freezeStatus, streakFreezeReady ? s.freezeStatusReady : s.freezeStatusUsed]}>
+                  {streakFreezeReady ? 'ready' : 'used this week'}
+                </Text>
+              </View>
+            </>
+          ) : (
+            /* Free-user teaser — taps to Paywall */
+            <>
+              <View style={s.settingDivider} />
+              <Pressable
+                style={s.freezeRow}
+                onPress={() => { tapSelect(); navigation.navigate('Paywall'); }}
+              >
+                <Text style={s.freezeLabel}>Streak Freeze</Text>
+                <Text style={s.freezeHint}>Premium  ›</Text>
+              </Pressable>
+            </>
           )}
           {isSubscribed && (
             <>
@@ -761,6 +787,37 @@ function makeStyles(colors, fonts) {
       color: colors.gold,
     },
     streakShareHint: {
+      fontFamily: fonts.body,
+      fontSize: 12,
+      color: colors.muted,
+      letterSpacing: 0.2,
+    },
+    // Streak Freeze row — inside the subscription card
+    freezeRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      paddingHorizontal: 16,
+      paddingVertical: 10,
+    },
+    freezeLabel: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 13,
+      color: colors.text,
+      letterSpacing: 0.1,
+    },
+    freezeStatus: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 12,
+      letterSpacing: 0.5,
+    },
+    freezeStatusReady: {
+      color: colors.gold,
+    },
+    freezeStatusUsed: {
+      color: colors.muted,
+    },
+    freezeHint: {
       fontFamily: fonts.body,
       fontSize: 12,
       color: colors.muted,

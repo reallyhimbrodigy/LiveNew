@@ -21,6 +21,31 @@ export function getYesterdayISO() {
 }
 
 /**
+ * Returns the day before yesterday as YYYY-MM-DD in local timezone.
+ * Used by the streak-freeze resolver to detect a single missed day.
+ */
+export function getDayBeforeYesterdayISO() {
+  const d = new Date();
+  d.setDate(d.getDate() - 2);
+  return getLocalDateISO(d);
+}
+
+/**
+ * Returns the ISO-week identifier for a given date as the Monday date of that
+ * week in 'YYYY-MM-DD' format.  This is the simplest stable per-week string
+ * that requires no locale logic and is easy to compute and compare.
+ * @param {Date} [date]
+ * @returns {string} Monday's 'YYYY-MM-DD' for the week that contains date.
+ */
+export function getWeekIdISO(date) {
+  const d = date ? new Date(date) : new Date();
+  // JS getDay(): 0=Sun, 1=Mon, ..., 6=Sat. Shift so Monday=0.
+  const dayOfWeek = (d.getDay() + 6) % 7; // 0=Mon … 6=Sun
+  d.setDate(d.getDate() - dayOfWeek);
+  return getLocalDateISO(d);
+}
+
+/**
  * The "logical day" the user is currently in for purposes of their plan.
  * Calendar midnight is the wrong boundary — a plan generated at 11pm should
  * still be valid at 2am (the user hasn't slept yet, the day hasn't really

@@ -9,7 +9,8 @@ import {
   clearStaleZoneNotificationsIfNoPlanToday,
   migrateLegacyZoneNotifications,
 } from '../notifications';
-import { getLocalDateISO, getYesterdayISO, getLogicalDateISO, isSleepWindow } from '../utils/localDate';
+import { getLocalDateISO, getYesterdayISO, getDayBeforeYesterdayISO, getWeekIdISO, getLogicalDateISO, isSleepWindow } from '../utils/localDate';
+import { resolveStreakOnLoad } from '../domain/streak.js';
 import { earnedGems } from '../domain/gems.js';
 import {
   isHealthAvailable,
@@ -38,6 +39,12 @@ const onboardedMarkerKey = (userId) => (userId ? `livenew:onboarded:${userId}` :
 // Account-scoped, survives logout (the collection is permanent). Stores the
 // highest streak ever reached + the date each gem was first earned.
 const gemsKey = (userId) => (userId ? `livenew:gems:${userId}` : 'livenew:gems');
+
+// Account-scoped streak-freeze ledger. Stores { lastUsedWeek: '<ISO-week-id>' }
+// where the week id is the Monday date 'YYYY-MM-DD' of that week.
+// Survives logout (like gems) so a re-login doesn't grant a second free save in
+// the same calendar week.  Removed on deleteAccount alongside gems.
+const streakFreezeKey = (userId) => (userId ? `livenew:streakfreeze:${userId}` : null);
 const writeOnboardedMarker = async (userId) => {
   const key = onboardedMarkerKey(userId);
   if (!key) return;
@@ -113,6 +120,8 @@ export const useAuthStore = create((set, get) => ({
   gemEarnedAt: {},     // { [gemId]: 'YYYY-MM-DD' } first-earned dates
   pendingGemUnlock: null, // gemId just crossed this session (for the celebration), else null
   haloStats: null,     // { [day]: pct } live cross-user rarity from /v1/halo-stats, or null
+  streakSavedByFreeze: false, // transient: true if a premium freeze saved the streak this load
+  streakFreezeReady: false,   // transient: true if premium AND freeze not yet used this week
 
   // Hydrate from storage
   hydrate: async () => {
@@ -864,22 +873,53 @@ export const useAuthStore = create((set, get) => ({
   loadStreak: async () => {
     try {
       const raw = await AsyncStorage.getItem('livenew:streak');
-      if (raw) {
-        const data = JSON.parse(raw);
-        const today = getLocalDateISO();
-        const yesterday = getYesterdayISO();
+      const record = raw ? JSON.parse(raw) : null;
 
-        if (data.lastDate === today) {
-          set({ streak: data.count });
-        } else if (data.lastDate === yesterday) {
-          set({ streak: data.count });
-        } else {
-          set({ streak: 0 });
-          await AsyncStorage.setItem('livenew:streak', JSON.stringify({ count: 0, lastDate: null }));
+      const today             = getLocalDateISO();
+      const yesterday         = getYesterdayISO();
+      const dayBeforeYesterday = getDayBeforeYesterdayISO();
+      const currentWeekId     = getWeekIdISO();
+
+      // Compute premium status directly (useIsPremium is a hook — can't call here).
+      const state = get();
+      const isPremiumNow = state.isSubscribed || isWithinTrial(state.trialStartISO);
+
+      // Read the per-account freeze ledger (survives logout, removed on deleteAccount).
+      const userId = state.userId;
+      let lastUsedWeek = null;
+      const fKey = streakFreezeKey(userId);
+      if (fKey) {
+        try {
+          const ledgerRaw = await AsyncStorage.getItem(fKey);
+          if (ledgerRaw) { const ledger = JSON.parse(ledgerRaw); lastUsedWeek = ledger.lastUsedWeek || null; }
+        } catch {}
+      }
+
+      const canFreeze = isPremiumNow && (lastUsedWeek !== currentWeekId);
+      const streakFreezeReady = isPremiumNow && (lastUsedWeek !== currentWeekId);
+
+      const result = resolveStreakOnLoad(record, { today, yesterday, dayBeforeYesterday, canFreeze });
+
+      if (result.freezeConsumed) {
+        // Write the corrected streak record (advance lastDate → yesterday).
+        const correctedRecord = { count: result.count, lastDate: result.lastDate };
+        try { await AsyncStorage.setItem('livenew:streak', JSON.stringify(correctedRecord)); } catch {}
+        // Mark the freeze used for this week.
+        if (fKey) {
+          try { await AsyncStorage.setItem(fKey, JSON.stringify({ lastUsedWeek: currentWeekId })); } catch {}
         }
+        set({ streak: result.count, streakSavedByFreeze: true, streakFreezeReady: false });
+      } else if (result.count === 0 && record && record.lastDate !== null && record.lastDate !== today && record.lastDate !== yesterday) {
+        // Streak broken — persist the reset.
+        try { await AsyncStorage.setItem('livenew:streak', JSON.stringify({ count: 0, lastDate: null })); } catch {}
+        set({ streak: 0, streakSavedByFreeze: false, streakFreezeReady });
+      } else {
+        set({ streak: result.count, streakSavedByFreeze: false, streakFreezeReady });
       }
     } catch {}
   },
+
+  clearStreakSavedFlag: () => set({ streakSavedByFreeze: false }),
 
   loadGems: async () => {
     const userId = get().userId;
@@ -980,6 +1020,8 @@ export const useAuthStore = create((set, get) => ({
       completed: {}, reflection: null, streak: 0,
       healthPermission: 'unknown', healthSnapshot: null,
       maxStreak: 0, gemEarnedAt: {}, pendingGemUnlock: null,
+      // Reset transient freeze flags (the account-scoped ledger key survives logout intentionally)
+      streakSavedByFreeze: false, streakFreezeReady: false,
     });
   },
 
@@ -1006,7 +1048,8 @@ export const useAuthStore = create((set, get) => ({
         `livenew:onboarded:${deletedUserId}`,
         `livenew:seen_first_plan_welcome:${deletedUserId}`,
         gemsKey(deletedUserId),
-      ] : []),
+        streakFreezeKey(deletedUserId),
+      ].filter(Boolean) : []),
     ]);
     try {
       const { clearWidgetPayload } = require('../widgetBridge');
@@ -1028,6 +1071,7 @@ export const useAuthStore = create((set, get) => ({
       completed: {}, reflection: null, streak: 0,
       healthPermission: 'unknown', healthSnapshot: null,
       maxStreak: 0, gemEarnedAt: {}, pendingGemUnlock: null,
+      streakSavedByFreeze: false, streakFreezeReady: false,
     });
   },
 }));
