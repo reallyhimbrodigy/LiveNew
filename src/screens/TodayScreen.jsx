@@ -16,8 +16,6 @@ import GemUnlockModal from '../components/GemUnlockModal';
 import IrisSignature from '../components/IrisSignature';
 import DailyQuote from '../components/DailyQuote';
 import CortisolFact from '../components/CortisolFact';
-import RecommendationCard from '../components/RecommendationCard';
-import SoundscapePlayer from '../components/SoundscapePlayer';
 import StateRing from '../components/StateRing';
 import GradientScreen from '../components/GradientScreen';
 import FlameIcon from '../components/FlameIcon';
@@ -28,6 +26,7 @@ import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import { maybePromptReview } from '../reviewPrompt';
 import { getLocalDateISO, getYesterdayISO, getLogicalDateISO, isSleepWindow } from '../utils/localDate';
 import { computeScore, scoreBand, getCurrentZoneId, ZONE_ORDER, ZONE_LABELS } from '../utils/score';
+import { recForToday, RECOMMENDATIONS } from '../domain/recommendations';
 import { api } from '../api';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -132,9 +131,11 @@ export default function TodayScreen({ navigation }) {
   const [currentZoneId, setCurrentZoneId] = useState(getCurrentZoneId());
   const [showStressRelief, setShowStressRelief] = useState(false);
   const [stressNoted, setStressNoted] = useState(false);
-  const [showAllZones, setShowAllZones] = useState(false);
   const [zoneExpanded, setZoneExpanded] = useState(false);
-  const [openWhy, setOpenWhy] = useState({});
+  // Offset into the recommendation list for the subordinate "ALSO" line
+  // folded into the zone hero. Starts at the day-stable pick; tapping the
+  // line cycles to the next rec.
+  const [recOffset, setRecOffset] = useState(0);
   const [sharing, setSharing] = useState(null); // { type: 'zone'|'streak', payload }
   const [showScoreInfo, setShowScoreInfo] = useState(false);
   const [yesterdayReflection, setYesterdayReflection] = useState(null);
@@ -246,6 +247,14 @@ export default function TodayScreen({ navigation }) {
   const zones = Array.isArray(todayPlan?.zones) ? todayPlan.zones : [];
   const zoneById = zones.reduce((acc, z) => { acc[z.id] = z; return acc; }, {});
   const currentZone = zoneById[currentZoneId] || zones[0] || null;
+
+  // Folded recommendation — the day-stable pick from recForToday(), cycled
+  // forward by recOffset when the user taps the subordinate "ALSO" line in
+  // the zone hero. Indexed off the full RECOMMENDATIONS list so cycling
+  // walks the whole set, not just today's time-of-day bucket.
+  const baseRec = recForToday();
+  const baseRecIndex = Math.max(0, RECOMMENDATIONS.findIndex(r => r.id === baseRec.id));
+  const foldedRec = RECOMMENDATIONS[(baseRecIndex + recOffset) % RECOMMENDATIONS.length];
 
   const goalThread = todayPlan?.goalThread || null;
   const stressRelief = todayPlan?.stressRelief || null;
@@ -592,6 +601,9 @@ export default function TodayScreen({ navigation }) {
               </Pressable>
               <Text style={s.emptyHint}>Or tap "I'm stressed" if you just need a moment.</Text>
               <CortisolFact style={s.emptyFactCard} />
+              {/* Daily quote — moved here from the populated plan. A calm
+                  anchor when there's no plan yet, not clutter on the plan. */}
+              <DailyQuote style={s.emptyQuoteCard} />
             </View>
           )}
         </ScrollView>
@@ -633,13 +645,24 @@ export default function TodayScreen({ navigation }) {
           <View style={{ flex: 1 }}>
             <Text style={s.greetingDay}>{userName ? `Hi, ${userName}.` : dayOfWeek.toLowerCase()}</Text>
             <Text style={s.greetingPart}>{userName ? `${dayOfWeek.toLowerCase()} ${partOfDay}` : partOfDay}</Text>
-            <Pressable
-              onPress={() => { tapLight(); navigation.navigate('Chat'); }}
-              hitSlop={6}
-              style={s.askIris}
-            >
-              <Text style={s.askIrisText}>Ask Iris anything →</Text>
-            </Pressable>
+            <View style={s.headerLinksRow}>
+              <Pressable
+                onPress={() => { tapLight(); navigation.navigate('Chat'); }}
+                hitSlop={6}
+                style={s.askIris}
+              >
+                <Text style={s.askIrisText}>Ask Iris anything →</Text>
+              </Pressable>
+              {/* Secondary surface — soundscapes moved to their own screen.
+                  Subtle gold link, not a card. */}
+              <Pressable
+                onPress={() => { tapLight(); navigation.navigate('Soundscapes'); }}
+                hitSlop={6}
+                style={s.soundsLink}
+              >
+                <Text style={s.soundsLinkText}>Sounds</Text>
+              </Pressable>
+            </View>
           </View>
           {/* Streak chip — only when the number is meaningful. Showing
               "1 DAY" on day one reads as filler, not pride. From day 2 the
@@ -685,9 +708,6 @@ export default function TodayScreen({ navigation }) {
             <Text style={s.firstReadText}>{todayPlan.firstRead}</Text>
           </View>
         ) : null}
-
-        {/* Daily quote — a calming anchor. Rotates each calendar day. */}
-        <DailyQuote style={s.dailyQuoteCard} />
 
         {/* Streak Freeze saved banner — one-time, gentle, dismissed on tap. */}
         {streakSavedByFreeze ? (
@@ -782,24 +802,59 @@ export default function TodayScreen({ navigation }) {
                 {zoneExpanded ? 'Hide' : 'See why'}
               </Text>
             </Pressable>
+
+            {/* Folded recommendation — a SUBORDINATE secondary line, visually
+                quieter than the zone headline so it never competes as a
+                second "do this." Tap to cycle to another rec. */}
+            {foldedRec ? (
+              <Pressable
+                onPress={() => { tapLight(); setRecOffset(o => o + 1); }}
+                hitSlop={8}
+                style={s.zoneAlso}
+                accessibilityRole="button"
+                accessibilityLabel="Another suggestion"
+              >
+                <Text style={s.zoneAlsoEyebrow}>ALSO</Text>
+                <Text style={s.zoneAlsoTitle}>{foldedRec.title}</Text>
+              </Pressable>
+            ) : null}
           </View>
+        )}
+
+        {/* Iris's week + day thread — moved directly under the zone hero
+            as the second-highest-value card. Tappable to continue the
+            conversation in Chat. */}
+        {(goalThread?.weeklyFocus || goalThread?.todayConnection) && (
+          <PressCard
+            style={s.goalCard}
+            onPress={() => { tapLight(); navigation.navigate('Chat'); }}
+          >
+            {goalThread?.weeklyFocus && (
+              <View style={s.goalLine}>
+                <Text style={s.goalLineLabel}>This week's focus</Text>
+                <Text style={s.goalLineValue}>{goalThread.weeklyFocus}</Text>
+              </View>
+            )}
+            {goalThread?.todayConnection && (
+              <View style={[s.goalLine, goalThread?.weeklyFocus && s.goalLineDivider]}>
+                <Text style={s.goalLineLabel}>Today's thread</Text>
+                <Text style={s.goalLineValue}>{goalThread.todayConnection}</Text>
+              </View>
+            )}
+          </PressCard>
         )}
 
         {/* Today's arc — animated timeline. Current dot pulses with a gold
             glow ring; past dots are solid gold; future dots are outlined.
             Line between dots is gold up to the current segment, muted
-            after. The whole card taps to expand all zones below. */}
+            after. Tapping the card now navigates to the full Zones screen. */}
         <Pressable
           style={s.arcCard}
-          onPress={() => {
-            tapLight();
-            LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-            setShowAllZones(v => !v);
-          }}
+          onPress={() => { tapLight(); navigation.navigate('Zones'); }}
         >
           <View style={s.arcHeader}>
             <Text style={s.arcLabel}>TODAY'S ARC</Text>
-            <Text style={s.arcChevron}>{showAllZones ? '▾' : '▸'}</Text>
+            <Text style={s.arcChevron}>{'›'}</Text>
           </View>
           <View style={s.arcRow}>
             {ZONE_ORDER.map((zid, i) => {
@@ -824,61 +879,6 @@ export default function TodayScreen({ navigation }) {
           </View>
           <Text style={s.arcCurrent}>{ZONE_LABELS[currentZoneId]}</Text>
         </Pressable>
-
-        {showAllZones && (
-          <View style={s.allZones}>
-            {ZONE_ORDER.map((zid) => {
-              const z = zoneById[zid];
-              if (!z) return null;
-              const isCurrent = zid === currentZoneId;
-              const whyOpen = !!openWhy[zid];
-              return (
-                <View key={zid} style={[s.zoneListItem, isCurrent && s.zoneListItemCurrent]}>
-                  <Text style={s.zoneListLabel}>{ZONE_LABELS[zid]}</Text>
-                  <Text style={s.zoneListHeadline}>{z.headline}</Text>
-                  {whyOpen ? (
-                    <Text style={s.zoneListBody}>{z.body}</Text>
-                  ) : null}
-                  <Pressable
-                    onPress={() => {
-                      tapLight();
-                      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
-                      setOpenWhy(prev => ({ ...prev, [zid]: !prev[zid] }));
-                    }}
-                    hitSlop={10}
-                    style={s.zoneWhyBtn}
-                    accessibilityRole="button"
-                    accessibilityLabel={whyOpen ? 'Hide why' : 'See why'}
-                  >
-                    <Text style={s.zoneWhyText}>{whyOpen ? 'Hide' : 'See why'}</Text>
-                  </Pressable>
-                </View>
-              );
-            })}
-          </View>
-        )}
-
-        {/* Iris's week + day thread — tappable to continue the conversation
-            in Chat. Every thread begs a follow-up; one tap gets you there. */}
-        {(goalThread?.weeklyFocus || goalThread?.todayConnection) && (
-          <PressCard
-            style={s.goalCard}
-            onPress={() => { tapLight(); navigation.navigate('Chat'); }}
-          >
-            {goalThread?.weeklyFocus && (
-              <View style={s.goalLine}>
-                <Text style={s.goalLineLabel}>This week's focus</Text>
-                <Text style={s.goalLineValue}>{goalThread.weeklyFocus}</Text>
-              </View>
-            )}
-            {goalThread?.todayConnection && (
-              <View style={[s.goalLine, goalThread?.weeklyFocus && s.goalLineDivider]}>
-                <Text style={s.goalLineLabel}>Today's thread</Text>
-                <Text style={s.goalLineValue}>{goalThread.todayConnection}</Text>
-              </View>
-            )}
-          </PressCard>
-        )}
 
         {/* Evening reflection */}
         {showEveningReflection && (
@@ -914,15 +914,6 @@ export default function TodayScreen({ navigation }) {
             <Text style={s.stressNotedText}>Noted. Tomorrow's plan accounts for this.</Text>
           </View>
         )}
-
-        {/* One more thing for today — a time-of-day-aware action Iris surfaces
-            beyond the plan. Day-stable; changes once per calendar day. */}
-        <RecommendationCard style={s.recCard} />
-
-        {/* Soundscape player — ambient audio to settle the nervous system.
-            Sits at the bottom of the populated plan as a "settle the system"
-            moment; looping brown noise, rain, pink noise, or stillness. */}
-        <SoundscapePlayer style={s.soundscapeCard} onUpgrade={() => navigation.navigate('Paywall')} />
       </ScrollView>
 
       {/* Sticky stress button + relief modal — defined once above, reused
@@ -1072,12 +1063,26 @@ function makeStyles(colors, fonts) {
     paddingHorizontal: 24,
     lineHeight: 20,
   },
-  askIris: {
+  headerLinksRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginTop: 8,
-    alignSelf: 'flex-start',
+    gap: 16,
+  },
+  askIris: {
     paddingVertical: 4,
   },
   askIrisText: {
+    fontFamily: fonts.italic,
+    fontSize: 13,
+    color: colors.gold,
+    letterSpacing: 0.3,
+  },
+  // Sounds link — subtle secondary entry point to the Soundscapes screen.
+  soundsLink: {
+    paddingVertical: 4,
+  },
+  soundsLinkText: {
     fontFamily: fonts.italic,
     fontSize: 13,
     color: colors.gold,
@@ -1131,9 +1136,10 @@ function makeStyles(colors, fonts) {
   },
   redoIcon: { color: colors.muted, fontSize: 18, lineHeight: 22 },
 
-  // Daily quote — calm anchor placed just under the first-read block.
-  dailyQuoteCard: {
-    marginBottom: 8,
+  // Daily quote — calm anchor on the empty/no-plan state, below the fact card.
+  emptyQuoteCard: {
+    marginTop: 16,
+    alignSelf: 'stretch',
   },
 
   // Streak Freeze saved — gentle one-time banner, tappable to dismiss.
@@ -1362,6 +1368,29 @@ function makeStyles(colors, fonts) {
     letterSpacing: 0.6,
     textAlign: 'center',
   },
+  // Folded recommendation — a subordinate "ALSO" line inside the zone hero.
+  // Quieter than the headline: small muted eyebrow + a smaller, muted title
+  // so it reads as a secondary suggestion, not a competing call to action.
+  zoneAlso: {
+    marginTop: 14,
+    paddingTop: 12,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.line,
+  },
+  zoneAlsoEyebrow: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 9,
+    color: colors.dim,
+    letterSpacing: 1.8,
+    marginBottom: 4,
+  },
+  zoneAlsoTitle: {
+    fontFamily: fonts.italic,
+    fontSize: 14,
+    color: colors.muted,
+    lineHeight: 20,
+    letterSpacing: 0.1,
+  },
   shareCardHidden: {
     position: 'absolute',
     top: -10000,
@@ -1427,57 +1456,6 @@ function makeStyles(colors, fonts) {
     marginTop: 4,
   },
 
-  // All zones (expanded)
-  allZones: { gap: 10, marginBottom: 16 },
-  zoneListItem: {
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 12,
-    padding: 14,
-  },
-  zoneListItemCurrent: {
-    borderColor: colors.goldBorder,
-    backgroundColor: 'rgba(196,168,108,0.06)',
-  },
-  zoneListLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: colors.gold,
-    letterSpacing: 1.4,
-    marginBottom: 6,
-  },
-  zoneListHeadline: {
-    fontFamily: fonts.display,
-    fontSize: 16,
-    color: colors.text,
-    marginBottom: 6,
-    lineHeight: 22,
-  },
-  zoneListBody: {
-    fontFamily: fonts.display,
-    fontSize: 13,
-    color: colors.muted,
-    lineHeight: 20,
-    marginBottom: 6,
-  },
-  // Per-zone "See why" toggle — gold italic, matches the hero's See-why link
-  zoneWhyBtn: {
-    alignSelf: 'flex-start',
-    paddingTop: 4,
-    paddingBottom: 2,
-    paddingHorizontal: 0,
-    minHeight: 44,
-    justifyContent: 'center',
-  },
-  zoneWhyText: {
-    fontFamily: fonts.italic,
-    fontSize: 13,
-    color: colors.gold,
-    letterSpacing: 0.4,
-  },
-
-
   // Goal thread card
   goalCard: {
     backgroundColor: colors.surface,
@@ -1542,16 +1520,6 @@ function makeStyles(colors, fonts) {
   },
   stressNotedCard: { paddingVertical: 12, alignItems: 'center', marginTop: 12 },
   stressNotedText: { color: colors.muted, fontSize: 13, fontStyle: 'italic' },
-
-  // Recommendation card — "one more thing for today", after plan content
-  recCard: {
-    marginTop: 20,
-  },
-
-  // Soundscape player — ambient audio card below the recommendation card.
-  soundscapeCard: {
-    marginTop: 16,
-  },
 
   // Sticky stress button — pill-shaped, centered, gold-soft fill, breathing dot
   stressBtnSticky: {
