@@ -134,6 +134,7 @@ export default function TodayScreen({ navigation }) {
   const [stressNoted, setStressNoted] = useState(false);
   const [showAllZones, setShowAllZones] = useState(false);
   const [zoneExpanded, setZoneExpanded] = useState(false);
+  const [openWhy, setOpenWhy] = useState({});
   const [sharing, setSharing] = useState(null); // { type: 'zone'|'streak', payload }
   const [showScoreInfo, setShowScoreInfo] = useState(false);
   const [yesterdayReflection, setYesterdayReflection] = useState(null);
@@ -762,10 +763,9 @@ export default function TodayScreen({ navigation }) {
               <Text style={s.zoneBody}>{currentZone.body}</Text>
             ) : null}
 
-            {/* Single elegant Show more / Show less link — centered, gold
-                italic. Replaces the previous cluttered Listen + Share +
-                Read more button row. The hairline divider above gives it
-                weight without competing visually with the headline. */}
+            {/* See why / Hide — reveals the zone body (the "why" reasoning)
+                on demand. Concise by default, depth on tap. Gold italic to
+                match the gold-link language used throughout the screen. */}
             <View style={s.zoneFooterDivider} />
             <Pressable
               onPress={() => {
@@ -775,9 +775,11 @@ export default function TodayScreen({ navigation }) {
               }}
               hitSlop={12}
               style={s.zoneShowMore}
+              accessibilityRole="button"
+              accessibilityLabel={zoneExpanded ? 'Hide why' : 'See why'}
             >
               <Text style={s.zoneShowMoreText}>
-                {zoneExpanded ? 'Show less' : 'Show more'}
+                {zoneExpanded ? 'Hide' : 'See why'}
               </Text>
             </Pressable>
           </View>
@@ -829,20 +831,40 @@ export default function TodayScreen({ navigation }) {
               const z = zoneById[zid];
               if (!z) return null;
               const isCurrent = zid === currentZoneId;
+              const whyOpen = !!openWhy[zid];
               return (
                 <View key={zid} style={[s.zoneListItem, isCurrent && s.zoneListItemCurrent]}>
                   <Text style={s.zoneListLabel}>{ZONE_LABELS[zid]}</Text>
                   <Text style={s.zoneListHeadline}>{z.headline}</Text>
-                  <Text style={s.zoneListBody}>{z.body}</Text>
+                  {whyOpen ? (
+                    <Text style={s.zoneListBody}>{z.body}</Text>
+                  ) : null}
+                  <Pressable
+                    onPress={() => {
+                      tapLight();
+                      LayoutAnimation.configureNext(LayoutAnimation.Presets.easeInEaseOut);
+                      setOpenWhy(prev => ({ ...prev, [zid]: !prev[zid] }));
+                    }}
+                    hitSlop={10}
+                    style={s.zoneWhyBtn}
+                    accessibilityRole="button"
+                    accessibilityLabel={whyOpen ? 'Hide why' : 'See why'}
+                  >
+                    <Text style={s.zoneWhyText}>{whyOpen ? 'Hide' : 'See why'}</Text>
+                  </Pressable>
                 </View>
               );
             })}
           </View>
         )}
 
-        {/* Iris's week + day thread — what she's narratively working toward */}
+        {/* Iris's week + day thread — tappable to continue the conversation
+            in Chat. Every thread begs a follow-up; one tap gets you there. */}
         {(goalThread?.weeklyFocus || goalThread?.todayConnection) && (
-          <View style={s.goalCard}>
+          <PressCard
+            style={s.goalCard}
+            onPress={() => { tapLight(); navigation.navigate('Chat'); }}
+          >
             {goalThread?.weeklyFocus && (
               <View style={s.goalLine}>
                 <Text style={s.goalLineLabel}>This week's focus</Text>
@@ -855,7 +877,7 @@ export default function TodayScreen({ navigation }) {
                 <Text style={s.goalLineValue}>{goalThread.todayConnection}</Text>
               </View>
             )}
-          </View>
+          </PressCard>
         )}
 
         {/* Evening reflection */}
@@ -1437,6 +1459,22 @@ function makeStyles(colors, fonts) {
     fontSize: 13,
     color: colors.muted,
     lineHeight: 20,
+    marginBottom: 6,
+  },
+  // Per-zone "See why" toggle — gold italic, matches the hero's See-why link
+  zoneWhyBtn: {
+    alignSelf: 'flex-start',
+    paddingTop: 4,
+    paddingBottom: 2,
+    paddingHorizontal: 0,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  zoneWhyText: {
+    fontFamily: fonts.italic,
+    fontSize: 13,
+    color: colors.gold,
+    letterSpacing: 0.4,
   },
 
 
