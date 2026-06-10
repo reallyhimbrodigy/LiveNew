@@ -769,6 +769,7 @@ export const useAuthStore = create((set, get) => ({
       date: today,
       contract: data,     // { zones, goalThread, stressRelief, eveningPrompt }
       stress: stressValue,
+      stressLabel,        // persist the label so hydrate restores todayStressLabel after a cold boot (otherwise computeScore takes a degraded branch)
       sleepQuality,
       energy,
       completed: {},
@@ -833,13 +834,17 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
     // Report completion to server so progress tracking works
     try {
-      const planItems = get().todayPlan?.plan || [];
-      const item = planItems[index];
+      // Current schema is todayPlan.zones (not .plan). markDone's `index` is
+      // the position of the acknowledged zone in that array; each zone carries
+      // a `type` (intervention type) and an `id` (zone slot). Report the real
+      // intervention type so completion tracking isn't always 'unknown'.
+      const zones = get().todayPlan?.zones || [];
+      const item = zones[index];
       api.feedback({
         type: 'item_completed',
         dateISO: getLocalDateISO(),
         sessionIndex: index,
-        interventionType: item?.type || 'unknown',
+        interventionType: item?.type || item?.id || 'unknown',
       }).catch(() => {});
     } catch {}
   },
@@ -882,7 +887,16 @@ export const useAuthStore = create((set, get) => ({
 
       // Compute premium status directly (useIsPremium is a hook — can't call here).
       const state = get();
-      const isPremiumNow = state.isSubscribed || isWithinTrial(state.trialStartISO);
+      // Resolve the REAL trial start. loadStreak runs during hydrate BEFORE
+      // ensureTrialStart populates state.trialStartISO, so it's still null here.
+      // isWithinTrial(null) returns true (full window), which would make every
+      // user — including free / expired-trial ones — appear premium and bypass
+      // the streak-freeze gate. Read the persisted value directly to be correct.
+      let trialStartISO = state.trialStartISO;
+      if (!trialStartISO) {
+        try { trialStartISO = await AsyncStorage.getItem('livenew:trial_start'); } catch {}
+      }
+      const isPremiumNow = state.isSubscribed || isWithinTrial(trialStartISO);
 
       // Read the per-account freeze ledger (survives logout, removed on deleteAccount).
       const userId = state.userId;
@@ -999,6 +1013,10 @@ export const useAuthStore = create((set, get) => ({
       'livenew:health_permission_status', 'livenew:review_prompted',
       'livenew:streak_risk_dismissed', 'livenew:live_activity_id',
       'livenew:seen_first_plan_welcome', 'livenew:seen_tts_hint',
+      // Trial + skip state are device-local and NOT account-scoped — clear them
+      // so a second account signing in on this device doesn't inherit the first
+      // user's (possibly expired) trial window or stale "skipped today" flag.
+      'livenew:trial_start', SKIPPED_KEY,
     ]);
     try {
       const { clearWidgetPayload } = require('../widgetBridge');
@@ -1014,7 +1032,7 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
-      userName: null, userId: null,
+      userName: null, userId: null, trialStartISO: null, skippedDate: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
       todaySleep: null, todayEnergy: null, isSubscribed: false,
       completed: {}, reflection: null, streak: 0,
@@ -1044,6 +1062,8 @@ export const useAuthStore = create((set, get) => ({
       'livenew:health_permission_status', 'livenew:review_prompted',
       'livenew:streak_risk_dismissed', 'livenew:live_activity_id',
       'livenew:seen_first_plan_welcome', 'livenew:seen_tts_hint',
+      // Device-local trial + skip state (see logout for rationale).
+      'livenew:trial_start', SKIPPED_KEY,
       ...(deletedUserId ? [
         `livenew:onboarded:${deletedUserId}`,
         `livenew:seen_first_plan_welcome:${deletedUserId}`,
@@ -1065,7 +1085,7 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
-      userName: null,
+      userName: null, userId: null, trialStartISO: null, skippedDate: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
       todaySleep: null, todayEnergy: null, isSubscribed: false,
       completed: {}, reflection: null, streak: 0,

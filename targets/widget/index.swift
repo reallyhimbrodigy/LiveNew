@@ -373,22 +373,74 @@ struct LockInlineView: View {
     }
 }
 
+// MARK: - HOME SCREEN — shared building blocks
+//
+// The warm gold-on-dark gradient "wave" — deep warm charcoal → near-black,
+// diagonal — that backs both home sizes. Pulled into one place so the two
+// views stay visually identical.
+private var homeBackgroundGradient: LinearGradient {
+    LinearGradient(
+        gradient: Gradient(colors: [
+            Color(red: 0.105, green: 0.086, blue: 0.052),
+            Color(red: 0.059, green: 0.051, blue: 0.039),
+        ]),
+        startPoint: .topLeading,
+        endPoint: .bottomTrailing
+    )
+}
+
+// A mini analog of the app's StateRing: a gold progress arc tracking the
+// day's score, with the score number centered inside. The track is the
+// warm foreground at low opacity so the arc reads against it.
+private struct ScoreRing: View {
+    let score: Int
+    let diameter: CGFloat
+    let lineWidth: CGFloat
+    let numberSize: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .stroke(
+                    Color("widgetForeground").opacity(0.15),
+                    lineWidth: lineWidth
+                )
+            Circle()
+                .trim(from: 0, to: CGFloat(min(max(score, 0), 100)) / 100.0)
+                .stroke(
+                    Color("$accent"),
+                    style: StrokeStyle(lineWidth: lineWidth, lineCap: .round)
+                )
+                .rotationEffect(.degrees(-90))
+            Text("\(score)")
+                .font(.system(size: numberSize, weight: .bold))
+                .foregroundColor(Color("widgetForeground"))
+                .minimumScaleFactor(0.6)
+                .lineLimit(1)
+        }
+        .frame(width: diameter, height: diameter)
+    }
+}
+
 // MARK: - HOME SCREEN — small
 struct HomeSmallView: View {
     let entry: DayEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
                 Text("LIVENEW")
                     .font(.system(size: 9, weight: .bold))
                     .tracking(2.4)
                     .foregroundColor(Color("$accent"))
                 Spacer()
                 if entry.isToday, let p = entry.payload {
-                    Text("\(p.score)")
-                        .font(.system(size: 18, weight: .bold))
-                        .foregroundColor(Color("widgetForeground"))
+                    ScoreRing(
+                        score: p.score,
+                        diameter: 40,
+                        lineWidth: 4,
+                        numberSize: 15
+                    )
                 }
             }
             Spacer(minLength: 0)
@@ -396,11 +448,11 @@ struct HomeSmallView: View {
                 Text(displayLabel(slot))
                     .font(.system(size: 9, weight: .bold))
                     .tracking(1.8)
-                    .foregroundColor(Color("widgetForeground").opacity(0.5))
+                    .foregroundColor(Color("$accent"))
                 Text(slot.headline)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundColor(Color("widgetForeground"))
-                    .lineLimit(4)
+                    .lineLimit(3)
                     .multilineTextAlignment(.leading)
             } else {
                 Text("Open LiveNew to start your day.")
@@ -408,21 +460,8 @@ struct HomeSmallView: View {
                     .foregroundColor(Color("widgetForeground").opacity(0.6))
             }
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 4)
-        .containerBackground(for: .widget) {
-            // Warm gold-on-dark gradient "wave" — matches the app's modernized
-            // look (deep warm charcoal → near-black, diagonal). Replaces the
-            // prior flat fill so the home widgets read as premium, not plain.
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(red: 0.105, green: 0.086, blue: 0.052),
-                    Color(red: 0.059, green: 0.051, blue: 0.039),
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
+        .padding(14)
+        .containerBackground(for: .widget) { homeBackgroundGradient }
     }
 }
 
@@ -431,57 +470,62 @@ struct HomeMediumView: View {
     let entry: DayEntry
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        // The medium size earns itself: ring on the left, and on the right
+        // both the CURRENT zone (label + headline) AND the NEXT zone with its
+        // start time — a small look-ahead the small widget can't fit.
+        HStack(spacing: 16) {
+            if entry.isToday, let p = entry.payload {
+                ScoreRing(
+                    score: p.score,
+                    diameter: 76,
+                    lineWidth: 7,
+                    numberSize: 28
+                )
+            }
+            VStack(alignment: .leading, spacing: 6) {
                 Text("LIVENEW")
-                    .font(.system(size: 10, weight: .bold))
+                    .font(.system(size: 9, weight: .bold))
                     .tracking(3)
                     .foregroundColor(Color("$accent"))
-                Spacer()
-                if entry.isToday, let p = entry.payload {
-                    HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("\(p.score)")
-                            .font(.system(size: 22, weight: .bold))
-                            .foregroundColor(Color("$accent"))
-                        Text("SCORE")
-                            .font(.system(size: 8, weight: .bold))
-                            .tracking(1.4)
-                            .foregroundColor(Color("widgetForeground").opacity(0.5))
+
+                if entry.isToday, let slot = entry.activeSlot {
+                    Text(displayLabel(slot))
+                        .font(.system(size: 9, weight: .bold))
+                        .tracking(2)
+                        .foregroundColor(Color("$accent"))
+                    Text(slot.headline)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundColor(Color("widgetForeground"))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+
+                    if let zones = entry.payload?.zones,
+                       let next = nextSlotFireDate(after: entry.date, in: zones) {
+                        Spacer(minLength: 0)
+                        HStack(spacing: 5) {
+                            Text("NEXT")
+                                .font(.system(size: 8, weight: .bold))
+                                .tracking(1.4)
+                                .foregroundColor(Color("widgetForeground").opacity(0.45))
+                            Text("\(next.slot.label) · \(formatHour(next.slot.startHour))")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(Color("widgetForeground").opacity(0.75))
+                                .lineLimit(1)
+                                .minimumScaleFactor(0.8)
+                        }
                     }
+                } else {
+                    Spacer(minLength: 0)
+                    Text("Open LiveNew to start your day.")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(Color("widgetForeground").opacity(0.6))
                 }
+                Spacer(minLength: 0)
             }
-            Spacer(minLength: 0)
-            if entry.isToday, let slot = entry.activeSlot {
-                Text(displayLabel(slot))
-                    .font(.system(size: 9, weight: .bold))
-                    .tracking(2)
-                    .foregroundColor(Color("$accent"))
-                Text(slot.headline)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(Color("widgetForeground"))
-                    .lineLimit(3)
-                    .multilineTextAlignment(.leading)
-            } else {
-                Text("Open LiveNew to start your day.")
-                    .font(.system(size: 13, weight: .regular))
-                    .foregroundColor(Color("widgetForeground").opacity(0.6))
-            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 4)
-        .padding(.vertical, 4)
-        .containerBackground(for: .widget) {
-            // Warm gold-on-dark gradient "wave" — matches the app's modernized
-            // look (deep warm charcoal → near-black, diagonal). Replaces the
-            // prior flat fill so the home widgets read as premium, not plain.
-            LinearGradient(
-                gradient: Gradient(colors: [
-                    Color(red: 0.105, green: 0.086, blue: 0.052),
-                    Color(red: 0.059, green: 0.051, blue: 0.039),
-                ]),
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        }
+        .padding(16)
+        .containerBackground(for: .widget) { homeBackgroundGradient }
     }
 }
 
