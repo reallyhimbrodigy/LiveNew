@@ -1,14 +1,15 @@
 import React, { useEffect, useState, useMemo, useCallback } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../theme';
 import IrisSignature from '../components/IrisSignature';
 import Halo from '../components/Halo';
+import AuraHalo from '../components/AuraHalo';
 import StandingCard from '../components/StandingCard';
 import { api } from '../api';
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore, useIsPremium } from '../store/authStore';
 import {
   GEMS,
   earnedGems,
@@ -19,6 +20,7 @@ import {
   rarityPctFor,
   formatRarity,
 } from '../domain/gems';
+import { AURAS, isAuraEarned } from '../domain/auras';
 
 const PROGRESS_CACHE_KEY = 'livenew:progress_cache_v1';
 
@@ -37,12 +39,15 @@ function formatGemDate(iso) {
 export default function ProgressScreen() {
   const { colors, fonts } = useTheme();
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
+  const navigation = useNavigation();
+  const isPremium = useIsPremium();
 
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [errorDetail, setErrorDetail] = useState('');
   const [selectedGem, setSelectedGem] = useState(null);
+  const [selectedAura, setSelectedAura] = useState(null);
   const streak = useAuthStore(s => s.streak);
   const maxStreak = useAuthStore(s => s.maxStreak);
   const gemEarnedAt = useAuthStore(s => s.gemEarnedAt);
@@ -171,6 +176,13 @@ export default function ProgressScreen() {
   const earnedCount = earnedGems(maxStreak).length;
   const gemNext = nextGem(maxStreak);
   const { daysToGo, fraction } = gemProgress(streak, maxStreak);
+
+  // Auras context — premium-gated collectible tier
+  const allHalosEarned = earnedGems(maxStreak).length === GEMS.length;
+  const auraCtx = useMemo(
+    () => ({ isPremium, maxStreak, allHalosEarned }),
+    [isPremium, maxStreak, allHalosEarned]
+  );
 
   // Week-over-week outcomes — REAL deltas the user can screenshot.
   // Without this, the user has to trust on faith that the app is working.
@@ -350,6 +362,131 @@ export default function ProgressScreen() {
                 <Pressable
                   style={({ pressed }) => [s.gemModalClose, pressed && { opacity: 0.85 }]}
                   onPress={() => setSelectedGem(null)}
+                >
+                  <Text style={s.gemModalCloseText}>Close</Text>
+                </Pressable>
+              </Pressable>
+            </Pressable>
+          </Modal>
+        )}
+
+        {/* ── Auras — premium-exclusive iridescent collectible tier ────────── */}
+        <View style={s.aurasCard}>
+          {/* Header */}
+          <View style={s.aurasHeaderRow}>
+            <View style={s.aurasHeaderLeft}>
+              <Text style={s.aurasTitle}>Auras</Text>
+              <View style={s.premiumBadge}>
+                <Text style={s.premiumBadgeText}>PREMIUM</Text>
+              </View>
+            </View>
+          </View>
+
+          {/* Tagline */}
+          <Text style={s.aurasTagline}>
+            {isPremium
+              ? 'Exclusive auras — alive, iridescent, yours.'
+              : 'Premium-only. The rarest things you can hold.'}
+          </Text>
+
+          {/* Aura grid */}
+          <View style={s.aurasGrid}>
+            {AURAS.map((a) => {
+              const earned = isAuraEarned(a.id, auraCtx);
+              return (
+                <View key={a.id} style={s.auraCell}>
+                  <AuraHalo
+                    aura={a}
+                    earned={earned}
+                    size={64}
+                    onPress={() => {
+                      if (!isPremium) {
+                        navigation.navigate('Paywall');
+                      } else {
+                        setSelectedAura(a);
+                      }
+                    }}
+                  />
+                  <Text style={[s.auraCellName, !earned && { color: colors.dim }]}>
+                    {a.name}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
+
+          {/* Non-premium CTA */}
+          {!isPremium && (
+            <Pressable
+              style={({ pressed }) => [s.aurasUnlockBtn, pressed && { opacity: 0.85 }]}
+              onPress={() => navigation.navigate('Paywall')}
+            >
+              <Text style={s.aurasUnlockText}>Unlock Auras</Text>
+            </Pressable>
+          )}
+        </View>
+
+        {/* Aura detail modal */}
+        {selectedAura !== null && (
+          <Modal
+            visible={selectedAura !== null}
+            transparent
+            animationType="fade"
+            onRequestClose={() => setSelectedAura(null)}
+          >
+            <Pressable
+              style={s.gemModalOverlay}
+              onPress={() => setSelectedAura(null)}
+            >
+              <Pressable style={s.auraModalCard} onPress={() => {}}>
+                {/* Large aura halo */}
+                <View style={s.gemModalGemWrap}>
+                  <AuraHalo
+                    aura={selectedAura}
+                    earned={isAuraEarned(selectedAura.id, auraCtx)}
+                    size={150}
+                  />
+                </View>
+
+                {/* Name */}
+                <Text style={s.gemModalName}>{selectedAura.name}</Text>
+
+                {/* Tier badge */}
+                <View style={s.auraModalTierBadge}>
+                  <Text style={s.auraModalTierText}>PREMIUM AURA</Text>
+                </View>
+
+                {/* Condition */}
+                <Text style={s.auraModalCondition}>{selectedAura.condition}</Text>
+
+                {/* Description */}
+                <Text style={s.gemModalFlavor}>{selectedAura.description}</Text>
+
+                {/* Status */}
+                {isAuraEarned(selectedAura.id, auraCtx) ? (
+                  <Text style={[s.gemModalStatus, { color: selectedAura.palette[2] }]}>
+                    Earned
+                  </Text>
+                ) : isPremium ? (
+                  <Text style={s.gemModalStatus}>
+                    {selectedAura.condition}
+                  </Text>
+                ) : (
+                  <>
+                    <Text style={s.gemModalStatus}>Premium — unlock to earn.</Text>
+                    <Pressable
+                      style={({ pressed }) => [s.auraPaywallBtn, pressed && { opacity: 0.85 }]}
+                      onPress={() => { setSelectedAura(null); navigation.navigate('Paywall'); }}
+                    >
+                      <Text style={s.auraPaywallBtnText}>Go Premium</Text>
+                    </Pressable>
+                  </>
+                )}
+
+                {/* Close */}
+                <Pressable
+                  style={({ pressed }) => [s.gemModalClose, { marginTop: 16 }, pressed && { opacity: 0.85 }]}
+                  onPress={() => setSelectedAura(null)}
                 >
                   <Text style={s.gemModalCloseText}>Close</Text>
                 </Pressable>
@@ -785,6 +922,137 @@ function makeStyles(colors, fonts) {
       fontFamily: fonts.displaySemibold,
       fontSize: 14,
       color: '#1a1612',
+      letterSpacing: 0.4,
+    },
+
+    // Auras section
+    aurasCard: {
+      backgroundColor: 'rgba(130,80,180,0.06)',
+      borderWidth: 1,
+      borderColor: 'rgba(180,140,220,0.22)',
+      borderRadius: 16,
+      padding: 18,
+      marginBottom: 16,
+    },
+    aurasHeaderRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 8,
+    },
+    aurasHeaderLeft: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    aurasTitle: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 16,
+      color: colors.text,
+      letterSpacing: 0.1,
+    },
+    premiumBadge: {
+      backgroundColor: 'rgba(160,100,220,0.18)',
+      borderRadius: 5,
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderWidth: 0.8,
+      borderColor: 'rgba(180,130,240,0.35)',
+    },
+    premiumBadgeText: {
+      fontFamily: fonts.displayBold,
+      fontSize: 9,
+      color: '#c890f0',
+      letterSpacing: 1.1,
+    },
+    aurasTagline: {
+      fontFamily: fonts.italic,
+      fontSize: 13,
+      color: colors.muted,
+      marginBottom: 16,
+      letterSpacing: 0.1,
+      lineHeight: 19,
+    },
+    aurasGrid: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      marginHorizontal: -6,
+    },
+    auraCell: {
+      width: '20%',
+      alignItems: 'center',
+      paddingHorizontal: 2,
+      paddingVertical: 8,
+    },
+    auraCellName: {
+      fontFamily: fonts.body,
+      fontSize: 8,
+      color: colors.text,
+      textAlign: 'center',
+      marginTop: 5,
+      letterSpacing: 0.2,
+    },
+    aurasUnlockBtn: {
+      marginTop: 14,
+      backgroundColor: 'rgba(160,100,220,0.15)',
+      borderRadius: 10,
+      paddingVertical: 11,
+      alignItems: 'center',
+      borderWidth: 0.8,
+      borderColor: 'rgba(180,130,240,0.3)',
+    },
+    aurasUnlockText: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 13,
+      color: '#c890f0',
+      letterSpacing: 0.4,
+    },
+    // Aura detail modal
+    auraModalCard: {
+      backgroundColor: colors.surface,
+      borderRadius: 20,
+      padding: 28,
+      width: '100%',
+      borderWidth: 1,
+      borderColor: 'rgba(180,130,240,0.3)',
+      alignItems: 'center',
+    },
+    auraModalTierBadge: {
+      backgroundColor: 'rgba(160,100,220,0.18)',
+      borderRadius: 6,
+      paddingHorizontal: 10,
+      paddingVertical: 3,
+      marginBottom: 10,
+      borderWidth: 0.8,
+      borderColor: 'rgba(180,130,240,0.35)',
+    },
+    auraModalTierText: {
+      fontFamily: fonts.displayBold,
+      fontSize: 10,
+      color: '#c890f0',
+      letterSpacing: 1.3,
+    },
+    auraModalCondition: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 13,
+      color: colors.muted,
+      textAlign: 'center',
+      marginBottom: 10,
+      letterSpacing: 0.2,
+    },
+    auraPaywallBtn: {
+      marginTop: 12,
+      backgroundColor: 'rgba(160,100,220,0.18)',
+      borderRadius: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 28,
+      borderWidth: 0.8,
+      borderColor: 'rgba(180,130,240,0.35)',
+    },
+    auraPaywallBtnText: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 14,
+      color: '#c890f0',
       letterSpacing: 0.4,
     },
 

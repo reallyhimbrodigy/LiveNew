@@ -115,7 +115,7 @@ export default function PaywallScreen({ navigation }) {
             { text: 'All soundscapes — rain, pink noise, stillness', coming: false },
             { text: 'Deep progress insights — weekly outcome deltas', coming: false },
             { text: 'Unlimited Iris — sleep, supplements, protocols', coming: false },
-            { text: 'Exclusive Aura halos', coming: true },
+            { text: 'Exclusive Aura halos', coming: false },
             { text: 'Personalized recommendations, sharpened over time', coming: false },
           ].map((f, i) => (
             <View key={i} style={s.featureRow}>
