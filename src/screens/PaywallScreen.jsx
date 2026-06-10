@@ -116,7 +116,7 @@ export default function PaywallScreen({ navigation }) {
             { text: 'Deep progress insights — weekly outcome deltas', coming: false },
             { text: 'Unlimited Iris — sleep, supplements, protocols', coming: false },
             { text: 'Exclusive Aura halos', coming: false },
-            { text: 'Personalized recommendations, sharpened over time', coming: false },
+            { text: 'Streak Freeze — your streak survives a missed day', coming: false },
           ].map((f, i) => (
             <View key={i} style={s.featureRow}>
               <Text style={s.featureCheck}>✓</Text>

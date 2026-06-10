@@ -1,16 +1,16 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { useTheme } from '../theme';
-import { useAuthStore, useIsPremium } from '../store/authStore';
+import { useAuthStore } from '../store/authStore';
 import { recForToday, todaysScheduleHint } from '../domain/recommendations.js';
 
 /**
  * RecommendationCard — displays one actionable cortisol-lowering suggestion
  * as a calm, premium card. Iris-voiced, positive, and time-of-day aware.
  *
- * Free users: generic time-of-day rec, no tagging.
- * Premium users with schedule blocks: same rec but with a tailored intro
- *   line referencing a relevant block from today's schedule.
+ * Everyone gets the time-of-day rec; if their schedule has a relevant block
+ * today, a tailored intro line references it. Schedule-aware tailoring is the
+ * app's core hook, so it is FREE for all users (not gated behind premium).
  *
  * Props:
  *   style — additional container style (optional).
@@ -21,12 +21,12 @@ import { recForToday, todaysScheduleHint } from '../domain/recommendations.js';
  */
 export default function RecommendationCard({ style }) {
   const { colors, fonts } = useTheme();
-  const isPremium = useIsPremium();
   const profile = useAuthStore((s) => s.profile);
   const rec = recForToday();
 
-  // Premium + schedule: derive a tailored intro line if today has a known block.
-  const hint = (isPremium && profile?.schedule?.blocks?.length)
+  // Schedule-aware tailoring is the core hook — FREE for everyone. If today
+  // has a recognizable block, add a tailored intro line referencing it.
+  const hint = profile?.schedule?.blocks?.length
     ? todaysScheduleHint(profile.schedule)
     : null;
 
