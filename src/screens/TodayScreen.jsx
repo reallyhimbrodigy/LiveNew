@@ -15,6 +15,7 @@ import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import GemUnlockModal from '../components/GemUnlockModal';
 import IrisSignature from '../components/IrisSignature';
 import DailyQuote from '../components/DailyQuote';
+import RecommendationCard from '../components/RecommendationCard';
 import CortisolFact from '../components/CortisolFact';
 import StateRing from '../components/StateRing';
 import GradientScreen from '../components/GradientScreen';
@@ -97,6 +98,66 @@ function PressCard({ onPress, style, children, disabled }) {
         {children}
       </Animated.View>
     </Pressable>
+  );
+}
+
+// Active night-home actions. The sleep window used to be a dead-end ("Iris is
+// offline until morning"). It isn't anymore: at night there's just as much to
+// DO, minus the new day plan. This grid surfaces the real things the user can
+// reach — Soundscapes featured first (perfect for sleep), then progress, Iris
+// chat. Each tile navigates somewhere real. Shared by BOTH sleep branches
+// (no-plan sleep-window AND the in-plan wind-down zone).
+function NightActions({ s, navigation }) {
+  const goProgress = () => {
+    tapLight();
+    // Progress is a sibling bottom-tab of the Today stack — hop up to the
+    // tab navigator to reach it.
+    (navigation.getParent?.() || navigation).navigate('Progress');
+  };
+  const tiles = [
+    {
+      key: 'sounds',
+      label: 'Soundscapes',
+      sub: 'Drift off to rain, waves, or white noise',
+      onPress: () => { tapLight(); navigation.navigate('Soundscapes'); },
+      featured: true,
+    },
+    {
+      key: 'progress',
+      label: 'Your progress',
+      sub: 'Halos, streak, and the week so far',
+      onPress: goProgress,
+    },
+    {
+      key: 'chat',
+      label: 'Talk to Iris',
+      sub: "Something on your mind? She's awake",
+      onPress: () => { tapLight(); navigation.navigate('Chat'); },
+    },
+  ];
+  return (
+    <View style={s.nightActions}>
+      {tiles.map((t) => (
+        <Pressable
+          key={t.key}
+          onPress={t.onPress}
+          hitSlop={6}
+          accessibilityRole="button"
+          accessibilityLabel={t.label}
+          style={({ pressed }) => [
+            s.nightTile,
+            t.featured && s.nightTileFeatured,
+            pressed && { opacity: 0.85, transform: [{ scale: 0.99 }] },
+          ]}
+        >
+          <View style={s.nightTileText}>
+            <Text style={[s.nightTileLabel, t.featured && s.nightTileLabelFeatured]}>{t.label}</Text>
+            <Text style={s.nightTileSub}>{t.sub}</Text>
+          </View>
+          <Text style={s.nightTileChevron}>{'›'}</Text>
+        </Pressable>
+      ))}
+    </View>
   );
 }
 
@@ -551,7 +612,16 @@ export default function TodayScreen({ navigation }) {
               streak worth saving. Quiet, not nagging. Suppressed inside the
               sleep window — pushing a streak-save at 2am defeats the point. */}
           {!sleepMode && streak >= 1 && new Date().getHours() >= 19 ? (
-            <View style={s.streakRiskCard}>
+            <Pressable
+              style={({ pressed }) => [s.streakRiskCard, pressed && { opacity: 0.9 }]}
+              onPress={async () => {
+                tapSelect();
+                try { await clearSkip(); } catch (err) { console.warn('[today] clearSkip failed', err?.message); }
+                navigation.replace('StressTap');
+              }}
+              accessibilityRole="button"
+              accessibilityLabel="Keep your streak alive — start today's check-in"
+            >
               <View style={s.streakRiskHeader}>
                 <View style={s.streakRiskFire}><FlameIcon size={17} color={colors.gold} /></View>
                 <Text style={s.streakRiskNum}>{streak}</Text>
@@ -560,28 +630,31 @@ export default function TodayScreen({ navigation }) {
               <Text style={s.streakRiskBody}>
                 Three taps keep it alive. Past midnight, the streak resets.
               </Text>
-            </View>
+              <Text style={s.streakRiskCta}>Start now ›</Text>
+            </Pressable>
           ) : null}
 
           {sleepMode ? (
-            // Sleep-window empty state. Hard block — NO escape hatch to plan
-            // generation. A plan generated at 2am is for a day that's mostly
-            // already over; it reads as broken. The stress button below is
-            // the only late-night interaction we offer: anxiety doesn't sleep
-            // and Iris should be there for it, but the daily plan can wait.
-            <View style={s.sleepCard}>
-              <Text style={s.sleepLabel}>SLEEP WINDOW</Text>
-              <Text style={s.sleepTitle}>It's late.</Text>
-              <Text style={s.sleepBody}>
-                Iris is offline until morning. The plan she'll build for you at sunrise will be sharper than anything she can put together right now — your overnight sleep and HRV shape every zone.
-              </Text>
-              <Text style={s.sleepBody}>
-                Try to rest. We'll meet in the morning.
-              </Text>
-              <Text style={s.sleepFootnote}>
-                Still stressed? Tap "I'm stressed" below. That part of Iris never sleeps.
-              </Text>
-            </View>
+            // Sleep-window night home. NO new day plan — a plan generated at
+            // 2am is for a day that's mostly already over and reads as broken.
+            // But the night is NOT a dead end: everything else Iris offers is
+            // here and tappable. Soundscapes for sleep, your progress, a chat
+            // with Iris, a wind-down tip, a reflection — plus "I'm stressed"
+            // below. Only the next day plan waits for morning.
+            <>
+              <View style={s.sleepCard}>
+                <Text style={s.sleepLabel}>WINDING DOWN</Text>
+                <Text style={s.sleepTitle}>It's late.</Text>
+                <Text style={s.sleepBody}>
+                  Your next plan arrives in the morning, tuned to tonight's sleep and HRV. Until then, here's what's good for right now.
+                </Text>
+              </View>
+              <NightActions s={s} navigation={navigation} />
+              {/* Tonight's wind-down tip — evening-aware, interactive (cycles). */}
+              <RecommendationCard style={s.nightRecCard} />
+              {/* Calm reflection anchor for the night. */}
+              <DailyQuote style={s.nightQuoteCard} />
+            </>
           ) : (
             <View style={s.emptyCard}>
               <Text style={s.emptyLabel}>NO PLAN YET</Text>
@@ -700,13 +773,18 @@ export default function TodayScreen({ navigation }) {
         {/* Daily first read — single Iris-voiced sentence anchored in
             today's actual data. Earns the open. Shown above everything else. */}
         {todayPlan?.firstRead ? (
-          <View style={s.firstRead}>
+          <Pressable
+            style={({ pressed }) => [s.firstRead, pressed && { opacity: 0.85 }]}
+            onPress={() => { tapLight(); navigation.navigate('Chat'); }}
+            accessibilityRole="button"
+            accessibilityLabel="Ask Iris about today's read"
+          >
             <View style={s.firstReadMarkRow}>
               <View style={s.firstReadMark} />
               <IrisSignature />
             </View>
             <Text style={s.firstReadText}>{todayPlan.firstRead}</Text>
-          </View>
+          </Pressable>
         ) : null}
 
         {/* Streak Freeze saved banner — one-time, gentle, dismissed on tap. */}
@@ -722,7 +800,12 @@ export default function TodayScreen({ navigation }) {
 
         {/* Yesterday's reflection payoff — show that Iris listened. */}
         {yesterdayReflection ? (
-          <View style={s.reflectionPayoff}>
+          <Pressable
+            style={({ pressed }) => [s.reflectionPayoff, pressed && { opacity: 0.85 }]}
+            onPress={() => { tapLight(); navigation.navigate('Chat'); }}
+            accessibilityRole="button"
+            accessibilityLabel="Talk to Iris about how today is going"
+          >
             <View style={s.reflectionPayoffHeader}>
               <IrisSignature />
               <Text style={s.reflectionPayoffSuffix}>
@@ -735,22 +818,29 @@ export default function TodayScreen({ navigation }) {
               {yesterdayReflection === 'same' && "Yesterday felt steady. Today holds the line."}
               {yesterdayReflection === 'harder' && "Yesterday felt harder. Today eases the load."}
             </Text>
-          </View>
+          </Pressable>
         ) : null}
 
-        {/* Wind-down banner — appears only while the sleep zone is current
-            (after 9:30pm). The day's protocols are done, this is the close.
-            Iris voice signals it explicitly so the user knows the rhythm. */}
+        {/* Wind-down — appears only while the sleep zone is current (after
+            9:30pm). The day's protocols are done, but the night is still
+            active: a calm close, then the real things to do tonight. Your
+            next plan arrives in the morning — that's the only thing that
+            waits. */}
         {currentZoneId === 'sleep' ? (
-          <View style={s.windDownCard}>
-            <Text style={s.windDownLabel}>WIND-DOWN</Text>
-            <Text style={s.windDownLine}>
-              That's today. I'm offline until morning.
-            </Text>
-            <Text style={s.windDownSub}>
-              Reflect below if you haven't yet — it shapes tomorrow.
-            </Text>
-          </View>
+          <>
+            <View style={s.windDownCard}>
+              <Text style={s.windDownLabel}>WINDING DOWN</Text>
+              <Text style={s.windDownLine}>
+                That's today. Your next plan arrives in the morning.
+              </Text>
+              <Text style={s.windDownSub}>
+                Here's what's good for tonight — and reflect below if you haven't yet.
+              </Text>
+            </View>
+            <NightActions s={s} navigation={navigation} />
+            {/* Tonight's wind-down tip — evening-aware, interactive (cycles). */}
+            <RecommendationCard style={s.nightRecCard} />
+          </>
         ) : null}
 
         {/* Current zone — hero card */}
@@ -1703,6 +1793,13 @@ function makeStyles(colors, fonts) {
     lineHeight: 20,
     letterSpacing: 0.1,
   },
+  streakRiskCta: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 13,
+    color: colors.error,
+    letterSpacing: 0.3,
+    marginTop: 10,
+  },
   welcomeContent: {
     backgroundColor: colors.surface,
     borderRadius: 18,
@@ -1879,6 +1976,63 @@ function makeStyles(colors, fonts) {
     lineHeight: 20,
     marginTop: 8,
     letterSpacing: 0.1,
+  },
+
+  // Night-home action tiles — the active "what you CAN do tonight" list,
+  // shared by both sleep branches. Each tile is a full-width Pressable row
+  // with a chevron affordance. The first (Soundscapes) is featured with a
+  // gold-soft fill so the most sleep-relevant action reads first.
+  nightActions: {
+    marginTop: 16,
+    marginBottom: 4,
+    gap: 10,
+  },
+  nightTile: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.line,
+    borderRadius: 14,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    minHeight: 44,
+  },
+  nightTileFeatured: {
+    backgroundColor: colors.goldSoft,
+    borderColor: colors.goldBorder,
+  },
+  nightTileText: { flex: 1 },
+  nightTileLabel: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 16,
+    color: colors.text,
+    letterSpacing: 0.1,
+    marginBottom: 3,
+  },
+  nightTileLabelFeatured: {
+    color: colors.gold,
+  },
+  nightTileSub: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.muted,
+    lineHeight: 18,
+    letterSpacing: 0.1,
+  },
+  nightTileChevron: {
+    fontFamily: fonts.display,
+    fontSize: 22,
+    color: colors.dim,
+    marginLeft: 12,
+  },
+  // Spacing wrappers so the shared RecommendationCard / DailyQuote sit
+  // cleanly in the night-home flow.
+  nightRecCard: {
+    marginTop: 12,
+  },
+  nightQuoteCard: {
+    marginTop: 4,
   },
 
   // Empty state

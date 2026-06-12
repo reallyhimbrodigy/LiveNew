@@ -499,11 +499,17 @@ export default function ProgressScreen() {
             cached data. Without this, the user thinks the numbers are
             current. */}
         {error && trend.length > 0 && (
-          <View style={s.staleBanner}>
+          <Pressable
+            style={({ pressed }) => [s.staleBanner, pressed && { opacity: 0.85 }]}
+            onPress={() => { setLoading(true); refresh(); }}
+            hitSlop={6}
+            accessibilityRole="button"
+            accessibilityLabel="Retry refreshing your progress"
+          >
             <Text style={s.staleBannerText}>
-              Couldn't refresh — showing last data Iris has on you.
+              Couldn't refresh — showing last data Iris has on you. Tap to retry.
             </Text>
-          </View>
+          </Pressable>
         )}
 
         {/* ── Deep Insights — premium gate ─────────────────────────────────── */}
@@ -511,7 +517,12 @@ export default function ProgressScreen() {
           <>
             {/* Weekly outcomes — REAL deltas so the user can feel the app working. */}
             {outcomes && outcomesSummary ? (
-              <View style={s.outcomesCard}>
+              <Pressable
+                style={({ pressed }) => [s.outcomesCard, pressed && { opacity: 0.9 }]}
+                onPress={() => navigation.navigate('Chat')}
+                accessibilityRole="button"
+                accessibilityLabel="Ask Iris about this week's outcomes"
+              >
                 <View style={s.outcomesHeader}>
                   <IrisSignature />
                   <Text style={s.outcomesHeaderSuffix}>this week vs last</Text>
@@ -539,12 +550,19 @@ export default function ProgressScreen() {
                     <Text style={s.outcomeStatLabel}>days active</Text>
                   </View>
                 </View>
-              </View>
+                <Text style={s.cardTapHint}>Ask Iris ›</Text>
+              </Pressable>
             ) : null}
 
-            {/* What Iris has noticed — pattern callouts derived from behavior profile */}
+            {/* What Iris has noticed — pattern callouts derived from behavior
+                profile. Tap to take any of these into a chat with Iris. */}
             {patternCallouts.length > 0 && (
-              <View style={s.noticedCard}>
+              <Pressable
+                style={({ pressed }) => [s.noticedCard, pressed && { opacity: 0.9 }]}
+                onPress={() => navigation.navigate('Chat')}
+                accessibilityRole="button"
+                accessibilityLabel="Ask Iris about the patterns she noticed"
+              >
                 <View style={s.noticedHeader}>
                   <IrisSignature />
                   <Text style={s.noticedHeaderSuffix}>noticed</Text>
@@ -555,7 +573,8 @@ export default function ProgressScreen() {
                     <Text style={s.noticedText}>{line}</Text>
                   </View>
                 ))}
-              </View>
+                <Text style={s.cardTapHint}>Ask Iris ›</Text>
+              </Pressable>
             )}
           </>
         ) : (
@@ -577,24 +596,36 @@ export default function ProgressScreen() {
           </Pressable>
         )}
 
-        {/* Story card — the main narrative */}
+        {/* Story card — the main narrative. Tap to continue with Iris. */}
         {daysActive >= 2 && (
-          <View style={s.storyCard}>
+          <Pressable
+            style={({ pressed }) => [s.storyCard, pressed && { opacity: 0.9 }]}
+            onPress={() => navigation.navigate('Chat')}
+            accessibilityRole="button"
+            accessibilityLabel="Talk to Iris about your progress"
+          >
             <Text style={s.storyText}>
               {buildStoryText({ daysActive, streak, stressChange, stressAvg, recentAvg, totalSessions, bestDay, dayNames })}
             </Text>
-          </View>
+            <Text style={s.cardTapHint}>Ask Iris ›</Text>
+          </Pressable>
         )}
 
-        {/* Iris's weekly read */}
+        {/* Iris's weekly read — tap to ask her to expand on it. */}
         {insight && (
-          <View style={s.insightCard}>
+          <Pressable
+            style={({ pressed }) => [s.insightCard, pressed && { opacity: 0.9 }]}
+            onPress={() => navigation.navigate('Chat')}
+            accessibilityRole="button"
+            accessibilityLabel="Ask Iris about this week's read"
+          >
             <View style={s.insightHeader}>
               <IrisSignature />
               <Text style={s.insightHeaderSuffix}>this week</Text>
             </View>
             <Text style={s.insightText}>{insight}</Text>
-          </View>
+            <Text style={s.cardTapHint}>Ask Iris ›</Text>
+          </Pressable>
         )}
 
         {/* Summary tiles — only meaningful once foundation is complete.
@@ -618,9 +649,14 @@ export default function ProgressScreen() {
           </View>
         )}
 
-        {/* Key insights */}
+        {/* Key insights — tap the card to dig into any of these with Iris. */}
         {(stressChange !== null || bestDay || stressAvg != null) && (
-          <View style={s.card}>
+          <Pressable
+            style={({ pressed }) => [s.card, pressed && { opacity: 0.9 }]}
+            onPress={() => navigation.navigate('Chat')}
+            accessibilityRole="button"
+            accessibilityLabel="Ask Iris about these insights"
+          >
             <Text style={s.cardTitle}>Insights</Text>
             {stressChange !== null && (
               <View style={s.insightRow}>
@@ -666,7 +702,8 @@ export default function ProgressScreen() {
                 </View>
               </View>
             )}
-          </View>
+            <Text style={s.cardTapHint}>Ask Iris ›</Text>
+          </Pressable>
         )}
 
         {/* Evening reflections — show how the loop is closing */}
@@ -1284,6 +1321,15 @@ function makeStyles(colors, fonts) {
     },
     cardTitle: { fontFamily: fonts.displaySemibold, fontSize: 16, color: colors.text, marginBottom: 4 },
     cardSub: { fontFamily: fonts.body, fontSize: 12, color: colors.dim, marginBottom: 16 },
+    // Subtle "this card opens a chat with Iris" affordance — gold, right-aligned.
+    cardTapHint: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 12,
+      color: colors.gold,
+      letterSpacing: 0.3,
+      alignSelf: 'flex-end',
+      marginTop: 12,
+    },
 
     // Insights rows
     insightRow: {
