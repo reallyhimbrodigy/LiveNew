@@ -76,7 +76,8 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-audio"
+      "expo-audio",
+      "./plugins/withModularHeaders.cjs"
     ],
     "extra": {
       "eas": {
