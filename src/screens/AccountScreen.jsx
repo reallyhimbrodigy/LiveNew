@@ -5,7 +5,6 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
-import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../theme';
 import { useAuthStore, useIsPremium } from '../store/authStore';
 import { trialDaysRemaining, isWithinTrial } from '../store/authStore';
@@ -43,7 +42,6 @@ export default function AccountScreen({ navigation }) {
   const userName = useAuthStore(s => s.userName);
   const userEmail = useAuthStore(s => s.userEmail);
   const avatarUri = useAuthStore(s => s.avatarUri);
-  const setAvatar = useAuthStore(s => s.setAvatar);
   const setDisplayName = useAuthStore(s => s.setDisplayName);
   const streak = useAuthStore(s => s.streak);
   const streakFreezeReady = useAuthStore(s => s.streakFreezeReady);
@@ -60,7 +58,6 @@ export default function AccountScreen({ navigation }) {
   const [editingName, setEditingName] = useState(false);
   const [nameValue, setNameValue] = useState('');
   const [savingName, setSavingName] = useState(false);
-  const [pickingAvatar, setPickingAvatar] = useState(false);
   const nameInputRef = useRef(null);
   const [nudgeDismissed, setNudgeDismissed] = useState(true); // default hidden until we check
   const shareCardRef = useRef(null);
@@ -226,37 +223,10 @@ export default function AccountScreen({ navigation }) {
     } catch {}
   };
 
-  // Profile picture — request permission, open the library, persist on success.
-  // Permission denial is handled gracefully (a friendly alert, no crash).
-  const handlePickAvatar = async () => {
-    if (pickingAvatar) return;
-    tapSelect();
-    setPickingAvatar(true);
-    try {
-      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (!perm.granted) {
-        Alert.alert(
-          'Photo access needed',
-          'To set a profile picture, allow photo access in Settings → LiveNew → Photos.',
-        );
-        return;
-      }
-      const res = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [1, 1],
-        quality: 0.8,
-      });
-      if (!res.canceled && res.assets?.[0]?.uri) {
-        await setAvatar(res.assets[0].uri);
-        tapLight();
-      }
-    } catch {
-      Alert.alert("Couldn't set picture", 'Something went wrong. Try again.');
-    } finally {
-      setPickingAvatar(false);
-    }
-  };
+  // NOTE: custom profile-photo upload is temporarily disabled. expo-image-picker
+  // fails the iOS pod install in this app's widget multi-target setup, so the
+  // avatar shows the user's initial (+ the Pro gold aura) for now. Photo upload
+  // returns once the native pod conflict is isolated.
 
   const startEditName = () => {
     tapSelect();
@@ -380,14 +350,7 @@ export default function AccountScreen({ navigation }) {
 
         {/* Profile — avatar + editable name. Pro users get a golden aura. */}
         <View style={s.profileSection}>
-          <Pressable
-            onPress={handlePickAvatar}
-            disabled={pickingAvatar}
-            hitSlop={8}
-            style={({ pressed }) => [s.avatarTap, pressed && { opacity: 0.85 }]}
-            accessibilityRole="button"
-            accessibilityLabel="Change profile picture"
-          >
+          <View style={s.avatarTap}>
             {/* PRO golden aura — concentric soft-gold halos + glow behind the
                 avatar. Free users fall through to a plain subtle ring only. */}
             {isPremium ? (
@@ -406,11 +369,7 @@ export default function AccountScreen({ navigation }) {
                 </View>
               )}
             </View>
-            {/* Edit affordance — gold camera dot at the corner. */}
-            <View style={s.avatarEditDot}>
-              <Text style={s.avatarEditGlyph}>+</Text>
-            </View>
-          </Pressable>
+          </View>
 
           <View style={s.profileMeta}>
             {editingName ? (
