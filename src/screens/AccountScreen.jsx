@@ -1,10 +1,11 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
-  View, Text, ScrollView, Pressable, TextInput, Switch,
+  View, Text, Image, ScrollView, Pressable, TextInput, Switch,
   StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking, Share, Modal,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
+import * as ImagePicker from 'expo-image-picker';
 import { useTheme } from '../theme';
 import { useAuthStore, useIsPremium } from '../store/authStore';
 import { trialDaysRemaining, isWithinTrial } from '../store/authStore';
@@ -39,6 +40,11 @@ export default function AccountScreen({ navigation }) {
   const deleteAccount = useAuthStore(s => s.deleteAccount);
   const saveProfile = useAuthStore(s => s.saveProfile);
   const userId = useAuthStore(s => s.userId);
+  const userName = useAuthStore(s => s.userName);
+  const userEmail = useAuthStore(s => s.userEmail);
+  const avatarUri = useAuthStore(s => s.avatarUri);
+  const setAvatar = useAuthStore(s => s.setAvatar);
+  const setDisplayName = useAuthStore(s => s.setDisplayName);
   const streak = useAuthStore(s => s.streak);
   const streakFreezeReady = useAuthStore(s => s.streakFreezeReady);
   const isPremium = useIsPremium();
@@ -51,6 +57,11 @@ export default function AccountScreen({ navigation }) {
   const [sharing, setSharing] = useState(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleKey, setScheduleKey] = useState(0);
+  const [editingName, setEditingName] = useState(false);
+  const [nameValue, setNameValue] = useState('');
+  const [savingName, setSavingName] = useState(false);
+  const [pickingAvatar, setPickingAvatar] = useState(false);
+  const nameInputRef = useRef(null);
   const [nudgeDismissed, setNudgeDismissed] = useState(true); // default hidden until we check
   const shareCardRef = useRef(null);
   const editInputRef = useRef(null);
@@ -215,6 +226,62 @@ export default function AccountScreen({ navigation }) {
     } catch {}
   };
 
+  // Profile picture — request permission, open the library, persist on success.
+  // Permission denial is handled gracefully (a friendly alert, no crash).
+  const handlePickAvatar = async () => {
+    if (pickingAvatar) return;
+    tapSelect();
+    setPickingAvatar(true);
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          'Photo access needed',
+          'To set a profile picture, allow photo access in Settings → LiveNew → Photos.',
+        );
+        return;
+      }
+      const res = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.8,
+      });
+      if (!res.canceled && res.assets?.[0]?.uri) {
+        await setAvatar(res.assets[0].uri);
+        tapLight();
+      }
+    } catch {
+      Alert.alert("Couldn't set picture", 'Something went wrong. Try again.');
+    } finally {
+      setPickingAvatar(false);
+    }
+  };
+
+  const startEditName = () => {
+    tapSelect();
+    setNameValue(userName || '');
+    setEditingName(true);
+    setTimeout(() => nameInputRef.current?.focus(), 250);
+  };
+
+  const handleSaveName = async () => {
+    const trimmed = nameValue.trim();
+    if (!trimmed || savingName) { setEditingName(false); return; }
+    tapLight();
+    setSavingName(true);
+    try {
+      await setDisplayName(trimmed);
+    } catch {
+      Alert.alert('Error', 'Could not save your name. Try again.');
+    } finally {
+      setSavingName(false);
+      setEditingName(false);
+    }
+  };
+
+  const avatarInitial = (userName || '').trim().charAt(0).toUpperCase() || '?';
+
   const handleEdit = (field) => {
     tapSelect();
     setEditValue(profile?.[field] || '');
@@ -311,6 +378,77 @@ export default function AccountScreen({ navigation }) {
           <Text style={s.heading}>Account</Text>
         </View>
 
+        {/* Profile — avatar + editable name. Pro users get a golden aura. */}
+        <View style={s.profileSection}>
+          <Pressable
+            onPress={handlePickAvatar}
+            disabled={pickingAvatar}
+            hitSlop={8}
+            style={({ pressed }) => [s.avatarTap, pressed && { opacity: 0.85 }]}
+            accessibilityRole="button"
+            accessibilityLabel="Change profile picture"
+          >
+            {/* PRO golden aura — concentric soft-gold halos + glow behind the
+                avatar. Free users fall through to a plain subtle ring only. */}
+            {isPremium ? (
+              <>
+                <View style={[s.aura, s.auraOuter]} pointerEvents="none" />
+                <View style={[s.aura, s.auraMid]} pointerEvents="none" />
+                <View style={[s.aura, s.auraInner]} pointerEvents="none" />
+              </>
+            ) : null}
+            <View style={[s.avatarRing, isPremium ? s.avatarRingPro : s.avatarRingFree]}>
+              {avatarUri ? (
+                <Image source={{ uri: avatarUri }} style={s.avatarImg} />
+              ) : (
+                <View style={s.avatarFallback}>
+                  <Text style={s.avatarInitial}>{avatarInitial}</Text>
+                </View>
+              )}
+            </View>
+            {/* Edit affordance — gold camera dot at the corner. */}
+            <View style={s.avatarEditDot}>
+              <Text style={s.avatarEditGlyph}>+</Text>
+            </View>
+          </Pressable>
+
+          <View style={s.profileMeta}>
+            {editingName ? (
+              <View style={s.nameEditRow}>
+                <TextInput
+                  ref={nameInputRef}
+                  style={s.nameInput}
+                  value={nameValue}
+                  onChangeText={setNameValue}
+                  placeholder="Your name"
+                  placeholderTextColor={colors.dim}
+                  returnKeyType="done"
+                  maxLength={40}
+                  onSubmitEditing={handleSaveName}
+                />
+                <Pressable
+                  onPress={handleSaveName}
+                  disabled={savingName || !nameValue.trim()}
+                  hitSlop={8}
+                  style={[s.nameSaveBtn, (savingName || !nameValue.trim()) && { opacity: 0.4 }]}
+                >
+                  <Text style={s.nameSaveText}>{savingName ? '…' : 'Save'}</Text>
+                </Pressable>
+              </View>
+            ) : (
+              <Pressable onPress={startEditName} hitSlop={8} style={s.nameRow}>
+                <Text style={s.profileName} numberOfLines={1}>
+                  {userName || 'Add your name'}
+                </Text>
+                <Text style={s.nameEditHint}>Edit</Text>
+              </Pressable>
+            )}
+            {userEmail ? (
+              <Text style={s.profileEmail} numberOfLines={1}>{userEmail}</Text>
+            ) : null}
+          </View>
+        </View>
+
         {/* One-time nudge for users with no schedule */}
         {hasProfile && !nudgeDismissed && !(profile?.schedule?.blocks?.length) ? (
           <View style={s.card}>
@@ -342,7 +480,7 @@ export default function AccountScreen({ navigation }) {
           >
             <View style={[s.statusBadge, isSubscribed && s.statusBadgeActive]}>
               <Text style={[s.statusBadgeText, isSubscribed && s.statusBadgeTextActive]}>
-                {isSubscribed ? 'PRO' : inTrial ? 'TRIAL' : 'FREE'}
+                {isSubscribed ? 'PRO' : inTrial ? 'TRIAL' : 'ESSENTIALS'}
               </Text>
             </View>
             <View style={s.statusContent}>
@@ -351,14 +489,14 @@ export default function AccountScreen({ navigation }) {
                   ? 'LiveNew Pro'
                   : inTrial
                   ? `${daysLeft} day${daysLeft === 1 ? '' : 's'} left in your trial`
-                  : 'Free plan'}
+                  : 'Essentials'}
               </Text>
               <Text style={s.statusSub}>
                 {isSubscribed
                   ? 'Full access to all premium features'
                   : inTrial
                   ? 'Premium features unlocked — trial ends in ' + daysLeft + ' day' + (daysLeft === 1 ? '' : 's') + '.'
-                  : 'Plans, streaks, and halos are always free.'}
+                  : 'Essentials — your plan, streak, and halos are always free.'}
               </Text>
             </View>
             {!isSubscribed ? <Text style={s.settingArrow}>›</Text> : null}
@@ -652,6 +790,158 @@ function makeStyles(colors, fonts) {
       fontSize: 32,
       color: colors.text,
       letterSpacing: 0.2,
+    },
+
+    // ─── Profile section (avatar + name + email) ───────────────────────────
+    profileSection: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      marginBottom: 20,
+    },
+    // The avatar wrapper is the aura's positioning context. Extra padding gives
+    // the Pro halos room to bloom outside the avatar ring without clipping.
+    avatarTap: {
+      width: 116,
+      height: 116,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    // Concentric gold halos — only rendered for Pro. Each is a centered circle
+    // behind the avatar; stacked with decreasing opacity they read as a glow.
+    aura: {
+      position: 'absolute',
+      borderRadius: 999,
+      alignSelf: 'center',
+    },
+    auraOuter: {
+      width: 116, height: 116,
+      backgroundColor: 'rgba(196,168,108,0.06)',
+    },
+    auraMid: {
+      width: 102, height: 102,
+      backgroundColor: 'rgba(196,168,108,0.10)',
+    },
+    auraInner: {
+      width: 92, height: 92,
+      backgroundColor: 'rgba(196,168,108,0.16)',
+      // Gold glow — a soft luminous bloom around the avatar that sells "premium."
+      shadowColor: colors.gold,
+      shadowOpacity: 0.9,
+      shadowRadius: 16,
+      shadowOffset: { width: 0, height: 0 },
+      elevation: 12,
+    },
+    // The avatar ring holds the image / fallback. Pro gets a solid gold border;
+    // free gets a plain subtle line — no glow.
+    avatarRing: {
+      width: 84,
+      height: 84,
+      borderRadius: 42,
+      overflow: 'hidden',
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarRingPro: {
+      borderWidth: 2,
+      borderColor: colors.gold,
+    },
+    avatarRingFree: {
+      borderWidth: 1,
+      borderColor: colors.line,
+    },
+    avatarImg: {
+      width: '100%',
+      height: '100%',
+    },
+    avatarFallback: {
+      width: '100%',
+      height: '100%',
+      backgroundColor: colors.goldSoft,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    avatarInitial: {
+      fontFamily: fonts.displayBold,
+      fontSize: 34,
+      color: colors.gold,
+      letterSpacing: 0.5,
+    },
+    // Edit affordance — a small gold dot at the lower-right of the avatar.
+    avatarEditDot: {
+      position: 'absolute',
+      right: 14,
+      bottom: 14,
+      width: 26,
+      height: 26,
+      borderRadius: 13,
+      backgroundColor: colors.gold,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: colors.bg,
+    },
+    avatarEditGlyph: {
+      fontFamily: fonts.displayBold,
+      fontSize: 16,
+      lineHeight: 18,
+      color: '#1a1612',
+      marginTop: -1,
+    },
+    profileMeta: {
+      flex: 1,
+      marginLeft: 6,
+    },
+    nameRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      minHeight: 44,
+    },
+    profileName: {
+      fontFamily: fonts.displayBold,
+      fontSize: 22,
+      color: colors.text,
+      letterSpacing: 0.2,
+      flexShrink: 1,
+    },
+    nameEditHint: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 13,
+      color: colors.gold,
+      marginLeft: 10,
+    },
+    nameEditRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      minHeight: 44,
+    },
+    nameInput: {
+      flex: 1,
+      fontFamily: fonts.displaySemibold,
+      fontSize: 18,
+      color: colors.text,
+      borderBottomWidth: 1,
+      borderBottomColor: colors.goldBorder,
+      paddingVertical: 6,
+      paddingRight: 8,
+    },
+    nameSaveBtn: {
+      paddingHorizontal: 14,
+      paddingVertical: 8,
+      borderRadius: 999,
+      backgroundColor: colors.gold,
+      marginLeft: 8,
+    },
+    nameSaveText: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 14,
+      color: '#1a1612',
+      letterSpacing: 0.3,
+    },
+    profileEmail: {
+      fontFamily: fonts.body,
+      fontSize: 13,
+      color: colors.muted,
+      marginTop: 2,
     },
 
     // Section titles

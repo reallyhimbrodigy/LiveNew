@@ -76,7 +76,13 @@
         }
       ],
       "@react-native-community/datetimepicker",
-      "expo-audio"
+      "expo-audio",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "LiveNew uses your photos so you can set a profile picture."
+        }
+      ]
     ],
     "extra": {
       "eas": {

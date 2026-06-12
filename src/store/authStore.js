@@ -25,6 +25,7 @@ const PROFILE_KEY = 'livenew:profile';
 const PLAN_KEY = 'livenew:plan';
 const SKIPPED_KEY = 'livenew:skipped_date';
 const NAME_KEY = 'livenew:user_name';
+const EMAIL_KEY = 'livenew:user_email';
 
 // Account-scoped "this user has finished onboarding on this device" marker.
 // CRITICAL: this is keyed by userId and is deliberately NOT cleared on logout.
@@ -40,6 +41,11 @@ const onboardedMarkerKey = (userId) => (userId ? `livenew:onboarded:${userId}` :
 // highest streak ever reached + the date each gem was first earned.
 const gemsKey = (userId) => (userId ? `livenew:gems:${userId}` : 'livenew:gems');
 
+// Account-scoped profile picture URI. Mirrors gemsKey — keyed by userId so a
+// second account on the same device never inherits the first user's avatar.
+// Survives logout (account-scoped); removed on deleteAccount.
+const avatarKey = (userId) => (userId ? `livenew:avatar:${userId}` : 'livenew:avatar');
+
 // Account-scoped streak-freeze ledger. Stores { lastUsedWeek: '<ISO-week-id>' }
 // where the week id is the Monday date 'YYYY-MM-DD' of that week.
 // Survives logout (like gems) so a re-login doesn't grant a second free save in
@@ -54,6 +60,16 @@ const readOnboardedMarker = async (userId) => {
   const key = onboardedMarkerKey(userId);
   if (!key) return false;
   try { return (await AsyncStorage.getItem(key)) === '1'; } catch { return false; }
+};
+
+// Persist the user's email locally so Account can show it (read-only). Email
+// isn't in the durable auth payload; capture it at sign-in. Device-local, not
+// account-scoped — cleared on logout like NAME_KEY.
+const persistEmail = async (email, set) => {
+  const e = (email || '').trim();
+  if (!e) return;
+  try { await AsyncStorage.setItem(EMAIL_KEY, e); } catch {}
+  set({ userEmail: e });
 };
 
 // Normalize schedule and derive a back-compat routine summary when a schedule
@@ -113,6 +129,8 @@ export const useAuthStore = create((set, get) => ({
   healthPermission: 'unknown', // "granted" | "denied" | "unknown"
   healthSnapshot: null,        // cached HealthKit summary, refreshed on app focus
   userName: null,              // first name (captured at signup, persisted locally)
+  userEmail: null,             // email (captured at sign-in, persisted locally, read-only display)
+  avatarUri: null,             // profile picture URI (account-scoped, loaded in hydrate)
   userId: null,                // current account id — scopes per-account device markers
   themeMode: 'system',         // 'system' | 'light' | 'dark' — overrides useColorScheme()
   trialStartISO: null,         // ISO date YYYY-MM-DD when the 14-day free trial began
@@ -138,12 +156,13 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
 
     try {
-      const [authJson, profileJson, planJson, skippedJson, nameJson] = await Promise.all([
+      const [authJson, profileJson, planJson, skippedJson, nameJson, emailJson] = await Promise.all([
         AsyncStorage.getItem(AUTH_KEY),
         AsyncStorage.getItem(PROFILE_KEY),
         AsyncStorage.getItem(PLAN_KEY),
         AsyncStorage.getItem(SKIPPED_KEY),
         AsyncStorage.getItem(NAME_KEY),
+        AsyncStorage.getItem(EMAIL_KEY),
       ]);
 
       if (authJson) {
@@ -219,6 +238,7 @@ export const useAuthStore = create((set, get) => ({
           profile,
           userId: auth.userId || null,
           userName: nameJson || null,
+          userEmail: emailJson || null,
           todayPlan,
           todayStress,
           todayStressLabel,
@@ -232,6 +252,7 @@ export const useAuthStore = create((set, get) => ({
         });
         get().loadStreak();
         get().loadGems();
+        get().loadAvatar();
         // Fire-and-forget: fetch live cross-user halo rarity stats.
         // Client falls back to designed rarityPct values if this fails or hasn't
         // resolved yet — never blocks hydrate.
@@ -330,6 +351,7 @@ export const useAuthStore = create((set, get) => ({
     };
     setTokens(auth.accessToken, auth.refreshToken);
     await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+    await persistEmail(email, set);
 
     await get().postSignInBootstrap();
   },
@@ -363,6 +385,7 @@ export const useAuthStore = create((set, get) => ({
     };
     setTokens(auth.accessToken, auth.refreshToken);
     await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+    await persistEmail(email, set);
     await get().postSignInBootstrap();
     return data;
   },
@@ -393,6 +416,7 @@ export const useAuthStore = create((set, get) => ({
     };
     setTokens(auth.accessToken, auth.refreshToken);
     await AsyncStorage.setItem(AUTH_KEY, JSON.stringify(auth));
+    await persistEmail(email, set);
     await get().postSignInBootstrap();
     return data;
   },
@@ -440,6 +464,8 @@ export const useAuthStore = create((set, get) => ({
       try { await AsyncStorage.setItem(NAME_KEY, first); } catch {}
       set({ userName: first });
     }
+    // Apple only returns email on the first sign-in; persist it when present.
+    if (credential.email) await persistEmail(credential.email, set);
     await get().postSignInBootstrap();
     return data;
   },
@@ -477,6 +503,7 @@ export const useAuthStore = create((set, get) => ({
       try { await AsyncStorage.setItem(NAME_KEY, first); } catch {}
       set({ userName: first });
     }
+    if (userInfo?.user?.email) await persistEmail(userInfo.user.email, set);
     await get().postSignInBootstrap();
     return data;
   },
@@ -954,6 +981,37 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
   },
 
+  // Load the account-scoped profile picture URI for the current user.
+  // Fire-and-forget from hydrate (mirrors loadGems). Missing key → null.
+  loadAvatar: async () => {
+    const userId = get().userId;
+    try {
+      const uri = await AsyncStorage.getItem(avatarKey(userId));
+      set({ avatarUri: uri || null });
+    } catch {}
+  },
+
+  // Persist the chosen profile picture URI to the account-scoped key and
+  // reflect it in state. Called after a successful image pick.
+  setAvatar: async (uri) => {
+    const userId = get().userId;
+    set({ avatarUri: uri || null });
+    try {
+      if (uri) await AsyncStorage.setItem(avatarKey(userId), uri);
+      else await AsyncStorage.removeItem(avatarKey(userId));
+    } catch {}
+  },
+
+  // Update the user's display (first) name. Reuses the SAME field+key the app
+  // already uses for the first name (userName / NAME_KEY) — Iris's greetings,
+  // signup, and social sign-in all read/write this. No new field invented.
+  setDisplayName: async (name) => {
+    const trimmed = (name || '').trim();
+    if (!trimmed) return;
+    set({ userName: trimmed });
+    try { await AsyncStorage.setItem(NAME_KEY, trimmed); } catch {}
+  },
+
   fetchHaloStats: async () => {
     try {
       const r = await api.haloStats();
@@ -1004,7 +1062,7 @@ export const useAuthStore = create((set, get) => ({
     try { await api.logout(); } catch {}
     clearTokens();
     await AsyncStorage.multiRemove([
-      AUTH_KEY, PROFILE_KEY, PLAN_KEY, NAME_KEY,
+      AUTH_KEY, PROFILE_KEY, PLAN_KEY, NAME_KEY, EMAIL_KEY,
       'livenew:subscribed', 'livenew:streak', 'livenew:plan_count',
       'livenew:plan_count_last_day', 'livenew:first_plan_at',
       'livenew:notif_prefs_v1', 'livenew:notif_permission',
@@ -1018,6 +1076,9 @@ export const useAuthStore = create((set, get) => ({
       // so a second account signing in on this device doesn't inherit the first
       // user's (possibly expired) trial window or stale "skipped today" flag.
       'livenew:trial_start', SKIPPED_KEY,
+      // NOTE: the account-scoped avatar key (avatarKey(userId)) is NOT removed
+      // here — like gems/freeze, the picture belongs to the account and should
+      // survive logout. We only reset avatarUri in state below.
     ]);
     try {
       const { clearWidgetPayload } = require('../widgetBridge');
@@ -1033,7 +1094,8 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
-      userName: null, userId: null, trialStartISO: null, skippedDate: null,
+      userName: null, userEmail: null, avatarUri: null,
+      userId: null, trialStartISO: null, skippedDate: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
       todaySleep: null, todayEnergy: null, isSubscribed: false,
       completed: {}, reflection: null, streak: 0,
@@ -1053,7 +1115,7 @@ export const useAuthStore = create((set, get) => ({
     await api.deleteAccount();
     clearTokens();
     await AsyncStorage.multiRemove([
-      AUTH_KEY, PROFILE_KEY, PLAN_KEY, NAME_KEY,
+      AUTH_KEY, PROFILE_KEY, PLAN_KEY, NAME_KEY, EMAIL_KEY,
       'livenew:subscribed', 'livenew:streak', 'livenew:plan_count',
       'livenew:plan_count_last_day', 'livenew:first_plan_at',
       'livenew:notif_prefs_v1', 'livenew:notif_permission',
@@ -1070,6 +1132,8 @@ export const useAuthStore = create((set, get) => ({
         `livenew:seen_first_plan_welcome:${deletedUserId}`,
         gemsKey(deletedUserId),
         streakFreezeKey(deletedUserId),
+        // The account is gone — unlike logout, the scoped avatar SHOULD be purged.
+        avatarKey(deletedUserId),
       ].filter(Boolean) : []),
     ]);
     try {
@@ -1086,7 +1150,8 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
-      userName: null, userId: null, trialStartISO: null, skippedDate: null,
+      userName: null, userEmail: null, avatarUri: null,
+      userId: null, trialStartISO: null, skippedDate: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
       todaySleep: null, todayEnergy: null, isSubscribed: false,
       completed: {}, reflection: null, streak: 0,
