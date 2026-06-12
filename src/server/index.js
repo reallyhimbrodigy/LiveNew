@@ -2293,7 +2293,7 @@ async function ensureHomeUiState({ userId, userProfile, userBaseline, userEmail,
 }
 
 
-async function buildSupabaseBootstrapPayload({ userId, userProfile, flags }) {
+async function buildSupabaseBootstrapPayload({ userId, userProfile, flags, avatarUrl }) {
   const isAuthenticated = Boolean(userId);
   const requiredVersion = await getRequiredConsentVersion();
   const { accepted, consentComplete, version } = supabaseConsentStatus(userProfile, requiredVersion);
@@ -2357,6 +2357,7 @@ async function buildSupabaseBootstrapPayload({ userId, userProfile, flags }) {
       timeMin: Number.isFinite(Number(constraints.timeMin)) ? Number(constraints.timeMin) : null,
       injuries,
       schedule: constraints.schedule || null,
+      avatar_url: avatarUrl || null,
     },
     baseline: baseline
       ? {
@@ -2479,6 +2480,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/subscription/status",
     "/v1/profile/update",
     "/v1/account/delete",
+    "/v1/avatar",
   ]);
   logDebug({ tag: "SUPABASE_ROUTE_CHECK", pathname, hit: supabaseRoutes.has(pathname) });
   if (!supabaseRoutes.has(pathname)) return false;
@@ -2496,12 +2498,24 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         return true;
       }
       let profile = null;
+      let avatarUrl = null;
       if (auth.userId && auth.jwt) {
         const persist = createPersist(supabaseForUser(auth.jwt));
         profile = await persist.getOrCreateUserProfile(auth.userId);
         res.livenewUserId = auth.userId;
+        // Read avatar_url defensively in its own query: the column may not
+        // exist yet (until avatars_setup.sql is applied), and it's not part of
+        // the shared profile select, so a failure here must not break bootstrap.
+        try {
+          const { data: avatarRow } = await supabaseAdmin()
+            .from("user_profile")
+            .select("avatar_url")
+            .eq("user_id", auth.userId)
+            .maybeSingle();
+          avatarUrl = avatarRow?.avatar_url || null;
+        } catch {}
       }
-      const payload = await buildSupabaseBootstrapPayload({ userId: auth.userId, userProfile: profile, flags });
+      const payload = await buildSupabaseBootstrapPayload({ userId: auth.userId, userProfile: profile, flags, avatarUrl });
       logDebug({ tag: "BOOTSTRAP_RESPONSE", userId: auth.userId, uiState: payload?.uiState, consent: payload?.consent, profile: payload?.profile });
       assertBootstrapContract(payload);
       sendJson(res, 200, payload, auth.userId || null);
@@ -3342,6 +3356,65 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           sendError(res, 500, "internal", "Checkin failed");
         }
       }
+    }
+    return true;
+  }
+
+  // Profile avatar upload. Client sends a base64-encoded image; we upload it to
+  // the public "avatars" Supabase Storage bucket (service-role bypasses RLS),
+  // persist the public URL on user_profile.avatar_url, and return it. The path
+  // is keyed by userId with upsert, so a re-upload reuses the same object — we
+  // cache-bust the returned URL with ?v=<ts> so the new image shows immediately.
+  if (pathname === "/v1/avatar" && req.method === "POST") {
+    try {
+      const body = await parseJson(req);
+      const imageBase64 = typeof body?.imageBase64 === "string" ? body.imageBase64 : null;
+      if (!imageBase64) {
+        sendJson(res, 400, { ok: false, error: "missing_image" }, auth.userId);
+        return true;
+      }
+      // Size cap: base64 length ~12M ≈ ~9MB decoded. Reject oversized payloads
+      // before we allocate the buffer.
+      if (imageBase64.length > 12_000_000) {
+        sendJson(res, 413, { ok: false, error: "image_too_large" }, auth.userId);
+        return true;
+      }
+      const ext = body?.ext === "png" ? "png" : "jpg";
+      const contentType = ext === "png" ? "image/png" : "image/jpeg";
+      const buffer = Buffer.from(imageBase64, "base64");
+      const path = `${auth.userId}/avatar.${ext}`;
+
+      const admin = supabaseAdmin();
+      const { error: uploadError } = await admin.storage
+        .from("avatars")
+        .upload(path, buffer, { contentType, upsert: true });
+      if (uploadError) throw uploadError;
+
+      const { data: pub } = admin.storage.from("avatars").getPublicUrl(path);
+      // Cache-bust: upsert reuses the path, so the CDN/public URL is identical
+      // across uploads — appending a version forces the client to refetch.
+      const avatarUrl = `${pub.publicUrl}?v=${Date.now()}`;
+
+      // Persist the URL on the user's profile so bootstrap can return it on
+      // launch. Service-role write — matches how other admin-side writes go.
+      const { error: updateError } = await admin
+        .from("user_profile")
+        .update({ avatar_url: avatarUrl, updated_at: new Date().toISOString() })
+        .eq("user_id", auth.userId);
+      if (updateError) throw updateError;
+
+      sendJson(res, 200, { ok: true, avatarUrl }, auth.userId);
+    } catch (avatarErr) {
+      console.error(
+        "[AVATAR_ERROR]",
+        JSON.stringify({
+          message: avatarErr?.message,
+          code: avatarErr?.code,
+          stack: avatarErr?.stack,
+          requestId: res?.livenewRequestId,
+        })
+      );
+      sendJson(res, 500, { ok: false, error: "upload_failed" }, auth.userId);
     }
     return true;
   }
@@ -6263,6 +6336,7 @@ const server = http.createServer(async (req, res) => {
     "/v1/consent/accept",
     "/v1/consents/accept",
     "/v1/onboard/complete",
+    "/v1/avatar",
   ]);
 
   if (

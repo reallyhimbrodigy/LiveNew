@@ -184,6 +184,10 @@ export const api = {
   // Profile
   onboardComplete: (profile) => request('POST', '/v1/onboard/complete', { profile }),
 
+  // Avatar — upload a base64-encoded profile photo. Server stores it in
+  // Supabase Storage and returns { ok, avatarUrl } (public, cache-busted URL).
+  uploadAvatar: (imageBase64, ext) => request('POST', '/v1/avatar', { imageBase64, ext }),
+
   // Account
   deleteAccount: () => request('POST', '/v1/account/delete', {}),
 };

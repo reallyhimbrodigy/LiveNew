@@ -2,7 +2,9 @@ import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, Image, ScrollView, Pressable, TextInput, Switch,
   StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking, Share, Modal,
+  ActivityIndicator,
 } from 'react-native';
+import * as ImagePicker from 'expo-image-picker';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
@@ -42,6 +44,8 @@ export default function AccountScreen({ navigation }) {
   const userName = useAuthStore(s => s.userName);
   const userEmail = useAuthStore(s => s.userEmail);
   const avatarUri = useAuthStore(s => s.avatarUri);
+  const setAvatar = useAuthStore(s => s.setAvatar);
+  const avatarUploading = useAuthStore(s => s.avatarUploading);
   const setDisplayName = useAuthStore(s => s.setDisplayName);
   const streak = useAuthStore(s => s.streak);
   const streakFreezeReady = useAuthStore(s => s.streakFreezeReady);
@@ -223,10 +227,48 @@ export default function AccountScreen({ navigation }) {
     } catch {}
   };
 
-  // NOTE: custom profile-photo upload is temporarily disabled. expo-image-picker
-  // fails the iOS pod install in this app's widget multi-target setup, so the
-  // avatar shows the user's initial (+ the Pro gold aura) for now. Photo upload
-  // returns once the native pod conflict is isolated.
+  // Pick a profile photo from the library and upload it. We request library
+  // permission first (graceful denial alert), then launch the picker with
+  // square cropping at moderate quality + base64 so we can hand the bytes to
+  // the server, which stores them in Supabase Storage and returns the URL.
+  const handlePickAvatar = async () => {
+    if (avatarUploading) return;
+    tapSelect();
+    try {
+      const perm = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!perm.granted) {
+        Alert.alert(
+          'Photo access needed',
+          'Enable photo library access in Settings to set a profile picture.'
+        );
+        return;
+      }
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        aspect: [1, 1],
+        quality: 0.7,
+        base64: true,
+      });
+      if (result.canceled) return;
+      const asset = result.assets?.[0];
+      if (!asset?.base64) {
+        Alert.alert('Error', 'Could not read that image. Try another photo.');
+        return;
+      }
+      // Derive the extension from the asset metadata; default to jpg. Only
+      // png/jpg are meaningful to the server (it maps everything else to jpeg).
+      let ext = 'jpg';
+      const nameExt = (asset.fileName || '').split('.').pop()?.toLowerCase();
+      const mime = (asset.mimeType || '').toLowerCase();
+      if (nameExt === 'png' || mime.includes('png')) ext = 'png';
+      const ok = await setAvatar({ base64: asset.base64, ext });
+      if (ok) tapLight();
+      else Alert.alert('Upload failed', 'Could not upload your photo. Please try again.');
+    } catch {
+      Alert.alert('Upload failed', 'Could not upload your photo. Please try again.');
+    }
+  };
 
   const startEditName = () => {
     tapSelect();
@@ -350,7 +392,12 @@ export default function AccountScreen({ navigation }) {
 
         {/* Profile — avatar + editable name. Pro users get a golden aura. */}
         <View style={s.profileSection}>
-          <View style={s.avatarTap}>
+          <Pressable
+            style={s.avatarTap}
+            onPress={handlePickAvatar}
+            disabled={avatarUploading}
+            hitSlop={6}
+          >
             {/* PRO golden aura — concentric soft-gold halos + glow behind the
                 avatar. Free users fall through to a plain subtle ring only. */}
             {isPremium ? (
@@ -368,8 +415,19 @@ export default function AccountScreen({ navigation }) {
                   <Text style={s.avatarInitial}>{avatarInitial}</Text>
                 </View>
               )}
+              {/* Upload spinner overlay — dims the avatar while the photo
+                  uploads so the tap feels acknowledged. */}
+              {avatarUploading ? (
+                <View style={s.avatarUploadingOverlay} pointerEvents="none">
+                  <ActivityIndicator size="small" color={colors.gold} />
+                </View>
+              ) : null}
             </View>
-          </View>
+            {/* Gold "+" edit affordance — signals the avatar is tappable. */}
+            <View style={s.avatarEditDot} pointerEvents="none">
+              <Text style={s.avatarEditGlyph}>+</Text>
+            </View>
+          </Pressable>
 
           <View style={s.profileMeta}>
             {editingName ? (
@@ -811,6 +869,13 @@ function makeStyles(colors, fonts) {
     avatarImg: {
       width: '100%',
       height: '100%',
+    },
+    // Dim overlay shown over the avatar while an upload is in flight.
+    avatarUploadingOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: 'rgba(0,0,0,0.35)',
+      alignItems: 'center',
+      justifyContent: 'center',
     },
     avatarFallback: {
       width: '100%',

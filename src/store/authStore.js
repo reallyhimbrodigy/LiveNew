@@ -130,7 +130,8 @@ export const useAuthStore = create((set, get) => ({
   healthSnapshot: null,        // cached HealthKit summary, refreshed on app focus
   userName: null,              // first name (captured at signup, persisted locally)
   userEmail: null,             // email (captured at sign-in, persisted locally, read-only display)
-  avatarUri: null,             // profile picture URI (account-scoped, loaded in hydrate)
+  avatarUri: null,             // profile picture URL (server-sourced; cached locally for instant display)
+  avatarUploading: false,      // transient: true while an avatar upload is in flight (drives the UI spinner)
   userId: null,                // current account id — scopes per-account device markers
   themeMode: 'system',         // 'system' | 'light' | 'dark' — overrides useColorScheme()
   trialStartISO: null,         // ISO date YYYY-MM-DD when the 14-day free trial began
@@ -291,6 +292,12 @@ export const useAuthStore = create((set, get) => ({
           // Persist the account-scoped onboarded marker so a later
           // logout→login with a flaky connection still recognizes this user.
           if (serverSaysOnboarded) await writeOnboardedMarker(auth.userId);
+          // Sync the avatar from the authoritative server value. Overwrites the
+          // local cache loaded by loadAvatar() above with the fresh URL.
+          if (serverProfile.avatar_url) {
+            set({ avatarUri: serverProfile.avatar_url });
+            try { await AsyncStorage.setItem(avatarKey(auth.userId), serverProfile.avatar_url); } catch {}
+          }
           if (serverProfile.routine) {
             const localProfile = profile || {};
             const pickServer = (key) => (
@@ -562,6 +569,14 @@ export const useAuthStore = create((set, get) => ({
       // Durable, account-scoped record that this user is onboarded — survives
       // logout so a future flaky-network re-login doesn't re-onboard them.
       if (serverSaysOnboarded) await writeOnboardedMarker(userId);
+      // Load the avatar from the authoritative server value (or fall back to the
+      // local cache for this account, so a returning user sees their photo).
+      if (p.avatar_url) {
+        set({ avatarUri: p.avatar_url });
+        try { await AsyncStorage.setItem(avatarKey(userId), p.avatar_url); } catch {}
+      } else {
+        get().loadAvatar();
+      }
       set({ isLoggedIn: true, hasProfile: serverSaysOnboarded, profile });
       return;
     }
@@ -981,25 +996,45 @@ export const useAuthStore = create((set, get) => ({
     } catch {}
   },
 
-  // Load the account-scoped profile picture URI for the current user.
+  // Load the account-scoped avatar URL from the local cache for instant
+  // display. The authoritative source is the server (profile.avatar_url from
+  // bootstrap), but reading the cache here — before the network returns — means
+  // a returning user sees their photo immediately, even offline. The bootstrap
+  // merge (see hydrate) overwrites this with the fresh server URL when it lands.
   // Fire-and-forget from hydrate (mirrors loadGems). Missing key → null.
   loadAvatar: async () => {
     const userId = get().userId;
     try {
       const uri = await AsyncStorage.getItem(avatarKey(userId));
-      set({ avatarUri: uri || null });
+      if (uri) set({ avatarUri: uri });
     } catch {}
   },
 
-  // Persist the chosen profile picture URI to the account-scoped key and
-  // reflect it in state. Called after a successful image pick.
-  setAvatar: async (uri) => {
-    const userId = get().userId;
-    set({ avatarUri: uri || null });
+  // Upload a newly-picked profile photo. `asset` = { base64, ext }. We send the
+  // base64 to the server, which stores it in Supabase Storage and returns the
+  // public URL; we then reflect that URL in state and cache it locally (account-
+  // scoped) for instant offline display next launch. Returns true on success,
+  // false on failure so the UI can surface an error. `avatarUploading` drives
+  // the in-UI spinner.
+  setAvatar: async (asset) => {
+    const base64 = asset?.base64;
+    const ext = asset?.ext === 'png' ? 'png' : 'jpg';
+    if (!base64) return false;
+    set({ avatarUploading: true });
     try {
-      if (uri) await AsyncStorage.setItem(avatarKey(userId), uri);
-      else await AsyncStorage.removeItem(avatarKey(userId));
-    } catch {}
+      const r = await api.uploadAvatar(base64, ext);
+      if (r?.avatarUrl) {
+        const userId = get().userId;
+        set({ avatarUri: r.avatarUrl });
+        try { await AsyncStorage.setItem(avatarKey(userId), r.avatarUrl); } catch {}
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    } finally {
+      set({ avatarUploading: false });
+    }
   },
 
   // Update the user's display (first) name. Reuses the SAME field+key the app
