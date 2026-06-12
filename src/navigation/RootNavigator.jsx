@@ -222,7 +222,7 @@ export default function RootNavigator() {
   if (!bootAnimDone) {
     return (
       <BootLoader
-        ready={!isLoading && fontsLoaded}
+        ready={!isLoading}
         onFinish={handleBootFinish}
       />
     );

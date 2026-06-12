@@ -64,6 +64,11 @@ const ZOOM_SCALE = 2.2;
 const ZOOM_DURATION_MS = 650;
 const FADE_DURATION_MS = 650;
 
+// HARD failsafe: the boot must NEVER hang on the splash. If `ready` never
+// arrives (e.g. hydrate stalls on a slow/blocked network), we force the outro
+// after this long regardless. This is the guard that prevents "stuck on splash."
+const MAX_BOOT_MS = 4500;
+
 // ─── Component ──────────────────────────────────────────────────────────────
 
 export default function BootLoader({ ready, onFinish }) {
@@ -72,7 +77,7 @@ export default function BootLoader({ ready, onFinish }) {
 
   // The image is rendered at a fixed width matching the screen width, so we
   // derive the rendered height from the native aspect ratio.
-  const imgRenderedW = screenW * 0.75; // 75% of screen width looks balanced
+  const imgRenderedW = Math.min(screenW * 0.75, 340); // capped so it stays balanced on large/iPad screens
   const imgRenderedH = imgRenderedW * (IMG_NATIVE_H / IMG_NATIVE_W);
 
   // ── Animated values ──────────────────────────────────────────────────────
@@ -99,6 +104,7 @@ export default function BootLoader({ ready, onFinish }) {
   const [barsDone, setBarsDone] = useState(false);
   const [minTimeDone, setMinTimeDone] = useState(false);
   const outroFired = useRef(false);
+  const finishedRef = useRef(false);
   const [reduceMotion, setReduceMotion] = useState(false);
 
   // ── Reduce motion detection ──────────────────────────────────────────────
@@ -197,6 +203,14 @@ export default function BootLoader({ ready, onFinish }) {
 
   // ── Outro: fires when ready + bars done + min time ───────────────────────
 
+  // Hand off to the app, guarded so it only ever runs once (the outro callback
+  // and the failsafe backstops can both fire — we must finish exactly once).
+  const finishOnce = useCallback(() => {
+    if (finishedRef.current) return;
+    finishedRef.current = true;
+    onFinish();
+  }, [onFinish]);
+
   const fireOutro = useCallback(() => {
     if (outroFired.current) return;
     outroFired.current = true;
@@ -205,8 +219,8 @@ export default function BootLoader({ ready, onFinish }) {
     breatheAnim.current?.stop();
 
     if (reduceMotion) {
-      // No motion — just call finish directly
-      onFinish();
+      // No motion — just hand off directly
+      finishOnce();
       return;
     }
 
@@ -270,16 +284,32 @@ export default function BootLoader({ ready, onFinish }) {
           useNativeDriver: true,
         }),
       ]).start(() => {
-        onFinish();
+        finishOnce();
       });
+
+      // Backstop: if the animation callback is ever dropped, still hand off.
+      setTimeout(() => finishOnce(), ZOOM_DURATION_MS + 500);
     }, BLING_DURATION_MS + 80);
-  }, [reduceMotion, onFinish, imgRenderedH]);
+  }, [reduceMotion, finishOnce, imgRenderedH]);
 
   useEffect(() => {
     if (ready && barsDone && minTimeDone) {
       fireOutro();
     }
   }, [ready, barsDone, minTimeDone, fireOutro]);
+
+  // Keep the latest fireOutro reachable from the mount-only failsafe below.
+  const fireOutroRef = useRef(fireOutro);
+  useEffect(() => { fireOutroRef.current = fireOutro; }, [fireOutro]);
+
+  // HARD FAILSAFE — the single most important guard in this component.
+  // Regardless of `ready`/fonts/hydrate, force the outro after MAX_BOOT_MS so
+  // the app ALWAYS reveals itself and can never hang on the splash. (The App
+  // Store rejection was exactly this: `ready` never arrived, so we never left.)
+  useEffect(() => {
+    const failsafe = setTimeout(() => { fireOutroRef.current?.(); }, MAX_BOOT_MS);
+    return () => clearTimeout(failsafe);
+  }, []);
 
   // ── Render ───────────────────────────────────────────────────────────────
 
