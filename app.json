@@ -8,11 +8,6 @@
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "scheme": "livenew",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#0f0d0a"
-    },
     "ios": {
       "supportsTablet": false,
       "bundleIdentifier": "app.livenew.mobile",
@@ -82,6 +77,15 @@
         "expo-image-picker",
         {
           "photosPermission": "LiveNew uses your photos so you can set a profile picture."
+        }
+      ],
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#0f0d0a",
+          "image": "./assets/splash.png",
+          "imageWidth": 200,
+          "resizeMode": "contain"
         }
       ]
     ],

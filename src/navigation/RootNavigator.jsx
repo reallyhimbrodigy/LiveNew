@@ -15,6 +15,8 @@ import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../theme';
 import AppBackground from '../components/AppBackground';
 import BootLoader from '../components/BootLoader';
+import ErrorBoundary from '../components/ErrorBoundary';
+import * as SplashScreen from 'expo-splash-screen';
 import { initPurchases } from '../purchases';
 import { GOOGLE_WEB_CLIENT_ID, GOOGLE_IOS_CLIENT_ID } from '../socialAuthConfig';
 
@@ -219,12 +221,26 @@ export default function RootNavigator() {
   const [bootAnimDone, setBootAnimDone] = useState(false);
   const handleBootFinish = useCallback(() => setBootAnimDone(true), []);
 
+  // FAILSAFE: the app MUST appear even if the boot screen never finishes.
+  // Independently of BootLoader, force past the boot gate after a hard cap and
+  // force-hide the native splash. This is what guarantees the app can never get
+  // stuck on the splash — the cause of the App Store launch rejection.
+  useEffect(() => {
+    const finish = setTimeout(() => setBootAnimDone(true), 4500);
+    const hide = setTimeout(() => { SplashScreen.hideAsync().catch(() => {}); }, 1200);
+    return () => { clearTimeout(finish); clearTimeout(hide); };
+  }, []);
+
   if (!bootAnimDone) {
+    // BootLoader wrapped so a render crash on a real device can't strand the
+    // launch — on error we just proceed into the app (no animation, but it loads).
     return (
-      <BootLoader
-        ready={!isLoading}
-        onFinish={handleBootFinish}
-      />
+      <ErrorBoundary onError={handleBootFinish} fallback={null}>
+        <BootLoader
+          ready={!isLoading}
+          onFinish={handleBootFinish}
+        />
+      </ErrorBoundary>
     );
   }
 
