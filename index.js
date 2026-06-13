@@ -2,19 +2,17 @@ import { registerRootComponent } from 'expo';
 import * as SplashScreen from 'expo-splash-screen';
 import App from './App';
 
-// Keep the native splash up until the app explicitly hides it.
-// Must run at module scope so it fires before any frame is rendered.
-SplashScreen.preventAutoHideAsync().catch(() => {});
-
-// FAILSAFE: the native splash must NEVER stay up forever. Even if React fails
-// to mount, or the boot screen throws before it can hide the splash, force it
-// down after 3s so the user is never stuck on the logo. (A boot screen that
-// held the splash open and never hid it was the App Store launch hang.)
+// We deliberately do NOT call preventAutoHideAsync(). The native splash
+// auto-hides as soon as the first JS frame renders — the behavior that shipped
+// fine before this app's custom boot screen was added. Holding the splash up
+// (preventAutoHide) and depending on the boot screen to hide it is exactly what
+// stranded the app on the logo when that hide didn't fire on-device.
+//
+// Failsafe: force-hide a couple seconds after launch in case auto-hide doesn't
+// fire on some OS version. Harmless no-op if the splash is already gone.
 setTimeout(() => {
   SplashScreen.hideAsync().catch(() => {});
-}, 3000);
+}, 2000);
 
-// registerRootComponent calls AppRegistry.registerComponent('main', () => App);
-// It also ensures that whether you load the app in Expo Go or in a native build,
-// the environment is set up appropriately
+// registerRootComponent calls AppRegistry.registerComponent('main', () => App).
 registerRootComponent(App);
