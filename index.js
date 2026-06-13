@@ -1,18 +1,50 @@
 import { registerRootComponent } from 'expo';
 import * as SplashScreen from 'expo-splash-screen';
-import App from './App';
+import React from 'react';
+import { Text, ScrollView } from 'react-native';
 
-// We deliberately do NOT call preventAutoHideAsync(). The native splash
-// auto-hides as soon as the first JS frame renders — the behavior that shipped
-// fine before this app's custom boot screen was added. Holding the splash up
-// (preventAutoHide) and depending on the boot screen to hide it is exactly what
-// stranded the app on the logo when that hide didn't fire on-device.
-//
-// Failsafe: force-hide a couple seconds after launch in case auto-hide doesn't
-// fire on some OS version. Harmless no-op if the splash is already gone.
-setTimeout(() => {
-  SplashScreen.hideAsync().catch(() => {});
-}, 2000);
+// Hide the native splash immediately and unconditionally. If any JavaScript is
+// running at all, the user can never be stuck on the logo after this point.
+SplashScreen.hideAsync().catch(() => {});
 
-// registerRootComponent calls AppRegistry.registerComponent('main', () => App).
-registerRootComponent(App);
+// Load the real app inside a try/catch so a module-scope throw anywhere in its
+// import chain is CAUGHT and shown on screen, instead of silently stranding the
+// app behind the splash. require() (not import) runs the module synchronously
+// here so we can catch its init error.
+let App = null;
+let loadError = null;
+try {
+  App = require('./App').default;
+} catch (e) {
+  loadError = e;
+  try {
+    // Also log so a local Metro/simulator run captures the raw error in stdout.
+    console.error('[LAUNCH_ERROR]', (e && (e.stack || e.message)) || e);
+  } catch {}
+}
+
+function Root() {
+  if (loadError || !App) {
+    const msg = loadError ? (loadError.message || String(loadError)) : 'App failed to load.';
+    const stack = loadError && loadError.stack ? String(loadError.stack) : '';
+    return (
+      <ScrollView
+        style={{ flex: 1, backgroundColor: '#0f0d0a' }}
+        contentContainerStyle={{ padding: 24, paddingTop: 90 }}
+      >
+        <Text style={{ color: '#c4a86c', fontSize: 20, fontWeight: '700', marginBottom: 14 }}>
+          Launch diagnostic
+        </Text>
+        <Text selectable style={{ color: '#ffffff', fontSize: 14, marginBottom: 18 }}>
+          {msg}
+        </Text>
+        <Text selectable style={{ color: '#9a9a9a', fontSize: 11, lineHeight: 16 }}>
+          {stack}
+        </Text>
+      </ScrollView>
+    );
+  }
+  return <App />;
+}
+
+registerRootComponent(Root);
