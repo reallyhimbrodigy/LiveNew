@@ -596,21 +596,6 @@ export default function ProgressScreen() {
           </Pressable>
         )}
 
-        {/* Story card — the main narrative. Tap to continue with Iris. */}
-        {daysActive >= 2 && (
-          <Pressable
-            style={({ pressed }) => [s.storyCard, pressed && { opacity: 0.9 }]}
-            onPress={() => navigation.navigate('Chat')}
-            accessibilityRole="button"
-            accessibilityLabel="Talk to Iris about your progress"
-          >
-            <Text style={s.storyText}>
-              {buildStoryText({ daysActive, streak, stressChange, stressAvg, recentAvg, totalSessions, bestDay, dayNames })}
-            </Text>
-            <Text style={s.cardTapHint}>Ask Iris ›</Text>
-          </Pressable>
-        )}
-
         {/* Iris's weekly read — tap to ask her to expand on it. */}
         {insight && (
           <Pressable
@@ -796,27 +781,6 @@ export default function ProgressScreen() {
       </ScrollView>
     </SafeAreaView>
   );
-}
-
-// One sentence. Pick the most signal-rich fact about today.
-// AI insight on Progress carries the rest of the narrative.
-function buildStoryText({ daysActive, streak, stressChange, stressAvg, recentAvg, totalSessions, bestDay, dayNames }) {
-  if (stressChange !== null && stressChange > 1) {
-    return `Stress dropped ${stressChange.toFixed(1)} points this week.`;
-  }
-  if (stressChange !== null && stressChange < -1) {
-    return `Stress climbed this week. Tomorrow adapts.`;
-  }
-  if (daysActive <= 3) {
-    return `Day ${daysActive}. Foundation phase.`;
-  }
-  if (recentAvg !== null && recentAvg >= 7) {
-    return `Stress sitting around ${Math.round(recentAvg)}. Tough stretch.`;
-  }
-  if (recentAvg !== null && recentAvg <= 4) {
-    return `Stress steady around ${Math.round(recentAvg)}. Whatever you're doing, keep going.`;
-  }
-  return `${daysActive} days in.`;
 }
 
 function makeStyles(colors, fonts) {
@@ -1247,23 +1211,6 @@ function makeStyles(colors, fonts) {
       lineHeight: 22,
       letterSpacing: 0.1,
       flex: 1,
-    },
-
-    // Story
-    storyCard: {
-      backgroundColor: colors.surface,
-      borderWidth: 1,
-      borderColor: colors.line,
-      borderRadius: 14,
-      padding: 20,
-      marginBottom: 16,
-    },
-    storyText: {
-      fontFamily: fonts.display,
-      fontSize: 16,
-      color: colors.text,
-      lineHeight: 26,
-      letterSpacing: 0.1,
     },
 
     // AI Insight

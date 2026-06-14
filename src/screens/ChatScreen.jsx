@@ -98,7 +98,7 @@ function Bubble({ role, content, s, fade }) {
   );
 }
 
-export default function ChatScreen({ navigation }) {
+export default function ChatScreen({ navigation, route }) {
   const { colors, fonts } = useTheme();
   const insets = useSafeAreaInsets();
   const s = useMemo(() => makeStyles(colors, fonts, insets), [colors, fonts, insets]);
@@ -117,6 +117,8 @@ export default function ChatScreen({ navigation }) {
   const scrollRef = useRef(null);
   const mountedRef = useRef(true);
   const sendScale = useRef(new Animated.Value(1)).current;
+  // Guard: only auto-send the initialPrompt once per mount.
+  const autoSentRef = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -197,6 +199,20 @@ export default function ChatScreen({ navigation }) {
       if (mountedRef.current) setSending(false);
     }
   }, [messages, sending, healthSnapshot, sendScale, isPremium, dailyCount, userId]);
+
+  // Auto-send the initialPrompt passed from a contextual entry point (e.g. the
+  // focus card on TodayScreen). Only fires once per mount; the autoSentRef guard
+  // prevents re-sending on re-renders or hot-reload. Normal chat (no initialPrompt)
+  // is completely unaffected.
+  const initialPrompt = route?.params?.initialPrompt;
+  useEffect(() => {
+    if (!initialPrompt || autoSentRef.current) return;
+    autoSentRef.current = true;
+    // Wait one frame so the component is fully mounted before sending.
+    requestAnimationFrame(() => send(initialPrompt));
+  // send is stable via useCallback; initialPrompt doesn't change after mount.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPrompt, send]);
 
   const atFreeLimit = !isPremium && dailyCount >= FREE_DAILY_IRIS;
   const canSend = !!input.trim() && !sending && !atFreeLimit;

@@ -917,7 +917,17 @@ export default function TodayScreen({ navigation }) {
         {(goalThread?.weeklyFocus || goalThread?.todayConnection) && (
           <PressCard
             style={s.goalCard}
-            onPress={() => { tapLight(); navigation.navigate('Chat'); }}
+            onPress={() => {
+              tapLight();
+              const prompt = goalThread?.weeklyFocus && goalThread?.todayConnection
+                ? `Why is "${goalThread.weeklyFocus}" my focus this week, and how does today connect to it?`
+                : goalThread?.weeklyFocus
+                  ? `Why is "${goalThread.weeklyFocus}" my focus this week?`
+                  : goalThread?.todayConnection
+                    ? `Tell me more about today's thread: "${goalThread.todayConnection}"`
+                    : 'Tell me more about my focus right now.';
+              navigation.navigate('Chat', { initialPrompt: prompt });
+            }}
           >
             {goalThread?.weeklyFocus && (
               <View style={s.goalLine}>
