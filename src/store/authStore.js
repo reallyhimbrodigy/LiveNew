@@ -75,15 +75,32 @@ const persistEmail = async (email, set) => {
 // Normalize schedule and derive a back-compat routine summary when a schedule
 // is present (keeps the hasProfile gate satisfied). Returns the profile
 // unchanged when no schedule is set. Used by both save paths.
+// Resolve the device's IANA timezone (e.g. "America/New_York"). Used so the
+// server can derive the plan's time-of-day from the user's real local time
+// instead of falling back to the server clock / LA default — that fallback was
+// the source of "good morning at night" for users outside LA.
+function getDeviceTimezone() {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone || null;
+  } catch {
+    return null;
+  }
+}
+
 function prepareProfileForSave(profile) {
-  if (!profile.schedule) return profile;
-  const schedule = normalizeSchedule(profile.schedule);
+  // Always stamp the current device timezone so it's persisted server-side and
+  // the day plan's time-of-day matches the user's real local time. Stamped even
+  // when there's no schedule (early-return path below) so it's never dropped.
+  const deviceTimezone = getDeviceTimezone();
+  const withTz = deviceTimezone ? { ...profile, timezone: deviceTimezone } : profile;
+  if (!withTz.schedule) return withTz;
+  const schedule = normalizeSchedule(withTz.schedule);
   // Always set a non-empty routine so the hasProfile gate (!!profile.routine)
   // passes even when the user skipped (empty schedule). The AI prompt uses the
   // structured schedule (daySchedule) as the primary signal; this string is
   // only the legacy fallback, so a benign sentinel is honest and safe.
-  const routine = profile.routine || deriveRoutineSummary(schedule) || 'No fixed schedule.';
-  return { ...profile, schedule, routine };
+  const routine = withTz.routine || deriveRoutineSummary(schedule) || 'No fixed schedule.';
+  return { ...withTz, schedule, routine };
 }
 
 // 14-day free trial helpers — used by both the gate (generatePlan) and the
@@ -785,6 +802,11 @@ export const useAuthStore = create((set, get) => ({
       // late-night sessions on its own). Don't send logical-date — that's
       // for client-side persistence only.
       dateISO: getLocalDateISO(),
+      // Device timezone so the server derives the plan's time-of-day from the
+      // user's ACTUAL local time, not the server clock / LA default. Sent on
+      // every check-in so it stays correct even before a profile save and
+      // updates automatically if the user travels.
+      timezone: getDeviceTimezone(),
       stress: stressValue,
       stressLabel,
       sleepQuality,   // "great" | "okay" | "rough"

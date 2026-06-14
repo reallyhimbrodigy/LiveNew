@@ -1,5 +1,6 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { logDebug } from "../server/logger.js";
+import { nowInTz } from "./utils/time.js";
 
 async function withRetry(fn, retries = 2) {
   for (let i = 0; i <= retries; i++) {
@@ -206,7 +207,7 @@ NEVER write generic "good morning" / "let's begin" / "here's your day" — usele
 
 The test for every zone: would a researcher who actually knows this person say this? If no, rewrite. The user is paying for substance — give it to them.`;
 
-export async function generateDayPlan({ stressLabel, sleepQuality, energy, routine, history, healthSnapshot, daySchedule = null }) {
+export async function generateDayPlan({ stressLabel, sleepQuality, energy, routine, history, healthSnapshot, daySchedule = null, timezone = null }) {
   const stressPhrase = stressLabel === "overwhelmed" ? "overwhelmed"
     : stressLabel === "stressed" ? "stressed"
     : stressLabel === "good" ? "calm"
@@ -218,8 +219,16 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
     : energy === "low" ? "energy is low"
     : "energy is steady";
 
-  const dayOfWeek = new Date().toLocaleDateString("en-US", { weekday: "long" });
-  const hour = new Date().getHours();
+  // Time-of-day MUST come from the user's local timezone, not the server clock.
+  // `timezone` is the user's IANA zone (sent by the client / stored on profile).
+  // When absent, nowInTz/toLocaleString fall back to UTC — still deterministic,
+  // just not personalized; the caller always passes the resolved zone.
+  const localNow = nowInTz(timezone);
+  const hour = Number.isFinite(localNow.hour) ? localNow.hour : new Date().getHours();
+  const weekdayFmtOpts = timezone
+    ? { weekday: "long", timeZone: timezone }
+    : { weekday: "long" };
+  const dayOfWeek = new Date().toLocaleDateString("en-US", weekdayFmtOpts);
   const timeContext = hour < 10 ? "early morning"
     : hour < 12 ? "late morning"
     : hour < 17 ? "afternoon"
@@ -319,7 +328,7 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
       );
     }
     if (pat.worstStressDay && pat.worstStressDay.dayName) {
-      const todayName = new Date().toLocaleDateString("en-US", { weekday: "long" });
+      const todayName = dayOfWeek;
       const worst = pat.worstStressDay.dayName;
       if (worst === todayName) {
         patternLines.push(

@@ -2731,8 +2731,17 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         injuriesList: injuriesInput,
         ...(incomingSchedule ? { schedule: incomingSchedule } : {}),
       };
+      // Prefer the device timezone the client sends so the plan's time-of-day
+      // matches the user's real local time. Validate it; fall back to any
+      // previously-stored value, then to the LA default only as a last resort.
+      const incomingTimezone =
+        typeof profileInput?.timezone === "string" && validateTimeZone(profileInput.timezone.trim())
+          ? profileInput.timezone.trim()
+          : null;
+      const resolvedProfileTimezone =
+        incomingTimezone || existingProfile?.timezone || DEFAULT_TIMEZONE;
       const updatedProfile = await persist.updateOnboarding(auth.userId, {
-        timezone: existingProfile?.timezone || DEFAULT_TIMEZONE,
+        timezone: resolvedProfileTimezone,
         dayBoundaryMinute:
           Number.isFinite(Number(existingProfile?.dayBoundaryMinute)) ? Number(existingProfile.dayBoundaryMinute) : 240,
         constraintsJson: mergedConstraints,
@@ -3194,6 +3203,37 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       }
       dateKey = dateValidation.value;
       const checkInRawSource = body?.checkIn && typeof body.checkIn === "object" ? body.checkIn : body;
+      // Device timezone from the client. This is the source of truth for the
+      // plan's time-of-day ("good morning" vs "evening") — it stays correct even
+      // before a profile save and updates if the user travels. Validate it;
+      // fall back to the stored profile timezone, then the LA default only as a
+      // last resort. Persist it onto the profile when it differs so future
+      // server-driven reads (rail/today, scheduling) use the right zone too.
+      const incomingCheckinTz =
+        (typeof checkInRawSource?.timezone === "string" && checkInRawSource.timezone.trim()) ||
+        (typeof body?.timezone === "string" && body.timezone.trim()) ||
+        "";
+      const effectiveTimezone =
+        incomingCheckinTz && validateTimeZone(incomingCheckinTz)
+          ? incomingCheckinTz
+          : baselineResolved.timezone;
+      if (
+        incomingCheckinTz &&
+        validateTimeZone(incomingCheckinTz) &&
+        incomingCheckinTz !== baselineResolved.timezone
+      ) {
+        baselineResolved.timezone = incomingCheckinTz;
+        try {
+          await persist.updateOnboarding(auth.userId, {
+            timezone: incomingCheckinTz,
+            dayBoundaryMinute: baselineResolved.dayBoundaryMinute,
+            constraintsJson: baselineResolved.constraints || null,
+            completedAt: profile?.onboardingCompletedAt || new Date().toISOString(),
+          });
+        } catch (err) {
+          console.error("[CHECKIN_TZ_PERSIST_FAILED]", err?.message);
+        }
+      }
       // Map string labels to numeric values for storage (new 3-step check-in sends labels)
       const sleepLabelToNum = { great: 8, okay: 5, rough: 2 };
       const energyLabelToNum = { high: 8, medium: 5, low: 2 };
@@ -3302,6 +3342,10 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           history: aiHistory,
           healthSnapshot,
           daySchedule,
+          // Derive the plan's time-of-day from the user's real local timezone,
+          // not the server clock. Without this the prompt said "good morning"
+          // at night for anyone outside the server's zone.
+          timezone: effectiveTimezone,
         });
       } catch (err) {
         console.error("[DAYPLAN_FAILED]", err?.message);
