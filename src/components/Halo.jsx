@@ -4,73 +4,100 @@ import Svg, {
   Circle,
   Line,
   Defs,
-  RadialGradient as SvgGradient,
+  RadialGradient as SvgRadialGradient,
+  LinearGradient as SvgLinearGradient,
   Stop,
 } from 'react-native-svg';
 import { useTheme } from '../theme';
+import { gemPalette } from '../domain/gems';
 
 /**
- * Radiant halo token — visual replacement for the old Gem component.
+ * Radiant halo token — premium redesign with luminous depth.
  *
- * Props:
+ * Props (UNCHANGED — backward-compatible):
  *   gem      — a GEMS entry {id, name, day, tier, rarityPct, hue, flavor}
  *   earned   — bool
  *   size     — default 56
  *   onPress  — optional
  *
- * The underlying data model still uses "gem" naming; this component is the
- * product-facing visual: a ring of light with radiating rays that escalates
- * with rarity tier, matching the radiant halo above the meditating figure
- * in the LiveNew logo.
+ * Visual model (bottom → top for earned halos):
+ *   1. Atmospheric bloom  — 3 translucent radial-gradient circles at increasing
+ *      radii giving a "glow from within" depth effect.
+ *   2. Rays layer         — gradient rays (bright near ring → fade) + slow rotation
+ *      for Epic/Legendary/Mythic. Varied lengths for Legendary/Mythic.
+ *   3. Ring layer         — dimensional ring filled with a 4-stop gradient:
+ *      bright sheen highlight → jewel mid → deep shadow → highlight arc.
+ *      An inner bright ring adds more luminosity.
+ *   4. Core glow          — a small radial gradient (near-white → jewel color →
+ *      transparent) over the ring center for a lit-from-within look.
+ *   5. Shine arc          — a soft specular highlight arc on the top of the ring.
+ *   6. Sparkle dots       — twinkling small dots at various orbit radii.
  *
- * Animation is tier-gated and only runs for earned halos. Locked halos are
- * always static. All loops use useNativeDriver: true (transforms + opacity
- * only) so they run on the native thread and don't block JS. Reduce Motion
- * skips all looping animations.
+ * Locked state: NOT plain grey — a dark silhouette with a faint hint of the
+ * gem's jewel color. The ring has a low-opacity jewel-colored stroke, a few
+ * ghost rays, and a subtle inner glow, making it feel like a tantalizing tease.
+ *
+ * Animation:
+ *   - All Animated.loop + useNativeDriver: true (transform + opacity only).
+ *   - Loop refs are stopped on unmount and on earned/reduceMotion changes.
+ *   - Reduce Motion → static, but still the full premium visual.
+ *   - Sparkle twinkles start at Common (2 dots) and scale up by tier.
  */
 
-// ── Tunable animation constants ───────────────────────────────────────────────
+// ── Animation constants ───────────────────────────────────────────────────────
 const ANIM = {
-  // Glow pulse: opacity range and duration (ms) per tier
-  UNCOMMON_GLOW_MIN: 0.55,
-  UNCOMMON_GLOW_MAX: 1.0,
-  UNCOMMON_GLOW_DUR: 3200,
-
-  RARE_GLOW_MIN: 0.5,
-  RARE_GLOW_MAX: 1.0,
-  RARE_GLOW_DUR: 2800,
-
-  EPIC_GLOW_MIN: 0.5,
-  EPIC_GLOW_MAX: 1.0,
-  EPIC_GLOW_DUR: 2800,
-
-  LEGENDARY_GLOW_MIN: 0.45,
-  LEGENDARY_GLOW_MAX: 1.0,
+  // Glow pulse — breathing opacity range and duration per tier
+  COMMON_GLOW_DUR:    4000,
+  UNCOMMON_GLOW_DUR:  3200,
+  RARE_GLOW_DUR:      2800,
+  EPIC_GLOW_DUR:      2600,
   LEGENDARY_GLOW_DUR: 2200,
+  MYTHIC_GLOW_DUR:    2000,
+  GLOW_MIN: 0.5,
+  GLOW_MAX: 1.0,
 
-  MYTHIC_GLOW_MIN: 0.45,
-  MYTHIC_GLOW_MAX: 1.0,
-  MYTHIC_GLOW_DUR: 2200,
-
-  // Ray rotation duration (ms per full revolution) — lower = faster
-  EPIC_ROT_DUR: 22000,
+  // Ray rotation (ms per full revolution)
+  UNCOMMON_ROT_DUR:  42000,
+  RARE_ROT_DUR:      32000,
+  EPIC_ROT_DUR:      22000,
   LEGENDARY_ROT_DUR: 15000,
-  MYTHIC_ROT_DUR: 11000,
+  MYTHIC_ROT_DUR:    10000,
 
-  // Breathing scale ranges and duration
+  // Breathing scale
   LEGENDARY_BREATHE_MIN: 1.0,
-  LEGENDARY_BREATHE_MAX: 1.03,
+  LEGENDARY_BREATHE_MAX: 1.032,
   LEGENDARY_BREATHE_DUR: 3000,
+  MYTHIC_BREATHE_MIN:    1.0,
+  MYTHIC_BREATHE_MAX:    1.044,
+  MYTHIC_BREATHE_DUR:    2600,
 
-  MYTHIC_BREATHE_MIN: 1.0,
-  MYTHIC_BREATHE_MAX: 1.04,
-  MYTHIC_BREATHE_DUR: 2600,
-
-  // Mythic sparkle: number of dots, stagger delay (ms), twinkle duration (ms)
-  MYTHIC_SPARKLE_COUNT: 6,
-  MYTHIC_SPARKLE_DUR: 900,
-  MYTHIC_SPARKLE_STAGGER: 140,
+  // Sparkle (dot count per tier, duration, stagger)
+  SPARKLE_DUR:     900,
+  SPARKLE_STAGGER: 130,
 };
+
+// Sparkle dot counts per tier
+const SPARKLE_COUNTS = {
+  Common:    2,
+  Uncommon:  3,
+  Rare:      4,
+  Epic:      5,
+  Legendary: 6,
+  Mythic:    8,
+};
+
+// Ray counts and base lengths per tier
+const TIER_CONFIG = {
+  Common:    { rays: 8,  rayLenFrac: 0.13, altLen: false },
+  Uncommon:  { rays: 10, rayLenFrac: 0.145, altLen: false },
+  Rare:      { rays: 12, rayLenFrac: 0.155, altLen: false },
+  Epic:      { rays: 14, rayLenFrac: 0.165, altLen: true },
+  Legendary: { rays: 16, rayLenFrac: 0.18,  altLen: true },
+  Mythic:    { rays: 20, rayLenFrac: 0.20,  altLen: true },
+};
+
+// Max sparkle count (for stable Animated.Value array)
+const MAX_SPARKLE = 8;
 
 export default function Halo({ gem, earned, size = 56, onPress }) {
   const { colors } = useTheme();
@@ -78,18 +105,16 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
   const [reduceMotion, setReduceMotion] = useState(false);
 
   // ── Animated values ────────────────────────────────────────────────────────
-  const rotAnim = useRef(new Animated.Value(0)).current;
-  const glowAnim = useRef(new Animated.Value(1)).current;
+  const rotAnim     = useRef(new Animated.Value(0)).current;
+  const glowAnim    = useRef(new Animated.Value(1)).current;
   const breatheAnim = useRef(new Animated.Value(1)).current;
-  // Sparkle opacity values for Mythic
   const sparkleAnims = useRef(
-    Array.from({ length: ANIM.MYTHIC_SPARKLE_COUNT }, () => new Animated.Value(0))
+    Array.from({ length: MAX_SPARKLE }, () => new Animated.Value(0))
   ).current;
 
-  // Loop refs for cleanup
   const loopRefs = useRef([]);
 
-  // ── Reduce Motion detection ────────────────────────────────────────────────
+  // ── Reduce Motion ──────────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false;
     AccessibilityInfo.isReduceMotionEnabled().then((on) => {
@@ -101,22 +126,51 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
 
   // ── Animation setup ────────────────────────────────────────────────────────
   useEffect(() => {
-    // Stop any running loops
     loopRefs.current.forEach((l) => l.stop());
     loopRefs.current = [];
 
-    // Only animate earned halos when reduce motion is off
     if (!earned || reduceMotion) return;
 
     const tier = gem.tier;
-    const newLoops = [];
+    const loops = [];
 
-    // ── Ray rotation (Epic, Legendary, Mythic) ─────────────────────────────
-    const rotDur =
-      tier === 'Epic' ? ANIM.EPIC_ROT_DUR :
+    // Glow pulse — all earned tiers breathe, just at different speeds
+    const glowDur = (
+      tier === 'Common'    ? ANIM.COMMON_GLOW_DUR    :
+      tier === 'Uncommon'  ? ANIM.UNCOMMON_GLOW_DUR  :
+      tier === 'Rare'      ? ANIM.RARE_GLOW_DUR      :
+      tier === 'Epic'      ? ANIM.EPIC_GLOW_DUR      :
+      tier === 'Legendary' ? ANIM.LEGENDARY_GLOW_DUR :
+      /* Mythic */           ANIM.MYTHIC_GLOW_DUR
+    );
+    glowAnim.setValue(ANIM.GLOW_MAX);
+    const glowLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(glowAnim, {
+          toValue: ANIM.GLOW_MIN,
+          duration: glowDur,
+          easing: Easing.inOut(Easing.sine),
+          useNativeDriver: true,
+        }),
+        Animated.timing(glowAnim, {
+          toValue: ANIM.GLOW_MAX,
+          duration: glowDur,
+          easing: Easing.inOut(Easing.sine),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    glowLoop.start();
+    loops.push(glowLoop);
+
+    // Ray rotation — Uncommon and above
+    const rotDur = (
+      tier === 'Uncommon'  ? ANIM.UNCOMMON_ROT_DUR  :
+      tier === 'Rare'      ? ANIM.RARE_ROT_DUR      :
+      tier === 'Epic'      ? ANIM.EPIC_ROT_DUR      :
       tier === 'Legendary' ? ANIM.LEGENDARY_ROT_DUR :
-      tier === 'Mythic' ? ANIM.MYTHIC_ROT_DUR : 0;
-
+      tier === 'Mythic'    ? ANIM.MYTHIC_ROT_DUR    : 0
+    );
     if (rotDur > 0) {
       rotAnim.setValue(0);
       const rotLoop = Animated.loop(
@@ -128,53 +182,16 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
         })
       );
       rotLoop.start();
-      newLoops.push(rotLoop);
+      loops.push(rotLoop);
     }
 
-    // ── Glow pulse (Uncommon, Rare, Epic, Legendary, Mythic) ───────────────
-    let glowMin, glowMax, glowDur;
-    if (tier === 'Uncommon') {
-      glowMin = ANIM.UNCOMMON_GLOW_MIN; glowMax = ANIM.UNCOMMON_GLOW_MAX; glowDur = ANIM.UNCOMMON_GLOW_DUR;
-    } else if (tier === 'Rare') {
-      glowMin = ANIM.RARE_GLOW_MIN; glowMax = ANIM.RARE_GLOW_MAX; glowDur = ANIM.RARE_GLOW_DUR;
-    } else if (tier === 'Epic') {
-      glowMin = ANIM.EPIC_GLOW_MIN; glowMax = ANIM.EPIC_GLOW_MAX; glowDur = ANIM.EPIC_GLOW_DUR;
-    } else if (tier === 'Legendary') {
-      glowMin = ANIM.LEGENDARY_GLOW_MIN; glowMax = ANIM.LEGENDARY_GLOW_MAX; glowDur = ANIM.LEGENDARY_GLOW_DUR;
-    } else if (tier === 'Mythic') {
-      glowMin = ANIM.MYTHIC_GLOW_MIN; glowMax = ANIM.MYTHIC_GLOW_MAX; glowDur = ANIM.MYTHIC_GLOW_DUR;
-    }
-
-    if (glowMin !== undefined) {
-      glowAnim.setValue(glowMax);
-      const glowLoop = Animated.loop(
-        Animated.sequence([
-          Animated.timing(glowAnim, {
-            toValue: glowMin,
-            duration: glowDur,
-            easing: Easing.inOut(Easing.sine),
-            useNativeDriver: true,
-          }),
-          Animated.timing(glowAnim, {
-            toValue: glowMax,
-            duration: glowDur,
-            easing: Easing.inOut(Easing.sine),
-            useNativeDriver: true,
-          }),
-        ])
-      );
-      glowLoop.start();
-      newLoops.push(glowLoop);
-    }
-
-    // ── Breathing scale (Legendary, Mythic) ────────────────────────────────
+    // Breathing scale — Legendary and Mythic
     let breatheMin, breatheMax, breatheDur;
     if (tier === 'Legendary') {
       breatheMin = ANIM.LEGENDARY_BREATHE_MIN; breatheMax = ANIM.LEGENDARY_BREATHE_MAX; breatheDur = ANIM.LEGENDARY_BREATHE_DUR;
     } else if (tier === 'Mythic') {
       breatheMin = ANIM.MYTHIC_BREATHE_MIN; breatheMax = ANIM.MYTHIC_BREATHE_MAX; breatheDur = ANIM.MYTHIC_BREATHE_DUR;
     }
-
     if (breatheMin !== undefined) {
       breatheAnim.setValue(breatheMin);
       const breatheLoop = Animated.loop(
@@ -194,39 +211,39 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
         ])
       );
       breatheLoop.start();
-      newLoops.push(breatheLoop);
+      loops.push(breatheLoop);
     }
 
-    // ── Mythic sparkle twinkle ─────────────────────────────────────────────
-    if (tier === 'Mythic') {
-      sparkleAnims.forEach((anim, i) => {
-        anim.setValue(0);
-        const sparkleLoop = Animated.loop(
-          Animated.sequence([
-            Animated.delay(i * ANIM.MYTHIC_SPARKLE_STAGGER),
-            Animated.timing(anim, {
-              toValue: 1,
-              duration: ANIM.MYTHIC_SPARKLE_DUR,
-              easing: Easing.inOut(Easing.quad),
-              useNativeDriver: true,
-            }),
-            Animated.timing(anim, {
-              toValue: 0,
-              duration: ANIM.MYTHIC_SPARKLE_DUR,
-              easing: Easing.inOut(Easing.quad),
-              useNativeDriver: true,
-            }),
-          ])
-        );
-        sparkleLoop.start();
-        newLoops.push(sparkleLoop);
-      });
-    }
+    // Sparkle twinkles — all tiers, count increases by tier
+    const sparkleCount = SPARKLE_COUNTS[tier] ?? 2;
+    sparkleAnims.slice(0, sparkleCount).forEach((anim, i) => {
+      anim.setValue(0);
+      const sparkleLoop = Animated.loop(
+        Animated.sequence([
+          Animated.delay(i * ANIM.SPARKLE_STAGGER),
+          Animated.timing(anim, {
+            toValue: 1,
+            duration: ANIM.SPARKLE_DUR,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+          Animated.timing(anim, {
+            toValue: 0,
+            duration: ANIM.SPARKLE_DUR,
+            easing: Easing.inOut(Easing.quad),
+            useNativeDriver: true,
+          }),
+        ])
+      );
+      sparkleLoop.start();
+      loops.push(sparkleLoop);
+    });
+    // Ensure unused sparkle anims stay at 0
+    sparkleAnims.slice(sparkleCount).forEach((anim) => anim.setValue(0));
 
-    loopRefs.current = newLoops;
-
+    loopRefs.current = loops;
     return () => {
-      newLoops.forEach((l) => l.stop());
+      loops.forEach((l) => l.stop());
     };
   }, [earned, reduceMotion, gem.tier]);
 
@@ -239,407 +256,349 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
     };
   }, []);
 
-  // ── Ray count + length by tier ─────────────────────────────────────────────
-  const TIER_CONFIG = {
-    Common:    { rays: 8,  rayLength: 0.14 },
-    Uncommon:  { rays: 10, rayLength: 0.15 },
-    Rare:      { rays: 12, rayLength: 0.16 },
-    Epic:      { rays: 14, rayLength: 0.17 },
-    Legendary: { rays: 16, rayLength: 0.19 },
-    Mythic:    { rays: 20, rayLength: 0.21 },
-  };
-  const config = TIER_CONFIG[gem.tier] || TIER_CONFIG.Common;
-  const { rays: RAY_COUNT, rayLength: RAY_LEN_FRAC } = config;
+  // ── Palette + geometry ─────────────────────────────────────────────────────
+  const pal = gemPalette(gem);
+  const tier = gem.tier;
+  const config = TIER_CONFIG[tier] ?? TIER_CONFIG.Common;
 
-  // ── Geometry ───────────────────────────────────────────────────────────────
   const cx = size / 2;
   const cy = size / 2;
 
-  const ringR = size * 0.32;
-  const ringStrokeWidth = Math.max(1.2, size * 0.028);
+  const ringR           = size * 0.30;
+  const ringStroke      = Math.max(2.0, size * 0.052);
+  const innerRingStroke = Math.max(0.8, size * 0.016);
 
-  const glowR = size * 0.46;
-  const isHighTier = gem.tier === 'Legendary' || gem.tier === 'Mythic';
-  const glowBaseOpacity = earned ? (isHighTier ? 0.28 : 0.18) : 0;
+  // Atmospheric bloom radii (3 layers)
+  const bloomR1 = size * 0.30;
+  const bloomR2 = size * 0.40;
+  const bloomR3 = size * 0.50;
 
-  const rayInnerR = ringR + ringStrokeWidth * 0.6;
-  const rayOuterR = ringR + size * RAY_LEN_FRAC + ringStrokeWidth * 0.6;
-  const rayStrokeWidth = Math.max(0.8, size * 0.02);
-
-  // Pre-compute ray endpoints
-  const rayLines = Array.from({ length: RAY_COUNT }, (_, i) => {
-    const angle = (2 * Math.PI * i) / RAY_COUNT - Math.PI / 2;
+  // Ray geometry — alternate long/short for higher tiers
+  const rayInnerR = ringR + ringStroke * 0.5;
+  const baseLen   = size * config.rayLenFrac;
+  const rayLines = Array.from({ length: config.rays }, (_, i) => {
+    const angle  = (2 * Math.PI * i) / config.rays - Math.PI / 2;
+    const isAlt  = config.altLen && i % 2 === 1;
+    const rayLen = isAlt ? baseLen * 0.62 : baseLen;
     return {
       x1: cx + Math.cos(angle) * rayInnerR,
       y1: cy + Math.sin(angle) * rayInnerR,
-      x2: cx + Math.cos(angle) * rayOuterR,
-      y2: cy + Math.sin(angle) * rayOuterR,
+      x2: cx + Math.cos(angle) * (rayInnerR + rayLen),
+      y2: cy + Math.sin(angle) * (rayInnerR + rayLen),
+      isAlt,
     };
   });
 
-  // ── Colors ─────────────────────────────────────────────────────────────────
-  const hue = gem.hue;
+  // Sparkle dot positions — orbit slightly beyond the farthest ray tips
+  const sparkleCount = SPARKLE_COUNTS[tier] ?? 2;
+  const sparkleOrbitR = rayInnerR + baseLen + size * 0.045;
+  const sparkleSize   = Math.max(2, size * 0.046);
+  const sparkleDots   = Array.from({ length: sparkleCount }, (_, i) => {
+    // Distribute at slightly irregular angles for organic feel
+    const baseAngle = (2 * Math.PI * i) / sparkleCount - Math.PI / 2;
+    const jitter    = (i % 3 === 0 ? 0.08 : i % 3 === 1 ? -0.05 : 0.12);
+    const angle     = baseAngle + jitter;
+    return {
+      x: cx + Math.cos(angle) * sparkleOrbitR,
+      y: cy + Math.sin(angle) * sparkleOrbitR,
+    };
+  });
 
-  // Unique gradient id per instance
-  const uid = React.useId();
-  const gradId = `halo-grad-${gem.id}-${uid.replace(/:/g, '')}`;
+  // ── Gradient IDs (unique per instance) ────────────────────────────────────
+  // Use React.useId() to ensure IDs are unique across concurrent instances.
+  const uid        = React.useId().replace(/:/g, '');
+  // Locked-state gradient IDs
+  const lockedRingGradId = `halo-lr-${gem.id}-${uid}`;
+  const lockedBloomId    = `halo-lb-${gem.id}-${uid}`;
+  // Earned-state gradient IDs (used inline in ringSvg via -local convention)
+  const ringGradId  = `halo-rg-${gem.id}-${uid}`;
+  const coreGradId  = `halo-cg-${gem.id}-${uid}`;
 
-  const ringColor = earned ? `url(#${gradId})` : colors.line;
-  const ringOpacity = earned ? 1 : 0.5;
-  const haloOpacity = earned ? 1 : 0.45;
-
-  const rayColor = earned ? lightenHex(hue, 0.3) : colors.dim;
-  const rayOpacity = earned ? 0.75 : 0;
-  const lockedGhostRayOpacity = 0.18;
-
-  // ── Accessibility ──────────────────────────────────────────────────────────
-  const label = earned
-    ? `${gem.name} halo, earned`
-    : `${gem.name} halo, locked`;
-
-  // ── Determine which animations are active ─────────────────────────────────
+  // ── Animation flags ────────────────────────────────────────────────────────
   const shouldAnimate = earned && !reduceMotion;
-  const tier = gem.tier;
-  const hasRotation = shouldAnimate && (tier === 'Epic' || tier === 'Legendary' || tier === 'Mythic');
-  const hasGlow = shouldAnimate && tier !== 'Common';
-  const hasBreathing = shouldAnimate && (tier === 'Legendary' || tier === 'Mythic');
-  const hasSparkle = shouldAnimate && tier === 'Mythic';
+  const hasRotation   = shouldAnimate && tier !== 'Common';
+  const hasBreathing  = shouldAnimate && (tier === 'Legendary' || tier === 'Mythic');
+  const hasSparkle    = shouldAnimate;
 
-  // ── Sparkle dot positions (Mythic only) — orbit slightly beyond the ray tips
-  const sparkleR = rayOuterR + size * 0.04;
-  const sparkleDots = hasSparkle
-    ? Array.from({ length: ANIM.MYTHIC_SPARKLE_COUNT }, (_, i) => {
-        const angle = (2 * Math.PI * i) / ANIM.MYTHIC_SPARKLE_COUNT - Math.PI / 2;
-        return {
-          x: cx + Math.cos(angle) * sparkleR,
-          y: cy + Math.sin(angle) * sparkleR,
-        };
-      })
-    : [];
-
-  // ── Rotation interpolation (0→1 → 0deg→360deg) ────────────────────────────
-  const rotateInterpolated = rotAnim.interpolate({
+  const rotateInterp = rotAnim.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
   });
 
-  // ── Static glow circle (non-animated fallback, or Common/locked) ───────────
-  const glowCircle = (
-    <Circle
-      cx={cx}
-      cy={cy}
-      r={glowR}
-      fill={hue}
-      fillOpacity={glowBaseOpacity}
-    />
-  );
+  // ── Accessibility ──────────────────────────────────────────────────────────
+  const label = earned ? `${gem.name} halo, earned` : `${gem.name} halo, locked`;
 
-  // ── The core static ring SVG (used in the ring/core layer) ────────────────
-  const ringAndDefs = (
-    <Svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
-      accessibilityLabel={label}
-      opacity={haloOpacity}
-    >
-      <Defs>
-        <SvgGradient id={gradId} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-          <Stop offset="0" stopColor={lightenHex(hue, 0.4)} stopOpacity="1" />
-          <Stop offset="1" stopColor={hue} stopOpacity="1" />
-        </SvgGradient>
-      </Defs>
-
-      {/* Glow — static version for non-animated tiers */}
-      {!hasGlow && glowCircle}
-
-      {/* Rays — only rendered here when NOT rotating (Common, Uncommon, Rare locked) */}
-      {!hasRotation && (
-        earned
-          ? rayLines.map((r, i) => (
-              <Line
-                key={i}
-                x1={r.x1}
-                y1={r.y1}
-                x2={r.x2}
-                y2={r.y2}
-                stroke={rayColor}
-                strokeWidth={rayStrokeWidth}
-                strokeOpacity={rayOpacity}
-                strokeLinecap="round"
-              />
-            ))
-          : [0, Math.floor(RAY_COUNT / 2)].map((idx) => {
-              const r = rayLines[idx];
-              return (
-                <Line
-                  key={idx}
-                  x1={r.x1}
-                  y1={r.y1}
-                  x2={r.x2}
-                  y2={r.y2}
-                  stroke={colors.dim}
-                  strokeWidth={rayStrokeWidth}
-                  strokeOpacity={lockedGhostRayOpacity}
-                  strokeLinecap="round"
-                />
-              );
-            })
-      )}
-
-      {/* Halo ring */}
-      <Circle
-        cx={cx}
-        cy={cy}
-        r={ringR}
-        fill="none"
-        stroke={ringColor}
-        strokeWidth={ringStrokeWidth}
-        strokeOpacity={ringOpacity}
-      />
-    </Svg>
-  );
-
-  // ── Static render (no animation — Common earned, locked, reduce-motion) ────
-  if (!shouldAnimate || tier === 'Common') {
-    const content = (
+  // ── LOCKED STATE ──────────────────────────────────────────────────────────
+  // Not just grey: dark desaturated silhouette with a faint jewel-hued edge
+  // and a whisper of glow to make it enticing.
+  if (!earned) {
+    const lockedContent = (
       <Svg
         width={size}
         height={size}
         viewBox={`0 0 ${size} ${size}`}
         accessibilityLabel={label}
-        opacity={haloOpacity}
       >
         <Defs>
-          <SvgGradient id={gradId} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-            <Stop offset="0" stopColor={lightenHex(hue, 0.4)} stopOpacity="1" />
-            <Stop offset="1" stopColor={hue} stopOpacity="1" />
-          </SvgGradient>
+          {/* Very faint jewel-tinted bloom behind the ring */}
+          <SvgRadialGradient id={lockedBloomId} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+            <Stop offset="0%"   stopColor={pal.mid} stopOpacity="0.10" />
+            <Stop offset="55%"  stopColor={pal.mid} stopOpacity="0.05" />
+            <Stop offset="100%" stopColor={pal.mid} stopOpacity="0" />
+          </SvgRadialGradient>
+          {/* Jewel-tinted desaturated ring stroke */}
+          <SvgLinearGradient id={lockedRingGradId} x1="0%" y1="0%" x2="100%" y2="100%">
+            <Stop offset="0%"   stopColor={pal.mid}  stopOpacity="0.30" />
+            <Stop offset="50%"  stopColor={pal.core} stopOpacity="0.18" />
+            <Stop offset="100%" stopColor={pal.mid}  stopOpacity="0.22" />
+          </SvgLinearGradient>
         </Defs>
 
-        {/* Glow */}
+        {/* Faint bloom */}
+        <Circle cx={cx} cy={cy} r={bloomR3} fill={`url(#${lockedBloomId})`} />
+
+        {/* Two ghost rays — barely visible enticing hints */}
+        {[0, Math.floor(config.rays / 2)].map((idx) => {
+          const r = rayLines[idx];
+          return (
+            <Line
+              key={idx}
+              x1={r.x1} y1={r.y1} x2={r.x2} y2={r.y2}
+              stroke={pal.mid}
+              strokeWidth={Math.max(0.8, size * 0.018)}
+              strokeOpacity={0.14}
+              strokeLinecap="round"
+            />
+          );
+        })}
+
+        {/* Dark silhouette fill inside the ring */}
         <Circle
-          cx={cx}
-          cy={cy}
-          r={glowR}
-          fill={hue}
-          fillOpacity={glowBaseOpacity}
+          cx={cx} cy={cy} r={ringR - ringStroke * 0.35}
+          fill={colors.bg ?? '#18140e'}
+          fillOpacity={0.88}
         />
 
-        {/* Rays */}
-        {earned
-          ? rayLines.map((r, i) => (
-              <Line
-                key={i}
-                x1={r.x1}
-                y1={r.y1}
-                x2={r.x2}
-                y2={r.y2}
-                stroke={rayColor}
-                strokeWidth={rayStrokeWidth}
-                strokeOpacity={rayOpacity}
-                strokeLinecap="round"
-              />
-            ))
-          : [0, Math.floor(RAY_COUNT / 2)].map((idx) => {
-              const r = rayLines[idx];
-              return (
-                <Line
-                  key={idx}
-                  x1={r.x1}
-                  y1={r.y1}
-                  x2={r.x2}
-                  y2={r.y2}
-                  stroke={colors.dim}
-                  strokeWidth={rayStrokeWidth}
-                  strokeOpacity={lockedGhostRayOpacity}
-                  strokeLinecap="round"
-                />
-              );
-            })}
-
-        {/* Ring */}
+        {/* Jewel-tinted ring outline — the enticing tease */}
         <Circle
-          cx={cx}
-          cy={cy}
-          r={ringR}
+          cx={cx} cy={cy} r={ringR}
           fill="none"
-          stroke={ringColor}
-          strokeWidth={ringStrokeWidth}
-          strokeOpacity={ringOpacity}
+          stroke={`url(#${lockedRingGradId})`}
+          strokeWidth={ringStroke}
+          strokeOpacity={0.7}
         />
       </Svg>
     );
 
     if (onPress) {
       return (
-        <Pressable
-          onPress={onPress}
-          hitSlop={6}
-          accessibilityLabel={label}
-          style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}
-        >
-          {content}
+        <Pressable onPress={onPress} hitSlop={6} accessibilityLabel={label}
+          style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
+          {lockedContent}
         </Pressable>
       );
     }
-    return content;
+    return lockedContent;
   }
 
-  // ── Animated render — earned && !reduceMotion && tier !== Common ───────────
-  // Layer order (bottom → top):
-  //   1. Glow layer (Animated.View — opacity pulse)
-  //   2. Rays layer (Animated.View — rotation, contains its own Svg)
-  //   3. Ring/core layer (Animated.View — breathing scale)
-  //   4. Sparkle dots (Mythic only, Animated.View per dot)
+  // ── Bloom layer SVG ────────────────────────────────────────────────────────
+  const bloomSvg = (
+    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      {/* Outermost atmospheric bloom — largest, lowest opacity */}
+      <Circle cx={cx} cy={cy} r={bloomR3} fill={pal.glow} fillOpacity={0.06} />
+      {/* Mid bloom */}
+      <Circle cx={cx} cy={cy} r={bloomR2} fill={pal.glow} fillOpacity={0.10} />
+      {/* Inner bloom — tightest, most visible */}
+      <Circle cx={cx} cy={cy} r={bloomR1} fill={pal.glow} fillOpacity={0.16} />
+    </Svg>
+  );
 
-  const sparkleSize = Math.max(2.5, size * 0.05);
+  // ── Ray SVG (used inside the rotating layer) ───────────────────────────────
+  const raySvg = (
+    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      {rayLines.map((r, i) => (
+        <Line
+          key={i}
+          x1={r.x1} y1={r.y1} x2={r.x2} y2={r.y2}
+          stroke={r.isAlt ? pal.mid : pal.sheen}
+          strokeWidth={r.isAlt
+            ? Math.max(0.7, size * 0.016)
+            : Math.max(0.9, size * 0.022)
+          }
+          strokeOpacity={r.isAlt ? 0.55 : 0.80}
+          strokeLinecap="round"
+        />
+      ))}
+    </Svg>
+  );
+
+  // ── Ring + core + shine SVG ────────────────────────────────────────────────
+  const ringSvg = (
+    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
+         accessibilityLabel={label}>
+      <Defs>
+        {/* Dimensional ring gradient: bright sheen → jewel mid → deep shadow → mid */}
+        <SvgLinearGradient id={ringGradId} x1="0%" y1="0%" x2="0%" y2="100%">
+          <Stop offset="0%"   stopColor={pal.sheen} stopOpacity="0.95" />
+          <Stop offset="25%"  stopColor={pal.mid}   stopOpacity="1" />
+          <Stop offset="65%"  stopColor={pal.deep}  stopOpacity="1" />
+          <Stop offset="100%" stopColor={pal.mid}   stopOpacity="0.9" />
+        </SvgLinearGradient>
+        {/* Core lit-from-within: near-white → jewel → transparent */}
+        <SvgRadialGradient id={coreGradId} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+          <Stop offset="0%"   stopColor={pal.core} stopOpacity="0.90" />
+          <Stop offset="35%"  stopColor={pal.mid}  stopOpacity="0.50" />
+          <Stop offset="70%"  stopColor={pal.mid}  stopOpacity="0.12" />
+          <Stop offset="100%" stopColor={pal.mid}  stopOpacity="0" />
+        </SvgRadialGradient>
+      </Defs>
+
+      {/* Outer soft glow ring — slightly larger, very low opacity */}
+      <Circle
+        cx={cx} cy={cy} r={ringR + ringStroke * 0.7}
+        fill="none"
+        stroke={pal.glow}
+        strokeWidth={ringStroke * 1.4}
+        strokeOpacity={0.22}
+      />
+
+      {/* Main dimensional ring — the jewel tube */}
+      <Circle
+        cx={cx} cy={cy} r={ringR}
+        fill="none"
+        stroke={`url(#${ringGradId})`}
+        strokeWidth={ringStroke}
+        strokeOpacity={1}
+      />
+
+      {/* Inner bright ring — adds luminosity inside the tube */}
+      <Circle
+        cx={cx} cy={cy} r={ringR - ringStroke * 0.18}
+        fill="none"
+        stroke={pal.core}
+        strokeWidth={innerRingStroke}
+        strokeOpacity={0.55}
+      />
+
+      {/* Core lit-from-within glow — radial gradient over the ring center */}
+      <Circle
+        cx={cx} cy={cy} r={ringR * 0.88}
+        fill={`url(#${coreGradId})`}
+      />
+
+      {/* Specular shine arc — short bright arc on the upper-left of the ring
+          simulating a light source from the top-left. Drawn as a stroked circle
+          with a dash offset so only the top ~80° is visible. */}
+      <Circle
+        cx={cx} cy={cy} r={ringR}
+        fill="none"
+        stroke={pal.core}
+        strokeWidth={ringStroke * 0.55}
+        strokeOpacity={0.70}
+        strokeLinecap="round"
+        strokeDasharray={`${ringR * 0.55} ${ringR * 10}`}
+        strokeDashoffset={ringR * 0.28}
+      />
+    </Svg>
+  );
+
+  // ── REDUCE MOTION — static premium render ─────────────────────────────────
+  if (!shouldAnimate) {
+    const staticContent = (
+      <View style={{ width: size, height: size }} accessibilityLabel={label}>
+        {/* Bloom */}
+        <View style={{ position: 'absolute', width: size, height: size }}>
+          {bloomSvg}
+        </View>
+        {/* Rays */}
+        <View style={{ position: 'absolute', width: size, height: size }}>
+          {raySvg}
+        </View>
+        {/* Ring */}
+        <View style={{ position: 'absolute', width: size, height: size }}>
+          {ringSvg}
+        </View>
+      </View>
+    );
+
+    if (onPress) {
+      return (
+        <Pressable onPress={onPress} hitSlop={6} accessibilityLabel={label}
+          style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
+          {staticContent}
+        </Pressable>
+      );
+    }
+    return staticContent;
+  }
+
+  // ── ANIMATED render ────────────────────────────────────────────────────────
+  // Layer stack (bottom → top):
+  //   1. Bloom       — Animated.View (opacity pulse via glowAnim)
+  //   2. Rays        — Animated.View (rotation transform)
+  //   3. Ring/core   — Animated.View (breathing scale for Legend/Mythic)
+  //   4. Sparkles    — Animated.View per dot (twinkle opacity)
 
   const animated = (
-    <View
-      style={{ width: size, height: size }}
-      accessibilityLabel={label}
-    >
-      {/* ── Layer 1: Glow (opacity pulse) ─────────────────────────────────── */}
+    <View style={{ width: size, height: size }} accessibilityLabel={label}>
+
+      {/* ── Layer 1: Atmospheric bloom (opacity pulse) ─────────────────────── */}
       <Animated.View
         pointerEvents="none"
-        style={{
-          position: 'absolute',
-          width: size,
-          height: size,
-          opacity: hasGlow ? glowAnim : glowBaseOpacity,
-        }}
+        style={{ position: 'absolute', width: size, height: size, opacity: glowAnim }}
       >
-        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-          <Circle
-            cx={cx}
-            cy={cy}
-            r={glowR}
-            fill={hue}
-            fillOpacity={glowBaseOpacity}
-          />
-        </Svg>
+        {bloomSvg}
       </Animated.View>
 
       {/* ── Layer 2: Rays (rotation) ───────────────────────────────────────── */}
       <Animated.View
         pointerEvents="none"
         style={[
-          {
-            position: 'absolute',
-            width: size,
-            height: size,
-          },
-          hasRotation && {
-            transform: [{ rotate: rotateInterpolated }],
-          },
+          { position: 'absolute', width: size, height: size },
+          hasRotation && { transform: [{ rotate: rotateInterp }] },
         ]}
       >
-        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
-          {rayLines.map((r, i) => (
-            <Line
-              key={i}
-              x1={r.x1}
-              y1={r.y1}
-              x2={r.x2}
-              y2={r.y2}
-              stroke={rayColor}
-              strokeWidth={rayStrokeWidth}
-              strokeOpacity={rayOpacity}
-              strokeLinecap="round"
-            />
-          ))}
-        </Svg>
+        {raySvg}
       </Animated.View>
 
-      {/* ── Layer 3: Ring/core (breathing scale) ──────────────────────────── */}
+      {/* ── Layer 3: Ring + core (breathing scale) ────────────────────────── */}
       <Animated.View
         pointerEvents="none"
         style={[
-          {
-            position: 'absolute',
-            width: size,
-            height: size,
-          },
-          hasBreathing && {
-            transform: [{ scale: breatheAnim }],
-          },
+          { position: 'absolute', width: size, height: size },
+          hasBreathing && { transform: [{ scale: breatheAnim }] },
         ]}
       >
-        <Svg
-          width={size}
-          height={size}
-          viewBox={`0 0 ${size} ${size}`}
-          opacity={haloOpacity}
-        >
-          <Defs>
-            <SvgGradient id={gradId} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-              <Stop offset="0" stopColor={lightenHex(hue, 0.4)} stopOpacity="1" />
-              <Stop offset="1" stopColor={hue} stopOpacity="1" />
-            </SvgGradient>
-          </Defs>
-          <Circle
-            cx={cx}
-            cy={cy}
-            r={ringR}
-            fill="none"
-            stroke={ringColor}
-            strokeWidth={ringStrokeWidth}
-            strokeOpacity={ringOpacity}
-          />
-        </Svg>
+        {ringSvg}
       </Animated.View>
 
-      {/* ── Layer 4: Mythic sparkle dots ────────────────────────────────────── */}
-      {hasSparkle &&
-        sparkleDots.map((dot, i) => (
-          <Animated.View
-            key={i}
-            pointerEvents="none"
-            style={{
-              position: 'absolute',
-              width: sparkleSize,
-              height: sparkleSize,
-              borderRadius: sparkleSize,
-              backgroundColor: lightenHex(hue, 0.55),
-              // Centre the dot on its orbit position
-              left: dot.x - sparkleSize / 2,
-              top: dot.y - sparkleSize / 2,
-              opacity: sparkleAnims[i],
-            }}
-          />
-        ))}
+      {/* ── Layer 4: Sparkle dots (twinkling) ────────────────────────────── */}
+      {sparkleDots.map((dot, i) => (
+        <Animated.View
+          key={i}
+          pointerEvents="none"
+          style={{
+            position: 'absolute',
+            width:        sparkleSize,
+            height:       sparkleSize,
+            borderRadius: sparkleSize,
+            backgroundColor: i % 2 === 0 ? pal.core : pal.sheen,
+            left: dot.x - sparkleSize / 2,
+            top:  dot.y - sparkleSize / 2,
+            opacity: sparkleAnims[i],
+          }}
+        />
+      ))}
     </View>
   );
 
   if (onPress) {
     return (
-      <Pressable
-        onPress={onPress}
-        hitSlop={6}
-        accessibilityLabel={label}
-        style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}
-      >
+      <Pressable onPress={onPress} hitSlop={6} accessibilityLabel={label}
+        style={({ pressed }) => ({ opacity: pressed ? 0.85 : 1 })}>
         {animated}
       </Pressable>
     );
   }
-
   return animated;
-}
-
-// ── Utility ───────────────────────────────────────────────────────────────────
-/**
- * Lighten a hex color by blending toward white by `amount` [0–1].
- * Pure JS, no library.
- */
-function lightenHex(hex, amount) {
-  const h = hex.replace('#', '');
-  const r = parseInt(h.slice(0, 2), 16);
-  const g = parseInt(h.slice(2, 4), 16);
-  const b = parseInt(h.slice(4, 6), 16);
-  const lr = Math.min(255, Math.round(r + (255 - r) * amount));
-  const lg = Math.min(255, Math.round(g + (255 - g) * amount));
-  const lb = Math.min(255, Math.round(b + (255 - b) * amount));
-  return `rgb(${lr},${lg},${lb})`;
 }

@@ -11,36 +11,41 @@ import Svg, {
 import { useTheme } from '../theme';
 
 /**
- * AuraHalo — premium-exclusive iridescent halo, visually a tier above gold Halos.
+ * AuraHalo — premium-exclusive iridescent halo, visually a tier above gem Halos.
  *
- * Props:
+ * Props (UNCHANGED):
  *   aura     — an AURAS entry { id, name, condition, description, palette, unlock }
  *   earned   — bool
  *   size     — default 64
  *   onPress  — optional
  *
- * EARNED:
- *   - Hue-cycling: two layered SVG gradient rings cross-fade (opacity Animated
- *     loops) — palette forward then reversed — giving an oil-slick colour shift
- *     on native driver.
- *   - Aurora glow: two translucent coloured Animated.Views pulse independently
- *     behind the ring, producing a soft multi-hued aurora.
- *   - Ray rotation: a dense ring of rays (24) slowly rotates using transform.
+ * EARNED — depth + luminosity upgrades:
+ *   - Atmospheric bloom: 3 concentric radial-gradient circles pulse behind the
+ *     ring for an oil-slick halo-of-light effect.
+ *   - Hue-cycling ring: two layered SVG gradient rings cross-fade (opacity
+ *     Animated loops) — palette forward then reversed — giving an oil-slick
+ *     colour shift on native driver. Ring is now WIDER with an inner bright
+ *     ring + outer soft glow for a dimensional tube look.
+ *   - Aurora glow: two translucent coloured Animated.Views pulse independently.
+ *   - Ray rotation: 24 rays with alternating long/short lengths for visual
+ *     complexity. Rays use palette colors cycling per ray.
  *   - Breathing scale: the whole assembly gently inhales/exhales.
- *   - Sparkle particles: 8 small dots orbit and twinkle — more numerous, more
- *     saturated, and faster than the gold Mythic sparkle.
+ *   - Sparkle particles: 8 small dots at jittered orbit positions; colors
+ *     cycle through palette. Slightly faster twinkle than gem halos.
+ *   - Specular shine arc: a static bright arc on the top-left of the ring
+ *     simulating a premium light source.
  *
  * LOCKED (free user or not-yet-earned premium):
- *   - Dark silhouette ring with a faint iridescent edge shimmer.
+ *   - Dark silhouette ring with a rich iridescent edge shimmer (more color than
+ *     before — the locked state should make you WANT to earn it).
+ *   - 4 ghost rays instead of 2.
  *   - A small 'PREMIUM' lock badge in the lower-right.
- *   - The locked state is NOT just greyed out — it teases the palette as a
- *     very soft hint so the user can imagine what earned looks like.
  *
  * Animation safety:
  *   - All animations use useNativeDriver: true (transform + opacity only).
  *   - mountedRef prevents set-state after unmount.
  *   - All loop refs are stopped on unmount and when earned/reduceMotion changes.
- *   - Reduce Motion → fully static.
+ *   - Reduce Motion → fully static but still the full premium visual.
  *   - Unique gradient ids via React.useId() to avoid cross-instance bleed.
  */
 
@@ -69,7 +74,7 @@ const ANIM = {
   SPARKLE_STAGGER: 95,
 };
 
-// Number of rays on the iridescent ring (denser than gold halos)
+// Ray counts — 24 primary + 12 shorter alternates = visual richness
 const RAY_COUNT = 24;
 
 export default function AuraHalo({ aura, earned, size = 64, onPress }) {
@@ -278,36 +283,51 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
   const cx = size / 2;
   const cy = size / 2;
 
-  const ringR = size * 0.32;
-  const ringStrokeWidth = Math.max(1.8, size * 0.038); // thicker than gold halos
+  // Ring — wider stroke than gem halos for premium AuraHalo feel
+  const ringR          = size * 0.30;
+  const ringStrokeWidth = Math.max(2.2, size * 0.054);
+  const innerRingStroke = Math.max(0.9, size * 0.018);
 
-  const glowR = size * 0.48;
-  const rayLen = size * 0.19;
-  const rayInnerR = ringR + ringStrokeWidth * 0.5;
-  const rayOuterR = rayInnerR + rayLen;
+  // Atmospheric bloom radii
+  const bloomR1 = size * 0.30;
+  const bloomR2 = size * 0.40;
+  const bloomR3 = size * 0.52;
+
+  // Ray geometry — alternating long/short for every other ray
+  const baseRayLen  = size * 0.195;
+  const shortRayLen = baseRayLen * 0.58;
+  const rayInnerR   = ringR + ringStrokeWidth * 0.5;
+
+  // Outer radius used for sparkle orbit
+  const rayOuterR    = rayInnerR + baseRayLen;
   const rayStrokeWidth = Math.max(0.9, size * 0.022);
 
-  const sparkleR = rayOuterR + size * 0.05;
-  const sparkleSize = Math.max(2.5, size * 0.055);
+  const sparkleOrbitR = rayOuterR + size * 0.05;
+  const sparkleSize   = Math.max(2.5, size * 0.055);
 
-  // Pre-compute ray endpoints
+  // Pre-compute ray endpoints — alternate long/short
   const rayLines = Array.from({ length: RAY_COUNT }, (_, i) => {
-    const angle = (2 * Math.PI * i) / RAY_COUNT - Math.PI / 2;
+    const angle  = (2 * Math.PI * i) / RAY_COUNT - Math.PI / 2;
+    const isAlt  = i % 2 === 1;
+    const rayLen = isAlt ? shortRayLen : baseRayLen;
     return {
       x1: cx + Math.cos(angle) * rayInnerR,
       y1: cy + Math.sin(angle) * rayInnerR,
-      x2: cx + Math.cos(angle) * rayOuterR,
-      y2: cy + Math.sin(angle) * rayOuterR,
+      x2: cx + Math.cos(angle) * (rayInnerR + rayLen),
+      y2: cy + Math.sin(angle) * (rayInnerR + rayLen),
+      isAlt,
+      color: aura.palette[i % aura.palette.length],
     };
   });
 
-  // Sparkle dot orbit positions
+  // Sparkle dot orbit positions — jittered angles for organic feel
   const sparkleDots = Array.from({ length: ANIM.SPARKLE_COUNT }, (_, i) => {
-    const angle = (2 * Math.PI * i) / ANIM.SPARKLE_COUNT - Math.PI / 2;
+    const baseAngle = (2 * Math.PI * i) / ANIM.SPARKLE_COUNT - Math.PI / 2;
+    const jitter    = (i % 3 === 0 ? 0.10 : i % 3 === 1 ? -0.06 : 0.14);
+    const angle     = baseAngle + jitter;
     return {
-      x: cx + Math.cos(angle) * sparkleR,
-      y: cy + Math.sin(angle) * sparkleR,
-      // Color cycles through palette
+      x: cx + Math.cos(angle) * sparkleOrbitR,
+      y: cy + Math.sin(angle) * sparkleOrbitR,
       color: aura.palette[i % aura.palette.length],
     };
   });
@@ -336,70 +356,69 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
   });
 
   // ── LOCKED render ─────────────────────────────────────────────────────────
+  // Rich locked state — NOT just greyed out. Dark silhouette with a more
+  // visible iridescent edge, 4 ghost rays, faint bloom — making it feel like
+  // something beautiful just out of reach. PREMIUM badge teases.
   if (!earned) {
-    // Dark silhouette with a faint iridescent edge + PREMIUM badge
     const lockedContent = (
       <View style={{ width: size, height: size }} accessibilityLabel={label}>
-        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} opacity={0.72}>
+        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
           <Defs>
-            {/* Faint iridescent ring — just enough to tease */}
+            {/* Iridescent ring stroke — richer tease than before */}
             <SvgLinearGradient id={lockedGradId} x1="0%" y1="0%" x2="100%" y2="100%">
               {pal.map((color, i) => (
                 <Stop
                   key={i}
                   offset={`${Math.round((i / (pal.length - 1)) * 100)}%`}
                   stopColor={color}
-                  stopOpacity="0.25"
+                  stopOpacity="0.40"
                 />
               ))}
             </SvgLinearGradient>
           </Defs>
 
-          {/* Ghost glow — very faint iridescent bloom */}
-          <Circle
-            cx={cx}
-            cy={cy}
-            r={glowR}
-            fill={pal[0]}
-            fillOpacity={0.04}
-          />
+          {/* Faint iridescent bloom — bigger bloom hint */}
+          <Circle cx={cx} cy={cy} r={bloomR3} fill={pal[0]} fillOpacity={0.06} />
+          <Circle cx={cx} cy={cy} r={bloomR2} fill={pal[1]} fillOpacity={0.04} />
 
-          {/* Ghost rays — 2 opposite ones only, barely visible */}
-          {[0, Math.floor(RAY_COUNT / 2)].map((idx) => {
+          {/* Ghost rays — 4 at cardinal angles, enticing */}
+          {[0, Math.floor(RAY_COUNT / 4), Math.floor(RAY_COUNT / 2), Math.floor(RAY_COUNT * 3 / 4)].map((idx) => {
             const r = rayLines[idx];
             return (
               <Line
                 key={idx}
-                x1={r.x1}
-                y1={r.y1}
-                x2={r.x2}
-                y2={r.y2}
-                stroke={pal[1]}
+                x1={r.x1} y1={r.y1} x2={r.x2} y2={r.y2}
+                stroke={pal[idx % pal.length]}
                 strokeWidth={rayStrokeWidth}
-                strokeOpacity={0.12}
+                strokeOpacity={0.16}
                 strokeLinecap="round"
               />
             );
           })}
 
-          {/* Dark silhouette ring with iridescent edge */}
+          {/* Dark silhouette fill inside the ring */}
           <Circle
-            cx={cx}
-            cy={cy}
-            r={ringR}
+            cx={cx} cy={cy} r={ringR - ringStrokeWidth * 0.35}
+            fill={colors.bg ?? '#18140e'}
+            fillOpacity={0.90}
+          />
+
+          {/* Iridescent ring edge — richer than before */}
+          <Circle
+            cx={cx} cy={cy} r={ringR}
             fill="none"
             stroke={`url(#${lockedGradId})`}
             strokeWidth={ringStrokeWidth}
-            strokeOpacity={0.6}
+            strokeOpacity={0.70}
           />
 
-          {/* Dark fill circle — makes it feel like a silhouette */}
+          {/* Outer soft halo glow on the ring */}
           <Circle
-            cx={cx}
-            cy={cy}
-            r={ringR - ringStrokeWidth * 0.5}
-            fill={colors.bg}
-            fillOpacity={0.85}
+            cx={cx} cy={cy} r={ringR + ringStrokeWidth * 0.65}
+            fill="none"
+            stroke={pal[0]}
+            strokeWidth={ringStrokeWidth * 1.2}
+            strokeOpacity={0.08}
           />
         </Svg>
 
@@ -409,18 +428,18 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
             position: 'absolute',
             bottom: size * 0.04,
             right: size * 0.04,
-            backgroundColor: 'rgba(30,22,14,0.92)',
+            backgroundColor: 'rgba(18,14,26,0.94)',
             borderRadius: 4,
             paddingHorizontal: Math.max(3, size * 0.06),
             paddingVertical: Math.max(1, size * 0.025),
             borderWidth: 0.8,
-            borderColor: pal[2] + '60',
+            borderColor: pal[2] + '70',
           }}
         >
           <Text
             style={{
               color: pal[2],
-              fontSize: Math.max(5, size * 0.1),
+              fontSize: Math.max(5, size * 0.10),
               fontWeight: '700',
               letterSpacing: 0.6,
             }}
@@ -447,12 +466,14 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
     return lockedContent;
   }
 
-  // ── EARNED + Reduce Motion → static ───────────────────────────────────────
+  // ── EARNED + Reduce Motion → static but full premium visual ──────────────
   if (reduceMotion) {
     const staticContent = (
       <View style={{ width: size, height: size }} accessibilityLabel={label}>
-        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}
+             accessibilityLabel={label}>
           <Defs>
+            {/* Forward palette ring */}
             <SvgLinearGradient id={gradAId} x1="0%" y1="0%" x2="100%" y2="100%">
               {pal.map((color, i) => (
                 <Stop
@@ -463,29 +484,68 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
                 />
               ))}
             </SvgLinearGradient>
+            {/* Aurora bloom */}
+            <SvgRadialGradient id={auroraAGradId} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+              <Stop offset="0%"   stopColor={pal[0]} stopOpacity="0.22" />
+              <Stop offset="50%"  stopColor={pal[1]} stopOpacity="0.10" />
+              <Stop offset="100%" stopColor={pal[2]} stopOpacity="0" />
+            </SvgRadialGradient>
           </Defs>
-          <Circle cx={cx} cy={cy} r={glowR} fill={pal[0]} fillOpacity={0.18} />
+
+          {/* Atmospheric bloom — 3 layers */}
+          <Circle cx={cx} cy={cy} r={bloomR3} fill={pal[0]} fillOpacity={0.06} />
+          <Circle cx={cx} cy={cy} r={bloomR2} fill={pal[1]} fillOpacity={0.10} />
+          <Circle cx={cx} cy={cy} r={bloomR1} fill={`url(#${auroraAGradId})`} />
+
+          {/* Rays — alternating length and palette colors */}
           {rayLines.map((r, i) => (
             <Line
               key={i}
-              x1={r.x1}
-              y1={r.y1}
-              x2={r.x2}
-              y2={r.y2}
-              stroke={pal[i % pal.length]}
-              strokeWidth={rayStrokeWidth}
-              strokeOpacity={0.65}
+              x1={r.x1} y1={r.y1} x2={r.x2} y2={r.y2}
+              stroke={r.color}
+              strokeWidth={r.isAlt ? rayStrokeWidth * 0.75 : rayStrokeWidth}
+              strokeOpacity={r.isAlt ? 0.45 : 0.70}
               strokeLinecap="round"
             />
           ))}
+
+          {/* Outer soft glow ring */}
           <Circle
-            cx={cx}
-            cy={cy}
-            r={ringR}
+            cx={cx} cy={cy} r={ringR + ringStrokeWidth * 0.7}
+            fill="none"
+            stroke={pal[0]}
+            strokeWidth={ringStrokeWidth * 1.5}
+            strokeOpacity={0.20}
+          />
+
+          {/* Main iridescent ring */}
+          <Circle
+            cx={cx} cy={cy} r={ringR}
             fill="none"
             stroke={`url(#${gradAId})`}
             strokeWidth={ringStrokeWidth}
             strokeOpacity={1}
+          />
+
+          {/* Inner bright ring */}
+          <Circle
+            cx={cx} cy={cy} r={ringR - ringStrokeWidth * 0.18}
+            fill="none"
+            stroke="#ffffff"
+            strokeWidth={innerRingStroke}
+            strokeOpacity={0.45}
+          />
+
+          {/* Specular shine arc */}
+          <Circle
+            cx={cx} cy={cy} r={ringR}
+            fill="none"
+            stroke="#ffffff"
+            strokeWidth={ringStrokeWidth * 0.5}
+            strokeOpacity={0.60}
+            strokeLinecap="round"
+            strokeDasharray={`${ringR * 0.55} ${ringR * 10}`}
+            strokeDashoffset={ringR * 0.28}
           />
         </Svg>
       </View>
@@ -503,14 +563,16 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
   }
 
   // ── EARNED + ANIMATED ─────────────────────────────────────────────────────
-  // Layer stack (bottom → top):
-  //   1. Aurora glow A (Animated.View — opacity pulse, radialGrad colour 1)
-  //   2. Aurora glow B (Animated.View — opacity pulse, radialGrad colour 2)
-  //   3. Rays (Animated.View — slow rotation)
-  //   4. Gradient ring — layer A (Animated.View — cross-fade opacity)
-  //   5. Gradient ring — layer B (Animated.View — cross-fade opacity, reversed palette)
-  //   6. Breathing wrapper (Animated.View — scale)
-  //   7. Sparkle dots (Animated.View per dot — twinkle)
+  // Layer stack (bottom → top), all inside breathing Animated.View:
+  //   1. Aurora glow A  — radialGrad pulse (auroraA opacity)
+  //   2. Aurora glow B  — radialGrad pulse (auroraB opacity), offset phase
+  //   3. Static bloom   — 3 concentric opacity circles for constant depth
+  //   4. Rays           — rotating, alternating length, palette-colored
+  //   5. Ring layer A   — forward palette, cross-fading (gradAOpacity)
+  //   6. Ring layer B   — reversed palette, cross-fading (gradBOpacity)
+  //   7. Inner ring     — static bright inner ring for luminosity
+  //   8. Shine arc      — static specular highlight
+  //   9. Sparkle dots   — twinkling per-dot opacity
 
   const animated = (
     <Animated.View
@@ -521,7 +583,7 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
       }}
       accessibilityLabel={label}
     >
-      {/* ── Layer 1: Aurora glow A ──────────────────────────────────────────── */}
+      {/* ── Layer 1: Aurora glow A (opacity-pulsed radial gradient) ─────────── */}
       <Animated.View
         pointerEvents="none"
         style={{ position: 'absolute', width: size, height: size, opacity: auroraA }}
@@ -529,16 +591,16 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
         <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
           <Defs>
             <SvgRadialGradient id={auroraAGradId} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-              <Stop offset="0%" stopColor={pal[0]} stopOpacity="1" />
-              <Stop offset="60%" stopColor={pal[1]} stopOpacity="0.5" />
+              <Stop offset="0%"   stopColor={pal[0]} stopOpacity="0.32" />
+              <Stop offset="45%"  stopColor={pal[1]} stopOpacity="0.14" />
               <Stop offset="100%" stopColor={pal[2]} stopOpacity="0" />
             </SvgRadialGradient>
           </Defs>
-          <Circle cx={cx} cy={cy} r={glowR} fill={`url(#${auroraAGradId})`} />
+          <Circle cx={cx} cy={cy} r={bloomR3} fill={`url(#${auroraAGradId})`} />
         </Svg>
       </Animated.View>
 
-      {/* ── Layer 2: Aurora glow B ──────────────────────────────────────────── */}
+      {/* ── Layer 2: Aurora glow B (independent phase, different palette stop) ── */}
       <Animated.View
         pointerEvents="none"
         style={{ position: 'absolute', width: size, height: size, opacity: auroraB }}
@@ -546,16 +608,25 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
         <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
           <Defs>
             <SvgRadialGradient id={auroraBGradId} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-              <Stop offset="0%" stopColor={pal[3] || pal[2]} stopOpacity="1" />
-              <Stop offset="60%" stopColor={pal[2]} stopOpacity="0.4" />
-              <Stop offset="100%" stopColor={pal[1]} stopOpacity="0" />
+              <Stop offset="0%"   stopColor={pal[3] ?? pal[2]} stopOpacity="0.28" />
+              <Stop offset="45%"  stopColor={pal[2]}           stopOpacity="0.12" />
+              <Stop offset="100%" stopColor={pal[1]}           stopOpacity="0" />
             </SvgRadialGradient>
           </Defs>
-          <Circle cx={cx} cy={cy} r={glowR} fill={`url(#${auroraBGradId})`} />
+          <Circle cx={cx} cy={cy} r={bloomR3} fill={`url(#${auroraBGradId})`} />
         </Svg>
       </Animated.View>
 
-      {/* ── Layer 3: Rays (rotating) ────────────────────────────────────────── */}
+      {/* ── Layer 3: Static atmospheric bloom for constant depth ──────────────── */}
+      <View pointerEvents="none" style={{ position: 'absolute', width: size, height: size }}>
+        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <Circle cx={cx} cy={cy} r={bloomR3} fill={pal[0]} fillOpacity={0.05} />
+          <Circle cx={cx} cy={cy} r={bloomR2} fill={pal[1]} fillOpacity={0.08} />
+          <Circle cx={cx} cy={cy} r={bloomR1} fill={pal[0]} fillOpacity={0.12} />
+        </Svg>
+      </View>
+
+      {/* ── Layer 4: Rays (slow rotation, alternating length) ─────────────────── */}
       <Animated.View
         pointerEvents="none"
         style={{
@@ -569,21 +640,31 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
           {rayLines.map((r, i) => (
             <Line
               key={i}
-              x1={r.x1}
-              y1={r.y1}
-              x2={r.x2}
-              y2={r.y2}
-              stroke={pal[i % pal.length]}
-              strokeWidth={rayStrokeWidth}
-              strokeOpacity={0.55}
+              x1={r.x1} y1={r.y1} x2={r.x2} y2={r.y2}
+              stroke={r.color}
+              strokeWidth={r.isAlt ? rayStrokeWidth * 0.72 : rayStrokeWidth}
+              strokeOpacity={r.isAlt ? 0.42 : 0.68}
               strokeLinecap="round"
             />
           ))}
         </Svg>
       </Animated.View>
 
-      {/* ── Layers 4 + 5: Cross-fading iridescent ring ─────────────────────── */}
-      {/* Layer 4 — gradient A (forward palette) */}
+      {/* ── Layers 5 + 6: Cross-fading iridescent ring with outer soft glow ──── */}
+      {/* Static outer glow ring — constant depth behind the cross-fade */}
+      <View pointerEvents="none" style={{ position: 'absolute', width: size, height: size }}>
+        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <Circle
+            cx={cx} cy={cy} r={ringR + ringStrokeWidth * 0.7}
+            fill="none"
+            stroke={pal[0]}
+            strokeWidth={ringStrokeWidth * 1.5}
+            strokeOpacity={0.18}
+          />
+        </Svg>
+      </View>
+
+      {/* Layer 5 — gradient A (forward palette) */}
       <Animated.View
         pointerEvents="none"
         style={{ position: 'absolute', width: size, height: size, opacity: gradAOpacity }}
@@ -602,9 +683,7 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
             </SvgLinearGradient>
           </Defs>
           <Circle
-            cx={cx}
-            cy={cy}
-            r={ringR}
+            cx={cx} cy={cy} r={ringR}
             fill="none"
             stroke={`url(#${gradAId})`}
             strokeWidth={ringStrokeWidth}
@@ -613,7 +692,7 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
         </Svg>
       </Animated.View>
 
-      {/* Layer 5 — gradient B (reversed palette = different hue phase) */}
+      {/* Layer 6 — gradient B (reversed palette = different hue phase) */}
       <Animated.View
         pointerEvents="none"
         style={{ position: 'absolute', width: size, height: size, opacity: gradBOpacity }}
@@ -632,9 +711,7 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
             </SvgLinearGradient>
           </Defs>
           <Circle
-            cx={cx}
-            cy={cy}
-            r={ringR}
+            cx={cx} cy={cy} r={ringR}
             fill="none"
             stroke={`url(#${gradBId})`}
             strokeWidth={ringStrokeWidth}
@@ -643,19 +720,48 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
         </Svg>
       </Animated.View>
 
-      {/* ── Layer 7: Sparkle dots ───────────────────────────────────────────── */}
+      {/* ── Layer 7: Inner bright ring — luminosity inside the tube ─────────── */}
+      <View pointerEvents="none" style={{ position: 'absolute', width: size, height: size }}>
+        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <Circle
+            cx={cx} cy={cy} r={ringR - ringStrokeWidth * 0.18}
+            fill="none"
+            stroke="#ffffff"
+            strokeWidth={innerRingStroke}
+            strokeOpacity={0.50}
+          />
+        </Svg>
+      </View>
+
+      {/* ── Layer 8: Specular shine arc — top-left light source ─────────────── */}
+      <View pointerEvents="none" style={{ position: 'absolute', width: size, height: size }}>
+        <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <Circle
+            cx={cx} cy={cy} r={ringR}
+            fill="none"
+            stroke="#ffffff"
+            strokeWidth={ringStrokeWidth * 0.52}
+            strokeOpacity={0.65}
+            strokeLinecap="round"
+            strokeDasharray={`${ringR * 0.55} ${ringR * 10}`}
+            strokeDashoffset={ringR * 0.28}
+          />
+        </Svg>
+      </View>
+
+      {/* ── Layer 9: Sparkle dots ────────────────────────────────────────────── */}
       {sparkleDots.map((dot, i) => (
         <Animated.View
           key={i}
           pointerEvents="none"
           style={{
             position: 'absolute',
-            width: sparkleSize,
-            height: sparkleSize,
+            width:        sparkleSize,
+            height:       sparkleSize,
             borderRadius: sparkleSize,
             backgroundColor: dot.color,
             left: dot.x - sparkleSize / 2,
-            top: dot.y - sparkleSize / 2,
+            top:  dot.y - sparkleSize / 2,
             opacity: sparkleAnims[i],
           }}
         />

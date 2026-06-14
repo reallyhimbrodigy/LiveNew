@@ -11,7 +11,108 @@ export const GEMS = [
   { id: 'the_year',    name: 'The Year',    day: 365, tier: 'Mythic',    rarityPct: 0.15, hue: '#f0c44a', flavor: 'A full year. Legendary, literally.' },
 ];
 
+// ── Per-gem jewel palette ─────────────────────────────────────────────────────
+//
+// Each palette has four roles used by the Halo renderer:
+//   core  — the near-white hot-center of the luminous glow (very light tint)
+//   mid   — the main jewel color (saturated, rich)
+//   deep  — a deeper/darker shade for the shadow side of the ring
+//   glow  — the atmospheric bloom color (mid-opacity circles behind the ring)
+//
+// Design intent: each gem should feel like a distinct precious stone in a
+// collection. Common tiers warm gold; upper tiers shift into saturated jewel
+// hues. the_year is prismatic — it uses both the mid and the deep for a
+// multi-hue sheen that rotates through the AuraHalo cross-fade trick.
+
+export const GEM_PALETTE = {
+  // Common — warm antique gold, like a newly minted coin
+  first_light: {
+    core:  '#fffbe8',   // warm white
+    mid:   '#e8c96a',   // bright gold
+    deep:  '#a07830',   // dark amber
+    glow:  '#d4a832',   // golden bloom
+    sheen: '#fff3b0',   // highlight arc
+  },
+  // Common — honey amber, slightly richer than first_light
+  foundation: {
+    core:  '#fff8e0',
+    mid:   '#d4a23a',   // honey gold
+    deep:  '#8c5e18',   // dark amber-brown
+    glow:  '#c4921e',
+    sheen: '#ffe89a',
+  },
+  // Uncommon — rose-gold / coral: feminine and warm
+  the_week: {
+    core:  '#fff0ee',
+    mid:   '#e8836a',   // rose-coral
+    deep:  '#9e3a22',   // deep crimson-brown
+    glow:  '#d4604a',
+    sheen: '#ffccc0',
+  },
+  // Rare — teal aquamarine, clear Caribbean water
+  rhythm: {
+    core:  '#e8fffc',
+    mid:   '#3cc4b4',   // teal
+    deep:  '#0d6e64',   // deep teal
+    glow:  '#1ea89a',
+    sheen: '#b0f4ee',
+  },
+  // Epic — emerald green, lush and saturated
+  the_month: {
+    core:  '#e8fff0',
+    mid:   '#2ec87a',   // emerald
+    deep:  '#0a6636',   // deep forest green
+    glow:  '#18a858',
+    sheen: '#a0ffc8',
+  },
+  // Epic — sapphire blue, deep ocean depth
+  steadfast: {
+    core:  '#eaf0ff',
+    mid:   '#4a7cf8',   // sapphire
+    deep:  '#162880',   // deep cobalt
+    glow:  '#2c52e0',
+    sheen: '#b0c8ff',
+  },
+  // Legendary — amethyst violet, regal and luminous
+  century: {
+    core:  '#f5eeff',
+    mid:   '#9a5cf0',   // amethyst
+    deep:  '#4a1880',   // deep violet
+    glow:  '#7830cc',
+    sheen: '#ddb8ff',
+  },
+  // Mythic — prismatic / iridescent, multi-hue sheen
+  the_year: {
+    core:  '#ffffff',
+    mid:   '#f0c44a',   // warm gold base (hue field, still used by tierColor)
+    deep:  '#b042e8',   // violet edge
+    glow:  '#e040a0',   // magenta bloom
+    sheen: '#ffffff',
+    // Extra stops for the rotating prismatic sheen
+    prism: ['#f0c44a', '#e05090', '#9060f0', '#40b4f0', '#40d890', '#f0c44a'],
+  },
+};
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Returns the jewel palette for a gem, falling back to a gold palette when
+ * the gem id is not found (safe for future gems added without a palette entry).
+ *
+ * @param {object} gem  — a GEMS entry { id, hue, ... }
+ * @returns {{ core, mid, deep, glow, sheen, prism? }}
+ */
+export function gemPalette(gem) {
+  return (
+    GEM_PALETTE[gem.id] ?? {
+      core:  '#ffffff',
+      mid:   gem.hue,
+      deep:  '#8c6020',
+      glow:  gem.hue,
+      sheen: '#fff8c0',
+    }
+  );
+}
 
 /** Returns true when maxStreak is a number >= 1. */
 function validStreak(maxStreak) {
