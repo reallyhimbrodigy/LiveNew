@@ -61,9 +61,6 @@ function LockIcon({ color }) {
   );
 }
 
-// Brown noise (first soundscape) is always free. The rest require premium.
-const FREE_SOUNDSCAPE_ID = 'brown';
-
 export default function SoundscapePlayer({ onUpgrade }) {
   const { colors, fonts } = useTheme();
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);
@@ -103,8 +100,7 @@ export default function SoundscapePlayer({ onUpgrade }) {
     if (!mountedRef.current) return;
 
     // Premium gate: non-free soundscapes require a subscription or active trial.
-    const isFree = soundscape.id === FREE_SOUNDSCAPE_ID;
-    if (!isFree && !isPremium) {
+    if (!soundscape.free && !isPremium) {
       if (onUpgrade) onUpgrade();
       return;
     }
@@ -122,7 +118,7 @@ export default function SoundscapePlayer({ onUpgrade }) {
     try {
       const player = createAudioPlayer(soundscape.source);
       player.loop = true;
-      player.volume = 1;
+      player.volume = 0.55;
       player.play();
       playerRef.current = player;
       if (mountedRef.current) setPlayingId(soundscape.id);
@@ -139,8 +135,7 @@ export default function SoundscapePlayer({ onUpgrade }) {
       <Text style={s.eyebrow}>SOUNDSCAPES</Text>
       {SOUNDSCAPES.map((sc) => {
         const active = sc.id === playingId;
-        const isFree = sc.id === FREE_SOUNDSCAPE_ID;
-        const locked = !isFree && !isPremium;
+        const locked = !sc.free && !isPremium;
         return (
           <Pressable
             key={sc.id}
