@@ -86,7 +86,8 @@
           "imageWidth": 200,
           "resizeMode": "contain"
         }
-      ]
+      ],
+      "expo-asset"
     ],
     "extra": {
       "eas": {
