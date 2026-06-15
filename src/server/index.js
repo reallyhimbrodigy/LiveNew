@@ -3313,18 +3313,25 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       // a WiFi access-point handoff — drops the connection mid-wait. That's
       // the source of the "network error at ~15-20s on WiFi" symptom.
       res.writeHead(200, {
-        'Content-Type': 'application/json',
+        // text/event-stream is the one content-type Cloudflare will NOT buffer.
+        // With application/json it buffered the entire response (measured
+        // TTFB == total == ~25s), so every keep-alive space was held back and
+        // the socket sat silent the whole time — which mobile networks drop,
+        // surfacing as "Check your internet connection." The body is still
+        // plain JSON; leading keep-alive whitespace is ignored by JSON.parse,
+        // so the client's res.json() parses it unchanged.
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
         'X-Accel-Buffering': 'no',
       });
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
-      // Write one space immediately so the response body actually starts on
-      // the wire (some Node setups buffer until first body byte).
+      // Write a starter byte immediately so the body starts on the wire now.
       res.write(' ');
-      // Keep-alive: 5s cadence. Cumulative bytes streamed within every
-      // upstream/downstream idle timeout window (Render's proxy, iOS, etc.).
+      // Keep-alive: 3s cadence so there's never more than a few seconds of
+      // silence on the socket once Cloudflare is streaming it through.
       keepAlive = setInterval(() => {
         if (!res.writableEnded) res.write(' ');
-      }, 5000);
+      }, 3000);
       // If the client disconnects mid-generation, stop the keep-alive so the
       // interval can't leak and keep firing against a dead socket.
       res.on('close', () => { if (keepAlive) { clearInterval(keepAlive); keepAlive = null; } });
