@@ -416,10 +416,12 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
   try {
     const finalMessage = await withRetry(async () => {
       const stream = client.messages.stream({
-        // Sonnet 4.6 — faster than Sonnet 4 and higher quality. No extended
-        // thinking is enabled (no `thinking` param), so the only latency levers
-        // are the model and the output length; this is the speed/quality pick.
-        model: "claude-sonnet-4-6",
+        // Haiku 4.5 — the fast model. Plan generation is a tightly-templated
+        // task (the system prompt fully constrains structure + voice), so Haiku
+        // holds quality while cutting generation time ~3x vs Sonnet (42s
+        // measured -> ~15s). No extended thinking is enabled. If quality ever
+        // needs a bump, claude-sonnet-4-6 is the drop-in swap.
+        model: "claude-haiku-4-5-20251001",
         max_tokens: 4000,
         temperature: 1.0,
         system: SYSTEM_PROMPT,
