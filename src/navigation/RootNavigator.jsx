@@ -245,6 +245,7 @@ export default function RootNavigator() {
   }
 
   return (
+    <ErrorBoundary diagnostic>
     <View style={{ flex: 1, backgroundColor: colors.bg }}>
       <AppBackground />
       <StatusBar style={scheme === 'dark' ? 'light' : 'dark'} />
@@ -280,5 +281,6 @@ export default function RootNavigator() {
       </Stack.Navigator>
     </NavigationContainer>
     </View>
+    </ErrorBoundary>
   );
 }
