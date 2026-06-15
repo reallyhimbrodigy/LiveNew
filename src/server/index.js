@@ -2481,6 +2481,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
     "/v1/profile/update",
     "/v1/account/delete",
     "/v1/avatar",
+    "/v1/halo-stats",
   ]);
   logDebug({ tag: "SUPABASE_ROUTE_CHECK", pathname, hit: supabaseRoutes.has(pathname) });
   if (!supabaseRoutes.has(pathname)) return false;
