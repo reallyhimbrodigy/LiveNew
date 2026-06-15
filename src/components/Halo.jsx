@@ -131,7 +131,7 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
 
     if (!earned || reduceMotion) return;
 
-    const tier = gem.tier;
+    const tier = gem?.tier;
     const loops = [];
 
     // Glow pulse — all earned tiers breathe, just at different speeds
@@ -245,7 +245,7 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
     return () => {
       loops.forEach((l) => l.stop());
     };
-  }, [earned, reduceMotion, gem.tier]);
+  }, [earned, reduceMotion, gem?.tier]);
 
   // ── Unmount cleanup ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -255,6 +255,10 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
       loopRefs.current.forEach((l) => l.stop());
     };
   }, []);
+
+  // Defensive: every current caller passes a real gem, but guard anyway so a
+  // future null/undefined caller renders nothing instead of crashing.
+  if (!gem) return null;
 
   // ── Palette + geometry ─────────────────────────────────────────────────────
   const pal = gemPalette(gem);

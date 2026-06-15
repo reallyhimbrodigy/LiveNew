@@ -368,6 +368,7 @@ export const useAuthStore = create((set, get) => ({
   // Login
   login: async (email, password) => {
     const data = await api.login(email, password);
+    if (!data?.accessToken && !data?.token) throw new Error('Sign-in failed. Please try again.');
     const auth = {
       accessToken: data.accessToken || data.token,
       refreshToken: data.refreshToken,
@@ -402,6 +403,7 @@ export const useAuthStore = create((set, get) => ({
   // a targeted error and the Resend prompt.
   verifySignupOtp: async (email, code) => {
     const data = await api.verifySignupOtp(email, code);
+    if (!data?.accessToken) throw new Error('Sign-in failed. Please try again.');
     const auth = {
       accessToken: data.accessToken,
       refreshToken: data.refreshToken,
@@ -433,6 +435,7 @@ export const useAuthStore = create((set, get) => ({
   // password-based login path — caller can treat this as "log the user in."
   verifyOtp: async (email, code) => {
     const data = await api.verifyOtp(email, code);
+    if (!data?.accessToken) throw new Error('Sign-in failed. Please try again.');
     const auth = {
       accessToken: data.accessToken,
       refreshToken: data.refreshToken,
@@ -474,6 +477,7 @@ export const useAuthStore = create((set, get) => ({
       throw new Error('Apple sign-in did not return an identity token.');
     }
     const data = await api.socialSignIn('apple', credential.identityToken, rawNonce);
+    if (!data?.accessToken) throw new Error('Sign-in failed. Please try again.');
     const auth = {
       accessToken: data.accessToken,
       refreshToken: data.refreshToken,
@@ -515,6 +519,7 @@ export const useAuthStore = create((set, get) => ({
       throw new Error('Google sign-in did not return an idToken.');
     }
     const data = await api.socialSignIn('google', idToken, null);
+    if (!data?.accessToken) throw new Error('Sign-in failed. Please try again.');
     const auth = {
       accessToken: data.accessToken,
       refreshToken: data.refreshToken,

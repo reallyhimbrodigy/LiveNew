@@ -28,6 +28,9 @@ export default function StateRing({
   caption,
 }) {
   const { colors, fonts } = useTheme();
+  // Unique gradient id so two StateRings mounted at once (e.g. during a screen
+  // transition) don't collide on a shared SVG id and lose their gradient fill.
+  const ringGradId = `stateRingGold-${React.useId().replace(/:/g, '')}`;
   const clamped = Math.max(0, Math.min(100, Math.round(score)));
   const word = caption || captionForScore(clamped);
 
@@ -89,7 +92,7 @@ export default function StateRing({
       />
       <Svg width={size} height={size}>
         <Defs>
-          <SvgGradient id="stateRingGold" x1="0" y1="0" x2="1" y2="1">
+          <SvgGradient id={ringGradId} x1="0" y1="0" x2="1" y2="1">
             <Stop offset="0" stopColor={colors.goldDeep} />
             <Stop offset="1" stopColor={colors.gold} />
           </SvgGradient>
@@ -108,7 +111,7 @@ export default function StateRing({
           cx={size / 2}
           cy={size / 2}
           r={radius}
-          stroke="url(#stateRingGold)"
+          stroke={`url(#${ringGradId})`}
           strokeWidth={strokeWidth}
           strokeLinecap="round"
           fill="none"

@@ -142,21 +142,21 @@ export default function StressTapScreen({ navigation }) {
       navigation.replace('TodayMain');
     } catch (err) {
       clearTimeout(timeoutId);
-      if (err.message === 'AUTH_EXPIRED') {
+      if (err?.message === 'AUTH_EXPIRED') {
         await logout();
         return;
       }
       // Sleep-window error from authStore.generatePlan (the store has its
       // own gate as last-line defense). Send the user to Today, which
       // shows the sleep card explaining what's happening.
-      if (err.code === 'SLEEP_WINDOW') {
+      if (err?.code === 'SLEEP_WINDOW') {
         if (mountedRef.current) setLoading(false);
         navigation.replace('TodayMain');
         return;
       }
       if (!mountedRef.current) return;
-      if (err.message === 'TIMEOUT') setError('Iris is taking longer than usual. Tap an option to try again.');
-      else if (err.code === 'NETWORK_ERROR') setError('Check your internet connection, then tap an option to retry.');
+      if (err?.message === 'TIMEOUT') setError('Iris is taking longer than usual. Tap an option to try again.');
+      else if (err?.code === 'NETWORK_ERROR') setError('Check your internet connection, then tap an option to retry.');
       else setError('Something went wrong. Tap an option to try again.');
       setStep(skipSleepEnergy ? 1 : 3);
       setLoading(false);

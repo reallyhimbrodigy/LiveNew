@@ -27,6 +27,7 @@ import {
   View, Text, Animated, Easing,
   AccessibilityInfo, StyleSheet,
 } from 'react-native';
+import Svg, { Defs, RadialGradient, Stop, Rect } from 'react-native-svg';
 import { useTheme } from '../theme';
 
 // ─── Tunable constants ────────────────────────────────────────────────────────
@@ -78,6 +79,7 @@ const DEFAULT_MESSAGES = [
 export default function PlanBuilding({ messages, style }) {
   const { colors, fonts } = useTheme();
   const msgList = messages && messages.length ? messages : DEFAULT_MESSAGES;
+  const glowId = React.useId();
 
   // ── Reduce-motion gate ──────────────────────────────────────────────────
   // IMPORTANT: Start as null (unknown) so we don't start animations that
@@ -176,13 +178,13 @@ export default function PlanBuilding({ messages, style }) {
     runLoop(Animated.loop(
       Animated.sequence([
         Animated.timing(glowOpacity, {
-          toValue: 0.55,
+          toValue: 0.72,
           duration: GLOW_DURATION / 2,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(glowOpacity, {
-          toValue: 0.18,
+          toValue: 0.42,
           duration: GLOW_DURATION / 2,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
@@ -258,7 +260,6 @@ export default function PlanBuilding({ messages, style }) {
 
     if (!reduceMotion) {
       startBreathe();
-      startWave();
     }
     startMessages();
 
@@ -271,8 +272,10 @@ export default function PlanBuilding({ messages, style }) {
     };
   }, [reduceMotion, startBreathe, startWave, startMessages]);
 
-  // ── Glow halo size (matches logo, slightly larger) ────────────────────────
-  const GLOW_SIZE = IRIS_SIZE * 1.6;
+  // ── Glow sizes — a wide ambient halo plus a tighter luminous core, both
+  //     fading to transparent so it reads as warm LIGHT, not a flat disc. ─────
+  const GLOW_SIZE = IRIS_SIZE * 2.0;   // outer ambient halo
+  const GLOW_CORE = IRIS_SIZE * 1.15;  // bright inner core
 
   // ── Dot container width ───────────────────────────────────────────────────
   const dotRowWidth = DOT_COUNT * DOT_SIZE + (DOT_COUNT - 1) * DOT_GAP;
@@ -287,20 +290,56 @@ export default function PlanBuilding({ messages, style }) {
 
       {/* ── Logo + glow composition ── */}
       <View style={styles.logoWrap}>
-        {/* Soft gold glow behind logo — breathes in sync with the image */}
+        {/* Wide ambient halo — soft warm light that fades to nothing. */}
         <Animated.View
           style={[
             styles.glow,
             {
               width: GLOW_SIZE,
               height: GLOW_SIZE,
-              borderRadius: GLOW_SIZE / 2,
-              backgroundColor: colors.gold,
-              opacity: reduceMotion ? 0.12 : glowOpacity,
+              opacity: reduceMotion ? 0.5 : glowOpacity,
+              transform: reduceMotion ? undefined : [{ scale: breatheScale }],
             },
           ]}
           pointerEvents="none"
-        />
+        >
+          <Svg width={GLOW_SIZE} height={GLOW_SIZE}>
+            <Defs>
+              <RadialGradient id={`${glowId}-halo`} cx="50%" cy="50%" r="50%">
+                <Stop offset="0%"   stopColor="#e8bd72" stopOpacity="0.30" />
+                <Stop offset="42%"  stopColor="#cf9d52" stopOpacity="0.10" />
+                <Stop offset="100%" stopColor="#cf9d52" stopOpacity="0" />
+              </RadialGradient>
+            </Defs>
+            <Rect x="0" y="0" width={GLOW_SIZE} height={GLOW_SIZE} fill={`url(#${glowId}-halo)`} />
+          </Svg>
+        </Animated.View>
+
+        {/* Bright luminous core — a near-cream centre so it reads as glowing
+            light rather than a muddy brown disc. */}
+        <Animated.View
+          style={[
+            styles.glow,
+            {
+              width: GLOW_CORE,
+              height: GLOW_CORE,
+              opacity: reduceMotion ? 0.7 : glowOpacity,
+              transform: reduceMotion ? undefined : [{ scale: breatheScale }],
+            },
+          ]}
+          pointerEvents="none"
+        >
+          <Svg width={GLOW_CORE} height={GLOW_CORE}>
+            <Defs>
+              <RadialGradient id={`${glowId}-core`} cx="50%" cy="50%" r="50%">
+                <Stop offset="0%"   stopColor="#fff1d4" stopOpacity="0.5" />
+                <Stop offset="45%"  stopColor="#ffd98f" stopOpacity="0.2" />
+                <Stop offset="100%" stopColor="#ffd98f" stopOpacity="0" />
+              </RadialGradient>
+            </Defs>
+            <Rect x="0" y="0" width={GLOW_CORE} height={GLOW_CORE} fill={`url(#${glowId}-core)`} />
+          </Svg>
+        </Animated.View>
 
         {/* Iris breathing image */}
         <Animated.Image
@@ -316,25 +355,6 @@ export default function PlanBuilding({ messages, style }) {
           ]}
           resizeMode="contain"
         />
-      </View>
-
-      {/* ── Flowing wave dots ── */}
-      <View style={[styles.dotRow, { width: dotRowWidth }]}>
-        {dotValues.map((val, i) => (
-          <Animated.View
-            key={i}
-            style={[
-              styles.dot,
-              {
-                width: DOT_SIZE,
-                height: DOT_SIZE,
-                borderRadius: DOT_SIZE / 2,
-                backgroundColor: colors.gold,
-                opacity: reduceMotion ? staticDotOpacity : val,
-              },
-            ]}
-          />
-        ))}
       </View>
 
       {/* ── Rotating status message ── */}
@@ -361,7 +381,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingBottom: 80,
-    gap: 28,
+    gap: 48,
   },
   // Wrapper lets the glow sit behind the image via absolute positioning
   // without affecting the layout flow.

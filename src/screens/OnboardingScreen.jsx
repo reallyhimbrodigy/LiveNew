@@ -238,7 +238,7 @@ export default function OnboardingScreen() {
         return;
       }
       if (!mountedRef.current) return;
-      if (err.message === 'TIMEOUT') setError('Iris is taking longer than usual. Tap an option to try again.');
+      if (err?.message === 'TIMEOUT') setError('Iris is taking longer than usual. Tap an option to try again.');
       else if (err?.code === 'NETWORK_ERROR') setError('Check your internet connection.');
       else setError('Something went wrong. Tap an option to try again.');
       setStep(skipSleepEnergy ? 2 : 4);

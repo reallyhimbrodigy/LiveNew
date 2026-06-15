@@ -11,7 +11,7 @@ export function computeProgress({ checkIns, weekPlan, completions }) {
 }
 
 function averageLast7(checkIns, key) {
-  const sorted = [...checkIns].sort((a, b) => b.dateISO.localeCompare(a.dateISO));
+  const sorted = [...checkIns].sort((a, b) => (b.dateISO || '').localeCompare(a.dateISO || ''));
   const seen = new Set();
   let sum = 0;
   let count = 0;
@@ -39,7 +39,7 @@ function computeAdherence(weekPlan, completions) {
 
 function computeDownshiftMinutes(weekPlan) {
   if (!weekPlan || !Array.isArray(weekPlan.days)) return null;
-  const days = [...weekPlan.days].sort((a, b) => b.dateISO.localeCompare(a.dateISO)).slice(0, 7);
+  const days = [...weekPlan.days].sort((a, b) => (b.dateISO || '').localeCompare(a.dateISO || '')).slice(0, 7);
   let sum = 0;
   days.forEach((day) => {
     if (day.focus === "downshift") {
@@ -50,7 +50,7 @@ function computeDownshiftMinutes(weekPlan) {
 }
 
 function buildTrend(checkIns, key) {
-  const sorted = [...checkIns].sort((a, b) => a.dateISO.localeCompare(b.dateISO));
+  const sorted = [...checkIns].sort((a, b) => (a.dateISO || '').localeCompare(b.dateISO || ''));
   const seen = new Map();
   for (const c of sorted) {
     const date = c.dateISO || c.dateKey || c.date_key;
