@@ -237,6 +237,12 @@ export default function GemUnlockModal({ gemId, onClose }) {
     };
   });
 
+  // No pending unlock → render nothing. This MUST come after all hooks above
+  // (the useRefs + the single reveal useEffect) so hook order stays stable.
+  // Without it, the gem dereferences below and in the JSX crash on every Today
+  // render (pendingGemUnlock is null in the normal case) — the post-boot crash.
+  if (!gem) return null;
+
   const gemColor = pal?.mid ?? gem.hue;
   const shineColor = pal?.core ?? '#ffffff';
 
