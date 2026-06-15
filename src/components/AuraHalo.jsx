@@ -134,13 +134,13 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
           Animated.timing(gradAOpacity, {
             toValue: 0,
             duration: ANIM.HUE_SHIFT_DUR,
-            easing: Easing.inOut(Easing.sine),
+            easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
           }),
           Animated.timing(gradBOpacity, {
             toValue: 1,
             duration: ANIM.HUE_SHIFT_DUR,
-            easing: Easing.inOut(Easing.sine),
+            easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
           }),
         ]),
@@ -149,13 +149,13 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
           Animated.timing(gradAOpacity, {
             toValue: 1,
             duration: ANIM.HUE_SHIFT_DUR,
-            easing: Easing.inOut(Easing.sine),
+            easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
           }),
           Animated.timing(gradBOpacity, {
             toValue: 0,
             duration: ANIM.HUE_SHIFT_DUR,
-            easing: Easing.inOut(Easing.sine),
+            easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
           }),
         ]),
@@ -171,13 +171,13 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
         Animated.timing(auroraA, {
           toValue: ANIM.AURORA_OPACITY_MAX,
           duration: ANIM.AURORA_A_DUR,
-          easing: Easing.inOut(Easing.sine),
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(auroraA, {
           toValue: ANIM.AURORA_OPACITY_MIN,
           duration: ANIM.AURORA_A_DUR,
-          easing: Easing.inOut(Easing.sine),
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])
@@ -192,13 +192,13 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
         Animated.timing(auroraB, {
           toValue: ANIM.AURORA_OPACITY_MIN,
           duration: ANIM.AURORA_B_DUR,
-          easing: Easing.inOut(Easing.sine),
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(auroraB, {
           toValue: ANIM.AURORA_OPACITY_MAX,
           duration: ANIM.AURORA_B_DUR,
-          easing: Easing.inOut(Easing.sine),
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])
@@ -226,13 +226,13 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
         Animated.timing(breatheAnim, {
           toValue: ANIM.BREATHE_MAX,
           duration: ANIM.BREATHE_DUR,
-          easing: Easing.inOut(Easing.sine),
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(breatheAnim, {
           toValue: ANIM.BREATHE_MIN,
           duration: ANIM.BREATHE_DUR,
-          easing: Easing.inOut(Easing.sine),
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])

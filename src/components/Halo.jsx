@@ -149,13 +149,13 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
         Animated.timing(glowAnim, {
           toValue: ANIM.GLOW_MIN,
           duration: glowDur,
-          easing: Easing.inOut(Easing.sine),
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(glowAnim, {
           toValue: ANIM.GLOW_MAX,
           duration: glowDur,
-          easing: Easing.inOut(Easing.sine),
+          easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])
@@ -199,13 +199,13 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
           Animated.timing(breatheAnim, {
             toValue: breatheMax,
             duration: breatheDur,
-            easing: Easing.inOut(Easing.sine),
+            easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
           }),
           Animated.timing(breatheAnim, {
             toValue: breatheMin,
             duration: breatheDur,
-            easing: Easing.inOut(Easing.sine),
+            easing: Easing.inOut(Easing.sin),
             useNativeDriver: true,
           }),
         ])
