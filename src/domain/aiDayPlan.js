@@ -416,7 +416,10 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
   try {
     const finalMessage = await withRetry(async () => {
       const stream = client.messages.stream({
-        model: "claude-sonnet-4-20250514",
+        // Sonnet 4.6 — faster than Sonnet 4 and higher quality. No extended
+        // thinking is enabled (no `thinking` param), so the only latency levers
+        // are the model and the output length; this is the speed/quality pick.
+        model: "claude-sonnet-4-6",
         max_tokens: 4000,
         temperature: 1.0,
         system: SYSTEM_PROMPT,
@@ -464,6 +467,107 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
     console.error("[AI_DAYPLAN_ERROR]", err?.message);
     return null;
   }
+}
+
+// Deterministic, never-fails fallback. If the AI call errors, times out, or
+// returns an unparseable structure, the server serves THIS instead of an empty
+// plan — so onboarding and the daily check-in can never hard-fail with
+// "Something went wrong." It's a complete, on-brand 8-zone day grounded in the
+// cortisol curve; the only input-aware part is the opening line and stress
+// relief, both built from plain string maps that cannot throw.
+export function buildFallbackDayPlan({ stressLabel, sleepQuality, energy } = {}) {
+  const firstRead =
+    sleepQuality === "rough"
+      ? "You slept rough today — keep it gentle and protect tonight's wind-down."
+      : stressLabel === "overwhelmed" || stressLabel === "stressed"
+      ? "Stress is running high — today is about not adding to the load."
+      : energy === "high"
+      ? "Energy's up and stress is steady — a good day to push something real."
+      : "Here's your day mapped to the cortisol curve — start with the morning.";
+
+  const zones = [
+    {
+      id: "morning",
+      type: "counter_intuitive",
+      headline: "Hold the coffee for 90 minutes",
+      pullQuote: "Cortisol is already doing the job caffeine pretends to do.",
+      body:
+        "Don't reach for coffee the second you're up. Your cortisol awakening response is already peaking — that's your natural alertness — and caffeine on top of it spikes you, then drops you into an 11am crash. Wait about 90 minutes after waking. Have water with a pinch of salt first, let the natural rise carry you, then add caffeine as it starts to fall. Try it three mornings. The crash softens and the afternoon holds.",
+    },
+    {
+      id: "peak",
+      type: "protocol",
+      headline: "Front-load the hard thinking now",
+      pullQuote: "This is the sharpest your brain gets all day — spend it deliberately.",
+      body:
+        "Between 8 and 11am your cortisol is at its daily peak, which means your prefrontal cortex is at its sharpest. This is the window for the one task that actually moves your day — the hard decision, the deep work, the thing you keep avoiding. Don't spend it on email. Protect 90 minutes: phone in another room, one tab, one task. You won't get this clarity again until tomorrow. Use it on what matters, not what's loud.",
+    },
+    {
+      id: "midmorning",
+      type: "data_callout",
+      headline: "The 11am dip is the curve, not you",
+      pullQuote: "That sudden flatness isn't willpower — it's a glucose drop.",
+      body:
+        "Around 11 you'll feel the first dip — focus softens, you reach for a snack. That's a real cortisol and glucose drop, not a character flaw. Don't fix it with sugar; that buys 20 minutes and a bigger crash. Eat protein and fat instead — a handful of nuts, some yogurt, a couple of eggs. Step outside for two minutes of real daylight. The dip passes in about 15 minutes when you feed it right instead of spiking it.",
+    },
+    {
+      id: "lunch",
+      type: "counter_intuitive",
+      headline: "Eat protein first, carbs last",
+      pullQuote: "Same meal, different order, half the afternoon crash.",
+      body:
+        "The order you eat in changes how hard you crash later. Lead with protein and vegetables; save the bread and rice for the end. Same food, but the glucose curve flattens — which means the 2pm wall hits softer, or not at all. If you can, walk for ten minutes after. Muscle pulls glucose out of your blood without insulin, so the spike never happens. It's the cheapest afternoon-energy intervention there is.",
+    },
+    {
+      id: "afternoon",
+      type: "data_callout",
+      headline: "Your 2-to-4 crash is biology on schedule",
+      pullQuote: "The wall at 3pm is the second cortisol dip — every human has it.",
+      body:
+        "The slump between 2 and 4 is the second cortisol dip of the day. It's universal — not your sleep, not your coffee, just the curve. Fighting it with more caffeine now steals tonight's sleep. Ride it instead: a 10-minute walk, daylight on your face, or a genuinely boring 20-minute rest. If you must work, do lighter, mechanical tasks here, not the hard ones. Energy climbs back on its own around 4 as the curve recovers.",
+    },
+    {
+      id: "transition",
+      type: "protocol",
+      headline: "Cut the lights to start winding down",
+      pullQuote: "Bright light after 6pm tells your brain it's still noon.",
+      body:
+        "As evening comes your body shifts toward rest — but bright overhead light blocks the signal. Around 6, drop the lighting: lamps over ceilings, warm over white. If you train, this is the better window for cold exposure — your cortisol is already falling, so cold won't wire you the way it would at dawn. Dim light now is what lets melatonin start on time, which is what makes 10pm actually feel like bedtime instead of a fight.",
+    },
+    {
+      id: "winddown",
+      type: "protocol",
+      headline: "Magnesium glycinate, 200mg, 60 min before bed",
+      pullQuote: "Glycinate — not oxide, not citrate. The form is the whole point.",
+      body:
+        "If you take one thing for sleep, make it magnesium glycinate — 200mg, about an hour before bed, with a little fat for absorption. Not oxide (a laxative), not citrate (gut upset). Glycinate crosses into the brain and helps your nervous system downshift. Try to finish your last real meal by 7; late food keeps cortisol up and blocks melatonin. Night three you'll fall asleep faster. Two weeks in, the 3am wake-ups start to fade.",
+    },
+    {
+      id: "sleep",
+      type: "counter_intuitive",
+      headline: "Same bedtime beats more hours",
+      pullQuote: "Your body clocks consistency harder than it clocks duration.",
+      body:
+        "Don't chase a number tonight — chase the same time. A steady bed-and-wake time tunes your cortisol rhythm more than one long night ever will. Screens off 30 minutes before; the problem isn't only blue light, it's the alerting content. Keep the room cold — a drop in core temperature is the actual trigger for deep sleep. Tomorrow morning's cortisol release is set by tonight's timing. Protect the schedule and the energy takes care of itself.",
+    },
+  ];
+
+  const stressRelief =
+    stressLabel === "overwhelmed" || stressLabel === "stressed"
+      ? "Exhale twice as long as you inhale for one minute — a long exhale is the fastest switch into your parasympathetic brake."
+      : "Press your tongue flat against the roof of your mouth and hold for 10 seconds — it releases jaw tension and nudges you parasympathetic.";
+
+  return {
+    firstRead,
+    zones,
+    goalThread: {
+      weeklyFocus: "Daily cortisol rhythm",
+      todayConnection: "Today's zones follow your cortisol curve from waking to sleep.",
+    },
+    stressRelief,
+    eveningPrompt: "What changed in your afternoon when you ate protein before carbs at lunch?",
+    isFallback: true,
+  };
 }
 
 export { ZONE_DEFINITIONS };

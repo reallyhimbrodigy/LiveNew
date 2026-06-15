@@ -18,7 +18,7 @@ import { runContentChecks } from "../domain/content/checks.js";
 import { hashJSON, sanitizeContentItem, sanitizePack } from "../domain/content/snapshotHash.js";
 import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
-import { generateDayPlan } from "../domain/aiDayPlan.js";
+import { generateDayPlan, buildFallbackDayPlan } from "../domain/aiDayPlan.js";
 import { resolveDaySchedule, normalizeSchedule } from "../domain/schedule.js";
 import { generateInsight } from "../domain/aiInsight.js";
 import { generateStressRelief } from "../domain/aiStressRelief.js";
@@ -3262,19 +3262,31 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       checkIn.sleepHours = checkInRaw.sleepHours ?? checkInRaw.sleep_hours ?? null;
       const idempotencyKey = getIdempotencyKey(req);
       parityCounters.recordCheckin(Boolean(idempotencyKey));
-      await persist.upsertCheckin(auth.userId, dateKey, checkIn);
-      const checkinInserted = await persist.insertEventOncePerDay(
-        auth.userId,
-        dateKey,
-        "checkin_submitted",
-        {
-          stress: checkIn.stress,
-          sleep: checkIn.sleepQuality,
-          energy: checkIn.energy,
-          timeMin: checkIn.timeAvailableMin,
-        },
-        idempotencyKey
-      );
+      // Persist the check-in. A DB hiccup here must NOT sink the whole request
+      // (that would surface to the user as "Something went wrong" before they
+      // ever get a plan). Log loudly and continue — the user still gets a plan.
+      try {
+        await persist.upsertCheckin(auth.userId, dateKey, checkIn);
+      } catch (err) {
+        console.error("[CHECKIN_PERSIST_FAILED]", err?.message);
+      }
+      let checkinInserted = null;
+      try {
+        checkinInserted = await persist.insertEventOncePerDay(
+          auth.userId,
+          dateKey,
+          "checkin_submitted",
+          {
+            stress: checkIn.stress,
+            sleep: checkIn.sleepQuality,
+            energy: checkIn.energy,
+            timeMin: checkIn.timeAvailableMin,
+          },
+          idempotencyKey
+        );
+      } catch (err) {
+        console.error("[CHECKIN_EVENT_FAILED]", err?.message);
+      }
       if (checkinInserted?.inserted) {
         invalidateOutcomesCache(auth.userId, dateKey);
       }
@@ -3312,6 +3324,9 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       keepAlive = setInterval(() => {
         if (!res.writableEnded) res.write(' ');
       }, 5000);
+      // If the client disconnects mid-generation, stop the keep-alive so the
+      // interval can't leak and keep firing against a dead socket.
+      res.on('close', () => { if (keepAlive) { clearInterval(keepAlive); keepAlive = null; } });
 
       // Build AI history context from yesterday + recent days
       const userSupabaseForCheckin = supabaseForUser(auth.jwt);
@@ -3352,7 +3367,16 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       }
 
       if (!dayPlan) {
-        console.error("[DAYPLAN_NULL] AI returned no plan");
+        // AI failed, timed out, or returned nothing — serve the deterministic
+        // fallback so the client ALWAYS receives a complete plan. This is what
+        // makes onboarding and the daily check-in impossible to hard-fail with
+        // "Something went wrong."
+        console.error("[DAYPLAN_NULL] AI returned no plan — serving fallback");
+        dayPlan = buildFallbackDayPlan({
+          stressLabel,
+          sleepQuality: sleepLabel,
+          energy: energyLabel,
+        });
       }
 
       // Store the AI plan in derived_state for tomorrow's history context.
@@ -3367,9 +3391,15 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
         completed: {},
         reflection: null,
       };
-      await persist.upsertDerivedState(auth.userId, dateKey, null, derivedContract);
-      clearInterval(keepAlive);
-      keepAlive = null;
+      // Cache for tomorrow's history context. If this write fails we've
+      // already got a valid plan in hand — log and still return it rather than
+      // throwing the whole response away after the user waited for it.
+      try {
+        await persist.upsertDerivedState(auth.userId, dateKey, null, derivedContract);
+      } catch (err) {
+        console.error("[DERIVED_STATE_PERSIST_FAILED]", err?.message);
+      }
+      if (keepAlive) { clearInterval(keepAlive); keepAlive = null; }
       const responseBody = JSON.stringify({
         ok: true,
         dateISO: dateKey,
@@ -7068,8 +7098,11 @@ const server = http.createServer(async (req, res) => {
           if (linkErr) throw linkErr;
           const hashedToken = linkData?.properties?.hashed_token;
           if (!hashedToken) throw new Error("no_hashed_token");
+          // When verifying with a token_hash, Supabase requires ONLY
+          // token_hash + type — passing `email` alongside it makes the SDK
+          // throw "Only the token_hash and type should be provided" (the exact
+          // error that was breaking the App Review bypass in production).
           const { data: verifyData, error: verifyErr } = await supabaseAnon().auth.verifyOtp({
-            email: emailLower,
             token_hash: hashedToken,
             type: "magiclink",
           });
