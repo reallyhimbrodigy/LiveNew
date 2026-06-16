@@ -121,15 +121,16 @@ export function isWithinTrial(trialStartISO) {
 // Free users keep the core loop forever; this gate covers depth features only.
 export function useIsPremium() {
   const isSubscribed = useAuthStore((s) => s.isSubscribed);
+  const isComped = useAuthStore((s) => s.isComped);
   const trialStartISO = useAuthStore((s) => s.trialStartISO);
-  return isSubscribed || isWithinTrial(trialStartISO);
+  return isSubscribed || isComped || isWithinTrial(trialStartISO);
 }
 
 export const useAuthStore = create((set, get) => ({
   // State
   isLoading: true,
   isLoggedIn: false,
-  isSubscribed: false,
+  isSubscribed: false, isComped: false,
   hasProfile: false,
   profile: null,
   todayPlan: null,       // { rightNow, plan, goalThread, stressRelief, eveningPrompt }
@@ -302,6 +303,9 @@ export const useAuthStore = create((set, get) => ({
         try {
           const bootstrap = await api.bootstrap();
           const serverProfile = bootstrap?.profile || {};
+          // Manual comp flag (user_profile.is_pro) — premium alongside
+          // RevenueCat + the trial. See useIsPremium / isPremiumNow.
+          set({ isComped: serverProfile.isPro === true });
           const serverSaysOnboarded =
             bootstrap?.uiState === 'home' ||
             bootstrap?.profile?.isComplete === true ||
@@ -571,6 +575,7 @@ export const useAuthStore = create((set, get) => ({
 
     if (bootstrap) {
       const p = bootstrap?.profile || {};
+      set({ isComped: p.isPro === true });
       const profile = {
         routine: p.routine || null,
         stressSource: p.stressSource || null,
@@ -966,7 +971,7 @@ export const useAuthStore = create((set, get) => ({
       if (!trialStartISO) {
         try { trialStartISO = await AsyncStorage.getItem('livenew:trial_start'); } catch {}
       }
-      const isPremiumNow = state.isSubscribed || isWithinTrial(trialStartISO);
+      const isPremiumNow = state.isSubscribed || state.isComped || isWithinTrial(trialStartISO);
 
       // Read the per-account freeze ledger (survives logout, removed on deleteAccount).
       const userId = state.userId;
@@ -1159,7 +1164,7 @@ export const useAuthStore = create((set, get) => ({
       userName: null, userEmail: null, avatarUri: null,
       userId: null, trialStartISO: null, skippedDate: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
-      todaySleep: null, todayEnergy: null, isSubscribed: false,
+      todaySleep: null, todayEnergy: null, isSubscribed: false, isComped: false,
       completed: {}, reflection: null, streak: 0,
       healthPermission: 'unknown', healthSnapshot: null,
       maxStreak: 0, gemEarnedAt: {}, pendingGemUnlock: null,
@@ -1215,7 +1220,7 @@ export const useAuthStore = create((set, get) => ({
       userName: null, userEmail: null, avatarUri: null,
       userId: null, trialStartISO: null, skippedDate: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
-      todaySleep: null, todayEnergy: null, isSubscribed: false,
+      todaySleep: null, todayEnergy: null, isSubscribed: false, isComped: false,
       completed: {}, reflection: null, streak: 0,
       healthPermission: 'unknown', healthSnapshot: null,
       maxStreak: 0, gemEarnedAt: {}, pendingGemUnlock: null,

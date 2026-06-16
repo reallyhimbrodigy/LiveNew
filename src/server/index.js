@@ -2293,7 +2293,7 @@ async function ensureHomeUiState({ userId, userProfile, userBaseline, userEmail,
 }
 
 
-async function buildSupabaseBootstrapPayload({ userId, userProfile, flags, avatarUrl }) {
+async function buildSupabaseBootstrapPayload({ userId, userProfile, flags, avatarUrl, isPro }) {
   const isAuthenticated = Boolean(userId);
   const requiredVersion = await getRequiredConsentVersion();
   const { accepted, consentComplete, version } = supabaseConsentStatus(userProfile, requiredVersion);
@@ -2358,6 +2358,9 @@ async function buildSupabaseBootstrapPayload({ userId, userProfile, flags, avata
       injuries,
       schedule: constraints.schedule || null,
       avatar_url: avatarUrl || null,
+      // Manual comp flag: user_profile.is_pro === true grants premium server-
+      // side, independent of RevenueCat. Lets us comp accounts via one SQL line.
+      isPro: isPro === true,
     },
     baseline: baseline
       ? {
@@ -2500,6 +2503,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       }
       let profile = null;
       let avatarUrl = null;
+      let isPro = false;
       if (auth.userId && auth.jwt) {
         const persist = createPersist(supabaseForUser(auth.jwt));
         profile = await persist.getOrCreateUserProfile(auth.userId);
@@ -2515,8 +2519,18 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
             .maybeSingle();
           avatarUrl = avatarRow?.avatar_url || null;
         } catch {}
+        // Read the manual comp flag the same defensive way (column may not
+        // exist until the is_pro migration is applied).
+        try {
+          const { data: proRow } = await supabaseAdmin()
+            .from("user_profile")
+            .select("is_pro")
+            .eq("user_id", auth.userId)
+            .maybeSingle();
+          isPro = proRow?.is_pro === true;
+        } catch {}
       }
-      const payload = await buildSupabaseBootstrapPayload({ userId: auth.userId, userProfile: profile, flags, avatarUrl });
+      const payload = await buildSupabaseBootstrapPayload({ userId: auth.userId, userProfile: profile, flags, avatarUrl, isPro });
       logDebug({ tag: "BOOTSTRAP_RESPONSE", userId: auth.userId, uiState: payload?.uiState, consent: payload?.consent, profile: payload?.profile });
       assertBootstrapContract(payload);
       sendJson(res, 200, payload, auth.userId || null);
