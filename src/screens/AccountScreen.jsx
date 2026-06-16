@@ -850,8 +850,11 @@ function makeStyles(colors, fonts) {
     // sitting ON the ring edge, not floating off it.
     avatarEditDot: {
       position: 'absolute',
-      right: 18,
-      bottom: 18,
+      // The ring is 84 centered in the 116 tap target, so its lower-right 45°
+      // edge sits ~15px in from the wrapper corner — put the "+" there so it
+      // hugs the avatar edge instead of floating in the corner gap.
+      right: 15,
+      bottom: 15,
       width: 26,
       height: 26,
       borderRadius: 13,

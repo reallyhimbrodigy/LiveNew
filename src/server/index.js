@@ -4032,16 +4032,21 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       } catch {}
 
       // Flush headers immediately so iOS sees a 200 response and holds the
-      // connection while we wait for Claude. Same fix as /v1/checkin.
+      // connection while we wait for Claude. Same fix as /v1/checkin:
+      // text/event-stream is the one content-type Cloudflare won't buffer, so
+      // the keep-alive bytes actually reach the client instead of the socket
+      // sitting silent (which mobile networks drop -> "something went wrong").
+      // The body is still plain JSON; res.json() parses it regardless of type.
       res.writeHead(200, {
-        'Content-Type': 'application/json',
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache, no-transform',
         'X-Accel-Buffering': 'no',
       });
       if (typeof res.flushHeaders === 'function') res.flushHeaders();
       res.write(' ');
       const keepAlive = setInterval(() => {
         if (!res.writableEnded) res.write(' ');
-      }, 5000);
+      }, 3000);
 
       const reply = await generateChatReply({ messages: cleaned, userContext });
       clearInterval(keepAlive);
