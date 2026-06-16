@@ -767,10 +767,16 @@ export default function TodayScreen({ navigation }) {
           {streak >= 2 ? (
             <Pressable onPress={handleShareStreak} hitSlop={6} style={s.streakChip}>
               <View style={s.streakChipRow}>
-                {/* Flame whose color, size and flicker scale with the streak —
-                    gold early, warmer through week one, hot + bigger past a
-                    month (tiering handled inside FlameIcon via the streak prop). */}
-                <FlameIcon size={streak >= 30 ? 19 : 16} streak={streak} strokeWidth={2} />
+                {/* Flame whose color, size, fill, glow and flicker scale with
+                    the streak — calm gold ember early, hot red past a month,
+                    magenta, then a fully-alive PURPLE flame at 100+ (tiering
+                    handled inside FlameIcon via the streak prop). Size also
+                    steps up at the top tiers so the chip feels earned. */}
+                <FlameIcon
+                  size={streak >= 100 ? 20 : streak >= 60 ? 19 : streak >= 30 ? 18 : 16}
+                  streak={streak}
+                  strokeWidth={2}
+                />
                 <Text style={s.streakNum}>{streak}</Text>
               </View>
               <Text style={s.streakLabel}>days</Text>

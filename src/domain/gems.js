@@ -33,13 +33,14 @@ export const GEM_PALETTE = {
     glow:  '#d4a832',   // golden bloom
     sheen: '#fff3b0',   // highlight arc
   },
-  // Common — honey amber, slightly richer than first_light
+  // Common — burnished bronze, clearly warmer/deeper than first_light's bright
+  // coin gold so the two earliest halos never read as the same stone.
   foundation: {
-    core:  '#fff8e0',
-    mid:   '#d4a23a',   // honey gold
-    deep:  '#8c5e18',   // dark amber-brown
-    glow:  '#c4921e',
-    sheen: '#ffe89a',
+    core:  '#fff0d4',
+    mid:   '#c8862a',   // bronze-amber (warmer + deeper than first_light gold)
+    deep:  '#7a4a12',   // dark bronze-brown
+    glow:  '#b87016',   // amber bloom
+    sheen: '#ffdc88',
   },
   // Uncommon — rose-gold / coral: feminine and warm
   the_week: {
@@ -92,6 +93,40 @@ export const GEM_PALETTE = {
     prism: ['#f0c44a', '#e05090', '#9060f0', '#40b4f0', '#40d890', '#f0c44a'],
   },
 };
+
+// ── Progression ladder ─────────────────────────────────────────────────────────
+//
+// The Halo renderer drives its visual elaboration off a gem's *progression
+// rank* (0 = first_light … 7 = the_year), NOT off its tier band. This is what
+// makes each consecutive halo a distinct, monotonically-cooler step on a ladder
+// even when two gems share a tier (first_light/foundation both Common;
+// the_month/steadfast both Epic). Higher rank ⇒ more rays, faster + richer
+// animation, stronger glow, and extra flourishes (counter-rotation, sparkles).
+
+const GEM_RANK = GEMS.reduce((acc, g, i) => {
+  acc[g.id] = i;
+  return acc;
+}, {});
+
+const MAX_GEM_RANK = GEMS.length - 1; // 7 (the_year)
+
+/**
+ * Progression rank for a gem: its index in GEMS (0..7). Unknown ids fall back
+ * to 0 so a future/unknown gem renders as a subtle entry-level halo.
+ *
+ * @param {object} gem — a GEMS entry { id, ... }
+ * @returns {number} 0..7
+ */
+export function gemRank(gem) {
+  if (!gem) return 0;
+  const r = GEM_RANK[gem.id];
+  return typeof r === 'number' ? r : 0;
+}
+
+/** Highest progression rank (the_year). */
+export function maxGemRank() {
+  return MAX_GEM_RANK;
+}
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 

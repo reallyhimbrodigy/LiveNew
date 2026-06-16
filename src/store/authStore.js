@@ -560,6 +560,21 @@ export const useAuthStore = create((set, get) => ({
     }
     if (userId) set({ userId });
 
+    // Restore the real HealthKit permission status. The OS grant is
+    // device-level and survives logout, but `healthPermission` lives in
+    // memory and isn't restored by any login path (only cold-boot hydrate
+    // reads it). Without this, a logout→login within the same app session
+    // leaves it stale ('unknown'/'denied'), so a returning user who already
+    // granted Health gets re-prompted on Account. Mirror hydrate (~line 250).
+    // Defensive: never let this throw and block sign-in.
+    try {
+      const healthPermission = await getHealthPermissionStatus();
+      set({ healthPermission });
+      if (healthPermission === 'granted') {
+        get().refreshHealthSnapshot().catch(() => {});
+      }
+    } catch {}
+
     let bootstrap = null;
     let lastErr = null;
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -1151,13 +1166,22 @@ export const useAuthStore = create((set, get) => ({
       'livenew:goal_nudge_dismissed', 'livenew:share_card_variant',
       'livenew:lastCelebratedStreak', 'livenew:goal_set_at',
       'livenew:progress_cache_v1', 'livenew:health_snapshot_v1',
-      'livenew:health_permission_status', 'livenew:review_prompted',
+      'livenew:review_prompted',
       'livenew:streak_risk_dismissed', 'livenew:live_activity_id',
       'livenew:seen_first_plan_welcome', 'livenew:seen_tts_hint',
       // Trial + skip state are device-local and NOT account-scoped — clear them
       // so a second account signing in on this device doesn't inherit the first
       // user's (possibly expired) trial window or stale "skipped today" flag.
       'livenew:trial_start', SKIPPED_KEY,
+      // NOTE: 'livenew:health_permission_status' is deliberately NOT removed.
+      // The HealthKit grant is DEVICE-LEVEL (owned by iOS, lives in Settings →
+      // Health → Apps → LiveNew) and survives logout — iOS keeps honoring it.
+      // Wiping our flag made a returning user who re-logs in look un-granted,
+      // so they got re-prompted to "Connect Apple Health" despite already
+      // having granted it. We clear the cached snapshot below (account data)
+      // but keep the device-level permission flag. A different account signing
+      // in on the same device inherits only the OS grant, which is correct —
+      // the OS grant is per-device, not per-account.
       // NOTE: the account-scoped avatar key (avatarKey(userId)) is NOT removed
       // here — like gems/freeze, the picture belongs to the account and should
       // survive logout. We only reset avatarUri in state below.
