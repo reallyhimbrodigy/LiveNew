@@ -692,6 +692,17 @@ export const useAuthStore = create((set, get) => ({
     return { ok: true, error: null };
   },
 
+  // Turn OFF the app's use of Health data. iOS can't revoke the OS HealthKit
+  // grant programmatically — that lives in Settings → Health → Apps → LiveNew —
+  // so this clears the app side: flips our persisted status to 'denied', drops
+  // the cached snapshot, and persists via the same setter connectHealth uses.
+  // The score / plan stop reading biometrics until the user reconnects.
+  disconnectHealth: async () => {
+    set({ healthPermission: 'denied', healthSnapshot: null });
+    await setHealthPermissionStatus('denied');
+    return { ok: true };
+  },
+
   // Refresh the cached health snapshot (called on app focus / Today mount).
   refreshHealthSnapshot: async () => {
     const status = await getHealthPermissionStatus();
@@ -1045,13 +1056,14 @@ export const useAuthStore = create((set, get) => ({
   // Upload a newly-picked profile photo. `asset` = { base64, ext }. We send the
   // base64 to the server, which stores it in Supabase Storage and returns the
   // public URL; we then reflect that URL in state and cache it locally (account-
-  // scoped) for instant offline display next launch. Returns true on success,
-  // false on failure so the UI can surface an error. `avatarUploading` drives
-  // the in-UI spinner.
+  // scoped) for instant offline display next launch. Returns { ok, error } so
+  // the UI can surface the ACTUAL server failure (e.g. "image too large") instead
+  // of a generic message — a too-large image looks different from a bucket error.
+  // `avatarUploading` drives the in-UI spinner.
   setAvatar: async (asset) => {
     const base64 = asset?.base64;
     const ext = asset?.ext === 'png' ? 'png' : 'jpg';
-    if (!base64) return false;
+    if (!base64) return { ok: false, error: 'No image data.' };
     set({ avatarUploading: true });
     try {
       const r = await api.uploadAvatar(base64, ext);
@@ -1059,11 +1071,14 @@ export const useAuthStore = create((set, get) => ({
         const userId = get().userId;
         set({ avatarUri: r.avatarUrl });
         try { await AsyncStorage.setItem(avatarKey(userId), r.avatarUrl); } catch {}
-        return true;
+        return { ok: true, error: null };
       }
-      return false;
-    } catch {
-      return false;
+      // Server returned 200 with no URL — surface any message it included.
+      return { ok: false, error: r?.error || r?.message || null };
+    } catch (err) {
+      // Network / non-2xx error — surface the thrown message so a 413-style
+      // "too large" or a misconfigured-bucket error is distinguishable.
+      return { ok: false, error: err?.message || null };
     } finally {
       set({ avatarUploading: false });
     }

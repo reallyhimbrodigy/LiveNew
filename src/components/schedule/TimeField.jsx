@@ -14,7 +14,7 @@ function toHHMM(d) {
 }
 function label12(hhmm) {
   const [h, m] = (hhmm || '09:00').split(':').map(Number);
-  const ap = h < 12 ? 'a' : 'p';
+  const ap = h < 12 ? 'am' : 'pm';
   const h12 = ((h + 11) % 12) + 1;
   return m ? `${h12}:${String(m).padStart(2, '0')}${ap}` : `${h12}${ap}`;
 }

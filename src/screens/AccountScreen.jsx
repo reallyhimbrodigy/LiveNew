@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useRef, useEffect } from 'react';
 import {
   View, Text, Image, ScrollView, Pressable, TextInput, Switch,
-  StyleSheet, Alert, KeyboardAvoidingView, Platform, Linking, Share, Modal,
+  StyleSheet, Alert, Linking, Share, Modal,
   ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
@@ -52,10 +52,8 @@ export default function AccountScreen({ navigation }) {
   const isPremium = useIsPremium();
   const healthPermission = useAuthStore(s => s.healthPermission);
   const connectHealth = useAuthStore(s => s.connectHealth);
+  const disconnectHealth = useAuthStore(s => s.disconnectHealth);
   const [deleting, setDeleting] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [editValue, setEditValue] = useState('');
-  const [saving, setSaving] = useState(false);
   const [sharing, setSharing] = useState(null);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [scheduleKey, setScheduleKey] = useState(0);
@@ -65,18 +63,7 @@ export default function AccountScreen({ navigation }) {
   const nameInputRef = useRef(null);
   const [nudgeDismissed, setNudgeDismissed] = useState(true); // default hidden until we check
   const shareCardRef = useRef(null);
-  const editInputRef = useRef(null);
   const todayPlan = useAuthStore(z => z.todayPlan);
-
-  // Deferred focus on the routine edit input — replaces autoFocus, which
-  // raced KeyboardAvoidingView layout on iOS and could leave the edit
-  // screen showing blank content above the keyboard. 350ms delay lets the
-  // KeyboardAvoidingView settle before the keyboard slides up.
-  useEffect(() => {
-    if (!editing) return;
-    const t = setTimeout(() => editInputRef.current?.focus(), 350);
-    return () => clearTimeout(t);
-  }, [editing]);
 
   // Notification state
   const [notifPerm, setNotifPerm] = useState('unknown');
@@ -247,7 +234,9 @@ export default function AccountScreen({ navigation }) {
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [1, 1],
-        quality: 0.7,
+        // Base64 inflates payload ~33%; the server caps uploads at 12MB of
+        // base64. 0.5 keeps even large photos comfortably under that ceiling.
+        quality: 0.5,
         base64: true,
       });
       if (result.canceled) return;
@@ -262,11 +251,21 @@ export default function AccountScreen({ navigation }) {
       const nameExt = (asset.fileName || '').split('.').pop()?.toLowerCase();
       const mime = (asset.mimeType || '').toLowerCase();
       if (nameExt === 'png' || mime.includes('png')) ext = 'png';
-      const ok = await setAvatar({ base64: asset.base64, ext });
-      if (ok) tapLight();
-      else Alert.alert('Upload failed', 'Could not upload your photo. Please try again.');
-    } catch {
-      Alert.alert('Upload failed', 'Could not upload your photo. Please try again.');
+      const res = await setAvatar({ base64: asset.base64, ext });
+      if (res?.ok) {
+        tapLight();
+      } else {
+        // Surface the real server error so a too-large image reads differently
+        // from a generic failure. Fall back to the generic line if none given.
+        Alert.alert(
+          'Upload failed',
+          res?.error
+            ? `${res.error}\n\nIf the photo is very large, try a smaller one.`
+            : 'Could not upload your photo. Please try again.'
+        );
+      }
+    } catch (err) {
+      Alert.alert('Upload failed', err?.message || 'Could not upload your photo. Please try again.');
     }
   };
 
@@ -293,30 +292,6 @@ export default function AccountScreen({ navigation }) {
   };
 
   const avatarInitial = (userName || '').trim().charAt(0).toUpperCase() || '?';
-
-  const handleEdit = (field) => {
-    tapSelect();
-    setEditValue(profile?.[field] || '');
-    setEditing(field);
-  };
-
-  const handleSave = async () => {
-    if (!editValue.trim()) return;
-    tapLight();
-    setSaving(true);
-    try {
-      const updated = { ...profile, [editing]: editValue.trim() };
-      await saveProfile(updated);
-      setSaving(false);
-      setEditing(null);
-      // Profile is saved. Iris will pick up the change on the next plan
-      // generation — we don't yank the user into a re-check-in. They're in
-      // Account for a reason; respect that.
-    } catch {
-      Alert.alert('Error', 'Could not save. Try again.');
-      setSaving(false);
-    }
-  };
 
   const handleLogout = () => {
     tapSelect();
@@ -347,40 +322,6 @@ export default function AccountScreen({ navigation }) {
       ]
     );
   };
-
-  // Edit screen — routine only (goal removed in 2026-05-16 simplification)
-  if (editing) {
-    return (
-      <SafeAreaView style={s.safe}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={{ flex: 1 }}>
-          <View style={s.editWrap}>
-            <Text style={s.editTitle}>Update your routine</Text>
-            <Text style={s.editSub}>The more detail you give Iris, the more precisely she can shape your plan. Wake time, work hours, gym, meals, bedtime — anything that shapes your day helps.</Text>
-            <TextInput
-              ref={editInputRef}
-              style={s.editInput}
-              value={editValue}
-              onChangeText={setEditValue}
-              multiline
-              textAlignVertical="top"
-              placeholderTextColor={colors.dim}
-              placeholder="e.g. Wake 6:30am. Work from home 9–5. Gym at 6pm. Dinner 7. In bed by 11."
-            />
-            <Pressable
-              style={[s.saveBtn, (!editValue.trim() || saving) && { opacity: 0.4 }]}
-              onPress={handleSave}
-              disabled={!editValue.trim() || saving}
-            >
-              <Text style={s.saveBtnText}>{saving ? 'Saving...' : 'Save'}</Text>
-            </Pressable>
-            <Pressable style={s.cancelBtn} onPress={() => setEditing(null)}>
-              <Text style={s.cancelText}>Cancel</Text>
-            </Pressable>
-          </View>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    );
-  }
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -491,7 +432,7 @@ export default function AccountScreen({ navigation }) {
             onPress={() => {
               if (isSubscribed) return;
               tapSelect();
-              navigation.navigate('Paywall');
+              navigation.navigate('Essentials');
             }}
             disabled={isSubscribed}
           >
@@ -575,16 +516,6 @@ export default function AccountScreen({ navigation }) {
         <Text style={s.sectionTitle}>Your profile</Text>
 
         <View style={s.card}>
-          <Pressable style={s.settingRow} onPress={() => handleEdit('routine')}>
-            <View style={s.settingContent}>
-              <Text style={s.settingTitle}>My routine</Text>
-              <Text style={s.settingValue} numberOfLines={2}>{profile?.routine || 'Not set'}</Text>
-            </View>
-            <Text style={s.settingArrow}>›</Text>
-          </Pressable>
-
-          <View style={s.settingDivider} />
-
           <Pressable style={s.settingRow} onPress={openScheduleEditor}>
             <View style={s.settingContent}>
               <Text style={s.settingTitle}>Schedule</Text>
@@ -667,10 +598,24 @@ export default function AccountScreen({ navigation }) {
 
         {healthPermission === 'granted' ? (
           <View style={s.healthGrantedCard}>
-            <Text style={s.healthGrantedBadge}>● CONNECTED</Text>
-            <Text style={s.healthGrantedTitle}>Iris is reading your real biometrics.</Text>
+            <View style={s.healthToggleRow}>
+              <Text style={s.healthGrantedTitle}>Iris is reading your real biometrics.</Text>
+              <Switch
+                value={true}
+                onValueChange={(next) => {
+                  tapSelect();
+                  if (next) {
+                    connectHealth();
+                  } else {
+                    disconnectHealth();
+                  }
+                }}
+                trackColor={{ false: colors.line, true: colors.gold }}
+                thumbColor={colors.bg}
+              />
+            </View>
             <Text style={s.healthGrantedBody}>
-              Sleep, resting heart rate, and HRV are powering your score and the daily plan. To revoke, open Health → Sharing → Apps → LiveNew.
+              Sleep, resting heart rate, and HRV are powering your score and the daily plan. Turning this off stops Iris from using your Health data. To fully revoke access, open Health → Sharing → Apps → LiveNew.
             </Text>
           </View>
         ) : (
@@ -770,21 +715,29 @@ export default function AccountScreen({ navigation }) {
       ) : null}
 
       <Modal visible={scheduleOpen} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setScheduleOpen(false)}>
-        <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top']}>
-          <Pressable onPress={() => setScheduleOpen(false)} hitSlop={8} style={{ alignSelf: 'flex-end', padding: 16 }}>
+        <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top', 'bottom']}>
+          {/* Builder fills the screen; the Close control sits centered BELOW it,
+              clear of the status bar / battery that crowded the old top-right X. */}
+          <View style={{ flex: 1 }}>
+            <ScheduleBuilder
+              key={scheduleKey}
+              onComplete={async (schedule) => {
+                try {
+                  await saveProfile({ ...(profile || {}), schedule });
+                } catch (e) {
+                  console.warn('[account] saveProfile schedule failed', e?.message);
+                }
+                setScheduleOpen(false);
+              }}
+            />
+          </View>
+          <Pressable
+            onPress={() => setScheduleOpen(false)}
+            hitSlop={8}
+            style={{ alignSelf: 'center', paddingVertical: 18, paddingHorizontal: 32, marginBottom: 8 }}
+          >
             <Text style={{ color: colors.muted, fontFamily: fonts.displaySemibold, fontSize: 16 }}>Close</Text>
           </Pressable>
-          <ScheduleBuilder
-            key={scheduleKey}
-            onComplete={async (schedule) => {
-              try {
-                await saveProfile({ ...(profile || {}), schedule });
-              } catch (e) {
-                console.warn('[account] saveProfile schedule failed', e?.message);
-              }
-              setScheduleOpen(false);
-            }}
-          />
         </SafeAreaView>
       </Modal>
     </SafeAreaView>
@@ -890,11 +843,15 @@ function makeStyles(colors, fonts) {
       color: colors.gold,
       letterSpacing: 0.5,
     },
-    // Edit affordance — a small gold dot at the lower-right of the avatar.
+    // Edit affordance — a small gold dot on the avatar ring's lower-right edge.
+    // The ring (84px) is centered in the 116px tap wrapper, so there's ~16px of
+    // padding on every side. right/bottom of 18 lands the dot's center just
+    // inside the ring's lower-right corner (the 45° point) so it reads as
+    // sitting ON the ring edge, not floating off it.
     avatarEditDot: {
       position: 'absolute',
-      right: 14,
-      bottom: 14,
+      right: 18,
+      bottom: 18,
       width: 26,
       height: 26,
       borderRadius: 13,
@@ -1041,11 +998,21 @@ function makeStyles(colors, fonts) {
       letterSpacing: 1.6,
       marginBottom: 8,
     },
+    // Title + on/off Switch share a row so the toggle reads as the connection
+    // control, not buried below copy.
+    healthToggleRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      marginBottom: 6,
+    },
     healthGrantedTitle: {
       fontFamily: fonts.displaySemibold,
       fontSize: 16,
       color: colors.text,
       marginBottom: 6,
+      flexShrink: 1,
+      paddingRight: 12,
     },
     healthGrantedBody: {
       fontFamily: fonts.body,

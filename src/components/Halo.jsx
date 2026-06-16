@@ -53,10 +53,23 @@ const ANIM = {
   EPIC_GLOW_DUR:      2600,
   LEGENDARY_GLOW_DUR: 2200,
   MYTHIC_GLOW_DUR:    2000,
-  GLOW_MIN: 0.5,
+  GLOW_MIN: 0.38,
   GLOW_MAX: 1.0,
 
+  // Core glow pulse — luminous center breathes on a phase offset from the bloom
+  CORE_MIN: 0.55,
+  CORE_MAX: 1.0,
+  CORE_SCALE_MIN: 0.94,
+  CORE_SCALE_MAX: 1.06,
+  COMMON_CORE_DUR:    4600,
+  UNCOMMON_CORE_DUR:  3700,
+  RARE_CORE_DUR:      3200,
+  EPIC_CORE_DUR:      3000,
+  LEGENDARY_CORE_DUR: 2500,
+  MYTHIC_CORE_DUR:    2300,
+
   // Ray rotation (ms per full revolution)
+  COMMON_ROT_DUR:    60000,
   UNCOMMON_ROT_DUR:  42000,
   RARE_ROT_DUR:      32000,
   EPIC_ROT_DUR:      22000,
@@ -107,6 +120,7 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
   // ── Animated values ────────────────────────────────────────────────────────
   const rotAnim     = useRef(new Animated.Value(0)).current;
   const glowAnim    = useRef(new Animated.Value(1)).current;
+  const coreAnim    = useRef(new Animated.Value(1)).current;
   const breatheAnim = useRef(new Animated.Value(1)).current;
   const sparkleAnims = useRef(
     Array.from({ length: MAX_SPARKLE }, () => new Animated.Value(0))
@@ -163,8 +177,41 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
     glowLoop.start();
     loops.push(glowLoop);
 
-    // Ray rotation — Uncommon and above
+    // Core glow pulse — luminous center breathes on a phase offset from the
+    // bloom (it starts from CORE_MIN while the bloom starts from GLOW_MAX), so
+    // the halo's center reads as "breathing with light," not a static disc.
+    const coreDur = (
+      tier === 'Common'    ? ANIM.COMMON_CORE_DUR    :
+      tier === 'Uncommon'  ? ANIM.UNCOMMON_CORE_DUR  :
+      tier === 'Rare'      ? ANIM.RARE_CORE_DUR      :
+      tier === 'Epic'      ? ANIM.EPIC_CORE_DUR      :
+      tier === 'Legendary' ? ANIM.LEGENDARY_CORE_DUR :
+      /* Mythic */           ANIM.MYTHIC_CORE_DUR
+    );
+    coreAnim.setValue(ANIM.CORE_MIN);
+    const coreLoop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(coreAnim, {
+          toValue: ANIM.CORE_MAX,
+          duration: coreDur,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(coreAnim, {
+          toValue: ANIM.CORE_MIN,
+          duration: coreDur,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    );
+    coreLoop.start();
+    loops.push(coreLoop);
+
+    // Ray rotation — every earned tier rotates; Common is very slow so the
+    // most common (every user's first) halo still feels alive.
     const rotDur = (
+      tier === 'Common'    ? ANIM.COMMON_ROT_DUR    :
       tier === 'Uncommon'  ? ANIM.UNCOMMON_ROT_DUR  :
       tier === 'Rare'      ? ANIM.RARE_ROT_DUR      :
       tier === 'Epic'      ? ANIM.EPIC_ROT_DUR      :
@@ -293,14 +340,22 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
     };
   });
 
-  // Sparkle dot positions — orbit slightly beyond the farthest ray tips
+  // Sparkle dot positions — orbit nestled among the ray tips (reads as part of
+  // the halo, not detached satellites). Clamped to stay inside the size×size box
+  // with margin so dots never clip the edge, even at small sizes (e.g. 44).
   const sparkleCount = SPARKLE_COUNTS[tier] ?? 2;
-  const sparkleOrbitR = rayInnerR + baseLen + size * 0.045;
   const sparkleSize   = Math.max(2, size * 0.046);
+  const sparkleOrbitR = Math.min(
+    rayInnerR + baseLen * 0.6,
+    size * 0.5 - sparkleSize
+  );
   const sparkleDots   = Array.from({ length: sparkleCount }, (_, i) => {
-    // Distribute at slightly irregular angles for organic feel
+    // Distribute at slightly irregular angles for organic feel. With only 2
+    // dots (Common), jitter would make them visibly asymmetric, so symmetrize.
     const baseAngle = (2 * Math.PI * i) / sparkleCount - Math.PI / 2;
-    const jitter    = (i % 3 === 0 ? 0.08 : i % 3 === 1 ? -0.05 : 0.12);
+    const jitter    = sparkleCount <= 2
+      ? 0
+      : (i % 3 === 0 ? 0.08 : i % 3 === 1 ? -0.05 : 0.12);
     const angle     = baseAngle + jitter;
     return {
       x: cx + Math.cos(angle) * sparkleOrbitR,
@@ -320,7 +375,7 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
 
   // ── Animation flags ────────────────────────────────────────────────────────
   const shouldAnimate = earned && !reduceMotion;
-  const hasRotation   = shouldAnimate && tier !== 'Common';
+  const hasRotation   = shouldAnimate; // every earned tier rotates (Common = very slow)
   const hasBreathing  = shouldAnimate && (tier === 'Legendary' || tier === 'Mythic');
   const hasSparkle    = shouldAnimate;
 
@@ -328,6 +383,21 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
   });
+
+  // Core glow: a tiny scale that tracks the opacity pulse for a "breathing
+  // light" feel (CORE_MIN opacity → CORE_SCALE_MIN, CORE_MAX → CORE_SCALE_MAX).
+  const coreScaleInterp = coreAnim.interpolate({
+    inputRange: [ANIM.CORE_MIN, ANIM.CORE_MAX],
+    outputRange: [ANIM.CORE_SCALE_MIN, ANIM.CORE_SCALE_MAX],
+  });
+
+  // Sparkle twinkle "pop": dots scale up as they fade in (0 → 1 anim value).
+  const sparkleScaleInterps = sparkleAnims.map((a) =>
+    a.interpolate({
+      inputRange: [0, 0.5, 1],
+      outputRange: [0.6, 1.1, 0.6],
+    })
+  );
 
   // ── Accessibility ──────────────────────────────────────────────────────────
   const label = earned ? `${gem.name} halo, earned` : `${gem.name} halo, locked`;
@@ -448,13 +518,6 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
           <Stop offset="65%"  stopColor={pal.deep}  stopOpacity="1" />
           <Stop offset="100%" stopColor={pal.mid}   stopOpacity="0.9" />
         </SvgLinearGradient>
-        {/* Core lit-from-within: near-white → jewel → transparent */}
-        <SvgRadialGradient id={coreGradId} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
-          <Stop offset="0%"   stopColor={pal.core} stopOpacity="0.90" />
-          <Stop offset="35%"  stopColor={pal.mid}  stopOpacity="0.50" />
-          <Stop offset="70%"  stopColor={pal.mid}  stopOpacity="0.12" />
-          <Stop offset="100%" stopColor={pal.mid}  stopOpacity="0" />
-        </SvgRadialGradient>
       </Defs>
 
       {/* Outer soft glow ring — slightly larger, very low opacity */}
@@ -484,12 +547,6 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
         strokeOpacity={0.55}
       />
 
-      {/* Core lit-from-within glow — radial gradient over the ring center */}
-      <Circle
-        cx={cx} cy={cy} r={ringR * 0.88}
-        fill={`url(#${coreGradId})`}
-      />
-
       {/* Specular shine arc — short bright arc on the upper-left of the ring
           simulating a light source from the top-left. Drawn as a stroked circle
           with a dash offset so only the top ~80° is visible. */}
@@ -506,6 +563,22 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
     </Svg>
   );
 
+  // ── Core lit-from-within glow SVG (own layer so it can pulse independently) ─
+  const coreSvg = (
+    <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+      <Defs>
+        {/* Core lit-from-within: near-white → jewel → transparent */}
+        <SvgRadialGradient id={coreGradId} cx="50%" cy="50%" r="50%" fx="50%" fy="50%">
+          <Stop offset="0%"   stopColor={pal.core} stopOpacity="0.90" />
+          <Stop offset="35%"  stopColor={pal.mid}  stopOpacity="0.50" />
+          <Stop offset="70%"  stopColor={pal.mid}  stopOpacity="0.12" />
+          <Stop offset="100%" stopColor={pal.mid}  stopOpacity="0" />
+        </SvgRadialGradient>
+      </Defs>
+      <Circle cx={cx} cy={cy} r={ringR * 0.88} fill={`url(#${coreGradId})`} />
+    </Svg>
+  );
+
   // ── REDUCE MOTION — static premium render ─────────────────────────────────
   if (!shouldAnimate) {
     const staticContent = (
@@ -517,6 +590,10 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
         {/* Rays */}
         <View style={{ position: 'absolute', width: size, height: size }}>
           {raySvg}
+        </View>
+        {/* Core glow (static) */}
+        <View style={{ position: 'absolute', width: size, height: size }}>
+          {coreSvg}
         </View>
         {/* Ring */}
         <View style={{ position: 'absolute', width: size, height: size }}>
@@ -565,7 +642,21 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
         {raySvg}
       </Animated.View>
 
-      {/* ── Layer 3: Ring + core (breathing scale) ────────────────────────── */}
+      {/* ── Layer 3: Core glow (opacity + tiny scale pulse, offset from bloom) ─ */}
+      <Animated.View
+        pointerEvents="none"
+        style={{
+          position: 'absolute',
+          width: size,
+          height: size,
+          opacity: coreAnim,
+          transform: [{ scale: coreScaleInterp }],
+        }}
+      >
+        {coreSvg}
+      </Animated.View>
+
+      {/* ── Layer 4: Ring (breathing scale) ───────────────────────────────── */}
       <Animated.View
         pointerEvents="none"
         style={[
@@ -576,7 +667,7 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
         {ringSvg}
       </Animated.View>
 
-      {/* ── Layer 4: Sparkle dots (twinkling) ────────────────────────────── */}
+      {/* ── Layer 5: Sparkle dots (twinkling opacity + scale "pop") ───────── */}
       {sparkleDots.map((dot, i) => (
         <Animated.View
           key={i}
@@ -590,6 +681,7 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
             left: dot.x - sparkleSize / 2,
             top:  dot.y - sparkleSize / 2,
             opacity: sparkleAnims[i],
+            transform: [{ scale: sparkleScaleInterps[i] }],
           }}
         />
       ))}

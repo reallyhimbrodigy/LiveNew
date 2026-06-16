@@ -298,12 +298,16 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
   const shortRayLen = baseRayLen * 0.58;
   const rayInnerR   = ringR + ringStrokeWidth * 0.5;
 
-  // Outer radius used for sparkle orbit
-  const rayOuterR    = rayInnerR + baseRayLen;
   const rayStrokeWidth = Math.max(0.9, size * 0.022);
 
-  const sparkleOrbitR = rayOuterR + size * 0.05;
+  // Orbit nestled among the ray tips and clamped inside the size×size box (with
+  // a sparkleSize margin) so dots read as part of the halo and never clip the
+  // edge, even at small sizes.
   const sparkleSize   = Math.max(2.5, size * 0.055);
+  const sparkleOrbitR = Math.min(
+    rayInnerR + baseRayLen * 0.6,
+    size * 0.5 - sparkleSize
+  );
 
   // Pre-compute ray endpoints — alternate long/short
   const rayLines = Array.from({ length: RAY_COUNT }, (_, i) => {
@@ -323,7 +327,11 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
   // Sparkle dot orbit positions — jittered angles for organic feel
   const sparkleDots = Array.from({ length: ANIM.SPARKLE_COUNT }, (_, i) => {
     const baseAngle = (2 * Math.PI * i) / ANIM.SPARKLE_COUNT - Math.PI / 2;
-    const jitter    = (i % 3 === 0 ? 0.10 : i % 3 === 1 ? -0.06 : 0.14);
+    // Symmetrize for low counts; jitter only when there are enough dots to
+    // read as organic rather than lopsided.
+    const jitter    = ANIM.SPARKLE_COUNT <= 2
+      ? 0
+      : (i % 3 === 0 ? 0.10 : i % 3 === 1 ? -0.06 : 0.14);
     const angle     = baseAngle + jitter;
     return {
       x: cx + Math.cos(angle) * sparkleOrbitR,
@@ -354,6 +362,14 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg'],
   });
+
+  // Sparkle twinkle "pop": scale up as each dot fades in.
+  const sparkleScaleInterps = sparkleAnims.map((a) =>
+    a.interpolate({
+      inputRange: [0, 0.5, 1],
+      outputRange: [0.6, 1.1, 0.6],
+    })
+  );
 
   // ── LOCKED render ─────────────────────────────────────────────────────────
   // Rich locked state — NOT just greyed out. Dark silhouette with a more
@@ -763,6 +779,7 @@ export default function AuraHalo({ aura, earned, size = 64, onPress }) {
             left: dot.x - sparkleSize / 2,
             top:  dot.y - sparkleSize / 2,
             opacity: sparkleAnims[i],
+            transform: [{ scale: sparkleScaleInterps[i] }],
           }}
         />
       ))}

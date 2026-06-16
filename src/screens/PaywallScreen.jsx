@@ -10,9 +10,9 @@ import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import IrisSignature from '../components/IrisSignature';
 import CortisolFact from '../components/CortisolFact';
 
-// Two-tier paywall: Annual (highlighted, default) and Monthly. The 14-day
-// free trial happens BEFORE this screen ever appears — by the time the
-// user lands here, they've already used Iris for 14 days. The copy
+// Two-tier paywall: Annual (highlighted, default) and Monthly. The 7-day
+// free trial (TRIAL_DAYS=7) happens BEFORE this screen ever appears — by the
+// time the user lands here, they've already used Iris for 7 days. The copy
 // reflects that.
 export default function PaywallScreen({ navigation }) {
   const { colors, fonts } = useTheme();
@@ -112,10 +112,11 @@ export default function PaywallScreen({ navigation }) {
 
         <View style={s.features}>
           {[
-            { text: 'All soundscapes — rain, pink noise, stillness', coming: false },
+            { text: 'All 15 soundscapes — 12 premium-only (vs 3 free)', coming: false },
             { text: 'Deep progress insights — weekly outcome deltas', coming: false },
             { text: 'Unlimited Iris — sleep, supplements, protocols', coming: false },
-            { text: 'Exclusive Aura halos', coming: false },
+            { text: 'Tailored recommendations — day & time-aware picks just for you', coming: false },
+            { text: 'Exclusive animated Aura halos', coming: false },
             { text: 'Streak Freeze — your streak survives a missed day', coming: false },
           ].map((f, i) => (
             <View key={i} style={s.featureRow}>

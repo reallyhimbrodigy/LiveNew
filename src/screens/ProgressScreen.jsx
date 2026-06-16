@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useMemo, useCallback, useRef } from 'react';
 import { View, Text, ScrollView, StyleSheet, ActivityIndicator, Pressable, Modal } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
@@ -53,11 +53,26 @@ export default function ProgressScreen() {
   const gemEarnedAt = useAuthStore(s => s.gemEarnedAt);
   const haloStats = useAuthStore(s => s.haloStats);
 
+  // Guards against (a) a hung request never clearing the spinner, and (b)
+  // overlapping refreshes from mount + focus stomping each other.
+  const mountedRef = useRef(true);
+  const fetchingRef = useRef(false);
+
   // Stale-while-revalidate: render last-cached payload instantly, refresh in background.
   // Eliminates the multi-second spinner on every Progress tab open.
   const refresh = async () => {
+    // In-flight guard: a focus event firing mid-fetch would otherwise kick
+    // off a second request and the late one could clobber fresh state.
+    if (fetchingRef.current) return;
+    fetchingRef.current = true;
     try {
-      const res = await api.progress();
+      // 15s timeout so a hung request rejects instead of pinning the spinner
+      // forever (mirrors the Promise.race timeout pattern in StressTapScreen).
+      const res = await Promise.race([
+        api.progress(),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 15000)),
+      ]);
+      if (!mountedRef.current) return;
       const next = res?.progress || null;
       setData(next);
       setError(false);
@@ -66,6 +81,7 @@ export default function ProgressScreen() {
         try { await AsyncStorage.setItem(PROGRESS_CACHE_KEY, JSON.stringify(next)); } catch {}
       }
     } catch (err) {
+      if (!mountedRef.current) return;
       setError(true);
       // Build a compact human-readable detail string with everything we
       // know: HTTP status if available, error code, message. Shown inline
@@ -78,24 +94,27 @@ export default function ProgressScreen() {
       setErrorDetail(detail);
       // eslint-disable-next-line no-console
       console.warn('[PROGRESS] fetch failed:', detail);
+    } finally {
+      fetchingRef.current = false;
+      // Guarded so a late resolve after unmount doesn't set state.
+      if (mountedRef.current) setLoading(false);
     }
-    setLoading(false);
   };
 
   // Initial mount: hydrate from cache, then refresh.
   useEffect(() => {
-    let mounted = true;
+    mountedRef.current = true;
     (async () => {
       try {
         const cached = await AsyncStorage.getItem(PROGRESS_CACHE_KEY);
-        if (cached && mounted) {
+        if (cached && mountedRef.current) {
           setData(JSON.parse(cached));
           setLoading(false);
         }
       } catch {}
-      if (mounted) refresh();
+      if (mountedRef.current) refresh();
     })();
-    return () => { mounted = false; };
+    return () => { mountedRef.current = false; };
   }, []);
 
   // Auto-retry on tab focus. Without this, the first failed fetch sticks
@@ -107,6 +126,11 @@ export default function ProgressScreen() {
       refresh();
     }, [])
   );
+
+  // Chat is registered inside the Today stack, not the Progress tab. Navigating
+  // to a bare 'Chat' from here is a silent no-op, so hop to the Today tab and
+  // target its nested Chat screen (mirrors the cross-tab pattern in TodayScreen).
+  const goChat = () => navigation.navigate('Today', { screen: 'Chat' });
 
   const rawTrend = data?.stressTrend || [];
   const trend = [...rawTrend].sort((a, b) => (a.date || '').localeCompare(b.date || ''));
@@ -385,8 +409,8 @@ export default function ProgressScreen() {
           {/* Tagline */}
           <Text style={s.aurasTagline}>
             {isPremium
-              ? 'Exclusive auras — alive, iridescent, yours.'
-              : 'Premium-only. The rarest things you can hold.'}
+              ? 'Trophies of your journey — alive, iridescent, yours.'
+              : 'Earn your first free. The rest are premium milestone trophies.'}
           </Text>
 
           {/* Aura grid */}
@@ -400,7 +424,9 @@ export default function ProgressScreen() {
                     earned={earned}
                     size={64}
                     onPress={() => {
-                      if (!isPremium) {
+                      // Free auras (and premium users) open the detail; a free
+                      // user tapping a premium aura goes to the paywall.
+                      if (!a.free && !isPremium) {
                         navigation.navigate('Paywall');
                       } else {
                         setSelectedAura(a);
@@ -453,7 +479,7 @@ export default function ProgressScreen() {
 
                 {/* Tier badge */}
                 <View style={s.auraModalTierBadge}>
-                  <Text style={s.auraModalTierText}>PREMIUM AURA</Text>
+                  <Text style={s.auraModalTierText}>{selectedAura.free ? 'FREE AURA' : 'PREMIUM AURA'}</Text>
                 </View>
 
                 {/* Condition */}
@@ -467,7 +493,7 @@ export default function ProgressScreen() {
                   <Text style={[s.gemModalStatus, { color: selectedAura.palette[2] }]}>
                     Earned
                   </Text>
-                ) : isPremium ? (
+                ) : (selectedAura.free || isPremium) ? (
                   <Text style={s.gemModalStatus}>
                     {selectedAura.condition}
                   </Text>
@@ -519,7 +545,7 @@ export default function ProgressScreen() {
             {outcomes && outcomesSummary ? (
               <Pressable
                 style={({ pressed }) => [s.outcomesCard, pressed && { opacity: 0.9 }]}
-                onPress={() => navigation.navigate('Chat')}
+                onPress={goChat}
                 accessibilityRole="button"
                 accessibilityLabel="Ask Iris about this week's outcomes"
               >
@@ -559,7 +585,7 @@ export default function ProgressScreen() {
             {patternCallouts.length > 0 && (
               <Pressable
                 style={({ pressed }) => [s.noticedCard, pressed && { opacity: 0.9 }]}
-                onPress={() => navigation.navigate('Chat')}
+                onPress={goChat}
                 accessibilityRole="button"
                 accessibilityLabel="Ask Iris about the patterns she noticed"
               >
@@ -600,7 +626,7 @@ export default function ProgressScreen() {
         {insight && (
           <Pressable
             style={({ pressed }) => [s.insightCard, pressed && { opacity: 0.9 }]}
-            onPress={() => navigation.navigate('Chat')}
+            onPress={goChat}
             accessibilityRole="button"
             accessibilityLabel="Ask Iris about this week's read"
           >
@@ -638,7 +664,7 @@ export default function ProgressScreen() {
         {(stressChange !== null || bestDay || stressAvg != null) && (
           <Pressable
             style={({ pressed }) => [s.card, pressed && { opacity: 0.9 }]}
-            onPress={() => navigation.navigate('Chat')}
+            onPress={goChat}
             accessibilityRole="button"
             accessibilityLabel="Ask Iris about these insights"
           >

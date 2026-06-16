@@ -266,7 +266,12 @@ export default function TodayScreen({ navigation }) {
   useEffect(() => {
     const check = async () => {
       const today = getLogicalDateISO();
-      if (todayPlan && todayDate === today) {
+      // Read FRESH store state, not the stale first-render closure. With `[]`
+      // deps the captured todayPlan/todayDate would be whatever they were on
+      // mount — re-entering Today after a plan generated elsewhere would see
+      // null and wrongly re-hydrate / re-route. getState() reads live.
+      const live = useAuthStore.getState();
+      if (live.todayPlan && live.todayDate === today) {
         setHydrated(true);
         return;
       }
@@ -290,7 +295,9 @@ export default function TodayScreen({ navigation }) {
           }
         }
       } catch {}
-      if (todayPlan && todayDate !== today) {
+      // Re-read live in case a plan arrived while we were awaiting storage.
+      const after = useAuthStore.getState();
+      if (after.todayPlan && after.todayDate !== today) {
         useAuthStore.setState({
           todayPlan: null, todayDate: null, completed: {}, reflection: null,
         });
@@ -409,6 +416,10 @@ export default function TodayScreen({ navigation }) {
     (async () => {
       let seen = null;
       try { seen = await AsyncStorage.getItem('livenew:seen_overnight_date'); } catch {}
+      // Re-check LIVE state after the await — a plan may have hydrated or been
+      // generated in the gap. Bail rather than bounce a user with a plan into
+      // a check-in (the re-checkin-on-return bug).
+      if (useAuthStore.getState().todayPlan) return;
       if (seen === today) {
         navigation.replace('StressTap');
       } else {
@@ -591,7 +602,20 @@ export default function TodayScreen({ navigation }) {
 
   // Empty / loading / skipped states
   const today = getLogicalDateISO();
-  if (!todayPlan) {
+  // Until AsyncStorage hydration finishes, todayPlan is briefly null even when
+  // a cached plan exists. Showing the "Start today" card here would flash the
+  // empty state (and the auto-route effect would fire a check-in) on every
+  // return to Today. Render a neutral loading view until hydration settles.
+  if (!hydrated) {
+    return (
+      <GradientScreen edges={['top']}>
+        <View style={s.centered}>
+          <ActivityIndicator color={colors.gold} size="small" />
+        </View>
+      </GradientScreen>
+    );
+  }
+  if (hydrated && !todayPlan) {
     // No plan loaded — show the "Start today" empty card. There's no
     // auto-generation; the user has to tap Start to begin a check-in.
     // (Earlier `if (skippedDate === today || true)` was load-bearing despite
@@ -742,7 +766,13 @@ export default function TodayScreen({ navigation }) {
               streak becomes the social-shareable hook. */}
           {streak >= 2 ? (
             <Pressable onPress={handleShareStreak} hitSlop={6} style={s.streakChip}>
-              <Text style={s.streakNum}>{streak}</Text>
+              <View style={s.streakChipRow}>
+                {/* Flame whose color, size and flicker scale with the streak —
+                    gold early, warmer through week one, hot + bigger past a
+                    month (tiering handled inside FlameIcon via the streak prop). */}
+                <FlameIcon size={streak >= 30 ? 19 : 16} streak={streak} strokeWidth={2} />
+                <Text style={s.streakNum}>{streak}</Text>
+              </View>
               <Text style={s.streakLabel}>days</Text>
             </Pressable>
           ) : null}
@@ -984,7 +1014,11 @@ export default function TodayScreen({ navigation }) {
         {showEveningReflection && (
           <View style={s.reflectionCard}>
             <Text style={s.reflectionLabel}>EVENING CHECK-IN</Text>
-            <Text style={s.reflectionPrompt}>{eveningPrompt || 'How was today?'}</Text>
+            {/* Fixed comparative question — the Better/Same/Harder buttons only
+                make sense against a "vs. yesterday" prompt. The AI eveningPrompt
+                is often open-ended ("what time did you feel tired?"), which
+                mismatched the three fixed answers. */}
+            <Text style={s.reflectionPrompt}>Compared to yesterday, how did today feel?</Text>
             <View style={s.reflectionOptions}>
               {[
                 { label: 'Better', value: 'better' },
@@ -1198,6 +1232,11 @@ function makeStyles(colors, fonts) {
     paddingVertical: 8,
     marginRight: 8,
     minWidth: 60,
+  },
+  streakChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
   },
   streakNum: {
     fontFamily: fonts.accentBold,
@@ -1629,20 +1668,23 @@ function makeStyles(colors, fonts) {
     alignItems: 'center',
   },
   stressBtnInner: {
-    backgroundColor: 'rgba(196,168,108,0.13)',
+    // Solid surface fill + clear gold border reads as a real, premium button
+    // instead of the old faint ghost pill. Softer, larger, low-opacity shadow
+    // lifts it off the gradient without looking heavy.
+    backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: 'rgba(196,168,108,0.42)',
+    borderColor: colors.gold,
     borderRadius: 30,
-    paddingVertical: 13,
-    paddingHorizontal: 28,
+    paddingVertical: 14,
+    paddingHorizontal: 26,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 12,
+    gap: 9,
     shadowColor: colors.gold,
-    shadowOpacity: 0.22,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.18,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 8 },
     elevation: 6,
   },
   stressBtnDot: {
@@ -1653,9 +1695,9 @@ function makeStyles(colors, fonts) {
   },
   stressBtnText: {
     color: colors.gold,
-    fontSize: 14,
-    fontWeight: '600',
-    letterSpacing: 0.6,
+    fontSize: 15,
+    fontWeight: '700',
+    letterSpacing: 0.5,
   },
 
   // Modal

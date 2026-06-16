@@ -11,7 +11,7 @@ import { standing, formatRarity } from '../domain/gems';
  * Reads maxStreak + haloStats from the store, computes the user's rarity
  * tier (= highest earned halo), and shows:
  *   - the halo visual
- *   - headline: "Top X%" in gold
+ *   - headline: "Held by X%" in gold (X = share of members who hold this halo)
  *   - sub-line: rarity context sentence
  *   - share button
  *
@@ -46,7 +46,7 @@ export default function StandingCard({ compact = false }) {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `I'm in the top ${pctStr}% on LiveNew — ${st.gem.day}-day streak.`,
+        message: `Only ~${pctStr}% of LiveNew members have this halo — ${st.gem.day}-day streak.`,
       });
     } catch {
       // user dismissed or error — ignore silently
@@ -63,7 +63,7 @@ export default function StandingCard({ compact = false }) {
 
         {/* Text block */}
         <View style={s.textBlock}>
-          <Text style={s.headline}>Top {pctStr}%</Text>
+          <Text style={s.headline}>Held by {pctStr}%</Text>
           <Text style={s.sub}>
             Only ~{pctStr}% of members have reached a {st.gem.day}-day streak.
           </Text>

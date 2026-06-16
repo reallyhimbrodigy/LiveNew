@@ -28,6 +28,7 @@ import StressTapScreen from '../screens/StressTapScreen';
 import TodayScreen from '../screens/TodayScreen';
 import ProgressScreen from '../screens/ProgressScreen';
 import AccountScreen from '../screens/AccountScreen';
+import EssentialsScreen from '../screens/EssentialsScreen';
 import IntroScreen from '../screens/IntroScreen';
 import PaywallScreen from '../screens/PaywallScreen';
 import ChatScreen from '../screens/ChatScreen';
@@ -128,7 +129,7 @@ function MainTabs() {
     >
       <Tab.Screen name="Today" component={TodayStack} options={{ tabBarLabel: 'Today' }} />
       <Tab.Screen name="Progress" component={ProgressScreen} options={{ tabBarLabel: 'Progress' }} />
-      <Tab.Screen name="Account" component={AccountScreen} options={{ tabBarLabel: 'Account' }} />
+      <Tab.Screen name="Account" component={AccountStack} options={{ tabBarLabel: 'Account' }} />
     </Tab.Navigator>
   );
 }
@@ -143,6 +144,18 @@ function TodayStack() {
       <Stack.Screen name="Zones" component={ZonesScreen} />
       <Stack.Screen name="Paywall" component={PaywallScreen} options={{ presentation: 'modal' }} />
       <Stack.Screen name="Chat" component={ChatScreen} options={{ presentation: 'modal' }} />
+    </Stack.Navigator>
+  );
+}
+
+// Account is a stack so the Account tab can push Essentials and present the
+// Paywall as a modal — navigate('Essentials') / navigate('Paywall') resolve here.
+function AccountStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: 'transparent' } }}>
+      <Stack.Screen name="AccountMain" component={AccountScreen} />
+      <Stack.Screen name="Essentials" component={EssentialsScreen} />
+      <Stack.Screen name="Paywall" component={PaywallScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>
   );
 }
