@@ -104,9 +104,17 @@ function MainTabs() {
       sceneContainerStyle={{ backgroundColor: 'transparent' }}
       screenOptions={({ route }) => ({
         headerShown: false,
-        lazy: false,
+        // Mount each tab on first focus (visible + properly sized) rather than
+        // pre-mounting hidden. Pre-mounting (lazy:false) inside the v7 animated
+        // tab container committed Progress/Account at size 0 while inactive, so
+        // the first focus revealed a blank, un-laid-out tree — you had to switch
+        // away and back to force a real layout pass. Lazy mount fixes that at
+        // the source. (Progress is cache-first, so first open is still instant.)
+        lazy: true,
         freezeOnBlur: false,
-        animation: 'fade',
+        // No tab-transition animation: the v7 'fade' container is what revealed
+        // the un-laid-out screen on first focus. Instant switching is also the
+        // platform-standard behavior for a bottom tab bar.
         tabBarStyle: {
           backgroundColor: colors.tabBar,
           borderTopColor: colors.line,
