@@ -35,9 +35,11 @@ const IRIS_ASSET = require('../../assets/brand/iris-figure.png');
 const IRIS_SIZE  = 112;           // image width / height px
 
 // Breathing logo
-const BREATHE_DURATION    = 3200; // ms — one full inhale+exhale cycle
+const BREATHE_DURATION    = 4600; // ms — one full inhale+exhale cycle (slow,
+                                  // deliberate; a calm breath reads as smoother
+                                  // than a quick subtle pulse)
 const BREATHE_SCALE_MIN   = 1.0;
-const BREATHE_SCALE_MAX   = 1.055;
+const BREATHE_SCALE_MAX   = 1.075;
 const BREATHE_OPACITY_MIN = 0.72;
 const BREATHE_OPACITY_MAX = 1.0;
 
@@ -148,31 +150,24 @@ export default function PlanBuilding({ messages, style }) {
       ])
     ));
 
-    // Opacity breathe — slightly offset so they feel organic, not mechanical
-    Animated.timing(breatheOpacity, {
-      toValue: BREATHE_OPACITY_MAX,
-      duration: BREATHE_DURATION * 0.45,
-      easing: Easing.out(Easing.ease),
-      useNativeDriver: true,
-    }).start(() => {
-      if (!mountedRef.current) return;
-      runLoop(Animated.loop(
-        Animated.sequence([
-          Animated.timing(breatheOpacity, {
-            toValue: BREATHE_OPACITY_MIN,
-            duration: BREATHE_DURATION / 2,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-          Animated.timing(breatheOpacity, {
-            toValue: BREATHE_OPACITY_MAX,
-            duration: BREATHE_DURATION / 2,
-            easing: Easing.inOut(Easing.sin),
-            useNativeDriver: true,
-          }),
-        ])
-      ));
-    });
+    // Opacity breathe — same easing + phase as the scale so the figure
+    // brightens AS it expands (one coherent breath, not loops drifting apart).
+    runLoop(Animated.loop(
+      Animated.sequence([
+        Animated.timing(breatheOpacity, {
+          toValue: BREATHE_OPACITY_MAX,
+          duration: BREATHE_DURATION / 2,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+        Animated.timing(breatheOpacity, {
+          toValue: BREATHE_OPACITY_MIN,
+          duration: BREATHE_DURATION / 2,
+          easing: Easing.inOut(Easing.sin),
+          useNativeDriver: true,
+        }),
+      ])
+    ));
 
     // Soft glow pulse (shadowOpacity-like effect via a tinted View behind logo)
     runLoop(Animated.loop(
