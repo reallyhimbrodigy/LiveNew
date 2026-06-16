@@ -128,7 +128,7 @@ function MainTabs() {
       })}
     >
       <Tab.Screen name="Today" component={TodayStack} options={{ tabBarLabel: 'Today' }} />
-      <Tab.Screen name="Progress" component={ProgressScreen} options={{ tabBarLabel: 'Progress' }} />
+      <Tab.Screen name="Progress" component={ProgressStack} options={{ tabBarLabel: 'Progress' }} />
       <Tab.Screen name="Account" component={AccountStack} options={{ tabBarLabel: 'Account' }} />
     </Tab.Navigator>
   );
@@ -155,6 +155,18 @@ function AccountStack() {
     <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: 'transparent' } }}>
       <Stack.Screen name="AccountMain" component={AccountScreen} />
       <Stack.Screen name="Essentials" component={EssentialsScreen} />
+      <Stack.Screen name="Paywall" component={PaywallScreen} options={{ presentation: 'modal' }} />
+    </Stack.Navigator>
+  );
+}
+
+// Progress needs its own stack so the "Unlock"/upgrade cards on Progress can
+// reach the Paywall — otherwise navigate('Paywall') from the Progress tab is a
+// silent no-op (Paywall only existed in the Today/Account stacks).
+function ProgressStack() {
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false, animation: 'slide_from_right', contentStyle: { backgroundColor: 'transparent' } }}>
+      <Stack.Screen name="ProgressMain" component={ProgressScreen} />
       <Stack.Screen name="Paywall" component={PaywallScreen} options={{ presentation: 'modal' }} />
     </Stack.Navigator>
   );
