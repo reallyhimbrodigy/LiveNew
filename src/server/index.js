@@ -19,6 +19,7 @@ import { hashJSON, sanitizeContentItem, sanitizePack } from "../domain/content/s
 import { buildModelStamp } from "../domain/planning/modelStamp.js";
 import { buildToday, getLibrarySnapshot } from "../domain/planner.js";
 import { generateDayPlan, buildFallbackDayPlan } from "../domain/aiDayPlan.js";
+import { computeCorrelations } from "../domain/insights.js";
 import { resolveDaySchedule, normalizeSchedule } from "../domain/schedule.js";
 import { generateInsight } from "../domain/aiInsight.js";
 import { generateStressRelief } from "../domain/aiStressRelief.js";
@@ -3836,6 +3837,27 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
       };
     }
 
+    // Personal-correlation "deep insights" — honest, data-derived statements
+    // built from this user's own check-in + completion history (see
+    // domain/insights.js). Premium shows the real list; free can render a
+    // single blurred teaser. computeCorrelations never throws and returns []
+    // on any error or insufficient data, so this is safe to inline here. All
+    // inputs are already fetched above — no extra DB round-trips.
+    let correlations = [];
+    try {
+      correlations = computeCorrelations({
+        checkIns,
+        resetEvents, // reset_completed + session_feedback (any active session)
+        moveEvents,
+        winddownEvents,
+        streak: behaviorProfile?.streak,
+      });
+    } catch (err) {
+      console.error("[CORRELATIONS_ERROR]", err?.message);
+      correlations = [];
+    }
+    progress.correlations = Array.isArray(correlations) ? correlations : [];
+
     sendJson(res, 200, { ok: true, progress }, auth.userId);
     return true;
     } catch (err) {
@@ -3851,6 +3873,7 @@ async function handleSupabaseRoutes({ req, res, url, pathname, requestId }) {
           reflections: [],
           behaviorProfile: null,
           insight: null,
+          correlations: [],
         },
       }, auth.userId);
       return true;

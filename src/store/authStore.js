@@ -26,6 +26,9 @@ const PLAN_KEY = 'livenew:plan';
 const SKIPPED_KEY = 'livenew:skipped_date';
 const NAME_KEY = 'livenew:user_name';
 const EMAIL_KEY = 'livenew:user_email';
+// Device-local selected aura id (recolors the app accent + bg tint). Empty
+// string means "no aura → default gold". Cleared on logout like NAME_KEY.
+const SELECTED_AURA_KEY = 'livenew:selected_aura';
 
 // Account-scoped "this user has finished onboarding on this device" marker.
 // CRITICAL: this is keyed by userId and is deliberately NOT cleared on logout.
@@ -152,6 +155,7 @@ export const useAuthStore = create((set, get) => ({
   avatarUploading: false,      // transient: true while an avatar upload is in flight (drives the UI spinner)
   userId: null,                // current account id — scopes per-account device markers
   themeMode: 'system',         // 'system' | 'light' | 'dark' — overrides useColorScheme()
+  selectedAuraId: null,        // id of the EARNED aura recoloring the app accent/bg, or null for default gold
   trialStartISO: null,         // ISO date YYYY-MM-DD when the 14-day free trial began
   maxStreak: 0,        // highest streak ever reached — gates permanent gems
   gemEarnedAt: {},     // { [gemId]: 'YYYY-MM-DD' } first-earned dates
@@ -172,6 +176,14 @@ export const useAuthStore = create((set, get) => ({
     try {
       const m = await AsyncStorage.getItem('livenew:theme_mode');
       if (m === 'light' || m === 'dark' || m === 'system') set({ themeMode: m });
+    } catch {}
+
+    // Selected aura (accent/bg recolor) — device-local, independent of auth
+    // state, so restore it early alongside the theme so the app paints with the
+    // right accent immediately. Empty string / missing → default gold (null).
+    try {
+      const a = await AsyncStorage.getItem(SELECTED_AURA_KEY);
+      set({ selectedAuraId: a || null });
     } catch {}
 
     try {
@@ -770,6 +782,17 @@ export const useAuthStore = create((set, get) => ({
     try { await AsyncStorage.setItem('livenew:theme_mode', valid); } catch {}
   },
 
+  // Choose which (earned) aura recolors the app accent + adds a soft bg tint.
+  // Pass an aura id to apply; pass null/'' to reset to the default gold theme.
+  // Device-local + reversible — useTheme() reads selectedAuraId and overrides
+  // the accent live, so every screen re-renders into the new color. We persist
+  // '' (not a missing key) for null so the stored value is always explicit.
+  setSelectedAura: async (id) => {
+    const next = id || null;
+    set({ selectedAuraId: next });
+    try { await AsyncStorage.setItem(SELECTED_AURA_KEY, next || ''); } catch {}
+  },
+
   // Initialize the 14-day free trial. Idempotent — safe to call on every
   // hydrate / signup. Sets a date if one isn't already stored.
   ensureTrialStart: async () => {
@@ -1173,6 +1196,9 @@ export const useAuthStore = create((set, get) => ({
       // so a second account signing in on this device doesn't inherit the first
       // user's (possibly expired) trial window or stale "skipped today" flag.
       'livenew:trial_start', SKIPPED_KEY,
+      // Selected aura is device-local; reset to default gold on logout so the
+      // next user doesn't inherit the previous user's accent recolor.
+      SELECTED_AURA_KEY,
       // NOTE: 'livenew:health_permission_status' is deliberately NOT removed.
       // The HealthKit grant is DEVICE-LEVEL (owned by iOS, lives in Settings →
       // Health → Apps → LiveNew) and survives logout — iOS keeps honoring it.
@@ -1201,7 +1227,7 @@ export const useAuthStore = create((set, get) => ({
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
       userName: null, userEmail: null, avatarUri: null,
-      userId: null, trialStartISO: null, skippedDate: null,
+      userId: null, trialStartISO: null, skippedDate: null, selectedAuraId: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
       todaySleep: null, todayEnergy: null, isSubscribed: false, isComped: false,
       completed: {}, reflection: null, streak: 0,
@@ -1232,7 +1258,7 @@ export const useAuthStore = create((set, get) => ({
       'livenew:streak_risk_dismissed', 'livenew:live_activity_id',
       'livenew:seen_first_plan_welcome', 'livenew:seen_tts_hint',
       // Device-local trial + skip state (see logout for rationale).
-      'livenew:trial_start', SKIPPED_KEY,
+      'livenew:trial_start', SKIPPED_KEY, SELECTED_AURA_KEY,
       ...(deletedUserId ? [
         `livenew:onboarded:${deletedUserId}`,
         `livenew:seen_first_plan_welcome:${deletedUserId}`,
@@ -1257,7 +1283,7 @@ export const useAuthStore = create((set, get) => ({
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
       userName: null, userEmail: null, avatarUri: null,
-      userId: null, trialStartISO: null, skippedDate: null,
+      userId: null, trialStartISO: null, skippedDate: null, selectedAuraId: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
       todaySleep: null, todayEnergy: null, isSubscribed: false, isComped: false,
       completed: {}, reflection: null, streak: 0,

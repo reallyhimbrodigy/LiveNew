@@ -52,6 +52,8 @@ export default function ProgressScreen() {
   const maxStreak = useAuthStore(s => s.maxStreak);
   const gemEarnedAt = useAuthStore(s => s.gemEarnedAt);
   const haloStats = useAuthStore(s => s.haloStats);
+  const selectedAuraId = useAuthStore(s => s.selectedAuraId);
+  const applyAura = useAuthStore(s => s.setSelectedAura);
 
   // Guards against (a) a hung request never clearing the spinner, and (b)
   // overlapping refreshes from mount + focus stomping each other.
@@ -263,6 +265,11 @@ export default function ProgressScreen() {
     if (parts.length === 0) return "Steady week — held the line. That counts.";
     return "This week vs last: " + parts.join(', ') + ".";
   }, [outcomes]);
+
+  // Personal correlations — server-computed cause→effect patterns (deep insights).
+  // Each: { id, headline, detail, stat, sampleSize }. Premium sees them in full;
+  // free users get a redacted teaser so the value is felt before the paywall.
+  const correlations = Array.isArray(data?.correlations) ? data.correlations : [];
 
   // Chart slice (trend is already sorted chronologically asc)
   const chartTrend = trend.slice(-14);
@@ -490,9 +497,38 @@ export default function ProgressScreen() {
 
                 {/* Status */}
                 {isAuraEarned(selectedAura.id, auraCtx) ? (
-                  <Text style={[s.gemModalStatus, { color: selectedAura.palette[2] }]}>
-                    Earned
-                  </Text>
+                  <>
+                    <Text style={[s.gemModalStatus, { color: selectedAura.palette[2] }]}>
+                      Earned
+                    </Text>
+                    {/* Apply / Applied — only EARNED auras are selectable. */}
+                    {selectedAuraId === selectedAura.id ? (
+                      <View style={s.auraAppliedBadge}>
+                        <Text style={s.auraAppliedText}>Applied</Text>
+                      </View>
+                    ) : (
+                      <Pressable
+                        style={({ pressed }) => [s.auraUseBtn, pressed && { opacity: 0.85 }]}
+                        onPress={() => applyAura(selectedAura.id)}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Use the ${selectedAura.name}`}
+                      >
+                        <Text style={s.auraUseBtnText}>Use this aura</Text>
+                      </Pressable>
+                    )}
+                    {/* Reset to the default gold accent. Shown whenever ANY aura
+                        is active so the recolor is always reversible. */}
+                    {selectedAuraId ? (
+                      <Pressable
+                        style={({ pressed }) => [s.auraDefaultBtn, pressed && { opacity: 0.7 }]}
+                        onPress={() => applyAura(null)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Reset to the default gold theme"
+                      >
+                        <Text style={s.auraDefaultBtnText}>Use default (gold)</Text>
+                      </Pressable>
+                    ) : null}
+                  </>
                 ) : (selectedAura.free || isPremium) ? (
                   <Text style={s.gemModalStatus}>
                     {selectedAura.condition}
@@ -602,9 +638,73 @@ export default function ProgressScreen() {
                 <Text style={s.cardTapHint}>Ask Iris ›</Text>
               </Pressable>
             )}
+
+            {/* Personal correlations — the "this app knows me" payload. Real
+                cause→effect from the user's own data, in Iris's voice. */}
+            {correlations.length > 0 && (
+              <Pressable
+                style={({ pressed }) => [s.correlationsCard, pressed && { opacity: 0.9 }]}
+                onPress={goChat}
+                accessibilityRole="button"
+                accessibilityLabel="Ask Iris about the patterns in your data"
+              >
+                <View style={s.noticedHeader}>
+                  <IrisSignature />
+                  <Text style={s.noticedHeaderSuffix}>found in your data</Text>
+                </View>
+                {correlations.map((c, i) => (
+                  <View key={c.id || i} style={[s.corrRow, i > 0 && s.corrRowDivider]}>
+                    <View style={s.corrTextWrap}>
+                      <Text style={s.corrHeadline}>{c.headline}</Text>
+                      <Text style={s.corrDetail}>{c.detail}</Text>
+                    </View>
+                    {c.stat ? (
+                      <View style={s.corrStatPill}>
+                        <Text style={s.corrStatText}>{c.stat}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                ))}
+                <Text style={s.cardTapHint}>Ask Iris ›</Text>
+              </Pressable>
+            )}
           </>
+        ) : correlations.length > 0 ? (
+          /* Free users WITH data: a real teaser. They see the headline Iris
+             found (the hook) but the number — the payoff — is redacted. This
+             makes the value concrete so they feel they're missing something
+             specific, not just "premium stuff." */
+          <Pressable
+            style={({ pressed }) => [s.deepInsightsLockedCard, pressed && { opacity: 0.85 }]}
+            onPress={() => navigation.navigate('Paywall')}
+            accessibilityRole="button"
+            accessibilityLabel={`Iris found ${correlations.length} pattern${correlations.length === 1 ? '' : 's'} in your data. Unlock with Premium to see them.`}
+          >
+            <View style={s.deepInsightsLockRow}>
+              <Text style={s.deepInsightsLockIcon}>🔒</Text>
+              <Text style={s.deepInsightsLockTitle}>
+                Iris found {correlations.length} pattern{correlations.length === 1 ? '' : 's'} in your data
+              </Text>
+            </View>
+            {correlations.map((c, i) => (
+              <View key={c.id || i} style={[s.teaserRow, i > 0 && { marginTop: 12 }]}>
+                <View style={s.noticedDot} />
+                <View style={s.teaserTextWrap}>
+                  <Text style={s.teaserHeadline}>{c.headline}</Text>
+                  {/* the number is the payoff — redacted until they upgrade */}
+                  <View style={s.teaserRedactRow}>
+                    <View style={[s.teaserRedactBar, { width: '64%' }]} />
+                    <View style={[s.teaserRedactBar, { width: '22%' }]} />
+                  </View>
+                </View>
+              </View>
+            ))}
+            <View style={[s.deepInsightsUnlockBtn, { marginTop: 18 }]}>
+              <Text style={s.deepInsightsUnlockText}>See what Iris found · Unlock</Text>
+            </View>
+          </Pressable>
         ) : (
-          /* Free users: single locked "Deep insights" card */
+          /* Free users with no data yet: the generic locked card. */
           <Pressable
             style={({ pressed }) => [s.deepInsightsLockedCard, pressed && { opacity: 0.85 }]}
             onPress={() => navigation.navigate('Paywall')}
@@ -1104,6 +1204,49 @@ function makeStyles(colors, fonts) {
       color: '#c890f0',
       letterSpacing: 0.4,
     },
+    // "Use this aura" — primary action for an earned aura. Filled purple to
+    // match the aura section's accent and read as the main CTA.
+    auraUseBtn: {
+      marginTop: 4,
+      backgroundColor: 'rgba(160,100,220,0.9)',
+      borderRadius: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 32,
+    },
+    auraUseBtnText: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 14,
+      color: '#fbf7ff',
+      letterSpacing: 0.4,
+    },
+    // "Applied" — the active-selection state, a calm badge (not a button).
+    auraAppliedBadge: {
+      marginTop: 4,
+      backgroundColor: 'rgba(160,100,220,0.14)',
+      borderRadius: 10,
+      paddingVertical: 12,
+      paddingHorizontal: 32,
+      borderWidth: 0.8,
+      borderColor: 'rgba(180,130,240,0.4)',
+    },
+    auraAppliedText: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 14,
+      color: '#c890f0',
+      letterSpacing: 0.4,
+    },
+    // "Use default (gold)" — quiet reset affordance under the primary action.
+    auraDefaultBtn: {
+      marginTop: 10,
+      paddingVertical: 6,
+      paddingHorizontal: 12,
+    },
+    auraDefaultBtnText: {
+      fontFamily: fonts.display,
+      fontSize: 13,
+      color: colors.muted,
+      letterSpacing: 0.3,
+    },
 
     outcomesCard: {
       backgroundColor: colors.goldSoft,
@@ -1237,6 +1380,85 @@ function makeStyles(colors, fonts) {
       lineHeight: 22,
       letterSpacing: 0.1,
       flex: 1,
+    },
+
+    // Personal correlations — premium "deep insights" payload
+    correlationsCard: {
+      backgroundColor: colors.surface,
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      borderRadius: 14,
+      padding: 18,
+      marginBottom: 16,
+    },
+    corrRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 12,
+    },
+    corrRowDivider: {
+      borderTopWidth: 1,
+      borderTopColor: colors.line,
+      marginTop: 12,
+      paddingTop: 12,
+    },
+    corrTextWrap: {
+      flex: 1,
+    },
+    corrHeadline: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 15,
+      color: colors.text,
+      letterSpacing: 0.1,
+      marginBottom: 3,
+    },
+    corrDetail: {
+      fontFamily: fonts.display,
+      fontSize: 13.5,
+      color: colors.muted,
+      lineHeight: 20,
+      letterSpacing: 0.1,
+    },
+    corrStatPill: {
+      backgroundColor: colors.goldSoft,
+      borderWidth: 1,
+      borderColor: colors.goldBorder,
+      borderRadius: 8,
+      paddingHorizontal: 9,
+      paddingVertical: 5,
+    },
+    corrStatText: {
+      fontFamily: fonts.displayBold,
+      fontSize: 13,
+      color: colors.gold,
+      letterSpacing: 0.2,
+    },
+
+    // Free teaser — real headline, redacted number
+    teaserRow: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 10,
+    },
+    teaserTextWrap: {
+      flex: 1,
+    },
+    teaserHeadline: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 15,
+      color: colors.text,
+      letterSpacing: 0.1,
+      marginBottom: 8,
+    },
+    teaserRedactRow: {
+      flexDirection: 'row',
+      gap: 6,
+    },
+    teaserRedactBar: {
+      height: 9,
+      borderRadius: 4.5,
+      backgroundColor: colors.line,
+      opacity: 0.9,
     },
 
     // AI Insight

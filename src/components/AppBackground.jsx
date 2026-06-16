@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, AppState } from 'react-native';
+import { View, StyleSheet, AppState } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useTheme, getCircadianGradient } from '../theme';
 
@@ -8,7 +8,7 @@ import { useTheme, getCircadianGradient } from '../theme';
 // flat black. Screens keep transparent surfaces so this shows through; the
 // gradient also gives navigation transitions a stable backdrop to slide over.
 export default function AppBackground() {
-  const { scheme } = useTheme();
+  const { scheme, colors } = useTheme();
   const [hour, setHour] = useState(() => {
     const d = new Date();
     return d.getHours() + d.getMinutes() / 60;
@@ -27,12 +27,24 @@ export default function AppBackground() {
   }, []);
 
   return (
-    <LinearGradient
-      colors={getCircadianGradient(scheme, hour)}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 0, y: 1 }}
-      style={StyleSheet.absoluteFill}
-      pointerEvents="none"
-    />
+    <>
+      <LinearGradient
+        colors={getCircadianGradient(scheme, hour)}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 0, y: 1 }}
+        style={StyleSheet.absoluteFill}
+        pointerEvents="none"
+      />
+      {/* Aura tint — a VERY subtle wash of the selected aura's color over the
+          circadian gradient. Kept low-opacity so the warm-dark base stays
+          clearly dominant; it's a hint of the aura, not a color show. Only
+          drawn when an aura is active (colors.auraTint set). */}
+      {colors.auraTint ? (
+        <View
+          style={[StyleSheet.absoluteFill, { backgroundColor: colors.auraTint, opacity: 0.08 }]}
+          pointerEvents="none"
+        />
+      ) : null}
+    </>
   );
 }

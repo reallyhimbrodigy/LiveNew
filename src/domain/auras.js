@@ -2,7 +2,7 @@
 //
 // Auras are the prestige tier above the gold Halos: a trophy case of your
 // cortisol journey. Each one is EARNED at a real milestone — not bought — so it
-// means something. The first ("First Light") is FREE: every user earns it at a
+// means something. The first ("Pearl") is FREE: every user earns it at a
 // 3-day streak, so they taste the collectible system early. The rest are
 // premium, marking the deeper milestones only committed users reach.
 //
@@ -15,7 +15,7 @@
 export const AURAS = [
   {
     id: 'initiate',
-    name: 'First Light Aura',
+    name: 'Pearl Aura',
     free: true,
     condition: '3-day streak · free',
     description: 'Three days back to back — your first trophy. Proof you came back when it would have been easier not to. The collection starts here.',

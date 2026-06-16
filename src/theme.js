@@ -1,8 +1,58 @@
 import { useColorScheme } from 'react-native';
 import { useAuthStore } from './store/authStore';
+import { auraById } from './domain/auras';
 
 // Gold is the signature — preserved across both modes. Everything else flips.
 const GOLD = '#c4a86c';
+
+// ─── Aura accent picking ─────────────────────────────────────────────────
+// An aura's palette is a 4-5 stop iridescent journey. Many stops are near-white
+// "pearl" colors that would vanish against the warm-dark background and fail as
+// an accent. pickAuraAccent() scores each stop for VIVIDNESS (saturation) and
+// READABILITY on the dark bg (mid lightness — not too pale, not too dark) and
+// returns the best one as a hex string, so the recolored accent always reads.
+
+function hexToRgb(hex) {
+  const h = (hex || '').replace('#', '');
+  if (h.length !== 6) return null;
+  const n = parseInt(h, 16);
+  if (Number.isNaN(n)) return null;
+  return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+}
+
+// Standard RGB → HSL. Returns { h, s, l } with s,l in 0..1.
+function rgbToHsl({ r, g, b }) {
+  const rn = r / 255, gn = g / 255, bn = b / 255;
+  const max = Math.max(rn, gn, bn);
+  const min = Math.min(rn, gn, bn);
+  const l = (max + min) / 2;
+  let s = 0;
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  }
+  return { s, l };
+}
+
+// Choose the most vivid + readable stop from an aura palette. Avoids near-white
+// pearl stops (high lightness, low saturation) that wouldn't read on the dark
+// bg. Returns a hex string, or null if the palette is empty/unparseable.
+export function pickAuraAccent(palette) {
+  if (!Array.isArray(palette) || palette.length === 0) return null;
+  let best = null;
+  let bestScore = -Infinity;
+  for (const hex of palette) {
+    const rgb = hexToRgb(hex);
+    if (!rgb) continue;
+    const { s, l } = rgbToHsl(rgb);
+    // Reward saturation; favor mid lightness (peak ~0.55) so the accent is
+    // bright enough to read on dark but not a washed-out near-white pearl.
+    const lightnessFit = 1 - Math.abs(l - 0.55) / 0.55; // 1 at 0.55, → 0 at extremes
+    const score = s * 1.6 + Math.max(0, lightnessFit);
+    if (score > bestScore) { bestScore = score; best = hex; }
+  }
+  return best;
+}
 
 const darkColors = {
   bg: '#0f0d0a',
@@ -141,6 +191,35 @@ export const shadows = {
   light: { shadowColor: '#2a2620', shadowOpacity: 0.10, shadowRadius: 16, shadowOffset: { width: 0, height: 8 }, elevation: 4 },
 };
 
+// Build an rgba() string from a hex + alpha. Falls back to the hex itself if
+// it can't parse, so callers never get an invalid color.
+function rgba(hex, alpha) {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return hex;
+  return `rgba(${rgb.r},${rgb.g},${rgb.b},${alpha})`;
+}
+
+// Return a copy of the base colors with the accent recolored to the aura's
+// chosen color. Keeps EVERY key of the base object (we spread it first), only
+// overriding the gold-derived accents + adding `auraTint`, so no screen that
+// reads colors.* can break. The warm-dark bg, text, surfaces, and semantic
+// colors (error/success) are left untouched.
+function applyAura(base, accent) {
+  return {
+    ...base,
+    gold: accent,
+    goldDeep: accent,
+    goldDim: rgba(accent, 0.12),
+    goldSoft: rgba(accent, 0.06),
+    goldBorder: rgba(accent, 0.2),
+    ringTrack: rgba(accent, 0.10),
+    ringGlow: rgba(accent, 0.16),
+    line: rgba(accent, 0.1),
+    // The single accent color exposed for the AppBackground tint overlay.
+    auraTint: accent,
+  };
+}
+
 export function useTheme() {
   // Locked to dark. LiveNew's identity is gold-on-warm-dark (it's literally the
   // app icon), and the circadian gradient + state ring are tuned for it. The
@@ -149,6 +228,23 @@ export function useTheme() {
   // every user sees the intended look. Flip this one line to 'light' or restore
   // the system/themeMode logic if that ever changes.
   const effectiveScheme = 'dark';
-  const colors = getColors(effectiveScheme);
+  const baseColors = getColors(effectiveScheme);
+
+  // Aura recolor. Subscribing here (rather than in authStore) keeps the import
+  // one-directional — authStore never imports theme, so there's no cycle. When
+  // an earned aura is selected and resolves to a readable accent, override the
+  // gold accent; otherwise return the normal gold theme unchanged (auraTint
+  // null so AppBackground draws no overlay).
+  const selectedAuraId = useAuthStore((s) => s.selectedAuraId);
+  let colors = baseColors;
+  if (selectedAuraId) {
+    const aura = auraById(selectedAuraId);
+    const accent = aura ? pickAuraAccent(aura.palette) : null;
+    if (accent) colors = applyAura(baseColors, accent);
+    else colors = { ...baseColors, auraTint: null };
+  } else {
+    colors = { ...baseColors, auraTint: null };
+  }
+
   return { colors, fonts, spacing, scheme: colors.scheme };
 }
