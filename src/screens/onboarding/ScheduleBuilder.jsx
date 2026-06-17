@@ -13,20 +13,32 @@ const TYPES = [
   { type: 'custom',  label: 'Something else',    defaultDays: [0,1,2,3,4], start: '12:00', end: null },
 ];
 
-export default function ScheduleBuilder({ onComplete }) {
+export default function ScheduleBuilder({ onComplete, initial }) {
   const { colors, fonts } = useTheme();
   const s = makeStyles(colors, fonts);
+
+  // Seed from an existing schedule so reopening the editor remembers what the
+  // user already set (chips pre-selected, block times preserved) instead of
+  // starting blank. Parent remounts us (via key) on each open, so reading
+  // `initial` once at mount is correct.
+  const initialBlocks = Array.isArray(initial?.blocks) ? initial.blocks : [];
+  const initialTypes = [...new Set(initialBlocks.map((b) => b.type).filter(Boolean))];
+
   const [stage, setStage] = useState('triage');
-  const [selected, setSelected] = useState([]);
-  const [blocks, setBlocks] = useState([]);
+  const [selected, setSelected] = useState(initialTypes);
+  const [blocks, setBlocks] = useState(initialBlocks);
   const [cursor, setCursor] = useState(0);
 
   const toggleType = (t) =>
     setSelected((cur) => (cur.includes(t) ? cur.filter((x) => x !== t) : [...cur, t]));
 
   const startActivities = () => {
-    let n = 0;
+    let n = blocks.length;
     const seeded = selected.map((t) => {
+      // Preserve an already-configured block for this type (keeps the user's
+      // custom times/days); only fall back to defaults for newly-added types.
+      const existing = blocks.find((b) => b.type === t);
+      if (existing) return existing;
       const def = TYPES.find((x) => x.type === t);
       return { id: `b${n++}`, type: def.type, label: def.type === 'custom' ? '' : def.label,
                start: def.start, end: def.end, days: [...def.defaultDays] };

@@ -10,7 +10,7 @@ import {
   migrateLegacyZoneNotifications,
 } from '../notifications';
 import { getLocalDateISO, getYesterdayISO, getDayBeforeYesterdayISO, getWeekIdISO, getLogicalDateISO, isSleepWindow } from '../utils/localDate';
-import { resolveStreakOnLoad } from '../domain/streak.js';
+import { resolveStreakOnLoad, classifyStreakOnLoad, freezeCooldownDaysLeft } from '../domain/streak.js';
 import { earnedGems } from '../domain/gems.js';
 import {
   isHealthAvailable,
@@ -49,10 +49,12 @@ const gemsKey = (userId) => (userId ? `livenew:gems:${userId}` : 'livenew:gems')
 // Survives logout (account-scoped); removed on deleteAccount.
 const avatarKey = (userId) => (userId ? `livenew:avatar:${userId}` : 'livenew:avatar');
 
-// Account-scoped streak-freeze ledger. Stores { lastUsedWeek: '<ISO-week-id>' }
-// where the week id is the Monday date 'YYYY-MM-DD' of that week.
-// Survives logout (like gems) so a re-login doesn't grant a second free save in
-// the same calendar week.  Removed on deleteAccount alongside gems.
+// Account-scoped streak-freeze ledger. Stores { lastUsedAt: 'YYYY-MM-DD' } — the
+// day the user last spent a freeze. Free tier: one save, then a 7-day rolling
+// cooldown (freezeCooldownDaysLeft). Premium ignores the cooldown (save anytime).
+// Survives logout (like gems) so a re-login doesn't reset the cooldown; removed
+// on deleteAccount alongside gems. (Older builds stored { lastUsedWeek }; that
+// key is simply ignored now, which at worst grants one immediate save.)
 const streakFreezeKey = (userId) => (userId ? `livenew:streakfreeze:${userId}` : null);
 const writeOnboardedMarker = async (userId) => {
   const key = onboardedMarkerKey(userId);
@@ -161,8 +163,12 @@ export const useAuthStore = create((set, get) => ({
   gemEarnedAt: {},     // { [gemId]: 'YYYY-MM-DD' } first-earned dates
   pendingGemUnlock: null, // gemId just crossed this session (for the celebration), else null
   haloStats: null,     // { [day]: pct } live cross-user rarity from /v1/halo-stats, or null
-  streakSavedByFreeze: false, // transient: true if a premium freeze saved the streak this load
-  streakFreezeReady: false,   // transient: true if premium AND freeze not yet used this week
+  streakSavedByFreeze: false, // transient: true if a freeze saved the streak this load
+  streakFreezeReady: false,   // transient: true if a freeze is available to use now (premium, or free off-cooldown)
+  // Pending "you missed a day — save it?" offer, set on load when the streak is
+  // saveable. null when there's nothing to decide.
+  // { count, saveToDate, eligible, isPremium, cooldownDaysLeft }
+  streakFreezeOffer: null,
 
   // Hydrate from storage
   hydrate: async () => {
@@ -1024,40 +1030,80 @@ export const useAuthStore = create((set, get) => ({
 
       // Read the per-account freeze ledger (survives logout, removed on deleteAccount).
       const userId = state.userId;
-      let lastUsedWeek = null;
+      let lastUsedAt = null;
       const fKey = streakFreezeKey(userId);
       if (fKey) {
         try {
           const ledgerRaw = await AsyncStorage.getItem(fKey);
-          if (ledgerRaw) { const ledger = JSON.parse(ledgerRaw); lastUsedWeek = ledger.lastUsedWeek || null; }
+          if (ledgerRaw) { const ledger = JSON.parse(ledgerRaw); lastUsedAt = ledger.lastUsedAt || null; }
         } catch {}
       }
 
-      const canFreeze = isPremiumNow && (lastUsedWeek !== currentWeekId);
-      const streakFreezeReady = isPremiumNow && (lastUsedWeek !== currentWeekId);
+      // Eligibility: premium can save anytime; free gets one save then a 7-day
+      // rolling cooldown. We DON'T auto-spend — a scarce free save shouldn't
+      // disappear on a day the user didn't care about.
+      const cooldownDaysLeft = freezeCooldownDaysLeft(lastUsedAt, today);
+      const freezeEligible = isPremiumNow || cooldownDaysLeft === 0;
 
-      const result = resolveStreakOnLoad(record, { today, yesterday, dayBeforeYesterday, canFreeze });
+      const result = classifyStreakOnLoad(record, { today, yesterday, dayBeforeYesterday });
 
-      if (result.freezeConsumed) {
-        // Write the corrected streak record (advance lastDate → yesterday).
-        const correctedRecord = { count: result.count, lastDate: result.lastDate };
-        try { await AsyncStorage.setItem('livenew:streak', JSON.stringify(correctedRecord)); } catch {}
-        // Mark the freeze used for this week.
-        if (fKey) {
-          try { await AsyncStorage.setItem(fKey, JSON.stringify({ lastUsedWeek: currentWeekId })); } catch {}
-        }
-        set({ streak: result.count, streakSavedByFreeze: true, streakFreezeReady: false });
-      } else if (result.count === 0 && record && record.lastDate !== null && record.lastDate !== today && record.lastDate !== yesterday) {
-        // Streak broken — persist the reset.
+      if (result.status === 'saveable') {
+        // Missed exactly one day. Don't break OR save yet — surface the choice.
+        // Leave the stored record untouched so apply/decline both work cleanly.
+        set({
+          streak: result.count,
+          streakSavedByFreeze: false,
+          streakFreezeReady: freezeEligible,
+          streakFreezeOffer: {
+            count: result.count,
+            saveToDate: result.saveToDate,
+            eligible: freezeEligible,
+            isPremium: isPremiumNow,
+            cooldownDaysLeft,
+          },
+        });
+      } else if (result.status === 'broken') {
         try { await AsyncStorage.setItem('livenew:streak', JSON.stringify({ count: 0, lastDate: null })); } catch {}
-        set({ streak: 0, streakSavedByFreeze: false, streakFreezeReady });
+        set({ streak: 0, streakSavedByFreeze: false, streakFreezeReady: freezeEligible, streakFreezeOffer: null });
       } else {
-        set({ streak: result.count, streakSavedByFreeze: false, streakFreezeReady });
+        // intact
+        set({ streak: result.count, streakSavedByFreeze: false, streakFreezeReady: freezeEligible, streakFreezeOffer: null });
       }
     } catch {}
   },
 
   clearStreakSavedFlag: () => set({ streakSavedByFreeze: false }),
+
+  // User chose to spend a freeze to save the missed-day streak. Advances the
+  // stored record to `saveToDate` (yesterday) so today's check-in continues it,
+  // and stamps the cooldown ledger. Premium re-stamps too but ignores cooldown.
+  applyStreakFreeze: async () => {
+    const state = get();
+    const offer = state.streakFreezeOffer;
+    const isPremiumNow = state.isSubscribed || state.isComped;
+    // Re-check eligibility live (covers upgrading to premium from the offer).
+    if (!offer || !(offer.eligible || isPremiumNow)) return false;
+    const today = getLocalDateISO();
+    try {
+      await AsyncStorage.setItem('livenew:streak', JSON.stringify({ count: offer.count, lastDate: offer.saveToDate }));
+    } catch {}
+    const fKey = streakFreezeKey(state.userId);
+    if (fKey) { try { await AsyncStorage.setItem(fKey, JSON.stringify({ lastUsedAt: today })); } catch {} }
+    set({
+      streak: offer.count,
+      streakSavedByFreeze: true,
+      // Premium stays ready; free is now on cooldown.
+      streakFreezeReady: isPremiumNow,
+      streakFreezeOffer: null,
+    });
+    return true;
+  },
+
+  // User let the streak go. Persist the reset and clear the offer.
+  declineStreakFreeze: async () => {
+    try { await AsyncStorage.setItem('livenew:streak', JSON.stringify({ count: 0, lastDate: null })); } catch {}
+    set({ streak: 0, streakSavedByFreeze: false, streakFreezeOffer: null });
+  },
 
   loadGems: async () => {
     const userId = get().userId;
@@ -1234,7 +1280,7 @@ export const useAuthStore = create((set, get) => ({
       healthPermission: 'unknown', healthSnapshot: null,
       maxStreak: 0, gemEarnedAt: {}, pendingGemUnlock: null,
       // Reset transient freeze flags (the account-scoped ledger key survives logout intentionally)
-      streakSavedByFreeze: false, streakFreezeReady: false,
+      streakSavedByFreeze: false, streakFreezeReady: false, streakFreezeOffer: null,
     });
   },
 
@@ -1289,7 +1335,7 @@ export const useAuthStore = create((set, get) => ({
       completed: {}, reflection: null, streak: 0,
       healthPermission: 'unknown', healthSnapshot: null,
       maxStreak: 0, gemEarnedAt: {}, pendingGemUnlock: null,
-      streakSavedByFreeze: false, streakFreezeReady: false,
+      streakSavedByFreeze: false, streakFreezeReady: false, streakFreezeOffer: null,
     });
   },
 }));

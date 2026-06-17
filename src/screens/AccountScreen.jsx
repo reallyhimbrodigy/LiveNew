@@ -5,7 +5,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, SafeAreaProvider } from 'react-native-safe-area-context';
 import { captureRef } from 'react-native-view-shot';
 import { useTheme } from '../theme';
 import { useAuthStore, useIsPremium } from '../store/authStore';
@@ -364,9 +364,13 @@ export default function AccountScreen({ navigation }) {
                 </View>
               ) : null}
             </View>
-            {/* Gold "+" edit affordance — signals the avatar is tappable. */}
+            {/* Gold "+" edit affordance — signals the avatar is tappable.
+                Drawn as two geometric bars (not a text glyph) so it's
+                pixel-perfectly centered in the bubble — font "+" glyphs sit
+                off the line-box center and never truly centered. */}
             <View style={s.avatarEditDot} pointerEvents="none">
-              <Text style={s.avatarEditGlyph}>+</Text>
+              <View style={s.avatarEditBarH} />
+              <View style={s.avatarEditBarV} />
             </View>
           </Pressable>
 
@@ -463,32 +467,49 @@ export default function AccountScreen({ navigation }) {
             <Pressable style={s.streakRow} onPress={handleShareStreak}>
               <View style={{ flexDirection: 'row', alignItems: 'center' }}>
                 <Text style={s.streakText}>{streak} day streak</Text>
-                <View style={{ marginLeft: 6 }}><FlameIcon size={15} color={colors.gold} /></View>
+                {/* Identical to the Today chip: flame color/fill/glow/flicker
+                    and size all scale with the streak via the streak prop. */}
+                <View style={{ marginLeft: 6 }}>
+                  <FlameIcon
+                    size={streak >= 100 ? 20 : streak >= 60 ? 19 : streak >= 30 ? 18 : 16}
+                    streak={streak}
+                    strokeWidth={2}
+                  />
+                </View>
               </View>
               <Text style={s.streakShareHint}>Tap to share</Text>
             </Pressable>
           )}
-          {/* Streak Freeze status row — shown for premium users inside the subscription card */}
+          {/* Streak Freeze status — premium saves anytime; free gets one save
+              then a 7-day cooldown. Offered as a choice when you miss a day. */}
           {isPremium ? (
             <>
               <View style={s.settingDivider} />
               <View style={s.freezeRow}>
-                <Text style={s.freezeLabel}>Streak Freeze</Text>
-                <Text style={[s.freezeStatus, streakFreezeReady ? s.freezeStatusReady : s.freezeStatusUsed]}>
-                  {streakFreezeReady ? 'ready' : 'used this week'}
-                </Text>
+                <View>
+                  <Text style={s.freezeLabel}>Streak Freeze</Text>
+                  <Text style={s.freezeSubLabel}>Save your streak anytime you miss a day</Text>
+                </View>
+                <Text style={[s.freezeStatus, s.freezeStatusReady]}>Unlimited</Text>
               </View>
             </>
           ) : (
-            /* Free-user teaser — taps to Paywall */
+            /* Free tier — one save, then a 7-day cooldown. Taps to Paywall for unlimited. */
             <>
               <View style={s.settingDivider} />
               <Pressable
                 style={s.freezeRow}
                 onPress={() => { tapSelect(); navigation.navigate('Paywall'); }}
               >
-                <Text style={s.freezeLabel}>Streak Freeze</Text>
-                <Text style={s.freezeHint}>Premium  ›</Text>
+                <View>
+                  <Text style={s.freezeLabel}>Streak Freeze</Text>
+                  <Text style={s.freezeSubLabel}>
+                    {streakFreezeReady ? '1 free save ready · Premium = unlimited' : 'On cooldown · Premium = unlimited'}
+                  </Text>
+                </View>
+                <Text style={streakFreezeReady ? [s.freezeStatus, s.freezeStatusReady] : s.freezeHint}>
+                  {streakFreezeReady ? 'Ready' : 'Cooldown  ›'}
+                </Text>
               </Pressable>
             </>
           )}
@@ -715,12 +736,17 @@ export default function AccountScreen({ navigation }) {
       ) : null}
 
       <Modal visible={scheduleOpen} animationType="slide" presentationStyle="fullScreen" onRequestClose={() => setScheduleOpen(false)}>
+        {/* A fullScreen Modal renders outside the app's root SafeAreaProvider on
+            iOS, so SafeAreaView edges resolved to 0 inset and the title rendered
+            under the notch ("cut off at top"). Its own provider fixes the insets. */}
+        <SafeAreaProvider>
         <SafeAreaView style={{ flex: 1, backgroundColor: colors.bg }} edges={['top', 'bottom']}>
           {/* Builder fills the screen; the Close control sits centered BELOW it,
               clear of the status bar / battery that crowded the old top-right X. */}
           <View style={{ flex: 1 }}>
             <ScheduleBuilder
               key={scheduleKey}
+              initial={profile?.schedule}
               onComplete={async (schedule) => {
                 try {
                   await saveProfile({ ...(profile || {}), schedule });
@@ -739,6 +765,7 @@ export default function AccountScreen({ navigation }) {
             <Text style={{ color: colors.muted, fontFamily: fonts.displaySemibold, fontSize: 16 }}>Close</Text>
           </Pressable>
         </SafeAreaView>
+        </SafeAreaProvider>
       </Modal>
     </SafeAreaView>
   );
@@ -859,17 +886,29 @@ function makeStyles(colors, fonts) {
       height: 26,
       borderRadius: 13,
       backgroundColor: colors.gold,
-      alignItems: 'center',
-      justifyContent: 'center',
       borderWidth: 2,
       borderColor: colors.bg,
     },
-    avatarEditGlyph: {
-      fontFamily: fonts.displayBold,
-      fontSize: 16,
-      lineHeight: 18,
-      color: '#1a1612',
-      marginTop: -1,
+    // The "+" as two bars, each centered in the 26px dot by exact math:
+    //   horizontal bar 12×2.6 → left (26−12)/2=7, top (26−2.6)/2=11.7
+    //   vertical   bar 2.6×12 → left (26−2.6)/2=11.7, top (26−12)/2=7
+    avatarEditBarH: {
+      position: 'absolute',
+      left: 7,
+      top: 11.7,
+      width: 12,
+      height: 2.6,
+      borderRadius: 1.3,
+      backgroundColor: '#1a1612',
+    },
+    avatarEditBarV: {
+      position: 'absolute',
+      left: 11.7,
+      top: 7,
+      width: 2.6,
+      height: 12,
+      borderRadius: 1.3,
+      backgroundColor: '#1a1612',
     },
     profileMeta: {
       flex: 1,
@@ -1089,6 +1128,13 @@ function makeStyles(colors, fonts) {
       fontSize: 13,
       color: colors.text,
       letterSpacing: 0.1,
+    },
+    freezeSubLabel: {
+      fontFamily: fonts.body,
+      fontSize: 11,
+      color: colors.muted,
+      letterSpacing: 0.1,
+      marginTop: 2,
     },
     freezeStatus: {
       fontFamily: fonts.displaySemibold,

@@ -13,6 +13,7 @@ import { useTheme, shadows } from '../theme';
 import ShareCard from '../components/ShareCard';
 import StreakShareCard, { milestoneTier } from '../components/StreakShareCard';
 import GemUnlockModal from '../components/GemUnlockModal';
+import StreakFreezeModal from '../components/StreakFreezeModal';
 import IrisSignature from '../components/IrisSignature';
 import DailyQuote from '../components/DailyQuote';
 import RecommendationCard from '../components/RecommendationCard';
@@ -1154,6 +1155,10 @@ export default function TodayScreen({ navigation }) {
 
       {/* Gem-unlock celebration — driven by pendingGemUnlock from the store */}
       <GemUnlockModal gemId={pendingGemUnlock} onClose={clearPendingGemUnlock} />
+
+      {/* Streak-freeze offer — "you missed a day, save your streak?" Driven by
+          streakFreezeOffer from the store (set in loadStreak when saveable). */}
+      <StreakFreezeModal onUpgrade={() => navigation.navigate('Paywall')} />
     </GradientScreen>
   );
 }
