@@ -148,15 +148,16 @@ Across the 8 zones:
 - The "morning" zone should set up the day. The "sleep" zone should set up the next morning. Across the eight, there's a coherent through-line.
 
 [GOAL THREAD]
-weeklyFocus: 3–5 words MAX. Names a single phase of the day or a single lever. Reads like a chapter title, not a thesis.
+weeklyFocus: 3–5 words MAX. Names a single phase of the day or a single lever. Reads like a chapter title, not a thesis. It should reflect what THIS user's data says they most need right now — pick the lever their recent stress trend / reflections / completions point to, not a generic one.
 GOOD: "Evening wind-down rhythm", "Morning cortisol release", "Pre-sleep glycine window"
 BAD: "Building consistent energy", "Optimizing daily flow", "Creating space for recovery"
 
-todayConnection: ONE sentence, max 14 words. Count + target pattern.
-GOOD: "Three zones today target the cortisol descent."
-BAD: "Today supports your goal of better sleep through carefully timed interventions."
+todayConnection: ONE sentence, max 16 words, that ties TODAY to THIS user's CURRENT state — their stress/sleep/energy today, their recent trend, their last reflection, or what they've been completing. It must read like you looked at their data, never like a template. Vary it day to day.
+GOOD: "You came in stressed today, so three zones protect your evening descent."
+GOOD: "Sleep's been rough this week — today front-loads the calming levers."
+BAD (generic / identical every day): "Three zones today target the cortisol descent." / "Today supports your goal through timed interventions."
 
-CRITICAL: if a previous weeklyFocus is in context, you MUST keep it unless the user has had 4+ active days reinforcing it. Continuity is the point.
+CONTINUITY vs FRESHNESS: if a previous weeklyFocus is in context, keep it while it still fits — but SHARPEN or ADVANCE it when the user's data shifts (a new stress pattern, a clear trend, 3+ active days). It should feel like it's tracking THEM week to week, not frozen in place.
 
 [STRESS RELIEF]
 One specific 10-second action when the user taps "I'm stressed right now." Rotate category every day across:
@@ -273,13 +274,13 @@ export async function generateDayPlan({ stressLabel, sleepQuality, energy, routi
   }
   lines.push("");
 
-  // 4. Weekly focus continuity.
+  // 4. Weekly focus — continuity, but it tracks the user (not frozen).
   if (history?.lastWeeklyFocus) {
     const days = history?.daysActiveThisWeek ?? 0;
-    if (days >= 4) {
-      lines.push(`This week's focus has been: "${history.lastWeeklyFocus}". I've engaged ${days} days this week — you may advance the focus or keep it.`);
+    if (days >= 3) {
+      lines.push(`This week's focus has been: "${history.lastWeeklyFocus}". ${days} active days this week — keep it if it still fits, or SHARPEN/ADVANCE it if the data below points somewhere new. Always tie todayConnection to today's actual state.`);
     } else {
-      lines.push(`This week's focus is: "${history.lastWeeklyFocus}". Only ${days} active day${days === 1 ? "" : "s"} this week — KEEP this focus.`);
+      lines.push(`This week's focus is: "${history.lastWeeklyFocus}". Keep it for continuity, but make todayConnection specific to TODAY's check-in (don't repeat yesterday's wording).`);
     }
     lines.push("");
   }
