@@ -13,9 +13,10 @@ import { deriveFromHealth, canSkipSleepAndEnergy } from '../utils/healthInferenc
 import { isSleepWindow } from '../utils/localDate';
 import ScheduleBuilder from './onboarding/ScheduleBuilder';
 
-// Onboarding step machine:
-//   0 — Apple Health (always asked, FIRST)
-//   1 — Schedule (guided builder — see onboarding/ScheduleBuilder.jsx)
+// Onboarding step machine (order: routine → health → how you feel):
+//   0 — Schedule / routine (guided builder — see onboarding/ScheduleBuilder.jsx)
+//   1 — Apple Health (SKIPPED if already granted/denied — fixes the re-ask on
+//       relogin, and skips it for users who already connected)
 //   2 — Stress (always asked, subjective)
 //   3 — Sleep  (SKIPPED if HealthKit granted with data)
 //   4 — Energy (SKIPPED if HealthKit granted with data)
@@ -23,8 +24,7 @@ import ScheduleBuilder from './onboarding/ScheduleBuilder';
 // Goal removed: cortisol regulation is the universal lever — Iris targets the
 // full benefit spectrum based on daily state, not a stated goal.
 //
-// Total steps shown in the progress bar adapts: 3 for HealthKit-granted users,
-// 5 for users who decline HealthKit.
+// Total steps shown in the progress bar adapts to which steps are shown.
 
 const STRESS_OPTIONS = [
   { label: 'Good',         value: 'good',         sub: 'calm, steady' },
@@ -101,7 +101,12 @@ export default function OnboardingScreen() {
   const healthDerived = useMemo(() => deriveFromHealth(healthSnapshot), [healthSnapshot]);
   const skipSleepEnergy = canSkipSleepAndEnergy(healthSnapshot);
 
-  const [step, setStep] = useState(0); // 0=Health, 1=Schedule, 2=Stress, 3=Sleep, 4=Energy
+  // Only show the Apple Health step if we haven't already resolved permission.
+  // A returning user who already granted (or explicitly denied) should never be
+  // re-asked — that was the "connect Apple Health even though it's connected" bug.
+  const showHealthStep = healthPermission !== 'granted' && healthPermission !== 'denied';
+
+  const [step, setStep] = useState(0); // 0=Schedule, 1=Health, 2=Stress, 3=Sleep, 4=Energy
   const [schedule, setSchedule] = useState(null);
   const [stress, setStress] = useState(null);
   const [sleep, setSleep] = useState(null);
@@ -149,15 +154,15 @@ export default function OnboardingScreen() {
     } finally {
       if (mountedRef.current) {
         setConnectingHealth(false);
-        setStep(1);
+        setStep(2); // health (1) → stress (2)
       }
     }
   };
-  // Step 1 — Schedule
+  // Step 0 — Schedule → Health (or straight to Stress if Health is skipped)
   const handleScheduleNext = (sched) => {
     setSchedule(sched);
     tapMedium();
-    setStep(2);
+    setStep(showHealthStep ? 1 : 2);
   };
 
   // Step 2 — Stress
@@ -248,15 +253,16 @@ export default function OnboardingScreen() {
 
   const handleBack = () => {
     tapMedium();
-    if (step === 1) setStep(0);
-    else if (step === 2) setStep(1);
-    else if (step === 3) setStep(2);
-    else if (step === 4) setStep(3);
+    if (step === 1) setStep(0);                          // health → schedule
+    else if (step === 2) setStep(showHealthStep ? 1 : 0); // stress → health or schedule
+    else if (step === 3) setStep(2);                     // sleep → stress
+    else if (step === 4) setStep(3);                     // energy → sleep
   };
 
-  // Progress bar math
-  const totalSteps = skipSleepEnergy ? 3 : 5;
-  const visibleIndex = step + 1;
+  // Progress bar math — schedule + stress are always shown; health and
+  // sleep/energy are conditional.
+  const totalSteps = 2 + (showHealthStep ? 1 : 0) + (skipSleepEnergy ? 0 : 2);
+  const visibleIndex = step === 0 ? 1 : (showHealthStep ? step + 1 : step);
 
   return (
     <SafeAreaView style={s.safe} edges={['top', 'bottom']}>
@@ -292,8 +298,16 @@ export default function OnboardingScreen() {
                 </Pressable>
               )}
 
-              {/* Step 0 — Apple Health */}
+              {/* Step 0 — Schedule / routine (guided builder). First step now,
+                  so Iris learns the shape of the user's day before anything
+                  else. ScheduleBuilder calls onComplete(schedule) →
+                  handleScheduleNext, which advances to Health (or Stress). */}
               {step === 0 && (
+                <ScheduleBuilder onComplete={handleScheduleNext} initial={schedule} />
+              )}
+
+              {/* Step 1 — Apple Health (only when permission is unresolved) */}
+              {step === 1 && (
                 <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ flexGrow: 1, paddingBottom: 24 }}>
                   <Text style={s.heading}>Connect Apple Health</Text>
                   <Text style={s.healthSub}>
@@ -324,14 +338,6 @@ export default function OnboardingScreen() {
                     You'll be asked which data types to share. You can change this any time in Settings → Privacy → Health.
                   </Text>
                 </ScrollView>
-              )}
-
-              {/* Step 1 — Schedule (guided builder). Replaces the free-text
-                  routine essay. ScheduleBuilder calls onComplete(schedule)
-                  which sets the schedule state and advances to step 2 via
-                  handleScheduleNext — same advancement as before. */}
-              {step === 1 && (
-                <ScheduleBuilder onComplete={handleScheduleNext} />
               )}
 
               {/* Step 2 — Stress (always) */}

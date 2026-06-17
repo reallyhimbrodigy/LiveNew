@@ -104,9 +104,21 @@ export default function PlanBuilding({ messages, style }) {
   }, []);
 
   // ── Animated values ─────────────────────────────────────────────────────
-  const breatheScale   = useRef(new Animated.Value(BREATHE_SCALE_MIN)).current;
-  const breatheOpacity = useRef(new Animated.Value(BREATHE_OPACITY_MIN)).current;
-  const glowOpacity    = useRef(new Animated.Value(0)).current;
+  // ONE driver (0→1→0) for the whole breath. Scale, opacity and glow are all
+  // interpolated from this single value so they rise and fall in perfect
+  // lockstep. Three independent loops (the old approach) drifted out of phase
+  // over time — the figure would shrink while the glow brightened, which read
+  // as the "gold aura snapping on and off" rather than one smooth breath.
+  const breathe = useRef(new Animated.Value(0)).current;
+  const breatheScale = breathe.interpolate({
+    inputRange: [0, 1], outputRange: [BREATHE_SCALE_MIN, BREATHE_SCALE_MAX],
+  });
+  const breatheOpacity = breathe.interpolate({
+    inputRange: [0, 1], outputRange: [BREATHE_OPACITY_MIN, BREATHE_OPACITY_MAX],
+  });
+  const glowOpacity = breathe.interpolate({
+    inputRange: [0, 1], outputRange: [0.40, 0.72],
+  });
 
   // One Animated.Value per dot — each runs its own independent loop.
   const dotValues = useRef(
@@ -131,62 +143,29 @@ export default function PlanBuilding({ messages, style }) {
   }, []);
 
   // ── Start breathing animation ─────────────────────────────────────────────
+  // A single value eased up (inhale) then down (exhale). Easing.inOut(Easing.sin)
+  // has zero velocity at both ends, so the inhale↔exhale reversal is seamless —
+  // no snap. Scale/opacity/glow all read this one value (see interpolations
+  // above), so the whole figure breathes as one coherent motion.
   const startBreathe = useCallback(() => {
-    // Scale breathe
+    breathe.setValue(0);
     runLoop(Animated.loop(
       Animated.sequence([
-        Animated.timing(breatheScale, {
-          toValue: BREATHE_SCALE_MAX,
+        Animated.timing(breathe, {
+          toValue: 1,
           duration: BREATHE_DURATION / 2,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
-        Animated.timing(breatheScale, {
-          toValue: BREATHE_SCALE_MIN,
+        Animated.timing(breathe, {
+          toValue: 0,
           duration: BREATHE_DURATION / 2,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
       ])
     ));
-
-    // Opacity breathe — same easing + phase as the scale so the figure
-    // brightens AS it expands (one coherent breath, not loops drifting apart).
-    runLoop(Animated.loop(
-      Animated.sequence([
-        Animated.timing(breatheOpacity, {
-          toValue: BREATHE_OPACITY_MAX,
-          duration: BREATHE_DURATION / 2,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(breatheOpacity, {
-          toValue: BREATHE_OPACITY_MIN,
-          duration: BREATHE_DURATION / 2,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ])
-    ));
-
-    // Soft glow pulse (shadowOpacity-like effect via a tinted View behind logo)
-    runLoop(Animated.loop(
-      Animated.sequence([
-        Animated.timing(glowOpacity, {
-          toValue: 0.72,
-          duration: GLOW_DURATION / 2,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(glowOpacity, {
-          toValue: 0.42,
-          duration: GLOW_DURATION / 2,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ])
-    ));
-  }, [breatheScale, breatheOpacity, glowOpacity, runLoop]);
+  }, [breathe, runLoop]);
 
   // ── Start wave dots ───────────────────────────────────────────────────────
   const startWave = useCallback(() => {

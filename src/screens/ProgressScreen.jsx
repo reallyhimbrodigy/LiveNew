@@ -24,6 +24,17 @@ import { AURAS, isAuraEarned } from '../domain/auras';
 
 const PROGRESS_CACHE_KEY = 'livenew:progress_cache_v1';
 
+// Map a numeric stress value (1–10, stored from check-ins) to the SAME words
+// the rest of the app uses — the day plan never shows numbers, so "2/10" reads
+// as out of place. Bands mirror the onboarding labels (good/okay/stressed/over).
+function stressBand(v) {
+  if (v == null || Number.isNaN(v)) return null;
+  if (v <= 3) return 'Calm';
+  if (v <= 6) return 'Okay';
+  if (v <= 8) return 'Stressed';
+  return 'Overwhelmed';
+}
+
 // Format a 'YYYY-MM-DD' string to e.g. "Jun 9, 2026"
 function formatGemDate(iso) {
   if (!iso) return null;
@@ -252,8 +263,8 @@ export default function ProgressScreen() {
     if (!outcomes) return null;
     const parts = [];
     if (outcomes.stressDelta != null && Math.abs(outcomes.stressDelta) >= 0.5) {
-      if (outcomes.stressDelta > 0) parts.push(`stress down ${outcomes.stressDelta.toFixed(1)}`);
-      else parts.push(`stress up ${Math.abs(outcomes.stressDelta).toFixed(1)}`);
+      if (outcomes.stressDelta > 0) parts.push('calmer than last week');
+      else parts.push('a bit tenser than last week');
     }
     if (outcomes.hasReflectionData && outcomes.reflectionShift !== 0) {
       if (outcomes.reflectionShift > 0) parts.push("more 'better' days than the week before");
@@ -270,6 +281,10 @@ export default function ProgressScreen() {
   // Each: { id, headline, detail, stat, sampleSize }. Premium sees them in full;
   // free users get a redacted teaser so the value is felt before the paywall.
   const correlations = Array.isArray(data?.correlations) ? data.correlations : [];
+  // Largest sample behind any correlation — shown in the free teaser as proof
+  // this is the user's OWN data (not a canned example), so it reads as personal
+  // and worth unlocking rather than a static placeholder.
+  const insightSampleSize = correlations.reduce((m, c) => Math.max(m, c?.sampleSize || 0), 0);
 
   // Chart slice (trend is already sorted chronologically asc)
   const chartTrend = trend.slice(-14);
@@ -593,10 +608,10 @@ export default function ProgressScreen() {
                 <View style={s.outcomesGrid}>
                   {outcomes.stressDelta != null && Math.abs(outcomes.stressDelta) >= 0.3 ? (
                     <View style={s.outcomeStat}>
-                      <Text style={[s.outcomeStatNum, { color: outcomes.stressDelta > 0 ? colors.success : colors.error }]}>
-                        {outcomes.stressDelta > 0 ? `−${outcomes.stressDelta.toFixed(1)}` : `+${Math.abs(outcomes.stressDelta).toFixed(1)}`}
+                      <Text style={[s.outcomeStatNum, { fontSize: 20, color: outcomes.stressDelta > 0 ? colors.success : colors.error }]}>
+                        {outcomes.stressDelta > 0 ? 'Calmer' : 'Tenser'}
                       </Text>
-                      <Text style={s.outcomeStatLabel}>stress avg</Text>
+                      <Text style={s.outcomeStatLabel}>vs last week</Text>
                     </View>
                   ) : null}
                   {outcomes.hasReflectionData ? (
@@ -683,9 +698,14 @@ export default function ProgressScreen() {
             <View style={s.deepInsightsLockRow}>
               <Text style={s.deepInsightsLockIcon}>🔒</Text>
               <Text style={s.deepInsightsLockTitle}>
-                Iris found {correlations.length} pattern{correlations.length === 1 ? '' : 's'} in your data
+                Iris found {correlations.length} pattern{correlations.length === 1 ? '' : 's'} about you
               </Text>
             </View>
+            {insightSampleSize >= 1 ? (
+              <Text style={s.teaserProof}>
+                Pulled from your last {insightSampleSize} check-ins — the exact numbers are hidden.
+              </Text>
+            ) : null}
             {correlations.map((c, i) => (
               <View key={c.id || i} style={[s.teaserRow, i > 0 && { marginTop: 12 }]}>
                 <View style={s.noticedDot} />
@@ -700,7 +720,7 @@ export default function ProgressScreen() {
               </View>
             ))}
             <View style={[s.deepInsightsUnlockBtn, { marginTop: 18 }]}>
-              <Text style={s.deepInsightsUnlockText}>See what Iris found · Unlock</Text>
+              <Text style={s.deepInsightsUnlockText}>Reveal the numbers · Go Premium</Text>
             </View>
           </Pressable>
         ) : (
@@ -781,10 +801,7 @@ export default function ProgressScreen() {
                     {stressChange > 0 ? 'Stress is dropping' : 'Stress is rising'}
                   </Text>
                   <Text style={s.insightSub}>
-                    {stressChange > 0
-                      ? `Down ${stressChange.toFixed(1)} points vs last week`
-                      : `Up ${Math.abs(stressChange).toFixed(1)} points vs last week`
-                    }
+                    {stressChange > 0 ? 'Calmer than the week before' : 'Tenser than the week before'}
                   </Text>
                 </View>
               </View>
@@ -797,7 +814,7 @@ export default function ProgressScreen() {
                 <View style={s.insightContent}>
                   <Text style={s.insightTitle}>Best day</Text>
                   <Text style={s.insightSub}>
-                    {bestDay.date ? `${dayNames[new Date(bestDay.date + 'T12:00:00').getDay()]} \u2014 stress ${bestDay.stress}/10` : `Stress ${bestDay.stress}/10`}
+                    {bestDay.date ? `${dayNames[new Date(bestDay.date + 'T12:00:00').getDay()]} \u2014 your calmest day` : 'Your calmest day'}
                   </Text>
                 </View>
               </View>
@@ -809,7 +826,7 @@ export default function ProgressScreen() {
                 </View>
                 <View style={s.insightContent}>
                   <Text style={s.insightTitle}>7-day average</Text>
-                  <Text style={s.insightSub}>{stressAvg.toFixed(1)}/10 stress</Text>
+                  <Text style={s.insightSub}>{`Mostly ${(stressBand(stressAvg) || 'okay').toLowerCase()} this week`}</Text>
                 </View>
               </View>
             )}
@@ -1442,6 +1459,15 @@ function makeStyles(colors, fonts) {
     },
     teaserTextWrap: {
       flex: 1,
+    },
+    teaserProof: {
+      fontFamily: fonts.italic,
+      fontSize: 12.5,
+      color: colors.muted,
+      letterSpacing: 0.1,
+      lineHeight: 18,
+      marginTop: 6,
+      marginBottom: 14,
     },
     teaserHeadline: {
       fontFamily: fonts.displaySemibold,

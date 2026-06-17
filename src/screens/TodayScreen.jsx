@@ -46,7 +46,9 @@ function getGreetingParts() {
 }
 
 function isEvening() {
-  return new Date().getHours() >= 19;
+  // 6pm onward counts as evening for the wind-down reflection. Widened from 7pm
+  // so the end-of-day check-in reliably appears when people actually wind down.
+  return new Date().getHours() >= 18;
 }
 // Sleep window helper lives in utils/localDate so the same boundary
 // (22:00-05:00 local) is enforced by the gate inside authStore.generatePlan
@@ -297,8 +299,13 @@ export default function TodayScreen({ navigation }) {
         }
       } catch {}
       // Re-read live in case a plan arrived while we were awaiting storage.
+      // Only clear a GENUINELY OLD plan — one whose logical date is strictly
+      // before today. Using `!==` here wrongly cleared a still-valid plan the
+      // moment the logical day rolled at 5am (todayDate set pre-roll, `today`
+      // computed post-roll), which dumped the user back into a check-in even
+      // though they'd already done it. YYYY-MM-DD compares correctly as strings.
       const after = useAuthStore.getState();
-      if (after.todayPlan && after.todayDate !== today) {
+      if (after.todayPlan && after.todayDate && after.todayDate < today) {
         useAuthStore.setState({
           todayPlan: null, todayDate: null, completed: {}, reflection: null,
         });
@@ -328,7 +335,9 @@ export default function TodayScreen({ navigation }) {
   const goalThread = todayPlan?.goalThread || null;
   const stressRelief = todayPlan?.stressRelief || null;
   const eveningPrompt = todayPlan?.eveningPrompt || null;
-  const showEveningReflection = isEvening() && !reflection && zones.length > 0;
+  // Evening (6pm) through the overnight sleep window — so anyone winding down or
+  // checking the app at night gets the reflection, not just a narrow 7-9pm slot.
+  const showEveningReflection = (isEvening() || isSleepWindow()) && !reflection && zones.length > 0;
   // Stress button is ALWAYS available — even with no plan loaded. The relief
   // is fresh AI per tap, falls back to a curated string if the API can't
   // reach. Don't gate the highest-value feature behind having a plan.
@@ -743,24 +752,8 @@ export default function TodayScreen({ navigation }) {
           <View style={{ flex: 1 }}>
             <Text style={s.greetingDay}>{userName ? `Hi, ${userName}.` : dayOfWeek.toLowerCase()}</Text>
             <Text style={s.greetingPart}>{userName ? `${dayOfWeek.toLowerCase()} ${partOfDay}` : partOfDay}</Text>
-            <View style={s.headerLinksRow}>
-              <Pressable
-                onPress={() => { tapLight(); navigation.navigate('Chat'); }}
-                hitSlop={6}
-                style={s.askIris}
-              >
-                <Text style={s.askIrisText}>Ask Iris anything →</Text>
-              </Pressable>
-              {/* Secondary surface — soundscapes moved to their own screen.
-                  Subtle gold link, not a card. */}
-              <Pressable
-                onPress={() => { tapLight(); navigation.navigate('Soundscapes'); }}
-                hitSlop={6}
-                style={s.soundsLink}
-              >
-                <Text style={s.soundsLinkText}>Sounds</Text>
-              </Pressable>
-            </View>
+            {/* Quick-action buttons moved below the hero ring as obvious,
+                tappable pills (the faint header text-links read as decoration). */}
           </View>
           {/* Streak chip — only when the number is meaningful. Showing
               "1 DAY" on day one reads as filler, not pride. From day 2 the
@@ -806,6 +799,66 @@ export default function TodayScreen({ navigation }) {
           />
           <Text style={s.heroBand}>{scoreBandLabel}</Text>
         </View>
+
+        {/* Quick actions — obvious, tappable entry points to Iris chat and the
+            soundscapes. These were faint gold text-links in the header that
+            users didn't realize were buttons; promoted to clear pill buttons
+            in their own row right under the score. */}
+        <View style={s.quickActions}>
+          <Pressable
+            style={({ pressed }) => [s.quickAction, s.quickActionPrimary, pressed && { opacity: 0.88 }]}
+            onPress={() => { tapLight(); navigation.navigate('Chat'); }}
+            accessibilityRole="button"
+            accessibilityLabel="Ask Iris anything"
+          >
+            <IrisSignature />
+            <Text style={s.quickActionText}>Ask anything</Text>
+            <Text style={s.quickActionChevron}>›</Text>
+          </Pressable>
+          <Pressable
+            style={({ pressed }) => [s.quickAction, pressed && { opacity: 0.88 }]}
+            onPress={() => { tapLight(); navigation.navigate('Soundscapes'); }}
+            accessibilityRole="button"
+            accessibilityLabel="Open soundscapes"
+          >
+            <View style={s.soundGlyph}>
+              <View style={[s.soundBar, { height: 6 }]} />
+              <View style={[s.soundBar, { height: 12 }]} />
+              <View style={[s.soundBar, { height: 8 }]} />
+            </View>
+            <Text style={s.quickActionText}>Soundscapes</Text>
+            <Text style={s.quickActionChevron}>›</Text>
+          </Pressable>
+        </View>
+
+        {/* Evening check-in — surfaced near the top in the evening so it's
+            actually seen (it used to sit buried at the very bottom of the
+            scroll, which is why it felt like it "never appeared"). */}
+        {showEveningReflection && (
+          <View style={s.reflectionCard}>
+            <Text style={s.reflectionLabel}>EVENING CHECK-IN</Text>
+            {/* Fixed comparative question — the Better/Same/Harder buttons only
+                make sense against a "vs. yesterday" prompt. The AI eveningPrompt
+                is often open-ended ("what time did you feel tired?"), which
+                mismatched the three fixed answers. */}
+            <Text style={s.reflectionPrompt}>Compared to yesterday, how did today feel?</Text>
+            <View style={s.reflectionOptions}>
+              {[
+                { label: 'Better', value: 'better' },
+                { label: 'Same', value: 'same' },
+                { label: 'Harder', value: 'harder' },
+              ].map(opt => (
+                <Pressable
+                  key={opt.value}
+                  style={({ pressed }) => [s.reflectionBtn, pressed && { opacity: 0.85 }]}
+                  onPress={() => handleReflection(opt.value)}
+                >
+                  <Text style={s.reflectionBtnText}>{opt.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
 
         {/* Daily first read — single Iris-voiced sentence anchored in
             today's actual data. Earns the open. Shown above everything else. */}
@@ -1018,31 +1071,6 @@ export default function TodayScreen({ navigation }) {
         </Pressable>
 
         {/* Evening reflection */}
-        {showEveningReflection && (
-          <View style={s.reflectionCard}>
-            <Text style={s.reflectionLabel}>EVENING CHECK-IN</Text>
-            {/* Fixed comparative question — the Better/Same/Harder buttons only
-                make sense against a "vs. yesterday" prompt. The AI eveningPrompt
-                is often open-ended ("what time did you feel tired?"), which
-                mismatched the three fixed answers. */}
-            <Text style={s.reflectionPrompt}>Compared to yesterday, how did today feel?</Text>
-            <View style={s.reflectionOptions}>
-              {[
-                { label: 'Better', value: 'better' },
-                { label: 'Same', value: 'same' },
-                { label: 'Harder', value: 'harder' },
-              ].map(opt => (
-                <Pressable
-                  key={opt.value}
-                  style={({ pressed }) => [s.reflectionBtn, pressed && { opacity: 0.85 }]}
-                  onPress={() => handleReflection(opt.value)}
-                >
-                  <Text style={s.reflectionBtnText}>{opt.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        )}
         {reflection && (
           <View style={s.reflectionDoneCard}>
             <Text style={s.reflectionDoneText}>
@@ -1208,30 +1236,51 @@ function makeStyles(colors, fonts) {
     paddingHorizontal: 24,
     lineHeight: 20,
   },
-  headerLinksRow: {
+  // Quick-action button row (Ask Iris / Soundscapes) — clear, tappable pills.
+  quickActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 20,
+  },
+  quickAction: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    marginTop: 8,
-    gap: 16,
+    gap: 8,
+    backgroundColor: colors.goldSoft,
+    borderWidth: 1,
+    borderColor: colors.goldBorder,
+    borderRadius: 14,
+    paddingVertical: 13,
+    paddingHorizontal: 14,
   },
-  askIris: {
-    paddingVertical: 4,
+  quickActionPrimary: {
+    // The primary action reads slightly stronger than the secondary.
+    backgroundColor: colors.goldDim,
   },
-  askIrisText: {
-    fontFamily: fonts.italic,
-    fontSize: 13,
+  quickActionText: {
+    flex: 1,
+    fontFamily: fonts.displaySemibold,
+    fontSize: 14,
+    color: colors.text,
+    letterSpacing: 0.2,
+  },
+  quickActionChevron: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 17,
     color: colors.gold,
-    letterSpacing: 0.3,
   },
-  // Sounds link — subtle secondary entry point to the Soundscapes screen.
-  soundsLink: {
-    paddingVertical: 4,
+  // Tiny equalizer glyph for the Soundscapes button (no emoji).
+  soundGlyph: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2.5,
+    height: 14,
   },
-  soundsLinkText: {
-    fontFamily: fonts.italic,
-    fontSize: 13,
-    color: colors.gold,
-    letterSpacing: 0.3,
+  soundBar: {
+    width: 2.6,
+    borderRadius: 1.3,
+    backgroundColor: colors.gold,
   },
   streakChip: {
     alignItems: 'center',
