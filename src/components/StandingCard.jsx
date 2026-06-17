@@ -34,7 +34,7 @@ export default function StandingCard({ compact = false }) {
     return (
       <View style={s.card}>
         <Text style={s.nullText}>
-          Start a streak to earn your first halo and see where you rank.
+          Start a streak to earn your first gem and see where you rank.
         </Text>
       </View>
     );
@@ -46,7 +46,7 @@ export default function StandingCard({ compact = false }) {
   const handleShare = async () => {
     try {
       await Share.share({
-        message: `Only ~${pctStr}% of LiveNew members have this halo — ${st.gem.day}-day streak.`,
+        message: `Only ~${pctStr}% of LiveNew members have this gem — ${st.gem.day}-day streak.`,
       });
     } catch {
       // user dismissed or error — ignore silently

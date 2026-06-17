@@ -13,7 +13,7 @@ const ESSENTIALS = [
   'Daily personalized plan',
   '8 daily cortisol zones',
   'Streak tracking',
-  'Halos',
+  'Gems',
   '3 soundscapes',
   '5 Iris chats per day',
 ];
@@ -22,7 +22,7 @@ const PREMIUM = [
   '12 more soundscapes — 15 total',
   'Deep progress insights',
   'Unlimited Iris chat',
-  'Exclusive animated Aura halos',
+  'Exclusive animated Auras',
   'Streak Freeze — your streak survives a missed day',
   'Tailored recommendations — day & time-aware picks',
 ];
@@ -44,7 +44,7 @@ export default function EssentialsScreen({ navigation }) {
         <Text style={s.titleAccent}>in Essentials.</Text>
 
         <Text style={s.sub}>
-          Your plan, streak, and halos are always free. Premium adds depth — fuller access to Iris and every tool we build.
+          Your plan, streak, and gems are always free. Premium adds depth — fuller access to Iris and every tool we build.
         </Text>
 
         {/* Free tier */}

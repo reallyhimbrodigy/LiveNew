@@ -213,7 +213,7 @@ export default function GemUnlockModal({ gemId, onClose }) {
     if (!gem) return;
     try {
       await Share.share({
-        message: `I just earned the "${gem.name}" halo on LiveNew — held by only ~${formatRarity(rarityPctFor(gem, haloStats))}% of members.`,
+        message: `I just earned the "${gem.name}" gem on LiveNew — held by only ~${formatRarity(rarityPctFor(gem, haloStats))}% of members.`,
       });
     } catch {}
     onClose();
@@ -258,7 +258,7 @@ export default function GemUnlockModal({ gemId, onClose }) {
           <Pressable onPress={() => {}} style={s.cardInner}>
 
             {/* Eyebrow */}
-            <Text style={s.eyebrow}>HALO UNLOCKED</Text>
+            <Text style={s.eyebrow}>GEM UNLOCKED</Text>
 
             {/* ── Halo reveal area ──────────────────────────────────────────── */}
             <View style={s.gemWrap}>

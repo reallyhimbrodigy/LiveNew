@@ -57,8 +57,8 @@ export const AURAS = [
     id: 'paragon',
     name: 'Paragon Aura',
     free: false,
-    condition: 'Premium · every halo earned',
-    description: 'All eight gold halos. All of Iris, witnessed. The rarest trophy there is — nothing left to prove, only to be.',
+    condition: 'Premium · every gem earned',
+    description: 'All eight gems. All of Iris, witnessed. The rarest trophy there is — nothing left to prove, only to be.',
     // Full spectrum pearl: platinum → gold-rose → violet → cyan → pearl white
     palette: ['#f0f0e8', '#e8c490', '#c090e0', '#60d0d8', '#f0f0e8'],
     unlock: ({ isPremium, allHalosEarned }) => !!isPremium && !!allHalosEarned,

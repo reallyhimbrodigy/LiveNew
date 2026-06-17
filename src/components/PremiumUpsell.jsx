@@ -53,7 +53,7 @@ export default function PremiumUpsell({ onPress }) {
       <Text style={s.eyebrow}>LIVENEW PREMIUM</Text>
       <Text style={s.title}>Go deeper with Iris.</Text>
       <Text style={s.sub}>
-        Your plan, streak, and halos are always free. Premium unlocks everything else.
+        Your plan, streak, and gems are always free. Premium unlocks everything else.
       </Text>
 
       <View style={s.perks}>
@@ -61,7 +61,7 @@ export default function PremiumUpsell({ onPress }) {
           'All soundscapes — rain, pink noise, stillness',
           'Deep progress insights and weekly deltas',
           'Unlimited Iris conversations',
-          'Exclusive Aura halos (coming)',
+          'Exclusive Auras (coming)',
         ].map((perk, i) => (
           <View key={i} style={s.perkRow}>
             <CheckIcon color={colors.gold} />

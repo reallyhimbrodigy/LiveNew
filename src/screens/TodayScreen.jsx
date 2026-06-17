@@ -128,7 +128,7 @@ function NightActions({ s, navigation }) {
     {
       key: 'progress',
       label: 'Your progress',
-      sub: 'Halos, streak, and the week so far',
+      sub: 'Gems, streak, and the week so far',
       onPress: goProgress,
     },
     {

@@ -316,7 +316,7 @@ export default function ProgressScreen() {
         <View style={s.gemsCard}>
           {/* Header row */}
           <View style={s.gemsHeaderRow}>
-            <Text style={s.gemsTitle}>Your halos</Text>
+            <Text style={s.gemsTitle}>Your gems</Text>
             <Text style={s.gemsCount}>{earnedCount}/{GEMS.length}</Text>
           </View>
 
@@ -331,7 +331,7 @@ export default function ProgressScreen() {
               </View>
             </View>
           ) : (
-            <Text style={s.gemsAllDone}>All halos earned.</Text>
+            <Text style={s.gemsAllDone}>All gems earned.</Text>
           )}
 
           {/* Gem grid */}
@@ -397,7 +397,7 @@ export default function ProgressScreen() {
                   </Text>
                 ) : (
                   <Text style={s.gemModalStatus}>
-                    Reach a {selectedGem.day}-day streak to earn this halo.
+                    Reach a {selectedGem.day}-day streak to earn this gem.
                   </Text>
                 )}
 
@@ -904,7 +904,7 @@ export default function ProgressScreen() {
         {trend.length === 0 && error && (
           <View style={s.emptyCard}>
             <Text style={s.emptySub}>
-              Iris is offline for a moment. Keep showing up — your halos are tracked locally.
+              Iris is offline for a moment. Keep showing up — your gems are tracked locally.
             </Text>
             {/* Show the actual failure reason so we can diagnose instead of
                 guessing. Muted, small, screenshot-able. */}

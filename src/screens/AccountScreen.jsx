@@ -458,7 +458,7 @@ export default function AccountScreen({ navigation }) {
                   ? 'Full access to all premium features'
                   : inTrial
                   ? 'Premium features unlocked — trial ends in ' + daysLeft + ' day' + (daysLeft === 1 ? '' : 's') + '.'
-                  : 'Essentials — your plan, streak, and halos are always free.'}
+                  : 'Essentials — your plan, streak, and gems are always free.'}
               </Text>
             </View>
             {!isSubscribed ? <Text style={s.settingArrow}>›</Text> : null}
