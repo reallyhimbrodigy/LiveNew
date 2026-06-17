@@ -7,6 +7,7 @@ import { useTheme } from '../theme';
 import IrisSignature from '../components/IrisSignature';
 import Halo from '../components/Halo';
 import AuraHalo from '../components/AuraHalo';
+import FlameIcon from '../components/FlameIcon';
 import StandingCard from '../components/StandingCard';
 import { api } from '../api';
 import { useAuthStore, useIsPremium } from '../store/authStore';
@@ -771,10 +772,13 @@ export default function ProgressScreen() {
             </View>
             <View style={s.summaryCard}>
               <Text style={s.summaryValue}>{totalSessions}</Text>
-              <Text style={s.summaryLabel}>Done</Text>
+              <Text style={s.summaryLabel}>Sessions</Text>
             </View>
             <View style={s.summaryCard}>
-              <Text style={s.summaryValue}>{streak || 0}</Text>
+              <View style={s.summaryStreakRow}>
+                <FlameIcon size={20} streak={streak || 0} strokeWidth={2} />
+                <Text style={s.summaryValue}>{streak || 0}</Text>
+              </View>
               <Text style={s.summaryLabel}>Streak</Text>
             </View>
           </View>
@@ -838,7 +842,7 @@ export default function ProgressScreen() {
         {recentReflections.length > 0 && (
           <View style={s.card}>
             <Text style={s.cardTitle}>Evenings</Text>
-            <Text style={s.cardSub}>Last {recentReflections.length} reflections</Text>
+            <Text style={s.cardSub}>Last {recentReflections.length} reflection{recentReflections.length === 1 ? '' : 's'}</Text>
             <View style={s.reflectionRow}>
               <View style={s.reflectionStat}>
                 <Text style={s.reflectionValue}>{reflectionCounts.better}</Text>
@@ -1517,30 +1521,31 @@ function makeStyles(colors, fonts) {
       flex: 1,
       backgroundColor: colors.surface,
       borderWidth: 1,
-      borderColor: colors.line,
-      borderRadius: 14,
-      paddingVertical: 22,
+      borderColor: colors.goldBorder,
+      borderRadius: 16,
+      paddingVertical: 20,
       alignItems: 'center',
+      gap: 5,
     },
     summaryValue: {
       fontFamily: fonts.displayBold,
-      fontSize: 32,
-      color: colors.text,
-      marginBottom: 4,
+      fontSize: 30,
+      color: colors.gold,
       letterSpacing: 0.2,
     },
-    summaryLabel: { fontFamily: fonts.displaySemibold, fontSize: 10, color: colors.dim, textTransform: 'uppercase', letterSpacing: 1.2 },
+    summaryLabel: { fontFamily: fonts.displaySemibold, fontSize: 10, color: colors.muted, textTransform: 'uppercase', letterSpacing: 1.4 },
+    summaryStreakRow: { flexDirection: 'row', alignItems: 'center', gap: 5 },
 
     // Cards
     card: {
       backgroundColor: colors.surface,
       borderWidth: 1,
-      borderColor: colors.line,
-      borderRadius: 14,
+      borderColor: colors.goldBorder,
+      borderRadius: 16,
       padding: 18,
       marginBottom: 12,
     },
-    cardTitle: { fontFamily: fonts.displaySemibold, fontSize: 16, color: colors.text, marginBottom: 4 },
+    cardTitle: { fontFamily: fonts.displaySemibold, fontSize: 17, color: colors.text, letterSpacing: 0.1, marginBottom: 4 },
     cardSub: { fontFamily: fonts.body, fontSize: 12, color: colors.dim, marginBottom: 16 },
     // Subtle "this card opens a chat with Iris" affordance — gold, right-aligned.
     cardTapHint: {
@@ -1577,15 +1582,17 @@ function makeStyles(colors, fonts) {
     reflectionStat: {
       flex: 1,
       backgroundColor: colors.bg,
-      borderRadius: 10,
+      borderWidth: 1,
+      borderColor: colors.line,
+      borderRadius: 12,
       paddingVertical: 14,
       alignItems: 'center',
+      gap: 3,
     },
     reflectionValue: {
       fontFamily: fonts.displayBold,
       fontSize: 24,
       color: colors.text,
-      marginBottom: 2,
     },
     reflectionLabel: { fontFamily: fonts.displaySemibold, fontSize: 10, color: colors.dim, textTransform: 'uppercase', letterSpacing: 1.2 },
     reflectionInsight: {
