@@ -49,7 +49,7 @@ export async function generateStressRelief({ recentReliefTexts = [], timeContext
   try {
     // Smaller token budget — user is waiting on this. ~200 tokens is plenty.
     const stream = client.messages.stream({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 250,
       temperature: 1.0,
       system: SYSTEM_PROMPT,

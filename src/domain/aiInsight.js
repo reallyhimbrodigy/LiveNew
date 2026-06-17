@@ -43,7 +43,7 @@ export async function generateInsight({ checkIns, doneCount }) {
   try {
     const finalMessage = await withRetry(async () => {
       const stream = client.messages.stream({
-        model: "claude-opus-4-6",
+        model: "claude-opus-4-8",
         max_tokens: 200,
         temperature: 0.7,
         system: SYSTEM_PROMPT,

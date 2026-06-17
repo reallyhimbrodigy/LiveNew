@@ -72,7 +72,7 @@ export async function generateChatReply({ messages, userContext = null }) {
 
   try {
     const response = await client.messages.create({
-      model: "claude-sonnet-4-20250514",
+      model: "claude-sonnet-4-6",
       max_tokens: 300,
       temperature: 0.85,
       system: systemWithContext,
