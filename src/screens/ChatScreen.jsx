@@ -117,8 +117,10 @@ export default function ChatScreen({ navigation, route }) {
   const scrollRef = useRef(null);
   const mountedRef = useRef(true);
   const sendScale = useRef(new Animated.Value(1)).current;
-  // Guard: only auto-send the initialPrompt once per mount.
-  const autoSentRef = useRef(false);
+  // Tracks the exact initialPrompt we last auto-sent. Keyed by VALUE (not a
+  // once-per-mount boolean) so that if the Chat modal instance is reused for a
+  // different card, the new question is sent instead of the stale one lingering.
+  const lastPromptRef = useRef(null);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -152,7 +154,11 @@ export default function ChatScreen({ navigation, route }) {
     return () => sub.remove();
   }, []);
 
-  const send = useCallback(async (text) => {
+  // Core send, parameterized by the base conversation to append to. `send`
+  // (the input box) appends to the live thread; the initialPrompt path passes
+  // a fresh [] so a card-driven question always starts a clean conversation
+  // (no stale prior question lingering above it).
+  const sendWith = useCallback(async (baseMessages, text) => {
     const trimmed = (text || '').trim();
     if (!trimmed || sending) return;
 
@@ -178,7 +184,7 @@ export default function ChatScreen({ navigation, route }) {
       try { await AsyncStorage.setItem(key, String(next)); } catch {}
     }
 
-    const newMessages = [...messages, { role: 'user', content: trimmed }];
+    const newMessages = [...baseMessages, { role: 'user', content: trimmed }];
     setMessages(newMessages);
     setSending(true);
     try {
@@ -198,21 +204,24 @@ export default function ChatScreen({ navigation, route }) {
     } finally {
       if (mountedRef.current) setSending(false);
     }
-  }, [messages, sending, healthSnapshot, sendScale, isPremium, dailyCount, userId]);
+  }, [sending, healthSnapshot, sendScale, isPremium, dailyCount, userId]);
 
-  // Auto-send the initialPrompt passed from a contextual entry point (e.g. the
-  // focus card on TodayScreen). Only fires once per mount; the autoSentRef guard
-  // prevents re-sending on re-renders or hot-reload. Normal chat (no initialPrompt)
-  // is completely unaffected.
+  const send = useCallback((text) => sendWith(messages, text), [sendWith, messages]);
+
+  // Auto-send the initialPrompt passed from a contextual entry point (a card on
+  // TodayScreen / Progress). Keyed by the prompt VALUE: if the screen is reused
+  // for a different card, the new question is sent (and the thread reset) rather
+  // than the previous one lingering. Plain chat (no initialPrompt) is untouched.
   const initialPrompt = route?.params?.initialPrompt;
   useEffect(() => {
-    if (!initialPrompt || autoSentRef.current) return;
-    autoSentRef.current = true;
-    // Wait one frame so the component is fully mounted before sending.
-    requestAnimationFrame(() => send(initialPrompt));
-  // send is stable via useCallback; initialPrompt doesn't change after mount.
+    if (!initialPrompt) return;
+    if (lastPromptRef.current === initialPrompt) return; // already asked exactly this
+    lastPromptRef.current = initialPrompt;
+    // Fresh chat for the card's question — base [] clears any prior thread.
+    requestAnimationFrame(() => sendWith([], initialPrompt));
+  // sendWith is stable; we intentionally key only on initialPrompt.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialPrompt, send]);
+  }, [initialPrompt, sendWith]);
 
   const atFreeLimit = !isPremium && dailyCount >= FREE_DAILY_IRIS;
   const canSend = !!input.trim() && !sending && !atFreeLimit;

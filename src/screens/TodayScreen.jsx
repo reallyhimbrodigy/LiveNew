@@ -1005,33 +1005,49 @@ export default function TodayScreen({ navigation }) {
             as the second-highest-value card. Tappable to continue the
             conversation in Chat. */}
         {(goalThread?.weeklyFocus || goalThread?.todayConnection) && (
-          <PressCard
-            style={s.goalCard}
-            onPress={() => {
-              tapLight();
-              const prompt = goalThread?.weeklyFocus && goalThread?.todayConnection
-                ? `Why is "${goalThread.weeklyFocus}" my focus this week, and how does today connect to it?`
-                : goalThread?.weeklyFocus
-                  ? `Why is "${goalThread.weeklyFocus}" my focus this week?`
-                  : goalThread?.todayConnection
-                    ? `Tell me more about today's thread: "${goalThread.todayConnection}"`
-                    : 'Tell me more about my focus right now.';
-              navigation.navigate('Chat', { initialPrompt: prompt });
-            }}
-          >
+          <View style={s.goalCard}>
+            {/* Two SEPARATELY-tappable rows. Each asks Iris its OWN question —
+                tapping "Today's thread" must ask about today's thread, not the
+                week's focus (they used to share one combined prompt). */}
             {goalThread?.weeklyFocus && (
-              <View style={s.goalLine}>
-                <Text style={s.goalLineLabel}>This week's focus</Text>
+              <Pressable
+                style={({ pressed }) => [s.goalLine, pressed && { opacity: 0.7 }]}
+                onPress={() => {
+                  tapLight();
+                  navigation.navigate('Chat', {
+                    initialPrompt: `Why is "${goalThread.weeklyFocus}" my focus this week, and how do I lean into it?`,
+                  });
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Ask Iris about this week's focus: ${goalThread.weeklyFocus}`}
+              >
+                <View style={s.goalLineHeader}>
+                  <Text style={s.goalLineLabel}>THIS WEEK'S FOCUS</Text>
+                  <Text style={s.goalLineHint}>Ask Iris ›</Text>
+                </View>
                 <Text style={s.goalLineValue}>{goalThread.weeklyFocus}</Text>
-              </View>
+              </Pressable>
             )}
             {goalThread?.todayConnection && (
-              <View style={[s.goalLine, goalThread?.weeklyFocus && s.goalLineDivider]}>
-                <Text style={s.goalLineLabel}>Today's thread</Text>
+              <Pressable
+                style={({ pressed }) => [s.goalLine, goalThread?.weeklyFocus && s.goalLineDivider, pressed && { opacity: 0.7 }]}
+                onPress={() => {
+                  tapLight();
+                  navigation.navigate('Chat', {
+                    initialPrompt: `How does today connect to my focus? Today's thread is: "${goalThread.todayConnection}"`,
+                  });
+                }}
+                accessibilityRole="button"
+                accessibilityLabel={`Ask Iris about today's thread: ${goalThread.todayConnection}`}
+              >
+                <View style={s.goalLineHeader}>
+                  <Text style={s.goalLineLabel}>TODAY'S THREAD</Text>
+                  <Text style={s.goalLineHint}>Ask Iris ›</Text>
+                </View>
                 <Text style={s.goalLineValue}>{goalThread.todayConnection}</Text>
-              </View>
+              </Pressable>
             )}
-          </PressCard>
+          </View>
         )}
 
         {/* Today's arc — animated timeline. Current dot pulses with a gold
@@ -1659,13 +1675,25 @@ function makeStyles(colors, fonts) {
   goalCard: {
     backgroundColor: colors.surface,
     borderWidth: 1,
-    borderColor: colors.line,
-    borderRadius: 14,
+    borderColor: colors.goldBorder,
+    borderRadius: 16,
     paddingHorizontal: 18,
     marginBottom: 16,
   },
   goalLine: {
-    paddingVertical: 12,
+    paddingVertical: 14,
+  },
+  goalLineHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  goalLineHint: {
+    fontFamily: fonts.displaySemibold,
+    fontSize: 12,
+    color: colors.gold,
+    letterSpacing: 0.3,
   },
   goalLineDivider: {
     borderTopWidth: 1,
