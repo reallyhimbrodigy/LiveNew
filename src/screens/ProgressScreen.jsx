@@ -190,7 +190,11 @@ export default function ProgressScreen() {
     return out.slice(0, 3);
   })();
 
-  // Calculate insights (trend is now sorted chronologically asc)
+  // Calculate insights (trend is now sorted chronologically asc).
+  // GATING: insights must be trustworthy, never alarm on thin data. The
+  // week-over-week trend needs BOTH a real recent window and a real prior
+  // window AND a meaningful swing; single-day comparisons are noise, and a
+  // scary "stress is rising" off 3 days erodes trust.
   const recentTrend = trend.slice(-7);
   const olderTrend = trend.slice(-14, -7);
   const recentAvg = recentTrend.length > 0
@@ -199,10 +203,18 @@ export default function ProgressScreen() {
   const olderAvg = olderTrend.length > 0
     ? olderTrend.reduce((sum, t) => sum + (t.stress || 0), 0) / olderTrend.length
     : null;
-  const stressChange = recentAvg && olderAvg ? olderAvg - recentAvg : null;
+  const stressChange = (
+    recentAvg != null && olderAvg != null &&
+    recentTrend.length >= 4 && olderTrend.length >= 3 &&
+    Math.abs(olderAvg - recentAvg) >= 0.5            // ignore tiny, meaningless drift
+  ) ? olderAvg - recentAvg : null;
 
-  // Best day
-  const bestDay = trend.length > 0
+  // Enough history for the single-window insights (best day, 7-day average) to
+  // mean something — a few scattered days don't.
+  const enoughHistory = trend.length >= 5;
+
+  // Best day (only once there's a real week of data behind it)
+  const bestDay = enoughHistory
     ? trend.reduce((best, t) => (t.stress < (best?.stress || 999)) ? t : best, null)
     : null;
 
@@ -785,7 +797,7 @@ export default function ProgressScreen() {
         )}
 
         {/* Key insights — tap the card to dig into any of these with Iris. */}
-        {(stressChange !== null || bestDay || stressAvg != null) && (
+        {(stressChange !== null || bestDay || (stressAvg != null && enoughHistory)) && (
           <Pressable
             style={({ pressed }) => [s.card, pressed && { opacity: 0.9 }]}
             onPress={goChat}
@@ -802,10 +814,12 @@ export default function ProgressScreen() {
                 </View>
                 <View style={s.insightContent}>
                   <Text style={s.insightTitle}>
-                    {stressChange > 0 ? 'Stress is dropping' : 'Stress is rising'}
+                    {stressChange > 0 ? 'Stress is trending down' : 'Stress is trending up'}
                   </Text>
                   <Text style={s.insightSub}>
-                    {stressChange > 0 ? 'Calmer than the week before' : 'Tenser than the week before'}
+                    {stressChange > 0
+                      ? 'Calmer than the week before — keep the rhythm going.'
+                      : 'Tenser than last week — worth a gentler evening. Tap to plan one.'}
                   </Text>
                 </View>
               </View>
@@ -816,21 +830,21 @@ export default function ProgressScreen() {
                   <Text style={{ color: colors.gold, fontSize: 14, fontFamily: fonts.displayBold }}>{'\u2605'}</Text>
                 </View>
                 <View style={s.insightContent}>
-                  <Text style={s.insightTitle}>Best day</Text>
+                  <Text style={s.insightTitle}>Calmest day</Text>
                   <Text style={s.insightSub}>
-                    {bestDay.date ? `${dayNames[new Date(bestDay.date + 'T12:00:00').getDay()]} \u2014 your calmest day` : 'Your calmest day'}
+                    {bestDay.date ? `${dayNames[new Date(bestDay.date + 'T12:00:00').getDay()]} \u2014 your calmest day. Repeat what worked.` : 'Your calmest day. Repeat what worked.'}
                   </Text>
                 </View>
               </View>
             )}
-            {stressAvg != null && (
+            {stressAvg != null && enoughHistory && (
               <View style={[s.insightRow, { borderBottomWidth: 0 }]}>
                 <View style={[s.insightIcon, { backgroundColor: colors.goldSoft }]}>
                   <Text style={{ color: colors.muted, fontSize: 14, fontFamily: fonts.displayBold }}>~</Text>
                 </View>
                 <View style={s.insightContent}>
-                  <Text style={s.insightTitle}>7-day average</Text>
-                  <Text style={s.insightSub}>{`Mostly ${(stressBand(stressAvg) || 'okay').toLowerCase()} this week`}</Text>
+                  <Text style={s.insightTitle}>Where you sit</Text>
+                  <Text style={s.insightSub}>{`Mostly ${(stressBand(stressAvg) || 'okay').toLowerCase()} across the week.`}</Text>
                 </View>
               </View>
             )}
@@ -843,18 +857,39 @@ export default function ProgressScreen() {
           <View style={s.card}>
             <Text style={s.cardTitle}>Evenings</Text>
             <Text style={s.cardSub}>Last {recentReflections.length} reflection{recentReflections.length === 1 ? '' : 's'}</Text>
-            <View style={s.reflectionRow}>
-              <View style={s.reflectionStat}>
-                <Text style={s.reflectionValue}>{reflectionCounts.better}</Text>
-                <Text style={s.reflectionLabel}>Better</Text>
+            {/* Timeline — each recent evening as a dot (oldest → latest),
+                coloured by how the day felt. The loop made visual. */}
+            <View style={s.eveTimeline}>
+              {recentReflections.map((r, i) => {
+                const last = i === recentReflections.length - 1;
+                const c = r.feeling === 'better' ? colors.success
+                  : r.feeling === 'harder' ? colors.error
+                  : colors.dim;
+                return (
+                  <View
+                    key={i}
+                    style={[
+                      s.eveDot,
+                      { backgroundColor: c },
+                      last && { borderWidth: 2, borderColor: colors.bg, transform: [{ scale: 1.18 }] },
+                    ]}
+                  />
+                );
+              })}
+            </View>
+            {/* Legend + counts */}
+            <View style={s.eveLegend}>
+              <View style={s.eveLegendItem}>
+                <View style={[s.eveLegendDot, { backgroundColor: colors.success }]} />
+                <Text style={s.eveLegendText}>{reflectionCounts.better} better</Text>
               </View>
-              <View style={s.reflectionStat}>
-                <Text style={s.reflectionValue}>{reflectionCounts.same}</Text>
-                <Text style={s.reflectionLabel}>Same</Text>
+              <View style={s.eveLegendItem}>
+                <View style={[s.eveLegendDot, { backgroundColor: colors.dim }]} />
+                <Text style={s.eveLegendText}>{reflectionCounts.same} same</Text>
               </View>
-              <View style={s.reflectionStat}>
-                <Text style={s.reflectionValue}>{reflectionCounts.harder}</Text>
-                <Text style={s.reflectionLabel}>Harder</Text>
+              <View style={s.eveLegendItem}>
+                <View style={[s.eveLegendDot, { backgroundColor: colors.error }]} />
+                <Text style={s.eveLegendText}>{reflectionCounts.harder} harder</Text>
               </View>
             </View>
             {recentReflections.length >= 3 && (
@@ -1576,6 +1611,42 @@ function makeStyles(colors, fonts) {
     insightContent: { flex: 1 },
     insightTitle: { fontFamily: fonts.displaySemibold, fontSize: 14, color: colors.text },
     insightSub: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, marginTop: 1 },
+
+    // Evenings — dot timeline + legend
+    eveTimeline: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 10,
+      marginTop: 6,
+      marginBottom: 14,
+      minHeight: 18,
+    },
+    eveDot: {
+      width: 15,
+      height: 15,
+      borderRadius: 8,
+    },
+    eveLegend: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 16,
+    },
+    eveLegendItem: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    eveLegendDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+    },
+    eveLegendText: {
+      fontFamily: fonts.displaySemibold,
+      fontSize: 12,
+      color: colors.muted,
+      letterSpacing: 0.2,
+    },
 
     // Reflections
     reflectionRow: { flexDirection: 'row', gap: 10, marginTop: 4 },
