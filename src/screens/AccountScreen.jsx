@@ -364,13 +364,17 @@ export default function AccountScreen({ navigation }) {
                 </View>
               ) : null}
             </View>
-            {/* Gold "+" edit affordance — signals the avatar is tappable.
-                Drawn as two geometric bars (not a text glyph) so it's
-                pixel-perfectly centered in the bubble — font "+" glyphs sit
-                off the line-box center and never truly centered. */}
+            {/* Gold "+" edit affordance. The cross is flex-CENTERED in the dot
+                (border-aware) and the two bars are positioned inside a borderless
+                12×12 box — so the dot's 2px border can't shift them. Previous
+                versions hand-computed offsets against the 26px box, but RN places
+                absolute children inside the border (22px box), which left the "+"
+                ~2px down-right. This centers it for good. */}
             <View style={s.avatarEditDot} pointerEvents="none">
-              <View style={s.avatarEditBarH} />
-              <View style={s.avatarEditBarV} />
+              <View style={s.avatarEditCross}>
+                <View style={s.avatarEditBarH} />
+                <View style={s.avatarEditBarV} />
+              </View>
             </View>
           </Pressable>
 
@@ -888,14 +892,20 @@ function makeStyles(colors, fonts) {
       backgroundColor: colors.gold,
       borderWidth: 2,
       borderColor: colors.bg,
+      // Flex-center the cross — border-aware, so the 2px border can't offset it.
+      alignItems: 'center',
+      justifyContent: 'center',
     },
-    // The "+" as two bars, each centered in the 26px dot by exact math:
-    //   horizontal bar 12×2.6 → left (26−12)/2=7, top (26−2.6)/2=11.7
-    //   vertical   bar 2.6×12 → left (26−2.6)/2=11.7, top (26−12)/2=7
+    // Borderless 12×12 box, flex-centered in the dot. The bars are positioned
+    // inside THIS box (no border), so the math is exact and the "+" is dead-center.
+    avatarEditCross: {
+      width: 12,
+      height: 12,
+    },
     avatarEditBarH: {
       position: 'absolute',
-      left: 7,
-      top: 11.7,
+      left: 0,
+      top: 4.7,              // (12 − 2.6) / 2
       width: 12,
       height: 2.6,
       borderRadius: 1.3,
@@ -903,8 +913,8 @@ function makeStyles(colors, fonts) {
     },
     avatarEditBarV: {
       position: 'absolute',
-      left: 11.7,
-      top: 7,
+      left: 4.7,             // (12 − 2.6) / 2
+      top: 0,
       width: 2.6,
       height: 12,
       borderRadius: 1.3,

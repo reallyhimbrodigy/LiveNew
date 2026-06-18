@@ -752,14 +752,18 @@ export const useAuthStore = create((set, get) => ({
     set({ isSubscribed: value });
   },
 
-  // Save onboarding profile (sets hasProfile, triggers navigation to MainTabs)
+  // Save the profile (e.g. editing your routine/schedule from Account).
+  // PRESERVES today's plan: editing your routine must NOT delete the plan you
+  // already generated today — that wiped it out and forced a surprise
+  // re-check-in ("where did my plan go?"). The updated routine shapes FUTURE
+  // plans; today's stays put. (Onboarding's first generation uses
+  // saveProfileWithoutNav below, before any plan exists.)
   saveProfile: async (profile) => {
     const prepared = prepareProfileForSave(profile);
     await api.onboardComplete(prepared);
     await AsyncStorage.setItem(PROFILE_KEY, JSON.stringify(prepared));
-    await AsyncStorage.removeItem(PLAN_KEY);
     await writeOnboardedMarker(get().userId);
-    set({ hasProfile: true, profile: prepared, todayPlan: null, todayDate: null, completed: {}, reflection: null });
+    set({ hasProfile: true, profile: prepared });
   },
 
   // Save profile WITHOUT triggering navigation — used during onboarding
