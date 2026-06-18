@@ -108,6 +108,31 @@ function prepareProfileForSave(profile) {
   return { ...withTz, schedule, routine };
 }
 
+// App-version gating from the server bootstrap (`appUpdate`). Compares the
+// installed NATIVE app version against the server's min/latest so we can show a
+// forced "Update required" gate or a soft "Update available" nudge. JS-only
+// changes ship via EAS Update (OTA) and never trip this.
+function compareVersions(a, b) {
+  const pa = String(a || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  const pb = String(b || '0').split('.').map((n) => parseInt(n, 10) || 0);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d !== 0) return d < 0 ? -1 : 1;
+  }
+  return 0;
+}
+function parseAppUpdate(bootstrap) {
+  const au = bootstrap?.appUpdate;
+  if (!au) return null;
+  let current = '1.0.0';
+  try { current = require('expo-application').nativeApplicationVersion || current; } catch {}
+  return {
+    required: !!au.min && compareVersions(current, au.min) < 0,
+    available: !!au.latest && compareVersions(current, au.latest) < 0,
+    storeUrl: au.storeUrl || null,
+  };
+}
+
 // 14-day free trial helpers — used by both the gate (generatePlan) and the
 // UI (Paywall trigger, trial countdown on Account, feature gating elsewhere).
 export const TRIAL_DAYS = 7;
@@ -136,6 +161,7 @@ export const useAuthStore = create((set, get) => ({
   isLoading: true,
   isLoggedIn: false,
   isSubscribed: false, isComped: false,
+  appUpdate: null, // { required, available, storeUrl } from bootstrap, or null
   hasProfile: false,
   profile: null,
   todayPlan: null,       // { rightNow, plan, goalThread, stressRelief, eveningPrompt }
@@ -324,6 +350,7 @@ export const useAuthStore = create((set, get) => ({
           // Manual comp flag (user_profile.is_pro) — premium alongside
           // RevenueCat + the trial. See useIsPremium / isPremiumNow.
           set({ isComped: serverProfile.isPro === true });
+          set({ appUpdate: parseAppUpdate(bootstrap) });
           const serverSaysOnboarded =
             bootstrap?.uiState === 'home' ||
             bootstrap?.profile?.isComplete === true ||
@@ -624,6 +651,7 @@ export const useAuthStore = create((set, get) => ({
     if (bootstrap) {
       const p = bootstrap?.profile || {};
       set({ isComped: p.isPro === true });
+      set({ appUpdate: parseAppUpdate(bootstrap) });
       const profile = {
         routine: p.routine || null,
         stressSource: p.stressSource || null,

@@ -3,6 +3,13 @@
     "name": "LiveNew",
     "slug": "livenew",
     "version": "1.2.0",
+    "updates": {
+      "url": "https://u.expo.dev/7016e492-3994-4394-9413-4a2978b80130",
+      "fallbackToCacheTimeout": 0
+    },
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",

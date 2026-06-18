@@ -13,11 +13,13 @@
     },
     "preview": {
       "distribution": "internal",
+      "channel": "preview",
       "ios": {
         "simulator": false
       }
     },
     "production": {
+      "channel": "production",
       "env": {
         "EXPO_PUBLIC_SENTRY_DSN": "https://6b753482441d7652ff1bdfe1ddf0776e@o4511288242667520.ingest.us.sentry.io/4511452006645760",
         "SENTRY_DISABLE_AUTO_UPLOAD": "true"

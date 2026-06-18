@@ -15,6 +15,7 @@ import { useAuthStore } from '../store/authStore';
 import { useTheme } from '../theme';
 import AppBackground from '../components/AppBackground';
 import BootLoader from '../components/BootLoader';
+import UpdateGate from '../components/UpdateGate';
 import ErrorBoundary from '../components/ErrorBoundary';
 import * as SplashScreen from 'expo-splash-screen';
 import { initPurchases } from '../purchases';
@@ -313,6 +314,9 @@ export default function RootNavigator() {
         )}
       </Stack.Navigator>
     </NavigationContainer>
+    {/* Forced/soft app-update gate (driven by bootstrap appUpdate). Native
+        version bumps only; JS changes ship silently via EAS Update. */}
+    <UpdateGate />
     </View>
     </ErrorBoundary>
   );

@@ -2262,6 +2262,7 @@ async function buildBootstrapPayload({ userId, userProfile, userBaseline, userEm
     },
     env: { mode: config.envMode },
     uiState,
+    appUpdate: APP_UPDATE,
   };
 }
 
@@ -2293,6 +2294,15 @@ async function ensureHomeUiState({ userId, userProfile, userBaseline, userEmail,
   return { ok: true, uiState: bootstrap.uiState };
 }
 
+
+// App-version gating surfaced to the client on bootstrap. Bump `latest` (and
+// `min` for a forced update) ONLY when you ship a NATIVE App Store build users
+// must move to. JS-only changes ship via EAS Update (OTA) and never need this.
+const APP_UPDATE = {
+  min: '1.0.0',      // app version below this → blocking "Update required"
+  latest: '1.2.0',   // app version below this → dismissible "Update available"
+  storeUrl: 'https://apps.apple.com/app/id6760437838',
+};
 
 async function buildSupabaseBootstrapPayload({ userId, userProfile, flags, avatarUrl, isPro }) {
   const isAuthenticated = Boolean(userId);
@@ -2376,6 +2386,7 @@ async function buildSupabaseBootstrapPayload({ userId, userProfile, flags, avata
     },
     env: { mode: config.envMode },
     uiState,
+    appUpdate: APP_UPDATE,
   };
 }
 
