@@ -240,9 +240,9 @@ export default function RootNavigator() {
         const AsyncStorage = require('@react-native-async-storage/async-storage').default;
         const authRaw = await AsyncStorage.getItem('livenew:auth');
         const authData = authRaw ? JSON.parse(authRaw) : {};
-        if (authData?.userId) {
-          await initPurchases(authData.userId);
-        }
+        // ALWAYS configure RevenueCat (even logged-out → anonymous), so the
+        // paywall works in every session. If we know the user, configure as them.
+        await initPurchases(authData?.userId || null);
       } catch {}
       await hydrate();
     })();

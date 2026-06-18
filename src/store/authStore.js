@@ -578,6 +578,21 @@ export const useAuthStore = create((set, get) => ({
     }
     if (userId) set({ userId });
 
+    // Associate RevenueCat with this account so purchases (and the server's
+    // entitlement lookup) are tied to the signed-in user — not an anonymous RC
+    // id. Without this, a fresh sign-in session couldn't complete a purchase.
+    if (userId) {
+      try { await require('../purchases').identifyPurchases(userId); } catch {}
+      // Re-check entitlement now that RC knows who we are.
+      try {
+        const active = await require('../purchases').checkSubscription();
+        if (active !== get().isSubscribed) {
+          set({ isSubscribed: active });
+          try { await AsyncStorage.setItem('livenew:subscribed', JSON.stringify(active)); } catch {}
+        }
+      } catch {}
+    }
+
     // Restore the real HealthKit permission status. The OS grant is
     // device-level and survives logout, but `healthPermission` lives in
     // memory and isn't restored by any login path (only cold-boot hydrate
@@ -1233,6 +1248,7 @@ export const useAuthStore = create((set, get) => ({
   // previous user.
   logout: async () => {
     try { await api.logout(); } catch {}
+    try { await require('../purchases').logoutPurchases(); } catch {}
     clearTokens();
     await AsyncStorage.multiRemove([
       AUTH_KEY, PROFILE_KEY, PLAN_KEY, NAME_KEY, EMAIL_KEY,

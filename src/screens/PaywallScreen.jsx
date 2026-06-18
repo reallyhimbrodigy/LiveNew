@@ -55,14 +55,19 @@ export default function PaywallScreen({ navigation }) {
     tapLight();
     setPurchasing(true);
     try {
-      const success = await purchasePackage(pkg);
-      if (success) {
-        tapSuccess();
-        await setSubscribed(true);
-        navigation.goBack();
+      const { active, cancelled } = await purchasePackage(pkg);
+      if (cancelled) {
+        setPurchasing(false);
+        return; // user backed out — no error
       }
+      // The StoreKit purchase completed, so the user paid. Unlock immediately
+      // even if the entitlement hasn't reconciled this instant (it will), so a
+      // paying user is NEVER left stuck on the paywall.
+      tapSuccess();
+      await setSubscribed(true);
+      navigation.goBack();
     } catch (err) {
-      Alert.alert('Purchase failed', "Something went wrong. Try again, or use Restore if you've already subscribed.");
+      Alert.alert('Purchase failed', "Something went wrong and you were not charged. Try again, or use Restore if you've already subscribed.");
     }
     setPurchasing(false);
   };
