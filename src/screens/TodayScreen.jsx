@@ -831,35 +831,6 @@ export default function TodayScreen({ navigation }) {
           </Pressable>
         </View>
 
-        {/* Evening check-in — surfaced near the top in the evening so it's
-            actually seen (it used to sit buried at the very bottom of the
-            scroll, which is why it felt like it "never appeared"). */}
-        {showEveningReflection && (
-          <View style={s.reflectionCard}>
-            <Text style={s.reflectionLabel}>EVENING CHECK-IN</Text>
-            {/* Fixed comparative question — the Better/Same/Harder buttons only
-                make sense against a "vs. yesterday" prompt. The AI eveningPrompt
-                is often open-ended ("what time did you feel tired?"), which
-                mismatched the three fixed answers. */}
-            <Text style={s.reflectionPrompt}>Compared to yesterday, how did today feel?</Text>
-            <View style={s.reflectionOptions}>
-              {[
-                { label: 'Better', value: 'better' },
-                { label: 'Same', value: 'same' },
-                { label: 'Harder', value: 'harder' },
-              ].map(opt => (
-                <Pressable
-                  key={opt.value}
-                  style={({ pressed }) => [s.reflectionBtn, pressed && { opacity: 0.85 }]}
-                  onPress={() => handleReflection(opt.value)}
-                >
-                  <Text style={s.reflectionBtnText}>{opt.label}</Text>
-                </Pressable>
-              ))}
-            </View>
-          </View>
-        )}
-
         {/* Daily first read — single Iris-voiced sentence anchored in
             today's actual data. Earns the open. Shown above everything else. */}
         {todayPlan?.firstRead ? (
@@ -1086,7 +1057,34 @@ export default function TodayScreen({ navigation }) {
           <Text style={s.arcCurrent}>{ZONE_LABELS[currentZoneId]}</Text>
         </Pressable>
 
-        {/* Evening reflection */}
+        {/* Evening check-in — lives at the BOTTOM, by the last card, and only
+            appears toward the end of the day (evening / sleep window). It's the
+            close of the loop, so it belongs at the end of the screen, not up top. */}
+        {showEveningReflection && (
+          <View style={s.reflectionCard}>
+            <Text style={s.reflectionLabel}>EVENING CHECK-IN</Text>
+            {/* Fixed comparative question — the Better/Same/Harder buttons only
+                make sense against a "vs. yesterday" prompt. */}
+            <Text style={s.reflectionPrompt}>Compared to yesterday, how did today feel?</Text>
+            <View style={s.reflectionOptions}>
+              {[
+                { label: 'Better', value: 'better' },
+                { label: 'Same', value: 'same' },
+                { label: 'Harder', value: 'harder' },
+              ].map(opt => (
+                <Pressable
+                  key={opt.value}
+                  style={({ pressed }) => [s.reflectionBtn, pressed && { opacity: 0.85 }]}
+                  onPress={() => handleReflection(opt.value)}
+                >
+                  <Text style={s.reflectionBtnText}>{opt.label}</Text>
+                </Pressable>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {/* Evening reflection — confirmation after answering */}
         {reflection && (
           <View style={s.reflectionDoneCard}>
             <Text style={s.reflectionDoneText}>
