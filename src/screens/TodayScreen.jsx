@@ -1172,6 +1172,9 @@ export default function TodayScreen({ navigation }) {
             </View>
             <Text style={s.scoreInfoNum}>{score}</Text>
             <Text style={s.scoreInfoBand}>{scoreBandLabel}</Text>
+            <Text style={s.scoreInfoExplain}>
+              Your regulation read for today — how steady and resourced your system is right now, from your check-in{healthSnapshot ? ' and Apple Health' : ''}. Higher = calmer and more recovered. It's about today, not a grade.
+            </Text>
             <View style={s.scoreFactorList}>
               {scoreFactors.map((f, i) => (
                 <View key={i} style={[s.scoreFactorRow, i > 0 && s.scoreFactorDivider]}>
@@ -1985,9 +1988,18 @@ function makeStyles(colors, fonts) {
     color: colors.muted,
     textAlign: 'center',
     marginTop: 8,
-    marginBottom: 20,
+    marginBottom: 12,
     lineHeight: 22,
     paddingHorizontal: 8,
+  },
+  scoreInfoExplain: {
+    fontFamily: fonts.body,
+    fontSize: 13.5,
+    color: colors.muted,
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 20,
+    paddingHorizontal: 6,
   },
   scoreFactorList: {
     backgroundColor: colors.goldSoft,

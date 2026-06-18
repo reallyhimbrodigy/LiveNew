@@ -53,9 +53,12 @@ async function persistTokens() {
   } catch {}
 }
 
-async function request(method, path, body) {
+async function request(method, path, body, reqOpts = {}) {
   const headers = { 'Content-Type': 'application/json' };
   if (authToken) headers['Authorization'] = `Bearer ${authToken}`;
+  // Idempotency key lets the server dedupe a retried request (e.g. when the app
+  // was backgrounded mid-flight and we re-send) instead of double-counting.
+  if (reqOpts.idempotencyKey) headers['Idempotency-Key'] = reqOpts.idempotencyKey;
 
   const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
@@ -124,6 +127,27 @@ async function request(method, path, body) {
   return data;
 }
 
+// Retry transient NETWORK failures (the classic one: the app was backgrounded
+// for a moment mid-request and iOS dropped the socket — on resume the fetch
+// rejects). Only NETWORK_ERROR is retried; real 4xx/5xx errors throw straight
+// through. With an idempotency key the server won't double-count the retry.
+async function requestWithRetry(method, path, body, { idempotencyKey, retries = 3, retryDelayMs = 1000 } = {}) {
+  let lastErr;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await request(method, path, body, { idempotencyKey });
+    } catch (err) {
+      lastErr = err;
+      if (err?.code === 'NETWORK_ERROR' && attempt < retries) {
+        await new Promise((r) => setTimeout(r, retryDelayMs));
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastErr;
+}
+
 export const api = {
   // Auth
   // Passwordless OTP — primary auth path going forward
@@ -151,8 +175,12 @@ export const api = {
   // Bootstrap
   bootstrap: () => request('GET', '/v1/bootstrap'),
 
-  // Check-in (generates day plan)
-  checkin: (data) => request('POST', '/v1/checkin', { checkIn: data }),
+  // Check-in (generates day plan). Retries transient network drops (e.g. the
+  // app was briefly backgrounded mid-generation) so plan generation never fails
+  // just because the user left the app for a second. `idempotencyKey` keeps the
+  // retry from double-counting the check-in server-side.
+  checkin: (data, idempotencyKey) =>
+    requestWithRetry('POST', '/v1/checkin', { checkIn: data }, { idempotencyKey, retries: 3 }),
 
   // Evening reflection
   reflect: (data) => request('POST', '/v1/reflect', data),

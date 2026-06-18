@@ -32,19 +32,22 @@ const CORE_PATH =
 //   sparks     — true → draw drifting spark embers (top tier only)
 function tierForStreak(streak) {
   const s = typeof streak === 'number' ? streak : 0;
+  // EVERY tier is a filled, glowing, animated flame — even day one is a small
+  // live ember, never a dead outline. Color/scale/speed/core/sparks all ramp so
+  // the flame visibly gets hotter and more alive as the streak climbs.
   if (s >= 100)
-    return { color: '#9a5cf0', color2: '#7a3cf0', glow: '#7a3cf0', period: 520, minOpacity: 0.7, maxScale: 1.16, filled: true, core: true, sparks: true };
+    return { color: '#9a5cf0', color2: '#c98cff', glow: '#7a3cf0', period: 470, minOpacity: 0.6, maxScale: 1.24, filled: true, core: true, sparks: true };
   if (s >= 60)
-    return { color: '#e8358a', color2: '#b03cf0', glow: '#e8358a', period: 600, minOpacity: 0.72, maxScale: 1.12, filled: true, core: true, sparks: false };
+    return { color: '#e8358a', color2: '#f06ad0', glow: '#e8358a', period: 550, minOpacity: 0.64, maxScale: 1.18, filled: true, core: true, sparks: true };
   if (s >= 30)
-    return { color: '#ef4a2a', color2: '#f5732a', glow: '#ef4a2a', period: 680, minOpacity: 0.74, maxScale: 1.1, filled: true, core: false, sparks: false };
+    return { color: '#ef4a2a', color2: '#f5732a', glow: '#ef4a2a', period: 630, minOpacity: 0.68, maxScale: 1.15, filled: true, core: true, sparks: false };
   if (s >= 14)
-    return { color: '#f0701e', color2: '#f5a02a', glow: '#f0701e', period: 800, minOpacity: 0.78, maxScale: 1.07, filled: true, core: false, sparks: false };
+    return { color: '#f0701e', color2: '#f5a02a', glow: '#f0701e', period: 730, minOpacity: 0.7, maxScale: 1.12, filled: true, core: false, sparks: false };
   if (s >= 7)
-    return { color: '#f08a2e', color2: '#f5b347', glow: null, period: 950, minOpacity: 0.8, maxScale: 1.05, filled: true, core: false, sparks: false };
+    return { color: '#f08a2e', color2: '#f5b347', glow: '#f0901e', period: 850, minOpacity: 0.72, maxScale: 1.10, filled: true, core: false, sparks: false };
   if (s >= 3)
-    return { color: '#e8a93f', color2: '#f0c66a', glow: null, period: 1150, minOpacity: 0.84, maxScale: 1.035, filled: false, core: false, sparks: false };
-  return { color: '#d8b56a', color2: '#e8cf94', glow: null, period: 1450, minOpacity: 0.88, maxScale: 1.025, filled: false, core: false, sparks: false };
+    return { color: '#eba93f', color2: '#f5cf78', glow: '#e8a93f', period: 1000, minOpacity: 0.74, maxScale: 1.08, filled: true, core: false, sparks: false };
+  return { color: '#e0b85a', color2: '#f0d488', glow: '#d8a838', period: 1150, minOpacity: 0.76, maxScale: 1.07, filled: true, core: false, sparks: false };
 }
 
 // Crafted flame icon — replaces the 🔥 emoji, which renders inconsistently and

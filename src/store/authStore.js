@@ -862,6 +862,9 @@ export const useAuthStore = create((set, get) => ({
       } catch {}
     }
 
+    // Stable idempotency key for THIS check-in attempt (same inputs → same key)
+    // so an auto-retry after a backgrounding socket-drop won't double-count.
+    const idemKey = `checkin-${get().userId || 'anon'}-${getLogicalDateISO()}-${stressValue}-${sleepQuality}-${energy}`;
     const data = await api.checkin({
       // Server expects the calendar date (its day-boundary logic handles
       // late-night sessions on its own). Don't send logical-date — that's
@@ -878,7 +881,7 @@ export const useAuthStore = create((set, get) => ({
       energy,         // "high" | "medium" | "low"
       routine: profile.routine || '',
       healthSnapshot, // null if not connected; server handles either way
-    });
+    }, idemKey);
 
     // New schema: validate zones[]. Backward-compat: still accept old plan[]
     // for users mid-migration but treat absence of zones as a failure for new
