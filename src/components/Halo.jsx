@@ -33,7 +33,7 @@ import { gemPalette, gemRank, maxGemRank } from '../domain/gems';
  *
  * PROGRESSIVE LADDER (rank 0 first_light … 7 the_year), so same-tier pairs are
  * clearly distinct and each rung is richer than the last:
- *   • facet count       6 → 14   (more facets = more brilliant cut)
+ *   • facet count       8 → 16   (more facets = more brilliant cut)
  *   • glint speed       slow drift → fast sweep
  *   • bloom breath      shallow/slow → deep/fast
  *   • breathing scale   unlocked at rank ≥ 5
@@ -48,8 +48,8 @@ import { gemPalette, gemRank, maxGemRank } from '../domain/gems';
 
 // ── Ladder ramp constants ───────────────────────────────────────────────────
 const LADDER = {
-  FACETS_R0: 6,
-  FACETS_R7: 14,
+  FACETS_R0: 8,
+  FACETS_R7: 16,
 
   // Bloom (jewel glow) opacity breath.
   GLOW_DUR_R0: 4200,
@@ -112,7 +112,7 @@ function facetCountForRank(rank) {
   const t = progT(rank);
   let n = Math.round(lerp(LADDER.FACETS_R0, LADDER.FACETS_R7, t));
   if (n % 2 !== 0) n += 1; // even reads as a more symmetric cut
-  return Math.max(6, Math.min(14, n));
+  return Math.max(8, Math.min(16, n));
 }
 function sparkleCountForRank(rank) {
   const t = progT(rank);
@@ -245,12 +245,13 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
 
   const cx = size / 2;
   const cy = size / 2;
-  const R  = size * 0.40;          // girdle (outer) radius
-  const rT = R * 0.50;             // table (flat top) radius
+  const R  = size * 0.41;          // girdle (outer) radius
+  const rT = R * 0.40;             // table (flat top) radius — smaller, so the
+                                   // glowing core reads against a deep facet ring
   const N  = facetCountForRank(rank);
 
   // Light comes from the top-left; facets facing it are brightest.
-  const LIGHT = -Math.PI * 0.75;
+  const LIGHT = -Math.PI * 0.72;
 
   // Girdle + table vertices (table rotated half a step → brilliant kite facets).
   const girdle = Array.from({ length: N }, (_, i) => {
@@ -267,10 +268,20 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
   // Crown facets — the antiprism band between table and girdle. Two triangle
   // families perfectly tile the ring; each shaded by its centroid's angle to
   // the light so the cut reads as 3-D.
+  // High-contrast, slightly bimodal shading (deep → mid → sheen → core) so the
+  // cut reads as dramatic 3-D wedges of light and shadow — a beautiful gem, not
+  // a flat disc.
+  // Push the shadow facets toward black for dramatic, rocky dimensionality
+  // (the palette's own `deep` is too light to read as deep shadow). Only the
+  // facet shading uses this; the aura/locked tease keep the true palette.
+  const facetDeep = mix(pal.deep, '#000000', 0.34);
   const facetFill = (cxx, cyy) => {
     const ang = Math.atan2(cyy - cy, cxx - cx);
-    const b = 0.5 + 0.5 * Math.cos(ang - LIGHT); // 0 (shadow) .. 1 (lit)
-    return b < 0.5 ? mix(pal.deep, pal.mid, b * 2) : mix(pal.mid, pal.sheen, (b - 0.5) * 2);
+    let b = 0.5 + 0.5 * Math.cos(ang - LIGHT);
+    b = Math.pow(b, 1.4);
+    if (b < 0.30) return mix(facetDeep, pal.mid, b / 0.30);
+    if (b < 0.62) return mix(pal.mid, pal.sheen, (b - 0.30) / 0.32);
+    return mix(pal.sheen, pal.core, (b - 0.62) / 0.38);
   };
   const facets = [];
   for (let i = 0; i < N; i++) {
@@ -301,9 +312,19 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
     return { x: cx + Math.cos(a) * sparkleOrbitR, y: cy + Math.sin(a) * sparkleOrbitR, color };
   });
 
+  // 4-point sparkle star centered at (sx,sy).
+  const starPts = (sx, sy, r) => {
+    const r2 = r * 0.26;
+    return [
+      [0, -r], [r2, -r2], [r, 0], [r2, r2],
+      [0, r], [-r2, r2], [-r, 0], [-r2, -r2],
+    ].map(([dx, dy]) => `${(sx + dx).toFixed(1)},${(sy + dy).toFixed(1)}`).join(' ');
+  };
+
   const uid = React.useId().replace(/:/g, '');
   const bloomId = `gem-bloom-${gem.id}-${uid}`;
   const tableId = `gem-table-${gem.id}-${uid}`;
+  const fireId  = `gem-fire-${gem.id}-${uid}`;
   const tablePrismId = `gem-tableP-${gem.id}-${uid}`;
   const glintId = `gem-glint-${gem.id}-${uid}`;
 
@@ -342,45 +363,60 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
     return lockedContent;
   }
 
-  // ── Jewel bloom (pulses behind the stone) ──────────────────────────────────
-  const bloomMult = lerp(0.85, 1.5, t);
+  // ── Jewel bloom (pulses behind the stone) — a rich coloured aura ───────────
+  const bloomMult = lerp(1.0, 1.6, t);
   const bloomSvg = (
     <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       <Defs>
         <SvgRadialGradient id={bloomId} cx="50%" cy="50%" r="50%">
-          <Stop offset="0%"   stopColor={pal.glow} stopOpacity={Math.min(0.5, 0.30 * bloomMult)} />
-          <Stop offset="45%"  stopColor={pal.glow} stopOpacity={Math.min(0.22, 0.14 * bloomMult)} />
+          <Stop offset="0%"   stopColor={pal.glow} stopOpacity={Math.min(0.62, 0.42 * bloomMult)} />
+          <Stop offset="48%"  stopColor={pal.glow} stopOpacity={Math.min(0.26, 0.16 * bloomMult)} />
           <Stop offset="100%" stopColor={pal.glow} stopOpacity="0" />
         </SvgRadialGradient>
       </Defs>
-      <Circle cx={cx} cy={cy} r={R * 1.35} fill={`url(#${bloomId})`} />
+      <Circle cx={cx} cy={cy} r={R * 1.5} fill={`url(#${bloomId})`} />
     </Svg>
   );
 
-  // ── The gem body (static facets) + table ───────────────────────────────────
+  // ── The gem body — faceted crown, bright glowing table, lit-from-within
+  //     fire, and a sharp sparkle. This is the beautiful glowing stone. ───────
   const gemBodySvg = (
     <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} accessibilityLabel={label}>
       <Defs>
-        <SvgRadialGradient id={tableId} cx="37%" cy="30%" r="60%">
-          <Stop offset="0%"   stopColor={pal.core}  stopOpacity="0.92" />
-          <Stop offset="30%"  stopColor={pal.sheen} stopOpacity="0.92" />
-          <Stop offset="100%" stopColor={pal.mid}   stopOpacity="0.95" />
+        {/* Bright polished table — off-centre highlight for a lit top */}
+        <SvgRadialGradient id={tableId} cx="40%" cy="34%" r="62%">
+          <Stop offset="0%"   stopColor={pal.core}  stopOpacity="1" />
+          <Stop offset="45%"  stopColor={pal.sheen} stopOpacity="1" />
+          <Stop offset="100%" stopColor={pal.mid}   stopOpacity="1" />
+        </SvgRadialGradient>
+        {/* Lit-from-within fire — the glow that makes it read as a living gem */}
+        <SvgRadialGradient id={fireId} cx="46%" cy="42%" r="55%">
+          <Stop offset="0%"   stopColor="#ffffff"  stopOpacity="0.5" />
+          <Stop offset="40%"  stopColor={pal.sheen} stopOpacity="0.28" />
+          <Stop offset="100%" stopColor={pal.glow}  stopOpacity="0" />
         </SvgRadialGradient>
       </Defs>
 
-      {/* Crown facets — angle-shaded for the 3-D cut */}
+      {/* Crown facets — dramatic light/shadow wedges */}
       {facets.map((f, i) => (
-        <Polygon key={i} points={f.pts} fill={f.fill} fillOpacity={0.98} />
+        <Polygon key={i} points={f.pts} fill={f.fill} fillOpacity={1} />
       ))}
 
-      {/* Thin facet seams (girdle) to crisp the edges */}
-      <Polygon points={ptStr(girdle)} fill="none" stroke={pal.deep} strokeOpacity={0.5} strokeWidth={Math.max(0.5, size * 0.008)} strokeLinejoin="round" />
+      {/* Thin dark facet seams crisp the cut */}
+      <Polygon points={ptStr(girdle)} fill="none" stroke={pal.deep} strokeOpacity={0.6} strokeWidth={Math.max(0.5, size * 0.007)} strokeLinejoin="round" />
 
-      {/* The bright flat table (catches the most light) */}
-      <Polygon points={ptStr(table)} fill={`url(#${tableId})`} stroke={pal.core} strokeOpacity={0.5} strokeWidth={Math.max(0.5, size * 0.008)} strokeLinejoin="round" />
+      {/* Bright glowing table */}
+      <Polygon points={ptStr(table)} fill={`url(#${tableId})`} stroke={pal.sheen} strokeOpacity={0.55} strokeWidth={Math.max(0.5, size * 0.008)} strokeLinejoin="round" />
+
+      {/* Inner fire glow over the table centre */}
+      <Circle cx={cx - R * 0.08} cy={cy - R * 0.08} r={rT * 1.0} fill={`url(#${fireId})`} />
 
       {/* Crisp luminous girdle outline */}
-      <Polygon points={ptStr(girdle)} fill="none" stroke={pal.sheen} strokeOpacity={0.55} strokeWidth={Math.max(0.8, size * 0.014)} strokeLinejoin="round" />
+      <Polygon points={ptStr(girdle)} fill="none" stroke={pal.sheen} strokeOpacity={0.65} strokeWidth={Math.max(0.8, size * 0.014)} strokeLinejoin="round" />
+
+      {/* Sparkle — a bright 4-point star on the lit side, plus a small glint */}
+      <Polygon points={starPts(cx - rT * 0.35, cy - rT * 0.4, R * 0.26)} fill="#ffffff" fillOpacity={0.95} />
+      <Polygon points={starPts(cx + R * 0.4, cy + R * 0.28, R * 0.11)} fill={pal.core} fillOpacity={0.85} />
     </Svg>
   );
 
