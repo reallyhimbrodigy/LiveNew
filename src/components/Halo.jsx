@@ -1,28 +1,29 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, Animated, Easing, AccessibilityInfo, View } from 'react-native';
 import Svg, {
-  Ellipse, Polygon, Defs,
+  Ellipse, Polygon, Polyline, Line, Defs,
   RadialGradient as SvgRadialGradient,
+  LinearGradient as SvgLinearGradient,
   Stop,
 } from 'react-native-svg';
 import { useTheme } from '../theme';
 import { gemPalette, gemRank, maxGemRank } from '../domain/gems';
 
 /**
- * Gem token — a raw CRYSTAL CLUSTER: glossy faceted crystal points radiating
- * from a center, each with a lit face + a shadow face (real-mineral look), a
- * coloured glow behind, and twinkling speculars. NOT a flat cut diamond, and
- * unmistakably different from the auras' rings of light.
+ * Gem token — a luxurious raw CRYSTAL CLUSTER: glossy translucent crystal points
+ * radiating from a centre. Each point is filled with a gradient that runs dark
+ * at the base to a luminous jewel-coloured tip (the look of light passing
+ * through a real crystal), with crisp bright edges, a glossy specular streak,
+ * and a rich coloured aura. Unmistakably different from the auras' rings.
  *
  * Props (UNCHANGED): gem, earned, size=56, onPress
  *
- * Each cluster is SEEDED off gem.id so it's stable and unique. Rarity ramps the
- * number of crystal points, the aura pulse, breathing, sparkles and (apex gem)
- * a prismatic shimmer.
+ * Seeded off gem.id so every cluster is stable + unique. Rarity ramps the number
+ * of points, the aura, breathing, sparkles, and a prismatic shimmer on the apex.
  */
 
 const LADDER = {
-  N_R0: 6, N_R7: 11,                 // crystal points
+  N_R0: 6, N_R7: 11,
   GLOW_DUR_R0: 4200, GLOW_DUR_R7: 1900, GLOW_MIN_R0: 0.55, GLOW_MIN_R7: 0.32, GLOW_MAX: 1.0,
   BREATHE_MAX_R0: 1.02, BREATHE_MAX_R7: 1.05, BREATHE_DUR_R0: 3800, BREATHE_DUR_R7: 2400,
   SPARKLES_R0: 2, SPARKLES_R7: 6, SPARKLE_DUR: 850, SPARKLE_STAGGER: 150,
@@ -132,7 +133,10 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
   const cx = size / 2, cy = size / 2 + size * 0.05;
   const R = size * 0.30;
   const LA = -2.2; // light direction (upper-left)
-  const facetDeep = mix(pal.deep, '#000000', 0.30);
+  const facetDeep = mix(pal.deep, '#000000', 0.38);
+  const gradMid = mix(pal.deep, pal.mid, 0.7);
+  const tipLit = mix(pal.mid, pal.core, 0.6);   // luminous but still jewel-coloured
+  const tipDim = mix(pal.mid, pal.deep, 0.15);
   const N = nForRank(rank);
 
   const shards = [];
@@ -146,18 +150,10 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
   }
   shards.sort((a, b) => Math.sin(a.ang) - Math.sin(b.ang)); // back → front
 
+  const uid = React.useId().replace(/:/g, '');
   const ptStr = (pts) => pts.map((p) => `${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(' ');
-  const faceColor = (faceNormal) => {
-    let b = Math.max(0, Math.cos(faceNormal - LA));
-    b = 0.18 + 0.82 * b;
-    if (b < 0.45) return mix(facetDeep, pal.mid, b / 0.45);
-    if (b < 0.80) return mix(pal.mid, pal.sheen, (b - 0.45) / 0.35);
-    return mix(pal.sheen, pal.core, (b - 0.80) / 0.20);
-  };
 
-  const shardEls = [];
-  const tipPts = []; // for sparkles
-  shards.forEach((s, idx) => {
+  const shardEls = shards.map((s, idx) => {
     const d = { x: Math.cos(s.ang), y: Math.sin(s.ang) };
     const pp = { x: -Math.sin(s.ang), y: Math.cos(s.ang) };
     const base = { x: cx + d.x * s.baseDist, y: cy + d.y * s.baseDist };
@@ -169,19 +165,25 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
     const bR = { x: base.x + pp.x * s.w * 0.7, y: base.y + pp.y * s.w * 0.7 };
     const bLit = Math.max(0, Math.cos((s.ang - Math.PI / 2) - LA));
     const rLit = Math.max(0, Math.cos((s.ang + Math.PI / 2) - LA));
-    shardEls.push({
-      left: ptStr([bL, sL, tip, base]), leftFill: faceColor(s.ang - Math.PI / 2),
-      right: ptStr([bR, sR, tip, base]), rightFill: faceColor(s.ang + Math.PI / 2),
-      gloss: ptStr(bLit > rLit ? [sL, tip, base] : [sR, tip, base]),
-    });
-    tipPts.push(tip);
+    // glossy specular streak along the lit face, toward the tip
+    const litS = bLit >= rLit ? sL : sR;
+    const midPt = { x: (base.x + tip.x) / 2, y: (base.y + tip.y) / 2 };
+    const g1 = { x: midPt.x + (litS.x - midPt.x) * 0.5, y: midPt.y + (litS.y - midPt.y) * 0.5 };
+    const g2 = { x: tip.x * 0.82 + base.x * 0.18, y: tip.y * 0.82 + base.y * 0.18 };
+    return {
+      idL: `gl-${idx}-${uid}`, idR: `gr-${idx}-${uid}`,
+      base, tip,
+      left: ptStr([bL, sL, tip, base]), right: ptStr([bR, sR, tip, base]),
+      edge: ptStr([bL, sL, tip, sR, bR]),
+      gloss: ptStr([g1, g2]), glossW: Math.max(0.6, s.w * 0.5),
+      leftTip: bLit > 0.45 ? tipLit : tipDim,
+      rightTip: rLit > 0.45 ? tipLit : tipDim,
+    };
   });
+  const tipPts = shardEls.map((s) => s.tip);
 
-  const uid = React.useId().replace(/:/g, '');
   const bloomId = `gem-b-${gem.id}-${uid}`;
   const prismId = `gem-p-${gem.id}-${uid}`;
-  const seamColor = mix(pal.deep, '#000000', 0.45);
-  const seamW = Math.max(0.4, size * 0.008);
   const label = earned ? `${gem.name} gem, earned` : `${gem.name} gem, locked`;
 
   // ── LOCKED — dark crystal-cluster silhouette ────────────────────────────────
@@ -197,8 +199,8 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
         <Ellipse cx={cx} cy={cy} rx={R * 1.8} ry={R * 1.8} fill={`url(#${bloomId})`} />
         {shardEls.map((s, i) => (
           <React.Fragment key={i}>
-            <Polygon points={s.left} fill={colors.bg ?? '#18140e'} fillOpacity={0.9} stroke={pal.mid} strokeOpacity={0.22} strokeWidth={seamW} strokeLinejoin="round" />
-            <Polygon points={s.right} fill={colors.bg ?? '#18140e'} fillOpacity={0.82} stroke={pal.mid} strokeOpacity={0.22} strokeWidth={seamW} strokeLinejoin="round" />
+            <Polygon points={s.left} fill={colors.bg ?? '#18140e'} fillOpacity={0.9} stroke={pal.mid} strokeOpacity={0.22} strokeWidth={Math.max(0.4, size * 0.008)} strokeLinejoin="round" />
+            <Polygon points={s.right} fill={colors.bg ?? '#18140e'} fillOpacity={0.82} stroke={pal.mid} strokeOpacity={0.22} strokeWidth={Math.max(0.4, size * 0.008)} strokeLinejoin="round" />
           </React.Fragment>
         ))}
       </Svg>
@@ -214,23 +216,43 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
     <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       <Defs>
         <SvgRadialGradient id={bloomId} cx="50%" cy="46%" r="55%">
-          <Stop offset="0%"   stopColor={pal.glow} stopOpacity={Math.min(0.6, 0.4 * bloomMult)} />
-          <Stop offset="55%"  stopColor={pal.glow} stopOpacity={Math.min(0.18, 0.12 * bloomMult)} />
+          <Stop offset="0%"   stopColor={pal.glow} stopOpacity={Math.min(0.68, 0.46 * bloomMult)} />
+          <Stop offset="50%"  stopColor={pal.glow} stopOpacity={Math.min(0.2, 0.14 * bloomMult)} />
           <Stop offset="100%" stopColor={pal.glow} stopOpacity="0" />
         </SvgRadialGradient>
       </Defs>
-      <Ellipse cx={cx} cy={cy} rx={R * 2.0} ry={R * 2.0} fill={`url(#${bloomId})`} />
+      <Ellipse cx={cx} cy={cy} rx={R * 2.05} ry={R * 2.05} fill={`url(#${bloomId})`} />
     </Svg>
   );
 
-  // ── The crystal cluster ─────────────────────────────────────────────────────
+  // ── The crystal cluster — translucent gradient points + gloss + edges ───────
+  const seamW = Math.max(0.5, size * 0.011);
+  const edgeW = Math.max(0.5, size * 0.011);
   const clusterSvg = (
     <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} accessibilityLabel={label}>
+      <Defs>
+        {shardEls.map((s, i) => (
+          <React.Fragment key={i}>
+            <SvgLinearGradient id={s.idL} x1={s.base.x} y1={s.base.y} x2={s.tip.x} y2={s.tip.y} gradientUnits="userSpaceOnUse">
+              <Stop offset="0%" stopColor={facetDeep} />
+              <Stop offset="55%" stopColor={gradMid} />
+              <Stop offset="100%" stopColor={s.leftTip} />
+            </SvgLinearGradient>
+            <SvgLinearGradient id={s.idR} x1={s.base.x} y1={s.base.y} x2={s.tip.x} y2={s.tip.y} gradientUnits="userSpaceOnUse">
+              <Stop offset="0%" stopColor={facetDeep} />
+              <Stop offset="55%" stopColor={gradMid} />
+              <Stop offset="100%" stopColor={s.rightTip} />
+            </SvgLinearGradient>
+          </React.Fragment>
+        ))}
+      </Defs>
       {shardEls.map((s, i) => (
         <React.Fragment key={i}>
-          <Polygon points={s.left} fill={s.leftFill} stroke={seamColor} strokeOpacity={0.5} strokeWidth={seamW} strokeLinejoin="round" />
-          <Polygon points={s.right} fill={s.rightFill} stroke={seamColor} strokeOpacity={0.5} strokeWidth={seamW} strokeLinejoin="round" />
-          <Polygon points={s.gloss} fill={pal.core} fillOpacity={0.28} />
+          <Polygon points={s.left} fill={`url(#${s.idL})`} />
+          <Polygon points={s.right} fill={`url(#${s.idR})`} />
+          <Polyline points={s.edge} fill="none" stroke={pal.sheen} strokeOpacity={0.55} strokeWidth={edgeW} strokeLinejoin="round" />
+          <Line x1={s.base.x} y1={s.base.y} x2={s.tip.x} y2={s.tip.y} stroke={pal.core} strokeOpacity={0.38} strokeWidth={seamW * 0.7} />
+          <Polyline points={s.gloss} fill="none" stroke="#ffffff" strokeOpacity={0.7} strokeWidth={s.glossW} strokeLinecap="round" />
         </React.Fragment>
       ))}
     </Svg>
@@ -240,9 +262,9 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
     <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
       <Defs>
         <SvgRadialGradient id={prismId} cx="48%" cy="44%" r="58%">
-          <Stop offset="0%"   stopColor={(prism && prism[0]) || pal.core} stopOpacity="0.55" />
-          <Stop offset="50%"  stopColor={(prism && prism[2]) || pal.mid}  stopOpacity="0.4" />
-          <Stop offset="100%" stopColor={(prism && prism[4]) || pal.glow} stopOpacity="0.45" />
+          <Stop offset="0%"   stopColor={(prism && prism[0]) || pal.core} stopOpacity="0.5" />
+          <Stop offset="50%"  stopColor={(prism && prism[2]) || pal.mid}  stopOpacity="0.38" />
+          <Stop offset="100%" stopColor={(prism && prism[4]) || pal.glow} stopOpacity="0.42" />
         </SvgRadialGradient>
       </Defs>
       <Ellipse cx={cx} cy={cy} rx={R * 1.7} ry={R * 1.7} fill={`url(#${prismId})`} />
@@ -279,7 +301,7 @@ export default function Halo({ gem, earned, size = 56, onPress }) {
       <Animated.View pointerEvents="none" style={{ position: 'absolute', width: size, height: size, transform: [{ scale: breatheAnim }] }}>
         {clusterSvg}
         {prismSvg ? (
-          <Animated.View style={{ position: 'absolute', width: size, height: size, opacity: prismAnim.interpolate({ inputRange: [0, 1], outputRange: [0.1, 0.42] }) }}>
+          <Animated.View style={{ position: 'absolute', width: size, height: size, opacity: prismAnim.interpolate({ inputRange: [0, 1], outputRange: [0.1, 0.4] }) }}>
             {prismSvg}
           </Animated.View>
         ) : null}
