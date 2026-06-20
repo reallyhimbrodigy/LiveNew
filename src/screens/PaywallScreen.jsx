@@ -10,10 +10,9 @@ import { tapLight, tapSelect, tapSuccess } from '../haptics';
 import IrisSignature from '../components/IrisSignature';
 import CortisolFact from '../components/CortisolFact';
 
-// Two-tier paywall: Annual (highlighted, default) and Monthly. The 7-day
-// free trial (TRIAL_DAYS=7) happens BEFORE this screen ever appears — by the
-// time the user lands here, they've already used Iris for 7 days. The copy
-// reflects that.
+// Two-tier paywall: Annual (highlighted, default) and Monthly. There is no
+// app-level free trial — the free Essentials tier is always available and the
+// paywall is always dismissable. This screen is an opt-in upgrade, never a wall.
 export default function PaywallScreen({ navigation }) {
   const { colors, fonts } = useTheme();
   const s = useMemo(() => makeStyles(colors, fonts), [colors, fonts]);

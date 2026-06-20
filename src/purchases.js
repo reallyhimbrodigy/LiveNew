@@ -7,9 +7,9 @@ const API_KEY = 'appl_iHzKiLwHXhOkGobAjCtIFTtrOSw';
 // IMPORTANT: every product in RevenueCat grants the "LiveNew Pro" entitlement —
 // the "pro" entitlement is archived with NO products attached. The old check
 // (`entitlements.active.pro`) therefore NEVER matched a real purchase, so paying
-// subscribers were silently downgraded to free the moment their 7-day trial
-// ended. Checking "is there any active entitlement" is correct (LiveNew has a
-// single premium tier) and can't be broken again by an entitlement rename.
+// subscribers were silently downgraded to free. Checking "is there any active
+// entitlement" is correct (LiveNew has a single premium tier) and can't be
+// broken again by an entitlement rename.
 function hasActiveEntitlement(customerInfo) {
   const active = customerInfo?.entitlements?.active;
   return !!active && Object.keys(active).length > 0;

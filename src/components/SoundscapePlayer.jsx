@@ -99,7 +99,7 @@ export default function SoundscapePlayer({ onUpgrade }) {
   const handlePress = (soundscape) => {
     if (!mountedRef.current) return;
 
-    // Premium gate: non-free soundscapes require a subscription or active trial.
+    // Premium gate: non-free soundscapes require a subscription (or comp).
     if (!soundscape.free && !isPremium) {
       if (onUpgrade) onUpgrade();
       return;

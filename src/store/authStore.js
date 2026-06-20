@@ -133,27 +133,14 @@ function parseAppUpdate(bootstrap) {
   };
 }
 
-// 14-day free trial helpers — used by both the gate (generatePlan) and the
-// UI (Paywall trigger, trial countdown on Account, feature gating elsewhere).
-export const TRIAL_DAYS = 7;
-export function trialDaysRemaining(trialStartISO) {
-  if (!trialStartISO) return TRIAL_DAYS;
-  const start = new Date(trialStartISO + 'T00:00:00').getTime();
-  if (!Number.isFinite(start)) return 0;
-  const elapsedDays = Math.floor((Date.now() - start) / 86400000);
-  return Math.max(0, TRIAL_DAYS - elapsedDays);
-}
-export function isWithinTrial(trialStartISO) {
-  return trialDaysRemaining(trialStartISO) > 0;
-}
-
-// Premium = paying subscriber OR still within the 7-day trial taste.
-// Free users keep the core loop forever; this gate covers depth features only.
+// Premium = paying subscriber OR a comped account. There is NO time-limited
+// trial: the free Essentials tier (core loop — plan, check-in, streak, gems)
+// is available forever from day one. Premium gates cover depth features only
+// (unlimited Iris, all soundscapes, premium gems, save-streak-anytime).
 export function useIsPremium() {
   const isSubscribed = useAuthStore((s) => s.isSubscribed);
   const isComped = useAuthStore((s) => s.isComped);
-  const trialStartISO = useAuthStore((s) => s.trialStartISO);
-  return isSubscribed || isComped || isWithinTrial(trialStartISO);
+  return isSubscribed || isComped;
 }
 
 export const useAuthStore = create((set, get) => ({
@@ -184,7 +171,6 @@ export const useAuthStore = create((set, get) => ({
   userId: null,                // current account id — scopes per-account device markers
   themeMode: 'system',         // 'system' | 'light' | 'dark' — overrides useColorScheme()
   selectedAuraId: null,        // id of the EARNED aura recoloring the app accent/bg, or null for default gold
-  trialStartISO: null,         // ISO date YYYY-MM-DD when the 14-day free trial began
   maxStreak: 0,        // highest streak ever reached — gates permanent gems
   gemEarnedAt: {},     // { [gemId]: 'YYYY-MM-DD' } first-earned dates
   pendingGemUnlock: null, // gemId just crossed this session (for the celebration), else null
@@ -320,9 +306,6 @@ export const useAuthStore = create((set, get) => ({
         // Client falls back to designed rarityPct values if this fails or hasn't
         // resolved yet — never blocks hydrate.
         get().fetchHaloStats().catch(() => {});
-        // Initialize trial start if missing — first hydrate after signup
-        // sets it to today, giving the user a fresh 14-day window.
-        get().ensureTrialStart().catch(() => {});
 
         // Reconcile notifications based on whether the user has a plan for
         // their current logical day. No plan → cancel any lingering zone
@@ -347,8 +330,8 @@ export const useAuthStore = create((set, get) => ({
         try {
           const bootstrap = await api.bootstrap();
           const serverProfile = bootstrap?.profile || {};
-          // Manual comp flag (user_profile.is_pro) — premium alongside
-          // RevenueCat + the trial. See useIsPremium / isPremiumNow.
+          // Manual comp flag (user_profile.is_pro) — grants premium alongside
+          // a RevenueCat subscription. See useIsPremium.
           set({ isComped: serverProfile.isPro === true });
           set({ appUpdate: parseAppUpdate(bootstrap) });
           const serverSaysOnboarded =
@@ -846,24 +829,6 @@ export const useAuthStore = create((set, get) => ({
     try { await AsyncStorage.setItem(SELECTED_AURA_KEY, next || ''); } catch {}
   },
 
-  // Initialize the 14-day free trial. Idempotent — safe to call on every
-  // hydrate / signup. Sets a date if one isn't already stored.
-  ensureTrialStart: async () => {
-    const existing = get().trialStartISO;
-    if (existing) return existing;
-    try {
-      const stored = await AsyncStorage.getItem('livenew:trial_start');
-      if (stored) {
-        set({ trialStartISO: stored });
-        return stored;
-      }
-    } catch {}
-    const today = getLocalDateISO();
-    set({ trialStartISO: today });
-    try { await AsyncStorage.setItem('livenew:trial_start', today); } catch {}
-    return today;
-  },
-
   // Save routine upgrade (after user has seen their first plan and wants personalization)
   saveRoutine: async (routine) => {
     const profile = { ...get().profile, routine };
@@ -886,10 +851,8 @@ export const useAuthStore = create((set, get) => ({
       throw err;
     }
 
-    // Trial tracking: ensure a trial-start date is set for this user.
     // No paywall gate here — the daily plan is free forever (basics always on).
     // Premium gates live at the feature level (soundscapes, analytics, etc.).
-    await get().ensureTrialStart();
 
     const profile = get().profile || {};
     const stressMap = { good: 2, okay: 5, stressed: 8, overwhelmed: 10 };
@@ -966,19 +929,6 @@ export const useAuthStore = create((set, get) => ({
       completed: {},
       reflection: null,
     });
-
-    // Increment plan count for trial tracking — but only ONCE per day, even
-    // if the user re-runs the check-in. Same-day regenerations shouldn't
-    // count against any plan/quota limit.
-    try {
-      const lastDay = await AsyncStorage.getItem('livenew:plan_count_last_day');
-      if (lastDay !== today) {
-        const countRaw = await AsyncStorage.getItem('livenew:plan_count');
-        const count = countRaw ? parseInt(countRaw, 10) : 0;
-        await AsyncStorage.setItem('livenew:plan_count', (count + 1).toString());
-        await AsyncStorage.setItem('livenew:plan_count_last_day', today);
-      }
-    } catch {}
 
     // Schedule notifications.
     //   - scheduleCheckInReminders ignores its opts: the daily check-in
@@ -1067,16 +1017,7 @@ export const useAuthStore = create((set, get) => ({
 
       // Compute premium status directly (useIsPremium is a hook — can't call here).
       const state = get();
-      // Resolve the REAL trial start. loadStreak runs during hydrate BEFORE
-      // ensureTrialStart populates state.trialStartISO, so it's still null here.
-      // isWithinTrial(null) returns true (full window), which would make every
-      // user — including free / expired-trial ones — appear premium and bypass
-      // the streak-freeze gate. Read the persisted value directly to be correct.
-      let trialStartISO = state.trialStartISO;
-      if (!trialStartISO) {
-        try { trialStartISO = await AsyncStorage.getItem('livenew:trial_start'); } catch {}
-      }
-      const isPremiumNow = state.isSubscribed || state.isComped || isWithinTrial(trialStartISO);
+      const isPremiumNow = state.isSubscribed || state.isComped;
 
       // Read the per-account freeze ledger (survives logout, removed on deleteAccount).
       const userId = state.userId;
@@ -1324,7 +1265,7 @@ export const useAuthStore = create((set, get) => ({
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
       userName: null, userEmail: null, avatarUri: null,
-      userId: null, trialStartISO: null, skippedDate: null, selectedAuraId: null,
+      userId: null, skippedDate: null, selectedAuraId: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
       todaySleep: null, todayEnergy: null, isSubscribed: false, isComped: false,
       completed: {}, reflection: null, streak: 0,
@@ -1380,7 +1321,7 @@ export const useAuthStore = create((set, get) => ({
     set({
       isLoggedIn: false, hasProfile: false, profile: null,
       userName: null, userEmail: null, avatarUri: null,
-      userId: null, trialStartISO: null, skippedDate: null, selectedAuraId: null,
+      userId: null, skippedDate: null, selectedAuraId: null,
       todayPlan: null, todayDate: null, todayStress: null, todayStressLabel: null,
       todaySleep: null, todayEnergy: null, isSubscribed: false, isComped: false,
       completed: {}, reflection: null, streak: 0,
